@@ -1544,6 +1544,202 @@ def render_lj_page(
                 )
 
 
+def render_main_entry_page() -> None:
+    st.subheader("\u65b9\u6cd5\u5165\u53e3")
+    st.caption("\u8bf7\u5148\u9009\u62e9\u5f53\u524d\u9700\u8981\u4f7f\u7528\u7684\u8d28\u63a7\u65b9\u6cd5\u9875\u9762\u3002")
+    st.info("LJ \u9875\u9762\u4fdd\u7559\u5f53\u524d\u5b8c\u6574\u5de5\u4f5c\u6d41\uff1bZ-score \u548c Instant \u9875\u9762\u6682\u4e3a\u5360\u4f4d\u9875\u3002")
+
+
+def render_zscore_placeholder_page() -> None:
+    st.subheader("Z-score")
+    st.info("Z-score \u9875\u9762\u5c1a\u672a\u5f00\u59cb\u5b9e\u88c5\uff0c\u5f53\u524d\u4ec5\u4f5c\u4e3a\u5360\u4f4d\u9875\u3002")
+
+
+def render_instant_placeholder_page() -> None:
+    st.subheader("Instant")
+    st.info("Instant \u9875\u9762\u5c1a\u672a\u5f00\u59cb\u5b9e\u88c5\uff0c\u5f53\u524d\u4ec5\u4f5c\u4e3a\u5360\u4f4d\u9875\u3002")
+
+
+def render_lj_mode() -> None:
+    projects_df = list_projects()
+    selected_project_id = ensure_selected_project(projects_df)
+    batches_df = list_batches(selected_project_id) if selected_project_id is not None else pd.DataFrame()
+    selected_batch_id = ensure_selected_batch(batches_df)
+
+    manage_tab, work_tab = st.tabs([TEXT["manage"], TEXT["current_batch"]])
+
+    with manage_tab:
+        top_left, top_right = st.columns([1, 1.4])
+
+        with top_left:
+            st.subheader("\u65b0\u5efa\u9879\u76ee")
+            with st.form("create_project_form", clear_on_submit=True):
+                project_name = st.text_input("\u9879\u76ee\u540d\u79f0")
+                project_submitted = st.form_submit_button("\u521b\u5efa\u9879\u76ee", width="stretch")
+
+                if project_submitted:
+                    if not project_name.strip():
+                        st.error(TEXT["fill_project"])
+                    else:
+                        try:
+                            project_id = create_project(project_name.strip())
+                        except ValueError as exc:
+                            st.error(str(exc))
+                        else:
+                            st.session_state["selected_project_id"] = project_id
+                            st.success(f"\u9879\u76ee {project_id} \u5df2\u521b\u5efa\u3002")
+                            st.rerun()
+
+            st.subheader("\u9879\u76ee\u5217\u8868\u4e0e\u9009\u62e9")
+            if projects_df.empty:
+                st.info(TEXT["no_project"])
+            else:
+                project_labels, project_options = build_project_select_options(projects_df)
+                sync_selector_state(
+                    selector_key="project_selector",
+                    selected_id_key="selected_project_id",
+                    options_map=project_options,
+                    placeholder=project_labels[0],
+                )
+                selected_project_label = st.selectbox(
+                    "\u9009\u62e9\u9879\u76ee",
+                    options=project_labels,
+                    key="project_selector",
+                )
+                new_project_id = project_options[selected_project_label]
+                if new_project_id != selected_project_id:
+                    st.session_state["selected_project_id"] = new_project_id
+                    st.session_state["selected_batch_id"] = None
+                    st.session_state["batch_selector"] = "\u8bf7\u9009\u62e9\u6279\u6b21"
+                    st.rerun()
+
+                project_table = localize_dataframe_columns(format_datetime_column(projects_df, "created_at"))
+                st.dataframe(project_table, width="stretch", hide_index=True)
+
+                if selected_project_id is not None:
+                    current_project = get_project(selected_project_id)
+                    with st.expander("\u7f16\u8f91\u5f53\u524d\u9879\u76ee"):
+                        with st.form("edit_project_form"):
+                            edit_project_name = st.text_input(
+                                "\u9879\u76ee\u540d\u79f0",
+                                value=current_project["name"],
+                            )
+                            edit_project_submitted = st.form_submit_button(
+                                "\u4fdd\u5b58\u9879\u76ee\u4fee\u6539",
+                                width="stretch",
+                            )
+                            if edit_project_submitted:
+                                cleaned_name = edit_project_name.strip()
+                                if not cleaned_name:
+                                    st.error(TEXT["fill_project"])
+                                else:
+                                    try:
+                                        update_project(selected_project_id, cleaned_name)
+                                    except ValueError as exc:
+                                        st.error(str(exc))
+                                    else:
+                                        st.success("\u9879\u76ee\u540d\u79f0\u5df2\u66f4\u65b0\u3002")
+                                        st.rerun()
+
+        with top_right:
+            st.subheader("\u65b0\u5efa\u6279\u6b21")
+            if selected_project_id is None:
+                st.info(TEXT["choose_project"])
+            else:
+                current_project = get_project(selected_project_id)
+                st.caption(f"\u5f53\u524d\u6279\u6b21\u5c06\u5f52\u5c5e\u4e8e\u9879\u76ee\uff1a{current_project['name']}")
+                with st.form("create_batch_form", clear_on_submit=True):
+                    instrument = st.text_input("\u4eea\u5668")
+                    reagent = st.text_input("\u8bd5\u5242")
+                    qc_material = st.text_input("\u8d28\u63a7\u54c1")
+                    concentration = st.text_input("\u6d53\u5ea6")
+                    lot_no = st.text_input("\u8d28\u63a7\u54c1\u6279\u53f7")
+                    target_n = st.selectbox(
+                        "\u5efa\u9776\u6240\u9700\u6b21\u6570",
+                        options=list(range(5, 21)),
+                        index=15,
+                    )
+                    create_submitted = st.form_submit_button("\u521b\u5efa\u6279\u6b21", width="stretch")
+
+                    if create_submitted:
+                        fields = [instrument, reagent, qc_material, concentration, lot_no]
+                        if any(not field.strip() for field in fields):
+                            st.error(TEXT["fill_batch"])
+                        else:
+                            try:
+                                batch_id = create_batch(
+                                    project_id=selected_project_id,
+                                    instrument=instrument.strip(),
+                                    reagent=reagent.strip(),
+                                    qc_material=qc_material.strip(),
+                                    concentration=concentration.strip(),
+                                    lot_no=lot_no.strip(),
+                                    target_n=int(target_n),
+                                )
+                            except ValueError as exc:
+                                st.error(str(exc))
+                            else:
+                                st.session_state["selected_batch_id"] = batch_id
+                                st.success(f"\u6279\u6b21 {batch_id} \u5df2\u521b\u5efa\u3002")
+                                st.rerun()
+
+            st.subheader("\u6279\u6b21\u5217\u8868\u4e0e\u9009\u62e9")
+            if selected_project_id is None:
+                st.info(TEXT["choose_project"])
+            elif batches_df.empty:
+                st.info(TEXT["no_batch"])
+            else:
+                batch_labels, batch_options = build_batch_select_options(batches_df)
+                sync_selector_state(
+                    selector_key="batch_selector",
+                    selected_id_key="selected_batch_id",
+                    options_map=batch_options,
+                    placeholder=batch_labels[0],
+                )
+                selected_batch_label = st.selectbox(
+                    "\u9009\u62e9\u6279\u6b21",
+                    options=batch_labels,
+                    key="batch_selector",
+                )
+                new_batch_id = batch_options[selected_batch_label]
+                if new_batch_id != selected_batch_id:
+                    st.session_state["selected_batch_id"] = new_batch_id
+                    st.rerun()
+
+                batch_table = localize_dataframe_columns(format_datetime_column(batches_df, "created_at"))
+                st.dataframe(batch_table, width="stretch", hide_index=True)
+
+                if selected_batch_id is not None:
+                    current_batch = get_batch(selected_batch_id)
+                    with st.expander("\u7f16\u8f91\u5f53\u524d\u6279\u6b21"):
+                        st.markdown("**\u6279\u6b21\u56fa\u5b9a\u4fe1\u606f**")
+                        st.text(f"\u4eea\u5668\uff1a{current_batch['instrument']}")
+                        st.text(f"\u8bd5\u5242\uff1a{current_batch['reagent']}")
+                        st.text(f"\u8d28\u63a7\u54c1\uff1a{current_batch['qc_material']}")
+                        st.text(f"\u6d53\u5ea6\uff1a{current_batch['concentration']}")
+                        st.text(f"\u5efa\u9776\u6240\u9700\u6b21\u6570\uff1a{current_batch['target_n']}")
+                        st.markdown("**\u53ef\u7f16\u8f91\u4fe1\u606f**")
+                        with st.form("edit_batch_form"):
+                            edit_lot_no = st.text_input(
+                                "\u8d28\u63a7\u54c1\u6279\u53f7",
+                                value=current_batch["lot_no"],
+                            )
+                            edit_batch_submitted = st.form_submit_button(
+                                "\u4fdd\u5b58\u6279\u6b21\u4fee\u6539",
+                                width="stretch",
+                            )
+                            if edit_batch_submitted:
+                                if not edit_lot_no.strip():
+                                    st.error("\u8bf7\u586b\u5199\u8d28\u63a7\u54c1\u6279\u53f7\u3002")
+                                else:
+                                    update_batch(selected_batch_id, edit_lot_no.strip())
+                                    st.success("\u6279\u6b21\u8d28\u63a7\u54c1\u6279\u53f7\u5df2\u66f4\u65b0\u3002")
+                                    st.rerun()
+
+    guard_work_tab_selection(work_tab, selected_project_id, selected_batch_id)
+    render_lj_page(work_tab, selected_batch_id)
+
+
 def render_page_chrome() -> None:
     render_html_block(
         dedent(
@@ -1566,181 +1762,18 @@ def render_page_chrome() -> None:
 
 
 render_page_chrome()
+selected_method = st.radio(
+    "\u65b9\u6cd5\u9875\u9762",
+    options=["Main", "LJ", "Z-score", "Instant"],
+    horizontal=True,
+    key="top_level_method_selector",
+)
 
-projects_df = list_projects()
-selected_project_id = ensure_selected_project(projects_df)
-batches_df = list_batches(selected_project_id) if selected_project_id is not None else pd.DataFrame()
-selected_batch_id = ensure_selected_batch(batches_df)
-
-manage_tab, work_tab = st.tabs([TEXT["manage"], TEXT["current_batch"]])
-
-with manage_tab:
-    top_left, top_right = st.columns([1, 1.4])
-
-    with top_left:
-        st.subheader("\u65b0\u5efa\u9879\u76ee")
-        with st.form("create_project_form", clear_on_submit=True):
-            project_name = st.text_input("\u9879\u76ee\u540d\u79f0")
-            project_submitted = st.form_submit_button("\u521b\u5efa\u9879\u76ee", width="stretch")
-
-            if project_submitted:
-                if not project_name.strip():
-                    st.error(TEXT["fill_project"])
-                else:
-                    try:
-                        project_id = create_project(project_name.strip())
-                    except ValueError as exc:
-                        st.error(str(exc))
-                    else:
-                        st.session_state["selected_project_id"] = project_id
-                        st.success(f"\u9879\u76ee {project_id} \u5df2\u521b\u5efa\u3002")
-                        st.rerun()
-
-        st.subheader("\u9879\u76ee\u5217\u8868\u4e0e\u9009\u62e9")
-        if projects_df.empty:
-            st.info(TEXT["no_project"])
-        else:
-            project_labels, project_options = build_project_select_options(projects_df)
-            sync_selector_state(
-                selector_key="project_selector",
-                selected_id_key="selected_project_id",
-                options_map=project_options,
-                placeholder=project_labels[0],
-            )
-            selected_project_label = st.selectbox(
-                "\u9009\u62e9\u9879\u76ee",
-                options=project_labels,
-                key="project_selector",
-            )
-            new_project_id = project_options[selected_project_label]
-            if new_project_id != selected_project_id:
-                st.session_state["selected_project_id"] = new_project_id
-                st.session_state["selected_batch_id"] = None
-                st.session_state["batch_selector"] = "\u8bf7\u9009\u62e9\u6279\u6b21"
-                st.rerun()
-
-            project_table = localize_dataframe_columns(format_datetime_column(projects_df, "created_at"))
-            st.dataframe(project_table, width="stretch", hide_index=True)
-
-            if selected_project_id is not None:
-                current_project = get_project(selected_project_id)
-                with st.expander("\u7f16\u8f91\u5f53\u524d\u9879\u76ee"):
-                    with st.form("edit_project_form"):
-                        edit_project_name = st.text_input(
-                            "\u9879\u76ee\u540d\u79f0",
-                            value=current_project["name"],
-                        )
-                        edit_project_submitted = st.form_submit_button(
-                            "\u4fdd\u5b58\u9879\u76ee\u4fee\u6539",
-                            width="stretch",
-                        )
-                        if edit_project_submitted:
-                            cleaned_name = edit_project_name.strip()
-                            if not cleaned_name:
-                                st.error(TEXT["fill_project"])
-                            else:
-                                try:
-                                    update_project(selected_project_id, cleaned_name)
-                                except ValueError as exc:
-                                    st.error(str(exc))
-                                else:
-                                    st.success("\u9879\u76ee\u540d\u79f0\u5df2\u66f4\u65b0\u3002")
-                                    st.rerun()
-
-    with top_right:
-        st.subheader("\u65b0\u5efa\u6279\u6b21")
-        if selected_project_id is None:
-            st.info(TEXT["choose_project"])
-        else:
-            current_project = get_project(selected_project_id)
-            st.caption(f"\u5f53\u524d\u6279\u6b21\u5c06\u5f52\u5c5e\u4e8e\u9879\u76ee\uff1a{current_project['name']}")
-            with st.form("create_batch_form", clear_on_submit=True):
-                instrument = st.text_input("\u4eea\u5668")
-                reagent = st.text_input("\u8bd5\u5242")
-                qc_material = st.text_input("\u8d28\u63a7\u54c1")
-                concentration = st.text_input("\u6d53\u5ea6")
-                lot_no = st.text_input("\u8d28\u63a7\u54c1\u6279\u53f7")
-                target_n = st.selectbox(
-                    "\u5efa\u9776\u6240\u9700\u6b21\u6570",
-                    options=list(range(5, 21)),
-                    index=15,
-                )
-                create_submitted = st.form_submit_button("\u521b\u5efa\u6279\u6b21", width="stretch")
-
-                if create_submitted:
-                    fields = [instrument, reagent, qc_material, concentration, lot_no]
-                    if any(not field.strip() for field in fields):
-                        st.error(TEXT["fill_batch"])
-                    else:
-                        try:
-                            batch_id = create_batch(
-                                project_id=selected_project_id,
-                                instrument=instrument.strip(),
-                                reagent=reagent.strip(),
-                                qc_material=qc_material.strip(),
-                                concentration=concentration.strip(),
-                                lot_no=lot_no.strip(),
-                                target_n=int(target_n),
-                            )
-                        except ValueError as exc:
-                            st.error(str(exc))
-                        else:
-                            st.session_state["selected_batch_id"] = batch_id
-                            st.success(f"\u6279\u6b21 {batch_id} \u5df2\u521b\u5efa\u3002")
-                            st.rerun()
-
-        st.subheader("\u6279\u6b21\u5217\u8868\u4e0e\u9009\u62e9")
-        if selected_project_id is None:
-            st.info(TEXT["choose_project"])
-        elif batches_df.empty:
-            st.info(TEXT["no_batch"])
-        else:
-            batch_labels, batch_options = build_batch_select_options(batches_df)
-            sync_selector_state(
-                selector_key="batch_selector",
-                selected_id_key="selected_batch_id",
-                options_map=batch_options,
-                placeholder=batch_labels[0],
-            )
-            selected_batch_label = st.selectbox(
-                "\u9009\u62e9\u6279\u6b21",
-                options=batch_labels,
-                key="batch_selector",
-            )
-            new_batch_id = batch_options[selected_batch_label]
-            if new_batch_id != selected_batch_id:
-                st.session_state["selected_batch_id"] = new_batch_id
-                st.rerun()
-
-            batch_table = localize_dataframe_columns(format_datetime_column(batches_df, "created_at"))
-            st.dataframe(batch_table, width="stretch", hide_index=True)
-
-            if selected_batch_id is not None:
-                current_batch = get_batch(selected_batch_id)
-                with st.expander("\u7f16\u8f91\u5f53\u524d\u6279\u6b21"):
-                    st.markdown("**\u6279\u6b21\u56fa\u5b9a\u4fe1\u606f**")
-                    st.text(f"\u4eea\u5668\uff1a{current_batch['instrument']}")
-                    st.text(f"\u8bd5\u5242\uff1a{current_batch['reagent']}")
-                    st.text(f"\u8d28\u63a7\u54c1\uff1a{current_batch['qc_material']}")
-                    st.text(f"\u6d53\u5ea6\uff1a{current_batch['concentration']}")
-                    st.text(f"\u5efa\u9776\u6240\u9700\u6b21\u6570\uff1a{current_batch['target_n']}")
-                    st.markdown("**\u53ef\u7f16\u8f91\u4fe1\u606f**")
-                    with st.form("edit_batch_form"):
-                        edit_lot_no = st.text_input(
-                            "\u8d28\u63a7\u54c1\u6279\u53f7",
-                            value=current_batch["lot_no"],
-                        )
-                        edit_batch_submitted = st.form_submit_button(
-                            "\u4fdd\u5b58\u6279\u6b21\u4fee\u6539",
-                            width="stretch",
-                        )
-                        if edit_batch_submitted:
-                            if not edit_lot_no.strip():
-                                st.error("\u8bf7\u586b\u5199\u8d28\u63a7\u54c1\u6279\u53f7\u3002")
-                            else:
-                                update_batch(selected_batch_id, edit_lot_no.strip())
-                                st.success("\u6279\u6b21\u8d28\u63a7\u54c1\u6279\u53f7\u5df2\u66f4\u65b0\u3002")
-                                st.rerun()
-
-guard_work_tab_selection(work_tab, selected_project_id, selected_batch_id)
-render_lj_page(work_tab, selected_batch_id)
+if selected_method == "Main":
+    render_main_entry_page()
+elif selected_method == "LJ":
+    render_lj_mode()
+elif selected_method == "Z-score":
+    render_zscore_placeholder_page()
+else:
+    render_instant_placeholder_page()
