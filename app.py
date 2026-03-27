@@ -339,6 +339,22 @@ def ensure_selected_batch(batches_df: pd.DataFrame) -> int | None:
     return None if current_id is None else int(current_id)
 
 
+def guard_work_tab_selection(
+    work_tab,
+    selected_project_id: int | None,
+    selected_batch_id: int | None,
+) -> None:
+    if selected_project_id is None:
+        with work_tab:
+            st.info(TEXT["choose_project"])
+        st.stop()
+
+    if selected_batch_id is None:
+        with work_tab:
+            st.info(TEXT["choose_batch"])
+        st.stop()
+
+
 def compute_log10_display(value: float) -> tuple[str, float | None]:
     if math.isclose(value, 0.0, abs_tol=1e-12):
         return "", None
@@ -1137,24 +1153,28 @@ def sync_selector_state(
         st.session_state[selected_id_key] = None
 
 
-render_html_block(
-    dedent(
-        """
-        <div class="top-feedback-bar">
-            <a
-                class="top-feedback-link"
-                href="https://docs.qq.com/sheet/DY3V4b0FqS3psbkdK?tab=BB08J2"
-                target="_blank"
-                rel="noopener noreferrer"
-            >
-                \u95ee\u9898\u53cd\u9988
-            </a>
-        </div>
-        """
-    ).strip()
-)
-st.title(TEXT["app_title"])
-st.caption("\u65e9\u671f\u5f00\u53d1\u7248\u672c\uff0c\u4ec5\u4f9b\u53c2\u8003\uff0c\u5982\u6709\u7591\u95ee\u53ef\u8054\u7cfb\u5f00\u53d1\u8005\u6216\u53f3\u4e0a\u89d2\u201c\u95ee\u9898\u53cd\u9988\u201d\u7559\u8a00\u3002")
+def render_page_chrome() -> None:
+    render_html_block(
+        dedent(
+            """
+            <div class="top-feedback-bar">
+                <a
+                    class="top-feedback-link"
+                    href="https://docs.qq.com/sheet/DY3V4b0FqS3psbkdK?tab=BB08J2"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                >
+                    \u95ee\u9898\u53cd\u9988
+                </a>
+            </div>
+            """
+        ).strip()
+    )
+    st.title(TEXT["app_title"])
+    st.caption("\u65e9\u671f\u5f00\u53d1\u7248\u672c\uff0c\u4ec5\u4f9b\u53c2\u8003\uff0c\u5982\u6709\u7591\u95ee\u53ef\u8054\u7cfb\u5f00\u53d1\u8005\u6216\u53f3\u4e0a\u89d2\u201c\u95ee\u9898\u53cd\u9988\u201d\u7559\u8a00\u3002")
+
+
+render_page_chrome()
 
 projects_df = list_projects()
 selected_project_id = ensure_selected_project(projects_df)
@@ -1331,15 +1351,7 @@ with manage_tab:
                                 st.success("\u6279\u6b21\u8d28\u63a7\u54c1\u6279\u53f7\u5df2\u66f4\u65b0\u3002")
                                 st.rerun()
 
-if selected_project_id is None:
-    with work_tab:
-        st.info(TEXT["choose_project"])
-    st.stop()
-
-if selected_batch_id is None:
-    with work_tab:
-        st.info(TEXT["choose_batch"])
-    st.stop()
+guard_work_tab_selection(work_tab, selected_project_id, selected_batch_id)
 
 batch = get_batch(selected_batch_id)
 results_df = get_results(selected_batch_id)
