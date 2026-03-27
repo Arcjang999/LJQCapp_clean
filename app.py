@@ -1153,6 +1153,397 @@ def sync_selector_state(
         st.session_state[selected_id_key] = None
 
 
+def render_lj_page(
+    work_tab,
+    selected_batch_id: int,
+) -> None:
+    batch = get_batch(selected_batch_id)
+    results_df = get_results(selected_batch_id)
+    qc_df, stats = calculate_qc_results(results_df, int(batch["target_n"]))
+    latest_status, latest_status_message = get_latest_status_context(qc_df)
+    latest_rule_hits, latest_compact_message = get_latest_result_panel_content(qc_df, latest_status_message)
+    operator_options = build_operator_options(results_df)
+
+    view_mode = st.session_state.get("chart_view_mode", "\u5168\u90e8\u6570\u636e\u56fe")
+    view_options = ["\u5efa\u9776\u56fe", "\u6b63\u5f0f\u8d28\u63a7\u56fe", "\u5168\u90e8\u6570\u636e\u56fe"]
+    if view_mode not in view_options:
+        view_mode = view_options[2]
+
+    y_axis_mode = st.session_state.get("chart_y_axis_mode", "\u6807\u51c6\u89c6\u56fe")
+    y_axis_options = ["\u6807\u51c6\u89c6\u56fe", "\u5168\u8303\u56f4\u89c6\u56fe"]
+    if y_axis_mode not in y_axis_options:
+        y_axis_mode = y_axis_options[0]
+
+    standard_sd_limit = float(st.session_state.get("chart_standard_sd_limit", 4.0))
+
+    chart_title = (
+        f"{view_mode} - \u6279\u6b21 {batch['id']} - {batch['instrument']} - "
+        f"{batch['reagent']} - {batch['qc_material']} - {batch['concentration']}"
+    )
+
+    with work_tab:
+        st.caption(f"\u5f53\u524d\u9879\u76ee\uff1a{batch['project_name']}")
+        with st.container():
+            render_batch_summary_row(batch)
+
+        st.divider()
+        entry_col, chart_col = st.columns([1.0, 1.18], gap="large")
+
+        with entry_col:
+            st.subheader("\u5f55\u5165\u4e0e\u7edf\u8ba1")
+            st.caption("\u5de6\u4fa7\u4e13\u6ce8\u6570\u636e\u5f55\u5165\u548c\u5173\u952e\u7edf\u8ba1\uff0c\u51cf\u5c11\u9996\u5c4f\u4fe1\u606f\u62e5\u6324\u3002")
+            st.markdown("**\u6279\u6b21\u6570\u636e\u5f55\u5165**")
+            if st.session_state.get("entry_batch_id") != selected_batch_id:
+                st.session_state["entry_batch_id"] = selected_batch_id
+                st.session_state["entry_operator"] = operator_options[0] if operator_options else ""
+                st.session_state["entry_value"] = ""
+                st.session_state["entry_reagent_changed"] = False
+                st.session_state["entry_test_time"] = datetime.now()
+            if "entry_test_time" not in st.session_state:
+                st.session_state["entry_test_time"] = datetime.now()
+            if "entry_operator" not in st.session_state:
+                st.session_state["entry_operator"] = ""
+            if "entry_value" not in st.session_state:
+                st.session_state["entry_value"] = ""
+            if "entry_reagent_changed" not in st.session_state:
+                st.session_state["entry_reagent_changed"] = False
+
+            if st.session_state.get("reset_entry_form", False):
+                last_operator = st.session_state.get("entry_operator", "")
+                st.session_state["entry_operator"] = last_operator.strip()
+                st.session_state["entry_value"] = ""
+                st.session_state["entry_reagent_changed"] = False
+                st.session_state["entry_test_time"] = datetime.now()
+                st.session_state["reset_entry_form"] = False
+
+            test_time = st.datetime_input(
+                "\u68c0\u6d4b\u65f6\u95f4",
+                key="entry_test_time",
+            )
+            operator = st.selectbox(
+                "\u68c0\u6d4b\u4eba",
+                options=operator_options,
+                index=None,
+                key="entry_operator",
+                accept_new_options=True,
+                placeholder="\u53ef\u9009\u62e9\u5386\u53f2\u59d3\u540d\uff0c\u4e5f\u53ef\u76f4\u63a5\u8f93\u5165\u65b0\u59d3\u540d",
+            )
+            value_text = st.text_input(
+                "\u68c0\u6d4b\u503c\uff08\u652f\u6301\u5b9e\u65f6 log10\uff09",
+                key="entry_value",
+                placeholder="\u4f8b\u5982\uff1a123.4567",
+            )
+            parsed_value, log_display, log_value = parse_numeric_input(value_text)
+            render_live_log10_panel(
+                value_text=value_text,
+                field_label="\u68c0\u6d4b\u503c\uff08\u652f\u6301\u5b9e\u65f6 log10\uff09",
+                value_element_id="entry-log10-value",
+                hint_element_id="entry-log10-hint",
+            )
+            reagent_lot_changed = st.checkbox(
+                "\u672c\u6b21\u4e3a\u8bd5\u5242\u6279\u53f7\u53d8\u66f4\u70b9",
+                key="entry_reagent_changed",
+            )
+
+            if st.button("\u4fdd\u5b58\u68c0\u6d4b\u7ed3\u679c", type="primary", width="stretch"):
+                validation_errors: list[str] = []
+                cleaned_operator = (operator or "").strip()
+
+                if test_time is None:
+                    validation_errors.append("\u8bf7\u586b\u5199\u68c0\u6d4b\u65f6\u95f4\u3002")
+                if not cleaned_operator:
+                    validation_errors.append("\u8bf7\u586b\u5199\u68c0\u6d4b\u4eba\uff0c\u4e0d\u80fd\u4e3a\u7a7a\u3002")
+                if parsed_value is None:
+                    validation_errors.append("\u68c0\u6d4b\u503c\u5fc5\u987b\u4e3a\u6709\u6548\u6570\u5b57\u3002")
+
+                if validation_errors:
+                    st.error("\n".join(validation_errors))
+                else:
+                    add_result(
+                        batch_id=selected_batch_id,
+                        test_time=test_time.strftime("%Y-%m-%d %H:%M:%S"),
+                        operator=cleaned_operator,
+                        value=float(parsed_value),
+                        log_value=log_value,
+                        reagent_lot_changed=int(reagent_lot_changed),
+                    )
+                    st.success("\u68c0\u6d4b\u7ed3\u679c\u5df2\u4fdd\u5b58\u3002")
+                    st.session_state["reset_entry_form"] = True
+                    st.rerun()
+
+            st.divider()
+            st.markdown("**\u5efa\u9776\u7edf\u8ba1**")
+            render_compact_stat_metrics(
+                [
+                    ("Mean", "-" if stats["mean"] is None else f"{stats['mean']:.4f}"),
+                    ("SD", "-" if stats["sd"] is None else f"{stats['sd']:.4f}"),
+                    ("CV%", "-" if stats["cv"] is None else f"{stats['cv']:.2f}%"),
+                ]
+            )
+            st.caption(
+                "\u5efa\u9776\u8fdb\u5ea6\uff1a"
+                + (
+                    "\u5df2\u5b8c\u6210\uff0c\u540e\u7eed\u7ed3\u679c\u81ea\u52a8\u8fdb\u884c Westgard \u5224\u5b9a\u3002"
+                    if stats.get("target_ready")
+                    else f"\u5c1a\u9700\u7ee7\u7eed\u5f55\u5165\u81f3\u5c11 {int(batch['target_n'])} \u6b21\u7ed3\u679c\u3002"
+                )
+            )
+
+            st.divider()
+            st.markdown("**\u5b9e\u65f6\u7edf\u8ba1**")
+            sorted_results = results_df.sort_values(["test_time", "id"]).reset_index(drop=True)
+            if sorted_results.empty:
+                st.info("\u6682\u65e0\u6570\u636e\uff0c\u65e0\u6cd5\u8ba1\u7b97\u5b9e\u65f6\u7edf\u8ba1\u3002")
+            else:
+                sorted_results["sequence"] = sorted_results.index + 1
+                formal_results = sorted_results[sorted_results["sequence"] > int(batch["target_n"])].copy()
+                default_start = formal_results["test_time"].min() if not formal_results.empty else sorted_results["test_time"].min()
+                default_end = sorted_results["test_time"].max()
+
+                date_cols = st.columns(2)
+                realtime_start = date_cols[0].date_input(
+                    "\u5f00\u59cb\u65e5\u671f",
+                    value=default_start.date(),
+                    key="realtime_start",
+                )
+                realtime_end = date_cols[1].date_input(
+                    "\u7ed3\u675f\u65e5\u671f",
+                    value=default_end.date(),
+                    key="realtime_end",
+                )
+                st.caption("\u6309\u65e5\u671f\u7edf\u8ba1\uff0c\u7ed3\u675f\u65e5\u671f\u5305\u542b\u5f53\u65e5\u5168\u90e8\u8bb0\u5f55\u3002")
+                end_timestamp = pd.Timestamp(realtime_end) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+                realtime_stats, realtime_message = calculate_realtime_stats(
+                    results_df=results_df,
+                    target_n=int(batch["target_n"]),
+                    start_time=pd.Timestamp(realtime_start),
+                    end_time=end_timestamp,
+                )
+                render_compact_stat_metrics(
+                    [
+                        ("\u5b9e\u65f6 Mean", "-" if realtime_stats["mean"] is None else f"{realtime_stats['mean']:.4f}"),
+                        ("\u5b9e\u65f6 SD", "-" if realtime_stats["sd"] is None else f"{realtime_stats['sd']:.4f}"),
+                        ("\u5b9e\u65f6 CV%", "-" if realtime_stats["cv"] is None else f"{realtime_stats['cv']:.2f}%"),
+                    ]
+                )
+                if realtime_message:
+                    st.info(realtime_message)
+                st.caption(
+                    "\u7edf\u8ba1\u53e3\u5f84\uff1a\u5b9e\u65f6\u7edf\u8ba1\u4ec5\u57fa\u4e8e\u5f53\u524d\u6279\u6b21\u4e2d\u5224\u5b9a\u4e3a\u201c\u5728\u63a7\u201d\u7684\u6b63\u5f0f\u6570\u636e\u8ba1\u7b97\uff0c"
+                    "\u5df2\u81ea\u52a8\u6392\u9664\u8b66\u544a\u548c\u5931\u63a7\u7ed3\u679c\uff1b"
+                    "\u5f53\u68c0\u6d4b\u8bb0\u5f55\u88ab\u4fee\u6539\u6216\u5220\u9664\u540e\uff0c\u5b9e\u65f6 Mean / SD / CV% \u53ef\u80fd\u968f\u4e4b\u81ea\u52a8\u53d8\u5316\u3002"
+                )
+
+        with chart_col:
+            st.subheader("\u56fe\u8868\u4e0e\u5224\u8bfb")
+            chart_view_mode = view_mode
+            chart_y_axis_mode = y_axis_mode
+            chart_standard_sd_limit = float(st.session_state.get("chart_standard_sd_limit", standard_sd_limit))
+            with st.expander(
+                build_chart_control_title(chart_view_mode, chart_y_axis_mode, chart_standard_sd_limit),
+                expanded=False,
+            ):
+                view_selector_col, y_axis_selector_col = st.columns([1.2, 1.1])
+                chart_view_mode = view_selector_col.radio(
+                    "\u56fe\u5f62\u89c6\u56fe",
+                    options=view_options,
+                    horizontal=True,
+                    index=view_options.index(view_mode),
+                )
+                chart_y_axis_mode = y_axis_selector_col.radio(
+                    "Y \u8f74\u8303\u56f4",
+                    options=y_axis_options,
+                    horizontal=True,
+                    index=y_axis_options.index(y_axis_mode),
+                )
+                st.session_state["chart_view_mode"] = chart_view_mode
+                st.session_state["chart_y_axis_mode"] = chart_y_axis_mode
+                if chart_y_axis_mode == "\u6807\u51c6\u89c6\u56fe":
+                    chart_standard_sd_limit = st.slider(
+                        "\u6807\u51c6\u89c6\u56fe\u8303\u56f4\uff08Mean \u00b1 nSD\uff09",
+                        min_value=3.0,
+                        max_value=6.0,
+                        value=float(standard_sd_limit),
+                        step=0.5,
+                    )
+                    st.session_state["chart_standard_sd_limit"] = chart_standard_sd_limit
+                    render_standard_view_help(chart_standard_sd_limit)
+                else:
+                    chart_standard_sd_limit = float(st.session_state.get("chart_standard_sd_limit", standard_sd_limit))
+
+                if chart_view_mode != view_mode or chart_y_axis_mode != y_axis_mode:
+                    st.rerun()
+
+            chart_view_mode = st.session_state.get("chart_view_mode", view_mode)
+            chart_y_axis_mode = st.session_state.get("chart_y_axis_mode", y_axis_mode)
+            chart_standard_sd_limit = float(st.session_state.get("chart_standard_sd_limit", standard_sd_limit))
+            st.markdown("**LJ\u56fe**")
+            figure = plot_lj_chart(
+                qc_df=qc_df,
+                stats=stats,
+                title=(
+                    f"{chart_view_mode} - \u6279\u6b21 {batch['id']} - {batch['instrument']} - "
+                    f"{batch['reagent']} - {batch['qc_material']} - {batch['concentration']}"
+                ),
+                view_mode=chart_view_mode,
+                y_axis_mode=chart_y_axis_mode,
+                standard_sd_limit=chart_standard_sd_limit,
+            )
+            st.pyplot(figure, clear_figure=False, width="stretch")
+            st.markdown("**\u6700\u65b0\u7ed3\u679c\u5206\u6790**")
+            render_status_panel(
+                latest_status,
+                latest_compact_message,
+                latest_rule_hits,
+            )
+
+        st.divider()
+        st.markdown("**\u672c\u6279\u6b21\u89c4\u5219\u6c47\u603b**")
+        render_rule_summary_metrics(stats.get("rule_summary", {}))
+
+        with st.expander("Westgard\u89c4\u5219\u8bf4\u660e\uff08\u70b9\u51fb\u5c55\u5f00\uff09", expanded=False):
+            st.markdown(
+                "- `1_2s`\uff1a\u5355\u70b9\u8d85\u8fc7 \u00b12SD\uff0c\u8b66\u544a\n"
+                "- `1_3s`\uff1a\u5355\u70b9\u8d85\u8fc7 \u00b13SD\uff0c\u5931\u63a7\n"
+                "- `2_2s`\uff1a\u8fde\u7eed 2 \u4e2a\u70b9\u540c\u4fa7\u8d85\u8fc7 \u00b12SD\uff0c\u5931\u63a7\n"
+                "- `R_4s`\uff1a\u8fde\u7eed 2 \u4e2a\u70b9\u5dee\u503c\u8d85\u8fc7 4SD\uff0c\u5931\u63a7\n"
+                "- `4_1s`\uff1a\u8fde\u7eed 4 \u4e2a\u70b9\u540c\u4fa7\u8d85\u8fc7 \u00b11SD\uff0c\u5931\u63a7\n"
+                "- `10x`\uff1a\u8fde\u7eed 10 \u4e2a\u70b9\u4f4d\u4e8e\u5747\u503c\u540c\u4fa7\uff0c\u5931\u63a7"
+            )
+
+        st.divider()
+        with st.expander("\u5f53\u524d\u6279\u6b21\u68c0\u6d4b\u8bb0\u5f55\uff08\u70b9\u51fb\u6298\u53e0/\u5c55\u5f00\uff09", expanded=True):
+            st.caption("\u5f53\u524d\u6279\u6b21\u7684\u5b8c\u6574\u68c0\u6d4b\u8bb0\u5f55\u3001Westgard \u89e6\u53d1\u89c4\u5219\u548c\u5206\u6790\u63d0\u793a\u90fd\u5728\u6b64\u67e5\u770b\u3002")
+            display_df = prepare_display_records(qc_df)
+            render_records_table(display_df)
+
+        st.divider()
+        maintenance_col, export_col = st.columns([0.9, 1.1], gap="large")
+        with maintenance_col:
+            st.subheader("\u68c0\u6d4b\u8bb0\u5f55\u7ef4\u62a4")
+            st.caption("\u4e3b\u9875\u53ea\u4fdd\u7559\u7ef4\u62a4\u5165\u53e3\uff0c\u70b9\u51fb\u540e\u5728\u5f39\u7a97\u4e2d\u4fee\u6539\u6216\u5220\u9664\u68c0\u6d4b\u8bb0\u5f55\u3002")
+            open_maintenance_disabled = qc_df.empty
+            if st.button(
+                "\u6253\u5f00\u68c0\u6d4b\u8bb0\u5f55\u7ef4\u62a4",
+                key="open_record_maintenance_dialog",
+                width="stretch",
+                disabled=open_maintenance_disabled,
+            ):
+                bump_record_maintenance_dialog_nonce()
+                st.session_state["show_record_maintenance_dialog"] = True
+            if open_maintenance_disabled:
+                st.info("\u5f53\u524d\u6279\u6b21\u6682\u65e0\u68c0\u6d4b\u8bb0\u5f55\u53ef\u7ef4\u62a4\u3002")
+            if st.session_state.get("show_record_maintenance_dialog", False):
+                render_record_maintenance_dialog(qc_df)
+
+        with export_col:
+            st.subheader("\u5bfc\u51fa")
+            export_df = export_batch_results(batch, qc_df)
+            csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
+            xlsx_bytes = dataframe_to_xlsx_bytes(export_df)
+            png_bytes = figure_to_png_bytes(figure)
+
+            st.markdown("**\u5f53\u524d\u6279\u6b21\u5bfc\u51fa**")
+            export_format = st.radio(
+                "\u5bfc\u51fa\u6570\u636e\u683c\u5f0f",
+                options=["Excel (.xlsx)", "CSV (.csv)"],
+                horizontal=True,
+                key="export_format",
+            )
+            export_button_cols = st.columns(2)
+            export_button_cols[0].download_button(
+                label="\u5bfc\u51fa\u5f53\u524d\u6279\u6b21\u6570\u636e",
+                data=xlsx_bytes if export_format == "Excel (.xlsx)" else csv_bytes,
+                file_name=(
+                    f"batch_{batch['id']}_results.xlsx"
+                    if export_format == "Excel (.xlsx)"
+                    else f"batch_{batch['id']}_results.csv"
+                ),
+                mime=(
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    if export_format == "Excel (.xlsx)"
+                    else "text/csv"
+                ),
+                width="stretch",
+            )
+            export_button_cols[1].download_button(
+                label="\u5bfc\u51fa\u5f53\u524d LJ \u56fe PNG",
+                data=png_bytes,
+                file_name=f"batch_{batch['id']}_{chart_view_mode}.png",
+                mime="image/png",
+                width="stretch",
+            )
+
+            st.divider()
+            st.markdown("**\u6708\u5ea6\u8d28\u63a7\u56fe\u5bfc\u51fa**")
+            st.caption("\u4ec5\u5bfc\u51fa\u6b63\u5f0f\u6570\u636e\uff0c\u65e5\u671f\u8303\u56f4\u6700\u957f 30 \u5929\u3002")
+            formal_qc_df = qc_df[qc_df["phase"] == "\u6b63\u5f0f\u6570\u636e"].copy() if "phase" in qc_df.columns else pd.DataFrame()
+            if formal_qc_df.empty:
+                st.info("\u5f53\u524d\u6279\u6b21\u8fd8\u6ca1\u6709\u6b63\u5f0f\u8d28\u63a7\u6570\u636e\u3002")
+            else:
+                default_monthly_start = formal_qc_df["test_time"].min().date()
+                default_monthly_end = formal_qc_df["test_time"].max().date()
+                monthly_col_start, monthly_col_end = st.columns(2)
+                monthly_start = monthly_col_start.date_input(
+                    "\u5f00\u59cb\u65e5\u671f",
+                    value=default_monthly_start,
+                    key="monthly_export_start",
+                )
+                monthly_end = monthly_col_end.date_input(
+                    "\u7ed3\u675f\u65e5\u671f",
+                    value=default_monthly_end,
+                    key="monthly_export_end",
+                )
+
+                monthly_error = ""
+                day_span = (pd.Timestamp(monthly_end).date() - pd.Timestamp(monthly_start).date()).days + 1
+                if monthly_end < monthly_start:
+                    monthly_error = "\u7ed3\u675f\u65e5\u671f\u4e0d\u80fd\u65e9\u4e8e\u5f00\u59cb\u65e5\u671f\u3002"
+                elif day_span > 30:
+                    monthly_error = "\u6708\u5ea6\u8d28\u63a7\u56fe\u5bfc\u51fa\u8303\u56f4\u6700\u957f\u4e3a30\u5929\uff0c\u8bf7\u91cd\u65b0\u9009\u62e9\u65e5\u671f\u8303\u56f4\u3002"
+
+                monthly_png_bytes = None
+                monthly_file_name = None
+                if monthly_error:
+                    st.warning(monthly_error)
+                else:
+                    monthly_qc_df = build_monthly_export_dataframe(
+                        qc_df=qc_df,
+                        start_date=monthly_start,
+                        end_date=monthly_end,
+                    )
+                    if monthly_qc_df.empty:
+                        st.info("\u6240\u9009\u65e5\u671f\u8303\u56f4\u5185\u6ca1\u6709\u6b63\u5f0f\u8d28\u63a7\u6570\u636e\uff0c\u65e0\u6cd5\u5bfc\u51fa\u6708\u5ea6\u8d28\u63a7\u56fe\u3002")
+                    else:
+                        monthly_title = build_monthly_chart_title(
+                            batch=batch,
+                            start_date=monthly_start,
+                            end_date=monthly_end,
+                        )
+                        monthly_figure = plot_lj_chart(
+                            qc_df=monthly_qc_df,
+                            stats=stats,
+                            title=monthly_title,
+                            view_mode="\u6b63\u5f0f\u8d28\u63a7\u56fe",
+                            y_axis_mode=chart_y_axis_mode,
+                            standard_sd_limit=float(st.session_state.get("chart_standard_sd_limit", 4.0)),
+                        )
+                        monthly_png_bytes = figure_to_png_bytes(monthly_figure)
+                        monthly_file_name = (
+                            f"batch_{batch['id']}_monthly_qc_"
+                            f"{monthly_start.strftime('%Y-%m-%d')}_to_{monthly_end.strftime('%Y-%m-%d')}.png"
+                        )
+
+                st.download_button(
+                    label="\u5bfc\u51fa\u6708\u5ea6\u8d28\u63a7\u56fe PNG",
+                    data=monthly_png_bytes if monthly_png_bytes is not None else b"",
+                    file_name=monthly_file_name or f"batch_{batch['id']}_monthly_qc.png",
+                    mime="image/png",
+                    width="stretch",
+                    disabled=monthly_png_bytes is None,
+                )
+
+
 def render_page_chrome() -> None:
     render_html_block(
         dedent(
@@ -1352,389 +1743,4 @@ with manage_tab:
                                 st.rerun()
 
 guard_work_tab_selection(work_tab, selected_project_id, selected_batch_id)
-
-batch = get_batch(selected_batch_id)
-results_df = get_results(selected_batch_id)
-qc_df, stats = calculate_qc_results(results_df, int(batch["target_n"]))
-latest_status, latest_status_message = get_latest_status_context(qc_df)
-latest_rule_hits, latest_compact_message = get_latest_result_panel_content(qc_df, latest_status_message)
-operator_options = build_operator_options(results_df)
-
-view_mode = st.session_state.get("chart_view_mode", "\u5168\u90e8\u6570\u636e\u56fe")
-view_options = ["\u5efa\u9776\u56fe", "\u6b63\u5f0f\u8d28\u63a7\u56fe", "\u5168\u90e8\u6570\u636e\u56fe"]
-if view_mode not in view_options:
-    view_mode = view_options[2]
-
-y_axis_mode = st.session_state.get("chart_y_axis_mode", "\u6807\u51c6\u89c6\u56fe")
-y_axis_options = ["\u6807\u51c6\u89c6\u56fe", "\u5168\u8303\u56f4\u89c6\u56fe"]
-if y_axis_mode not in y_axis_options:
-    y_axis_mode = y_axis_options[0]
-
-standard_sd_limit = float(st.session_state.get("chart_standard_sd_limit", 4.0))
-
-chart_title = (
-    f"{view_mode} - \u6279\u6b21 {batch['id']} - {batch['instrument']} - "
-    f"{batch['reagent']} - {batch['qc_material']} - {batch['concentration']}"
-)
-
-with work_tab:
-    st.caption(f"\u5f53\u524d\u9879\u76ee\uff1a{batch['project_name']}")
-    with st.container():
-        render_batch_summary_row(batch)
-
-    st.divider()
-    entry_col, chart_col = st.columns([1.0, 1.18], gap="large")
-
-    with entry_col:
-        st.subheader("\u5f55\u5165\u4e0e\u7edf\u8ba1")
-        st.caption("\u5de6\u4fa7\u4e13\u6ce8\u6570\u636e\u5f55\u5165\u548c\u5173\u952e\u7edf\u8ba1\uff0c\u51cf\u5c11\u9996\u5c4f\u4fe1\u606f\u62e5\u6324\u3002")
-        st.markdown("**\u6279\u6b21\u6570\u636e\u5f55\u5165**")
-        if st.session_state.get("entry_batch_id") != selected_batch_id:
-            st.session_state["entry_batch_id"] = selected_batch_id
-            st.session_state["entry_operator"] = operator_options[0] if operator_options else ""
-            st.session_state["entry_value"] = ""
-            st.session_state["entry_reagent_changed"] = False
-            st.session_state["entry_test_time"] = datetime.now()
-        if "entry_test_time" not in st.session_state:
-            st.session_state["entry_test_time"] = datetime.now()
-        if "entry_operator" not in st.session_state:
-            st.session_state["entry_operator"] = ""
-        if "entry_value" not in st.session_state:
-            st.session_state["entry_value"] = ""
-        if "entry_reagent_changed" not in st.session_state:
-            st.session_state["entry_reagent_changed"] = False
-
-        if st.session_state.get("reset_entry_form", False):
-            last_operator = st.session_state.get("entry_operator", "")
-            st.session_state["entry_operator"] = last_operator.strip()
-            st.session_state["entry_value"] = ""
-            st.session_state["entry_reagent_changed"] = False
-            st.session_state["entry_test_time"] = datetime.now()
-            st.session_state["reset_entry_form"] = False
-
-        test_time = st.datetime_input(
-            "\u68c0\u6d4b\u65f6\u95f4",
-            key="entry_test_time",
-        )
-        operator = st.selectbox(
-            "\u68c0\u6d4b\u4eba",
-            options=operator_options,
-            index=None,
-            key="entry_operator",
-            accept_new_options=True,
-            placeholder="\u53ef\u9009\u62e9\u5386\u53f2\u59d3\u540d\uff0c\u4e5f\u53ef\u76f4\u63a5\u8f93\u5165\u65b0\u59d3\u540d",
-        )
-        value_text = st.text_input(
-            "\u68c0\u6d4b\u503c\uff08\u652f\u6301\u5b9e\u65f6 log10\uff09",
-            key="entry_value",
-            placeholder="\u4f8b\u5982\uff1a123.4567",
-        )
-        parsed_value, log_display, log_value = parse_numeric_input(value_text)
-        render_live_log10_panel(
-            value_text=value_text,
-            field_label="\u68c0\u6d4b\u503c\uff08\u652f\u6301\u5b9e\u65f6 log10\uff09",
-            value_element_id="entry-log10-value",
-            hint_element_id="entry-log10-hint",
-        )
-        reagent_lot_changed = st.checkbox(
-            "\u672c\u6b21\u4e3a\u8bd5\u5242\u6279\u53f7\u53d8\u66f4\u70b9",
-            key="entry_reagent_changed",
-        )
-
-        if st.button("\u4fdd\u5b58\u68c0\u6d4b\u7ed3\u679c", type="primary", width="stretch"):
-            validation_errors: list[str] = []
-            cleaned_operator = (operator or "").strip()
-
-            if test_time is None:
-                validation_errors.append("\u8bf7\u586b\u5199\u68c0\u6d4b\u65f6\u95f4\u3002")
-            if not cleaned_operator:
-                validation_errors.append("\u8bf7\u586b\u5199\u68c0\u6d4b\u4eba\uff0c\u4e0d\u80fd\u4e3a\u7a7a\u3002")
-            if parsed_value is None:
-                validation_errors.append("\u68c0\u6d4b\u503c\u5fc5\u987b\u4e3a\u6709\u6548\u6570\u5b57\u3002")
-
-            if validation_errors:
-                st.error("\n".join(validation_errors))
-            else:
-                add_result(
-                    batch_id=selected_batch_id,
-                    test_time=test_time.strftime("%Y-%m-%d %H:%M:%S"),
-                    operator=cleaned_operator,
-                    value=float(parsed_value),
-                    log_value=log_value,
-                    reagent_lot_changed=int(reagent_lot_changed),
-                )
-                st.success("\u68c0\u6d4b\u7ed3\u679c\u5df2\u4fdd\u5b58\u3002")
-                st.session_state["reset_entry_form"] = True
-                st.rerun()
-
-        st.divider()
-        st.markdown("**\u5efa\u9776\u7edf\u8ba1**")
-        render_compact_stat_metrics(
-            [
-                ("Mean", "-" if stats["mean"] is None else f"{stats['mean']:.4f}"),
-                ("SD", "-" if stats["sd"] is None else f"{stats['sd']:.4f}"),
-                ("CV%", "-" if stats["cv"] is None else f"{stats['cv']:.2f}%"),
-            ]
-        )
-        st.caption(
-            "\u5efa\u9776\u8fdb\u5ea6\uff1a"
-            + (
-                "\u5df2\u5b8c\u6210\uff0c\u540e\u7eed\u7ed3\u679c\u81ea\u52a8\u8fdb\u884c Westgard \u5224\u5b9a\u3002"
-                if stats.get("target_ready")
-                else f"\u5c1a\u9700\u7ee7\u7eed\u5f55\u5165\u81f3\u5c11 {int(batch['target_n'])} \u6b21\u7ed3\u679c\u3002"
-            )
-        )
-
-        st.divider()
-        st.markdown("**\u5b9e\u65f6\u7edf\u8ba1**")
-        sorted_results = results_df.sort_values(["test_time", "id"]).reset_index(drop=True)
-        if sorted_results.empty:
-            st.info("\u6682\u65e0\u6570\u636e\uff0c\u65e0\u6cd5\u8ba1\u7b97\u5b9e\u65f6\u7edf\u8ba1\u3002")
-        else:
-            sorted_results["sequence"] = sorted_results.index + 1
-            formal_results = sorted_results[sorted_results["sequence"] > int(batch["target_n"])].copy()
-            default_start = formal_results["test_time"].min() if not formal_results.empty else sorted_results["test_time"].min()
-            default_end = sorted_results["test_time"].max()
-
-            date_cols = st.columns(2)
-            realtime_start = date_cols[0].date_input(
-                "\u5f00\u59cb\u65e5\u671f",
-                value=default_start.date(),
-                key="realtime_start",
-            )
-            realtime_end = date_cols[1].date_input(
-                "\u7ed3\u675f\u65e5\u671f",
-                value=default_end.date(),
-                key="realtime_end",
-            )
-            st.caption("\u6309\u65e5\u671f\u7edf\u8ba1\uff0c\u7ed3\u675f\u65e5\u671f\u5305\u542b\u5f53\u65e5\u5168\u90e8\u8bb0\u5f55\u3002")
-            end_timestamp = pd.Timestamp(realtime_end) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-            realtime_stats, realtime_message = calculate_realtime_stats(
-                results_df=results_df,
-                target_n=int(batch["target_n"]),
-                start_time=pd.Timestamp(realtime_start),
-                end_time=end_timestamp,
-            )
-            render_compact_stat_metrics(
-                [
-                    ("\u5b9e\u65f6 Mean", "-" if realtime_stats["mean"] is None else f"{realtime_stats['mean']:.4f}"),
-                    ("\u5b9e\u65f6 SD", "-" if realtime_stats["sd"] is None else f"{realtime_stats['sd']:.4f}"),
-                    ("\u5b9e\u65f6 CV%", "-" if realtime_stats["cv"] is None else f"{realtime_stats['cv']:.2f}%"),
-                ]
-            )
-            if realtime_message:
-                st.info(realtime_message)
-            st.caption(
-                "\u7edf\u8ba1\u53e3\u5f84\uff1a\u5b9e\u65f6\u7edf\u8ba1\u4ec5\u57fa\u4e8e\u5f53\u524d\u6279\u6b21\u4e2d\u5224\u5b9a\u4e3a\u201c\u5728\u63a7\u201d\u7684\u6b63\u5f0f\u6570\u636e\u8ba1\u7b97\uff0c"
-                "\u5df2\u81ea\u52a8\u6392\u9664\u8b66\u544a\u548c\u5931\u63a7\u7ed3\u679c\uff1b"
-                "\u5f53\u68c0\u6d4b\u8bb0\u5f55\u88ab\u4fee\u6539\u6216\u5220\u9664\u540e\uff0c\u5b9e\u65f6 Mean / SD / CV% \u53ef\u80fd\u968f\u4e4b\u81ea\u52a8\u53d8\u5316\u3002"
-            )
-
-    with chart_col:
-        st.subheader("\u56fe\u8868\u4e0e\u5224\u8bfb")
-        chart_view_mode = view_mode
-        chart_y_axis_mode = y_axis_mode
-        chart_standard_sd_limit = float(st.session_state.get("chart_standard_sd_limit", standard_sd_limit))
-        with st.expander(
-            build_chart_control_title(chart_view_mode, chart_y_axis_mode, chart_standard_sd_limit),
-            expanded=False,
-        ):
-            view_selector_col, y_axis_selector_col = st.columns([1.2, 1.1])
-            chart_view_mode = view_selector_col.radio(
-                "\u56fe\u5f62\u89c6\u56fe",
-                options=view_options,
-                horizontal=True,
-                index=view_options.index(view_mode),
-            )
-            chart_y_axis_mode = y_axis_selector_col.radio(
-                "Y \u8f74\u8303\u56f4",
-                options=y_axis_options,
-                horizontal=True,
-                index=y_axis_options.index(y_axis_mode),
-            )
-            st.session_state["chart_view_mode"] = chart_view_mode
-            st.session_state["chart_y_axis_mode"] = chart_y_axis_mode
-            if chart_y_axis_mode == "\u6807\u51c6\u89c6\u56fe":
-                chart_standard_sd_limit = st.slider(
-                    "\u6807\u51c6\u89c6\u56fe\u8303\u56f4\uff08Mean \u00b1 nSD\uff09",
-                    min_value=3.0,
-                    max_value=6.0,
-                    value=float(standard_sd_limit),
-                    step=0.5,
-                )
-                st.session_state["chart_standard_sd_limit"] = chart_standard_sd_limit
-                render_standard_view_help(chart_standard_sd_limit)
-            else:
-                chart_standard_sd_limit = float(st.session_state.get("chart_standard_sd_limit", standard_sd_limit))
-
-            if chart_view_mode != view_mode or chart_y_axis_mode != y_axis_mode:
-                st.rerun()
-
-        chart_view_mode = st.session_state.get("chart_view_mode", view_mode)
-        chart_y_axis_mode = st.session_state.get("chart_y_axis_mode", y_axis_mode)
-        chart_standard_sd_limit = float(st.session_state.get("chart_standard_sd_limit", standard_sd_limit))
-        st.markdown("**LJ\u56fe**")
-        figure = plot_lj_chart(
-            qc_df=qc_df,
-            stats=stats,
-            title=(
-                f"{chart_view_mode} - \u6279\u6b21 {batch['id']} - {batch['instrument']} - "
-                f"{batch['reagent']} - {batch['qc_material']} - {batch['concentration']}"
-            ),
-            view_mode=chart_view_mode,
-            y_axis_mode=chart_y_axis_mode,
-            standard_sd_limit=chart_standard_sd_limit,
-        )
-        st.pyplot(figure, clear_figure=False, width="stretch")
-        st.markdown("**\u6700\u65b0\u7ed3\u679c\u5206\u6790**")
-        render_status_panel(
-            latest_status,
-            latest_compact_message,
-            latest_rule_hits,
-        )
-
-    st.divider()
-    st.markdown("**\u672c\u6279\u6b21\u89c4\u5219\u6c47\u603b**")
-    render_rule_summary_metrics(stats.get("rule_summary", {}))
-
-    with st.expander("Westgard\u89c4\u5219\u8bf4\u660e\uff08\u70b9\u51fb\u5c55\u5f00\uff09", expanded=False):
-        st.markdown(
-            "- `1_2s`\uff1a\u5355\u70b9\u8d85\u8fc7 \u00b12SD\uff0c\u8b66\u544a\n"
-            "- `1_3s`\uff1a\u5355\u70b9\u8d85\u8fc7 \u00b13SD\uff0c\u5931\u63a7\n"
-            "- `2_2s`\uff1a\u8fde\u7eed 2 \u4e2a\u70b9\u540c\u4fa7\u8d85\u8fc7 \u00b12SD\uff0c\u5931\u63a7\n"
-            "- `R_4s`\uff1a\u8fde\u7eed 2 \u4e2a\u70b9\u5dee\u503c\u8d85\u8fc7 4SD\uff0c\u5931\u63a7\n"
-            "- `4_1s`\uff1a\u8fde\u7eed 4 \u4e2a\u70b9\u540c\u4fa7\u8d85\u8fc7 \u00b11SD\uff0c\u5931\u63a7\n"
-            "- `10x`\uff1a\u8fde\u7eed 10 \u4e2a\u70b9\u4f4d\u4e8e\u5747\u503c\u540c\u4fa7\uff0c\u5931\u63a7"
-        )
-
-    st.divider()
-    with st.expander("\u5f53\u524d\u6279\u6b21\u68c0\u6d4b\u8bb0\u5f55\uff08\u70b9\u51fb\u6298\u53e0/\u5c55\u5f00\uff09", expanded=True):
-        st.caption("\u5f53\u524d\u6279\u6b21\u7684\u5b8c\u6574\u68c0\u6d4b\u8bb0\u5f55\u3001Westgard \u89e6\u53d1\u89c4\u5219\u548c\u5206\u6790\u63d0\u793a\u90fd\u5728\u6b64\u67e5\u770b\u3002")
-        display_df = prepare_display_records(qc_df)
-        render_records_table(display_df)
-
-    st.divider()
-    maintenance_col, export_col = st.columns([0.9, 1.1], gap="large")
-    with maintenance_col:
-        st.subheader("\u68c0\u6d4b\u8bb0\u5f55\u7ef4\u62a4")
-        st.caption("\u4e3b\u9875\u53ea\u4fdd\u7559\u7ef4\u62a4\u5165\u53e3\uff0c\u70b9\u51fb\u540e\u5728\u5f39\u7a97\u4e2d\u4fee\u6539\u6216\u5220\u9664\u68c0\u6d4b\u8bb0\u5f55\u3002")
-        open_maintenance_disabled = qc_df.empty
-        if st.button(
-            "\u6253\u5f00\u68c0\u6d4b\u8bb0\u5f55\u7ef4\u62a4",
-            key="open_record_maintenance_dialog",
-            width="stretch",
-            disabled=open_maintenance_disabled,
-        ):
-            bump_record_maintenance_dialog_nonce()
-            st.session_state["show_record_maintenance_dialog"] = True
-        if open_maintenance_disabled:
-            st.info("\u5f53\u524d\u6279\u6b21\u6682\u65e0\u68c0\u6d4b\u8bb0\u5f55\u53ef\u7ef4\u62a4\u3002")
-        if st.session_state.get("show_record_maintenance_dialog", False):
-            render_record_maintenance_dialog(qc_df)
-
-    with export_col:
-        st.subheader("\u5bfc\u51fa")
-        export_df = export_batch_results(batch, qc_df)
-        csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
-        xlsx_bytes = dataframe_to_xlsx_bytes(export_df)
-        png_bytes = figure_to_png_bytes(figure)
-
-        st.markdown("**\u5f53\u524d\u6279\u6b21\u5bfc\u51fa**")
-        export_format = st.radio(
-            "\u5bfc\u51fa\u6570\u636e\u683c\u5f0f",
-            options=["Excel (.xlsx)", "CSV (.csv)"],
-            horizontal=True,
-            key="export_format",
-        )
-        export_button_cols = st.columns(2)
-        export_button_cols[0].download_button(
-            label="\u5bfc\u51fa\u5f53\u524d\u6279\u6b21\u6570\u636e",
-            data=xlsx_bytes if export_format == "Excel (.xlsx)" else csv_bytes,
-            file_name=(
-                f"batch_{batch['id']}_results.xlsx"
-                if export_format == "Excel (.xlsx)"
-                else f"batch_{batch['id']}_results.csv"
-            ),
-            mime=(
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                if export_format == "Excel (.xlsx)"
-                else "text/csv"
-            ),
-            width="stretch",
-        )
-        export_button_cols[1].download_button(
-            label="\u5bfc\u51fa\u5f53\u524d LJ \u56fe PNG",
-            data=png_bytes,
-            file_name=f"batch_{batch['id']}_{chart_view_mode}.png",
-            mime="image/png",
-            width="stretch",
-        )
-
-        st.divider()
-        st.markdown("**\u6708\u5ea6\u8d28\u63a7\u56fe\u5bfc\u51fa**")
-        st.caption("\u4ec5\u5bfc\u51fa\u6b63\u5f0f\u6570\u636e\uff0c\u65e5\u671f\u8303\u56f4\u6700\u957f 30 \u5929\u3002")
-        formal_qc_df = qc_df[qc_df["phase"] == "\u6b63\u5f0f\u6570\u636e"].copy() if "phase" in qc_df.columns else pd.DataFrame()
-        if formal_qc_df.empty:
-            st.info("\u5f53\u524d\u6279\u6b21\u8fd8\u6ca1\u6709\u6b63\u5f0f\u8d28\u63a7\u6570\u636e\u3002")
-        else:
-            default_monthly_start = formal_qc_df["test_time"].min().date()
-            default_monthly_end = formal_qc_df["test_time"].max().date()
-            monthly_col_start, monthly_col_end = st.columns(2)
-            monthly_start = monthly_col_start.date_input(
-                "\u5f00\u59cb\u65e5\u671f",
-                value=default_monthly_start,
-                key="monthly_export_start",
-            )
-            monthly_end = monthly_col_end.date_input(
-                "\u7ed3\u675f\u65e5\u671f",
-                value=default_monthly_end,
-                key="monthly_export_end",
-            )
-
-            monthly_error = ""
-            day_span = (pd.Timestamp(monthly_end).date() - pd.Timestamp(monthly_start).date()).days + 1
-            if monthly_end < monthly_start:
-                monthly_error = "\u7ed3\u675f\u65e5\u671f\u4e0d\u80fd\u65e9\u4e8e\u5f00\u59cb\u65e5\u671f\u3002"
-            elif day_span > 30:
-                monthly_error = "\u6708\u5ea6\u8d28\u63a7\u56fe\u5bfc\u51fa\u8303\u56f4\u6700\u957f\u4e3a30\u5929\uff0c\u8bf7\u91cd\u65b0\u9009\u62e9\u65e5\u671f\u8303\u56f4\u3002"
-
-            monthly_png_bytes = None
-            monthly_file_name = None
-            if monthly_error:
-                st.warning(monthly_error)
-            else:
-                monthly_qc_df = build_monthly_export_dataframe(
-                    qc_df=qc_df,
-                    start_date=monthly_start,
-                    end_date=monthly_end,
-                )
-                if monthly_qc_df.empty:
-                    st.info("\u6240\u9009\u65e5\u671f\u8303\u56f4\u5185\u6ca1\u6709\u6b63\u5f0f\u8d28\u63a7\u6570\u636e\uff0c\u65e0\u6cd5\u5bfc\u51fa\u6708\u5ea6\u8d28\u63a7\u56fe\u3002")
-                else:
-                    monthly_title = build_monthly_chart_title(
-                        batch=batch,
-                        start_date=monthly_start,
-                        end_date=monthly_end,
-                    )
-                    monthly_figure = plot_lj_chart(
-                        qc_df=monthly_qc_df,
-                        stats=stats,
-                        title=monthly_title,
-                        view_mode="\u6b63\u5f0f\u8d28\u63a7\u56fe",
-                        y_axis_mode=chart_y_axis_mode,
-                        standard_sd_limit=float(st.session_state.get("chart_standard_sd_limit", 4.0)),
-                    )
-                    monthly_png_bytes = figure_to_png_bytes(monthly_figure)
-                    monthly_file_name = (
-                        f"batch_{batch['id']}_monthly_qc_"
-                        f"{monthly_start.strftime('%Y-%m-%d')}_to_{monthly_end.strftime('%Y-%m-%d')}.png"
-                    )
-
-            st.download_button(
-                label="\u5bfc\u51fa\u6708\u5ea6\u8d28\u63a7\u56fe PNG",
-                data=monthly_png_bytes if monthly_png_bytes is not None else b"",
-                file_name=monthly_file_name or f"batch_{batch['id']}_monthly_qc.png",
-                mime="image/png",
-                width="stretch",
-                disabled=monthly_png_bytes is None,
-            )
+render_lj_page(work_tab, selected_batch_id)
