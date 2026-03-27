@@ -214,14 +214,27 @@ st.markdown(
 )
 
 
+def _clean_selector_label_part(value, fallback: str) -> str:
+    cleaned_value = " ".join(str(value or "").split()).strip()
+    return cleaned_value or fallback
+
+
 def build_project_label(row: pd.Series) -> str:
-    return f"\u9879\u76ee {row['id']} | {row['name']}"
+    row = dict(row)
+    project_name = _clean_selector_label_part(row.get("name"), "\u672a\u547d\u540d\u9879\u76ee")
+    return f"\u9879\u76ee {row['id']} | {project_name}"
 
 
 def build_batch_label(row: pd.Series) -> str:
+    row = dict(row)
+    instrument = _clean_selector_label_part(row.get("instrument"), "\u672a\u586b\u5199\u4eea\u5668")
+    reagent = _clean_selector_label_part(row.get("reagent"), "\u672a\u586b\u5199\u8bd5\u5242")
+    qc_material = _clean_selector_label_part(row.get("qc_material"), "\u672a\u586b\u5199\u8d28\u63a7\u54c1")
+    concentration = _clean_selector_label_part(row.get("concentration"), "\u672a\u586b\u5199\u6d53\u5ea6")
+    lot_no = _clean_selector_label_part(row.get("lot_no"), "\u672a\u586b\u5199")
     return (
-        f"\u6279\u6b21 {row['id']} | {row['instrument']} | {row['reagent']} | "
-        f"{row['qc_material']} | {row['concentration']} | \u8d28\u63a7\u6279\u53f7 {row['lot_no']}"
+        f"\u6279\u6b21 {row['id']} | {instrument} | {reagent} | "
+        f"{qc_material} | {concentration} | \u8d28\u63a7\u6279\u53f7 {lot_no}"
     )
 
 
