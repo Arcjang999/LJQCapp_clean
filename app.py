@@ -254,6 +254,24 @@ def render_table_html(html: str, row_count: int) -> None:
     components.html(html_content, height=estimated_height, scrolling=row_count > 10)
 
 
+def build_safe_export_name(text: str | None, fallback: str) -> str:
+    cleaned_text = str(text or "").strip()
+    safe_characters: list[str] = []
+    unsafe_characters = set('<>:"/\\|?*')
+    for character in cleaned_text:
+        if character.isspace():
+            safe_characters.append("_")
+        elif character.isalnum() or character in ("-", "_"):
+            safe_characters.append(character)
+        elif character in unsafe_characters:
+            safe_characters.append("_")
+        else:
+            safe_characters.append("_")
+
+    safe_text = "".join(safe_characters).strip("_")
+    return safe_text or fallback
+
+
 def prepare_display_records(qc_df: pd.DataFrame) -> pd.DataFrame:
     display_df = qc_df.copy()
     if display_df.empty:
@@ -1442,6 +1460,8 @@ def render_lj_page(
             csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
             xlsx_bytes = dataframe_to_xlsx_bytes(export_df)
             png_bytes = figure_to_png_bytes(figure)
+            project_name_fragment = build_safe_export_name(batch.get("project_name"), "project")
+            lot_no_fragment = build_safe_export_name(batch.get("lot_no"), f"batch_{batch['id']}")
 
             st.markdown("**\u5f53\u524d\u6279\u6b21\u5bfc\u51fa**")
             export_format = st.radio(
@@ -1455,9 +1475,9 @@ def render_lj_page(
                 label="\u5bfc\u51fa\u5f53\u524d\u6279\u6b21\u6570\u636e",
                 data=xlsx_bytes if export_format == "Excel (.xlsx)" else csv_bytes,
                 file_name=(
-                    f"batch_{batch['id']}_results.xlsx"
+                    f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_results.xlsx"
                     if export_format == "Excel (.xlsx)"
-                    else f"batch_{batch['id']}_results.csv"
+                    else f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_results.csv"
                 ),
                 mime=(
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -1469,7 +1489,10 @@ def render_lj_page(
             export_button_cols[1].download_button(
                 label="\u5bfc\u51fa\u5f53\u524d LJ \u56fe PNG",
                 data=png_bytes,
-                file_name=f"batch_{batch['id']}_{chart_view_mode}.png",
+                file_name=(
+                    f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_"
+                    f"{build_safe_export_name(chart_view_mode, 'chart')}.png"
+                ),
                 mime="image/png",
                 width="stretch",
             )
@@ -1530,14 +1553,17 @@ def render_lj_page(
                         )
                         monthly_png_bytes = figure_to_png_bytes(monthly_figure)
                         monthly_file_name = (
-                            f"batch_{batch['id']}_monthly_qc_"
+                            f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_monthly_qc_"
                             f"{monthly_start.strftime('%Y-%m-%d')}_to_{monthly_end.strftime('%Y-%m-%d')}.png"
                         )
 
                 st.download_button(
                     label="\u5bfc\u51fa\u6708\u5ea6\u8d28\u63a7\u56fe PNG",
                     data=monthly_png_bytes if monthly_png_bytes is not None else b"",
-                    file_name=monthly_file_name or f"batch_{batch['id']}_monthly_qc.png",
+                    file_name=(
+                        monthly_file_name
+                        or f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_monthly_qc.png"
+                    ),
                     mime="image/png",
                     width="stretch",
                     disabled=monthly_png_bytes is None,
