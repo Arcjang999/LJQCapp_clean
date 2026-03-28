@@ -6,6 +6,7 @@ from io import BytesIO
 import math
 from string import ascii_uppercase
 from textwrap import dedent
+from typing import Any
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import pandas as pd
@@ -30,6 +31,8 @@ from database import (
 )
 from plotting import figure_to_png_bytes, plot_lj_chart
 from qc_logic import calculate_qc_results, calculate_realtime_stats, format_stats_message
+from zscore_logic import build_zscore_rule_templates, evaluate_zscore_run
+from zscore_plotting import plot_zscore_overlay, plot_zscore_single_level
 
 
 PAGE_TITLE = "\u5b9e\u9a8c\u5ba4\u8d28\u63a7 LJ \u66f2\u7ebf"
@@ -735,6 +738,215 @@ def render_zscore_level_input_block(
         value_element_id=value_element_id,
         hint_element_id=hint_element_id,
     )
+
+
+def build_zscore_current_level_results(template: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str], bool]:
+    key_map = {
+        "Level 1": "zscore_level1_value",
+        "Level 2": "zscore_level2_value",
+        "Level 3": "zscore_level3_value",
+    }
+    level_results: list[dict[str, Any]] = []
+    validation_errors: list[str] = []
+    has_any_input = False
+    for level_id in template["level_ids"]:
+        value_key = key_map[level_id]
+        raw_text = str(st.session_state.get(value_key, "") or "")
+        raw_value, _, log_value = parse_numeric_input(raw_text)
+        has_any_input = has_any_input or bool(raw_text.strip())
+        if raw_text.strip() and raw_value is None:
+            validation_errors.append(f"{level_id} 检测值必须为有效正数。")
+
+        target_info = template["default_targets"][level_id]
+        level_results.append(
+            {
+                "level_id": level_id,
+                "raw_value": raw_value,
+                "log_value": log_value,
+                "target_mean": target_info["target_mean"],
+                "target_sd": target_info["target_sd"],
+            }
+        )
+    return level_results, validation_errors, has_any_input
+
+
+def build_zscore_plot_dataframe(
+    saved_runs: list[dict[str, Any]],
+    draft_run: dict[str, Any] | None = None,
+) -> pd.DataFrame:
+    expected_columns = [
+        "run_id",
+        "run_index",
+        "test_time",
+        "level_id",
+        "zscore",
+        "status",
+        "rule_hits",
+        "raw_value",
+        "log_value",
+        "is_preview",
+    ]
+    rows: list[dict[str, Any]] = []
+    for run in saved_runs:
+        for level_result in run.get("level_results", []):
+            zscore = level_result.get("zscore")
+            if zscore is None:
+                continue
+            rows.append(
+                {
+                    "run_id": run.get("run_id"),
+                    "run_index": run.get("run_id"),
+                    "test_time": run.get("test_time"),
+                    "level_id": level_result.get("level_id"),
+                    "zscore": zscore,
+                    "status": level_result.get("status", run.get("run_status", "accept")),
+                    "rule_hits": ",".join(level_result.get("rule_hits_local", [])),
+                    "raw_value": level_result.get("raw_value"),
+                    "log_value": level_result.get("log_value"),
+                    "is_preview": False,
+                }
+            )
+
+    if draft_run and draft_run.get("run_status") != "pending":
+        preview_run_index = len(saved_runs) + 1
+        for level_result in draft_run.get("level_results", []):
+            zscore = level_result.get("zscore")
+            if zscore is None:
+                continue
+            rows.append(
+                {
+                    "run_id": preview_run_index,
+                    "run_index": preview_run_index,
+                    "test_time": draft_run.get("test_time"),
+                    "level_id": level_result.get("level_id"),
+                    "zscore": zscore,
+                    "status": level_result.get("status", draft_run.get("run_status", "accept")),
+                    "rule_hits": ",".join(level_result.get("rule_hits_local", [])),
+                    "raw_value": level_result.get("raw_value"),
+                    "log_value": level_result.get("log_value"),
+                    "is_preview": True,
+                }
+            )
+
+    return pd.DataFrame(rows, columns=expected_columns)
+
+
+def format_zscore_rule_hits(rule_hits: list[dict[str, Any]]) -> str:
+    if not rule_hits:
+        return "无"
+    ordered_rule_ids = list(dict.fromkeys(hit["rule_id"] for hit in rule_hits))
+    return "、".join(ordered_rule_ids)
+
+
+def build_zscore_chart_control_title(template: dict[str, Any], view_mode: str, selected_level: str) -> str:
+    scope_text = selected_level if view_mode == "单水平视图" else "全部 Level"
+    return f"图表控制（点击展开）｜{template['label']}｜{view_mode}｜{scope_text}"
+
+
+def render_zscore_chart_controls(
+    templates: dict[str, dict[str, Any]],
+    initial_template_id: str,
+) -> tuple[str, dict[str, Any], str, str]:
+    template = templates[initial_template_id]
+    view_mode = st.session_state.get("zscore_view_mode", "单水平视图")
+    if view_mode not in {"单水平视图", "合并视图"}:
+        view_mode = "单水平视图"
+    selected_level = st.session_state.get("zscore_selected_level", template["level_ids"][0])
+    if selected_level not in template["level_ids"]:
+        selected_level = template["level_ids"][0]
+        st.session_state["zscore_selected_level"] = selected_level
+
+    with st.expander(
+        build_zscore_chart_control_title(template, view_mode, selected_level),
+        expanded=False,
+    ):
+        control_col1, control_col2 = st.columns([1.05, 1.15], gap="large")
+        template_id = control_col1.selectbox(
+            "规则模板",
+            options=list(templates.keys()),
+            index=list(templates.keys()).index(initial_template_id),
+            key="zscore_rule_template",
+            format_func=lambda option: templates[option]["label"],
+        )
+        view_mode = control_col2.radio(
+            "视图模式",
+            options=["单水平视图", "合并视图"],
+            horizontal=True,
+            key="zscore_view_mode",
+        )
+        template = templates[template_id]
+        if st.session_state.get("zscore_selected_level") not in template["level_ids"]:
+            st.session_state["zscore_selected_level"] = template["level_ids"][0]
+        if view_mode == "单水平视图":
+            selected_level = st.radio(
+                "Level Selector",
+                options=template["level_ids"],
+                horizontal=True,
+                key="zscore_selected_level",
+            )
+        else:
+            selected_level = st.session_state.get("zscore_selected_level", template["level_ids"][0])
+    return template_id, template, view_mode, selected_level
+
+
+def render_zscore_latest_analysis_panel(latest_run: dict[str, Any] | None) -> None:
+    st.markdown("**最新结果分析**")
+    if latest_run is None:
+        st.info("请先完整录入一个 run，右侧将显示 Z-score 判读结果。")
+        return
+
+    palette = {
+        "accept": {"background": "#edf8ef", "border": "#59a14f", "text": "#1d5f2a", "badge": "#59a14f"},
+        "warning": {"background": "#fff6db", "border": "#edc948", "text": "#785b00", "badge": "#c89b00"},
+        "reject": {"background": "#fdeaea", "border": "#e15759", "text": "#8f1f28", "badge": "#c23b3d"},
+        "pending": {"background": "#f3f6fb", "border": "#7a8ca5", "text": "#31445a", "badge": "#58708f"},
+    }
+    status = str(latest_run.get("run_status", "pending"))
+    style = palette.get(status, palette["pending"])
+    source_text = "当前输入预览" if latest_run.get("is_preview") else f"最近已保存 run #{latest_run.get('run_id', '-')}"
+    html = dedent(
+        f"""
+        <div style="
+            background:{style['background']};
+            border:1px solid {style['border']};
+            border-left:5px solid {style['border']};
+            border-radius:10px;
+            padding:10px 12px;
+            margin:2px 0 6px 0;
+        ">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+                <span style="
+                    background:{style['badge']};
+                    color:#ffffff;
+                    font-size:12px;
+                    font-weight:700;
+                    border-radius:999px;
+                    padding:3px 9px;
+                ">{html_escape(status)}</span>
+                <span style="color:{style['text']};font-size:12px;font-weight:600;">
+                    {html_escape(source_text)}
+                </span>
+            </div>
+            <div style="color:{style['text']};font-size:13px;line-height:1.55;">
+                <div><strong>触发规则：</strong>{html_escape(format_zscore_rule_hits(latest_run.get('rule_hits_run', [])))}</div>
+                <div><strong>误差类型提示：</strong>{html_escape(str(latest_run.get('error_type_hint', 'unknown')))}</div>
+                <div style="margin-top:6px;">{html_escape(str(latest_run.get('analysis_prompt', '暂无分析提示。')))}</div>
+            </div>
+        </div>
+        """
+    ).strip()
+    render_html_block(html)
+
+
+def render_zscore_rules_config_expander(template: dict[str, Any]) -> None:
+    with st.expander("规则模板说明（点击展开）", expanded=False):
+        st.caption(template["note"])
+        st.markdown(f"- 当前模板：`{template['label']}`")
+        st.markdown(f"- 当前启用规则：`{', '.join(template['rule_ids'])}`")
+        for rule in template["rules"]:
+            st.markdown(
+                f"- `{rule['rule_id']}` | `{rule['severity']}` | `{rule['scope']}`"
+            )
 
 
 def render_batch_summary_row(batch) -> None:
@@ -1618,7 +1830,7 @@ def render_main_entry_page() -> None:
 
 def render_zscore_placeholder_page() -> None:
     st.subheader("Z-score")
-    st.caption("Z-score \u5f53\u524d\u4e3a\u7ed3\u6784\u5360\u4f4d\u9875\uff0c\u5c1a\u672a\u63a5\u5165\u8ba1\u7b97\u903b\u8f91\u3002")
+    st.caption("Z-score \u5f53\u524d\u4e3a\u72ec\u7acb MVR \u9875\u9762\uff0c\u5df2\u63a5\u5165\u6700\u5c0f\u89c4\u5219\u9aa8\u67b6\u4e0e\u53f3\u4fa7\u56fe\u8868\u6846\u67b6\uff0c\u5efa\u9776\u843d\u5e93\u4ecd\u7559\u5f85\u540e\u7eed\u63a5\u5165\u3002")
     manage_tab, work_tab = st.tabs(["\u7ba1\u7406 / \u51c6\u5907", "\u5f53\u524d\u5de5\u4f5c\u533a"])
 
     with manage_tab:
@@ -1626,7 +1838,7 @@ def render_zscore_placeholder_page() -> None:
         st.caption("\u540e\u7eed\u5728\u8fd9\u91cc\u63a5\u5165\u9879\u76ee\u3001\u6279\u6b21\u4e0e\u5de5\u4f5c\u4e0a\u4e0b\u6587\u3002")
 
     with work_tab:
-        shared_target_status = "\u5f85\u540e\u7eed\u63a5\u5165"
+        templates = build_zscore_rule_templates()
         if "zscore_entry_test_time" not in st.session_state:
             st.session_state["zscore_entry_test_time"] = datetime.now()
         if "zscore_entry_operator" not in st.session_state:
@@ -1635,63 +1847,146 @@ def render_zscore_placeholder_page() -> None:
             st.session_state["zscore_level1_value"] = ""
         if "zscore_level2_value" not in st.session_state:
             st.session_state["zscore_level2_value"] = ""
+        if "zscore_level3_value" not in st.session_state:
+            st.session_state["zscore_level3_value"] = ""
+        if "zscore_view_mode" not in st.session_state:
+            st.session_state["zscore_view_mode"] = "\u5355\u6c34\u5e73\u89c6\u56fe"
+        if "zscore_rule_template" not in st.session_state:
+            st.session_state["zscore_rule_template"] = "2_level_classic"
+        if "zscore_selected_level" not in st.session_state:
+            st.session_state["zscore_selected_level"] = "Level 1"
+        if "zscore_run_history" not in st.session_state or not isinstance(st.session_state["zscore_run_history"], dict):
+            st.session_state["zscore_run_history"] = {template_key: [] for template_key in templates}
+        for template_key in templates:
+            st.session_state["zscore_run_history"].setdefault(template_key, [])
 
-        st.subheader("录入与统计")
-        st.caption("左侧专注本次运行录入与建靶统计，避免把输入项和统计项混在同一个表里。")
-        st.caption(f"当前共享建靶状态：{shared_target_status}")
+        initial_template_id = st.session_state.get("zscore_rule_template", "2_level_classic")
+        if initial_template_id not in templates:
+            initial_template_id = "2_level_classic"
+            st.session_state["zscore_rule_template"] = initial_template_id
 
-        st.markdown("**本次数据录入**")
-        st.datetime_input("检测时间", key="zscore_entry_test_time")
-        st.text_input(
-            "检测人",
-            key="zscore_entry_operator",
-            placeholder="请输入本次检测人",
-        )
+        entry_col, chart_col = st.columns([1.0, 1.18], gap="large")
 
-        st.divider()
-        st.markdown("**多水平结果录入**")
-        render_zscore_level_input_block(
-            level_label="Level 1",
-            value_key="zscore_level1_value",
-            value_element_id="zscore-level1-log10-value",
-            hint_element_id="zscore-level1-log10-hint",
-        )
-        render_zscore_level_input_block(
-            level_label="Level 2",
-            value_key="zscore_level2_value",
-            value_element_id="zscore-level2-log10-value",
-            hint_element_id="zscore-level2-log10-hint",
-        )
-        if st.button("保存本次检测结果", type="primary", width="stretch"):
-            st.write("当前仅为结构占位，保存逻辑尚未接入。")
-
-        st.divider()
-        st.markdown("**建靶统计**")
-        stat_col1, stat_col2 = st.columns(2, gap="large")
-        with stat_col1:
-            st.markdown("**Level 1**")
-            render_compact_stat_metrics(
-                [
-                    ("Mean", "-"),
-                    ("SD", "-"),
-                    ("CV%", "-"),
-                ]
-            )
-        with stat_col2:
-            st.markdown("**Level 2**")
-            render_compact_stat_metrics(
-                [
-                    ("Mean", "-"),
-                    ("SD", "-"),
-                    ("CV%", "-"),
-                ]
+        with chart_col:
+            st.subheader("\u56fe\u8868\u4e0e\u5224\u8bfb")
+            template_id, template, view_mode, selected_level = render_zscore_chart_controls(
+                templates,
+                initial_template_id,
             )
 
-        st.divider()
-        st.markdown("**建靶状态说明**")
-        st.write(f"当前共享建靶状态：{shared_target_status}")
-        st.write("当前靶值可用性：未可用")
-        st.write("后续判读接入：未接入")
+        history_store = st.session_state["zscore_run_history"]
+        history_runs = list(history_store.get(template_id, []))
+        current_level_results, input_errors, has_any_input = build_zscore_current_level_results(template)
+        draft_run = evaluate_zscore_run(current_level_results, history_runs, template_id)
+        draft_run["test_time"] = pd.Timestamp(st.session_state["zscore_entry_test_time"])
+        draft_run["operator"] = str(st.session_state.get("zscore_entry_operator", "") or "").strip()
+        draft_run["template_id"] = template_id
+        draft_run["template_label"] = template["label"]
+        draft_run["is_preview"] = has_any_input
+
+        with entry_col:
+            shared_target_status = "\u6a21\u677f\u9ed8\u8ba4\u9776\u503c"
+            st.subheader("\u5f55\u5165\u4e0e\u7edf\u8ba1")
+            st.caption("\u5de6\u4fa7\u4e13\u6ce8 run \u5f55\u5165\u4e0e Z-score \u5efa\u9776\u7edf\u8ba1\uff0c\u53f3\u4fa7\u7528\u4e8e\u56fe\u8868\u4e0e\u89c4\u5219\u5224\u8bfb\u3002")
+            st.caption(f"\u5f53\u524d\u6a21\u677f\uff1a{template['label']}\uff5c\u5171\u4eab\u5efa\u9776\u72b6\u6001\uff1a{shared_target_status}")
+
+            st.markdown("**\u672c\u6b21\u6570\u636e\u5f55\u5165**")
+            st.datetime_input("\u68c0\u6d4b\u65f6\u95f4", key="zscore_entry_test_time")
+            st.text_input(
+                "\u68c0\u6d4b\u4eba",
+                key="zscore_entry_operator",
+                placeholder="\u8bf7\u8f93\u5165\u672c\u6b21\u68c0\u6d4b\u4eba",
+            )
+
+            st.divider()
+            st.markdown("**\u591a\u6c34\u5e73\u7ed3\u679c\u5f55\u5165**")
+            level_render_config = {
+                "Level 1": ("zscore_level1_value", "zscore-level1-log10-value", "zscore-level1-log10-hint"),
+                "Level 2": ("zscore_level2_value", "zscore-level2-log10-value", "zscore-level2-log10-hint"),
+                "Level 3": ("zscore_level3_value", "zscore-level3-log10-value", "zscore-level3-log10-hint"),
+            }
+            for level_id in template["level_ids"]:
+                value_key, value_element_id, hint_element_id = level_render_config[level_id]
+                render_zscore_level_input_block(
+                    level_label=level_id,
+                    value_key=value_key,
+                    value_element_id=value_element_id,
+                    hint_element_id=hint_element_id,
+                )
+
+            if st.button("\u4fdd\u5b58\u672c\u6b21\u68c0\u6d4b\u7ed3\u679c", type="primary", width="stretch"):
+                validation_errors = list(input_errors)
+                cleaned_operator = str(st.session_state.get("zscore_entry_operator", "") or "").strip()
+                if st.session_state.get("zscore_entry_test_time") is None:
+                    validation_errors.append("\u8bf7\u586b\u5199\u68c0\u6d4b\u65f6\u95f4\u3002")
+                if not cleaned_operator:
+                    validation_errors.append("\u8bf7\u586b\u5199\u68c0\u6d4b\u4eba\u3002")
+                for level_result in current_level_results:
+                    if level_result["raw_value"] is None:
+                        validation_errors.append(f"{level_result['level_id']} \u68c0\u6d4b\u503c\u5fc5\u987b\u4e3a\u6709\u6548\u6b63\u6570\u3002")
+
+                if validation_errors:
+                    st.error("\n".join(dict.fromkeys(validation_errors)))
+                else:
+                    saved_run = evaluate_zscore_run(current_level_results, history_runs, template_id)
+                    saved_run["run_id"] = len(history_runs) + 1
+                    saved_run["test_time"] = pd.Timestamp(st.session_state["zscore_entry_test_time"])
+                    saved_run["operator"] = cleaned_operator
+                    saved_run["template_id"] = template_id
+                    saved_run["template_label"] = template["label"]
+                    saved_run["is_preview"] = False
+                    history_store[template_id] = history_runs + [saved_run]
+                    st.session_state["zscore_run_history"] = history_store
+                    st.session_state["zscore_level1_value"] = ""
+                    st.session_state["zscore_level2_value"] = ""
+                    st.session_state["zscore_level3_value"] = ""
+                    st.session_state["zscore_entry_test_time"] = datetime.now()
+                    st.success("Z-score run \u5df2\u4fdd\u5b58\u5230\u5f53\u524d\u4f1a\u8bdd\u3002")
+                    st.rerun()
+
+            st.divider()
+            st.markdown("**\u5efa\u9776\u7edf\u8ba1**")
+            stat_cols = st.columns(len(template["level_ids"]), gap="large")
+            for stat_col, level_id in zip(stat_cols, template["level_ids"]):
+                target_info = template["default_targets"][level_id]
+                with stat_col:
+                    st.markdown(f"**{level_id}**")
+                    render_compact_stat_metrics(
+                        [
+                            ("Mean", f"{target_info['target_mean']:.4f}"),
+                            ("SD", f"{target_info['target_sd']:.4f}"),
+                            ("CV%", f"{target_info['target_cv']:.2f}%"),
+                        ]
+                    )
+
+            st.divider()
+            st.markdown("**\u5efa\u9776\u72b6\u6001\u8bf4\u660e**")
+            st.write(f"\u5f53\u524d\u5171\u4eab\u5efa\u9776\u72b6\u6001\uff1a{shared_target_status}")
+            st.write("\u5f53\u524d\u9776\u503c\u53ef\u7528\u6027\uff1a\u6a21\u677f\u9ed8\u8ba4\u503c\uff08\u4e34\u65f6\u53ef\u7528\uff09")
+            st.write("\u540e\u7eed\u5224\u8bfb\u63a5\u5165\uff1aMVR \u89c4\u5219\u5df2\u63a5\u5165")
+
+        plot_df = build_zscore_plot_dataframe(
+            history_runs,
+            draft_run if draft_run.get("is_preview") and draft_run.get("run_status") != "pending" else None,
+        )
+        latest_run = draft_run if draft_run.get("is_preview") else (history_runs[-1] if history_runs else None)
+
+        with chart_col:
+            if view_mode == "\u5355\u6c34\u5e73\u89c6\u56fe":
+                figure = plot_zscore_single_level(
+                    plot_df=plot_df,
+                    level_id=selected_level,
+                    title=f"\u5355 Level Z-score \u56fe\uff5c{selected_level}",
+                )
+            else:
+                figure = plot_zscore_overlay(
+                    plot_df=plot_df,
+                    title=f"\u5408\u5e76 Z-score / SDI \u89c6\u56fe\uff5c{template['label']}",
+                    active_levels=template["level_ids"],
+                )
+            st.pyplot(figure, clear_figure=False, width="stretch")
+            render_zscore_latest_analysis_panel(latest_run)
+            render_zscore_rules_config_expander(template)
 
 
 def render_instant_placeholder_page() -> None:
