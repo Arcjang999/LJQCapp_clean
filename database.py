@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import os
 import shutil
@@ -78,6 +79,9 @@ def init_db() -> None:
         _ensure_projects_table(connection)
         _ensure_batches_table(connection)
         _ensure_results_table(connection)
+        _ensure_zscore_runs_table(connection)
+        _ensure_zscore_level_results_table(connection)
+        _ensure_zscore_level_targets_table(connection)
         connection.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_results_batch_time
@@ -88,6 +92,24 @@ def init_db() -> None:
             """
             CREATE INDEX IF NOT EXISTS idx_batches_project
             ON batches (project_id, id)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_zscore_runs_batch_time
+            ON zscore_runs (batch_id, rule_template_id, test_time, id)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_zscore_level_results_run_level
+            ON zscore_level_results (run_id, level_id, id)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_zscore_level_targets_batch_level
+            ON zscore_level_targets (batch_id, level_id)
             """
         )
 
@@ -284,6 +306,82 @@ def _create_results_table(connection: sqlite3.Connection) -> None:
             log_value REAL,
             reagent_lot_changed INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (batch_id) REFERENCES batches (id) ON DELETE CASCADE
+        )
+        """
+    )
+
+
+def _ensure_zscore_runs_table(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS zscore_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            batch_id INTEGER NOT NULL,
+            project_id INTEGER NOT NULL,
+            test_time TEXT NOT NULL,
+            operator TEXT NOT NULL DEFAULT '',
+            level_count INTEGER NOT NULL CHECK (level_count BETWEEN 1 AND 3),
+            phase TEXT NOT NULL,
+            run_status TEXT NOT NULL,
+            rule_template_id TEXT NOT NULL,
+            rule_hits_run TEXT NOT NULL DEFAULT '[]',
+            error_type_hint TEXT NOT NULL DEFAULT 'unknown',
+            analysis_prompt TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (batch_id) REFERENCES batches (id) ON DELETE CASCADE,
+            FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
+        )
+        """
+    )
+
+
+def _ensure_zscore_level_results_table(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS zscore_level_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER NOT NULL,
+            level_id TEXT NOT NULL,
+            raw_value REAL NOT NULL,
+            log_value REAL,
+            zscore REAL,
+            level_status TEXT NOT NULL,
+            rule_hits_local TEXT NOT NULL DEFAULT '[]',
+            is_in_control_for_realtime_stats INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (run_id) REFERENCES zscore_runs (id) ON DELETE CASCADE
+        )
+        """
+    )
+
+
+def _ensure_zscore_level_targets_table(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS zscore_level_targets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            batch_id INTEGER NOT NULL,
+            level_id TEXT NOT NULL,
+            vendor_reference_mean REAL,
+            vendor_reference_sd REAL,
+            vendor_reference_cv REAL,
+            vendor_reference_source_note TEXT,
+            provisional_mean REAL,
+            provisional_sd REAL,
+            provisional_cv REAL,
+            final_target_mean REAL,
+            final_target_sd REAL,
+            final_target_cv REAL,
+            realtime_mean REAL,
+            realtime_sd REAL,
+            realtime_cv REAL,
+            collected_n INTEGER NOT NULL DEFAULT 0,
+            required_n INTEGER NOT NULL DEFAULT 5,
+            is_ready INTEGER NOT NULL DEFAULT 0,
+            phase TEXT NOT NULL DEFAULT 'target_building',
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (batch_id, level_id),
             FOREIGN KEY (batch_id) REFERENCES batches (id) ON DELETE CASCADE
         )
         """
@@ -616,3 +714,266 @@ def export_batch_results(batch: sqlite3.Row, qc_df: pd.DataFrame) -> pd.DataFram
         "id": "记录ID",
     }
     return ordered_df.rename(columns=column_mapping)
+
+
+def add_zscore_run(
+    batch_id: int,
+    project_id: int,
+    test_time: str,
+    operator: str,
+    level_count: int,
+    phase: str,
+    run_status: str,
+    rule_template_id: str,
+    rule_hits_run,
+    error_type_hint: str,
+    analysis_prompt: str,
+) -> int:
+    serialized_rule_hits = json.dumps(rule_hits_run or [], ensure_ascii=False)
+    with get_connection() as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO zscore_runs (
+                batch_id,
+                project_id,
+                test_time,
+                operator,
+                level_count,
+                phase,
+                run_status,
+                rule_template_id,
+                rule_hits_run,
+                error_type_hint,
+                analysis_prompt
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                batch_id,
+                project_id,
+                test_time,
+                operator,
+                int(level_count),
+                phase,
+                run_status,
+                rule_template_id,
+                serialized_rule_hits,
+                error_type_hint,
+                analysis_prompt,
+            ),
+        )
+        return int(cursor.lastrowid)
+
+
+def add_zscore_level_results(run_id: int, level_results: list[dict]) -> None:
+    if not level_results:
+        return
+
+    rows = []
+    for level_result in level_results:
+        rows.append(
+            (
+                run_id,
+                str(level_result["level_id"]),
+                float(level_result["raw_value"]),
+                level_result.get("log_value"),
+                level_result.get("zscore"),
+                str(level_result.get("status", "pending")),
+                json.dumps(level_result.get("rule_hits_local") or [], ensure_ascii=False),
+                int(bool(level_result.get("is_in_control_for_realtime_stats", False))),
+            )
+        )
+
+    with get_connection() as connection:
+        connection.executemany(
+            """
+            INSERT INTO zscore_level_results (
+                run_id,
+                level_id,
+                raw_value,
+                log_value,
+                zscore,
+                level_status,
+                rule_hits_local,
+                is_in_control_for_realtime_stats
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+
+
+def get_zscore_runs_df(batch_id: int, rule_template_id: str | None = None) -> pd.DataFrame:
+    with get_connection() as connection:
+        if rule_template_id:
+            dataframe = pd.read_sql_query(
+                """
+                SELECT
+                    runs.*,
+                    projects.name AS project_name
+                FROM zscore_runs AS runs
+                LEFT JOIN projects ON projects.id = runs.project_id
+                WHERE runs.batch_id = ? AND runs.rule_template_id = ?
+                ORDER BY datetime(runs.test_time) ASC, runs.id ASC
+                """,
+                connection,
+                params=(batch_id, rule_template_id),
+            )
+        else:
+            dataframe = pd.read_sql_query(
+                """
+                SELECT
+                    runs.*,
+                    projects.name AS project_name
+                FROM zscore_runs AS runs
+                LEFT JOIN projects ON projects.id = runs.project_id
+                WHERE runs.batch_id = ?
+                ORDER BY datetime(runs.test_time) ASC, runs.id ASC
+                """,
+                connection,
+                params=(batch_id,),
+            )
+
+    if not dataframe.empty:
+        dataframe["test_time"] = pd.to_datetime(dataframe["test_time"])
+        dataframe["created_at"] = pd.to_datetime(dataframe["created_at"])
+    return dataframe
+
+
+def get_zscore_level_results_df(
+    run_id: int | None = None,
+    batch_id: int | None = None,
+    rule_template_id: str | None = None,
+) -> pd.DataFrame:
+    if run_id is None and batch_id is None:
+        raise ValueError("run_id 和 batch_id 至少需要提供一个")
+
+    with get_connection() as connection:
+        if run_id is not None:
+            dataframe = pd.read_sql_query(
+                """
+                SELECT
+                    level_results.*,
+                    runs.batch_id,
+                    runs.project_id,
+                    runs.phase,
+                    runs.run_status,
+                    runs.rule_template_id,
+                    runs.test_time
+                FROM zscore_level_results AS level_results
+                INNER JOIN zscore_runs AS runs ON runs.id = level_results.run_id
+                WHERE level_results.run_id = ?
+                ORDER BY level_results.id ASC
+                """,
+                connection,
+                params=(run_id,),
+            )
+        elif rule_template_id:
+            dataframe = pd.read_sql_query(
+                """
+                SELECT
+                    level_results.*,
+                    runs.batch_id,
+                    runs.project_id,
+                    runs.phase,
+                    runs.run_status,
+                    runs.rule_template_id,
+                    runs.test_time
+                FROM zscore_level_results AS level_results
+                INNER JOIN zscore_runs AS runs ON runs.id = level_results.run_id
+                WHERE runs.batch_id = ? AND runs.rule_template_id = ?
+                ORDER BY datetime(runs.test_time) ASC, level_results.id ASC
+                """,
+                connection,
+                params=(batch_id, rule_template_id),
+            )
+        else:
+            dataframe = pd.read_sql_query(
+                """
+                SELECT
+                    level_results.*,
+                    runs.batch_id,
+                    runs.project_id,
+                    runs.phase,
+                    runs.run_status,
+                    runs.rule_template_id,
+                    runs.test_time
+                FROM zscore_level_results AS level_results
+                INNER JOIN zscore_runs AS runs ON runs.id = level_results.run_id
+                WHERE runs.batch_id = ?
+                ORDER BY datetime(runs.test_time) ASC, level_results.id ASC
+                """,
+                connection,
+                params=(batch_id,),
+            )
+
+    if not dataframe.empty:
+        dataframe["test_time"] = pd.to_datetime(dataframe["test_time"])
+        dataframe["created_at"] = pd.to_datetime(dataframe["created_at"])
+        dataframe["is_in_control_for_realtime_stats"] = (
+            dataframe["is_in_control_for_realtime_stats"].fillna(0).astype(int)
+        )
+    return dataframe
+
+
+def get_zscore_level_targets_df(batch_id: int) -> pd.DataFrame:
+    with get_connection() as connection:
+        dataframe = pd.read_sql_query(
+            """
+            SELECT *
+            FROM zscore_level_targets
+            WHERE batch_id = ?
+            ORDER BY level_id ASC, id ASC
+            """,
+            connection,
+            params=(batch_id,),
+        )
+
+    if not dataframe.empty:
+        dataframe["updated_at"] = pd.to_datetime(dataframe["updated_at"])
+        dataframe["is_ready"] = dataframe["is_ready"].fillna(0).astype(int)
+        dataframe["collected_n"] = dataframe["collected_n"].fillna(0).astype(int)
+        dataframe["required_n"] = dataframe["required_n"].fillna(0).astype(int)
+    return dataframe
+
+
+def upsert_zscore_level_target(batch_id: int, level_id: str, **fields) -> None:
+    allowed_fields = {
+        "vendor_reference_mean",
+        "vendor_reference_sd",
+        "vendor_reference_cv",
+        "vendor_reference_source_note",
+        "provisional_mean",
+        "provisional_sd",
+        "provisional_cv",
+        "final_target_mean",
+        "final_target_sd",
+        "final_target_cv",
+        "realtime_mean",
+        "realtime_sd",
+        "realtime_cv",
+        "collected_n",
+        "required_n",
+        "is_ready",
+        "phase",
+    }
+    payload = {key: fields[key] for key in fields if key in allowed_fields}
+    if not payload:
+        return
+
+    insert_columns = ["batch_id", "level_id", *payload.keys()]
+    insert_values = [batch_id, level_id, *payload.values()]
+    placeholders = ", ".join(["?"] * len(insert_columns))
+    update_clause = ", ".join(f"{column} = excluded.{column}" for column in payload.keys())
+
+    with get_connection() as connection:
+        connection.execute(
+            f"""
+            INSERT INTO zscore_level_targets ({", ".join(insert_columns)})
+            VALUES ({placeholders})
+            ON CONFLICT(batch_id, level_id) DO UPDATE SET
+                {update_clause},
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            insert_values,
+        )

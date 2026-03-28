@@ -34,12 +34,14 @@ from qc_logic import calculate_qc_results, calculate_realtime_stats, format_stat
 from zscore_logic import (
     PHASE_FORMAL_QC,
     PHASE_TARGET_BUILDING,
-    build_level_target_profiles,
     build_zscore_rule_templates,
+    create_zscore_run,
     determine_zscore_phase,
-    evaluate_zscore_run_with_phase,
+    get_zscore_level_targets,
     get_phase_label,
+    get_zscore_runs,
     should_enable_formal_rules,
+    upsert_zscore_level_target,
 )
 from zscore_plotting import plot_zscore_overlay, plot_zscore_single_level
 
@@ -398,6 +400,190 @@ def guard_work_tab_selection(
         st.stop()
 
 
+def prepare_project_batch_context() -> tuple[pd.DataFrame, int | None, pd.DataFrame, int | None]:
+    projects_df = list_projects()
+    selected_project_id = ensure_selected_project(projects_df)
+    batches_df = list_batches(selected_project_id) if selected_project_id is not None else pd.DataFrame()
+    selected_batch_id = ensure_selected_batch(batches_df)
+    return projects_df, selected_project_id, batches_df, selected_batch_id
+
+
+def render_project_batch_management(
+    manage_tab,
+    projects_df: pd.DataFrame,
+    selected_project_id: int | None,
+    batches_df: pd.DataFrame,
+    selected_batch_id: int | None,
+) -> None:
+    with manage_tab:
+        top_left, top_right = st.columns([1, 1.4])
+
+        with top_left:
+            st.subheader("新建项目")
+            with st.form("create_project_form", clear_on_submit=True):
+                project_name = st.text_input("项目名称")
+                project_submitted = st.form_submit_button("创建项目", width="stretch")
+
+                if project_submitted:
+                    if not project_name.strip():
+                        st.error(TEXT["fill_project"])
+                    else:
+                        try:
+                            project_id = create_project(project_name.strip())
+                        except ValueError as exc:
+                            st.error(str(exc))
+                        else:
+                            st.session_state["selected_project_id"] = project_id
+                            st.success(f"项目 {project_id} 已创建。")
+                            st.rerun()
+
+            st.subheader("项目列表与选择")
+            if projects_df.empty:
+                st.info(TEXT["no_project"])
+            else:
+                project_labels, project_options = build_project_select_options(projects_df)
+                sync_selector_state(
+                    selector_key="project_selector",
+                    selected_id_key="selected_project_id",
+                    options_map=project_options,
+                    placeholder=project_labels[0],
+                )
+                selected_project_label = st.selectbox(
+                    "选择项目",
+                    options=project_labels,
+                    key="project_selector",
+                )
+                new_project_id = project_options[selected_project_label]
+                if new_project_id != selected_project_id:
+                    st.session_state["selected_project_id"] = new_project_id
+                    st.session_state["selected_batch_id"] = None
+                    st.session_state["batch_selector"] = "请选择批次"
+                    st.rerun()
+
+                project_table = localize_dataframe_columns(format_datetime_column(projects_df, "created_at"))
+                st.dataframe(project_table, width="stretch", hide_index=True)
+
+                if selected_project_id is not None:
+                    current_project = get_project(selected_project_id)
+                    with st.expander("编辑当前项目"):
+                        with st.form("edit_project_form"):
+                            edit_project_name = st.text_input(
+                                "项目名称",
+                                value=current_project["name"],
+                            )
+                            edit_project_submitted = st.form_submit_button(
+                                "保存项目修改",
+                                width="stretch",
+                            )
+                            if edit_project_submitted:
+                                cleaned_name = edit_project_name.strip()
+                                if not cleaned_name:
+                                    st.error(TEXT["fill_project"])
+                                else:
+                                    try:
+                                        update_project(selected_project_id, cleaned_name)
+                                    except ValueError as exc:
+                                        st.error(str(exc))
+                                    else:
+                                        st.success("项目名称已更新。")
+                                        st.rerun()
+
+        with top_right:
+            st.subheader("新建批次")
+            if selected_project_id is None:
+                st.info(TEXT["choose_project"])
+            else:
+                current_project = get_project(selected_project_id)
+                st.caption(f"当前批次将归属于项目：{current_project['name']}")
+                with st.form("create_batch_form", clear_on_submit=True):
+                    instrument = st.text_input("仪器")
+                    reagent = st.text_input("试剂")
+                    qc_material = st.text_input("质控品")
+                    concentration = st.text_input("浓度")
+                    lot_no = st.text_input("质控品批号")
+                    target_n = st.selectbox(
+                        "建靶所需次数",
+                        options=list(range(5, 21)),
+                        index=15,
+                    )
+                    create_submitted = st.form_submit_button("创建批次", width="stretch")
+
+                    if create_submitted:
+                        fields = [instrument, reagent, qc_material, concentration, lot_no]
+                        if any(not field.strip() for field in fields):
+                            st.error(TEXT["fill_batch"])
+                        else:
+                            try:
+                                batch_id = create_batch(
+                                    project_id=selected_project_id,
+                                    instrument=instrument.strip(),
+                                    reagent=reagent.strip(),
+                                    qc_material=qc_material.strip(),
+                                    concentration=concentration.strip(),
+                                    lot_no=lot_no.strip(),
+                                    target_n=int(target_n),
+                                )
+                            except ValueError as exc:
+                                st.error(str(exc))
+                            else:
+                                st.session_state["selected_batch_id"] = batch_id
+                                st.success(f"批次 {batch_id} 已创建。")
+                                st.rerun()
+
+            st.subheader("批次列表与选择")
+            if selected_project_id is None:
+                st.info(TEXT["choose_project"])
+            elif batches_df.empty:
+                st.info(TEXT["no_batch"])
+            else:
+                batch_labels, batch_options = build_batch_select_options(batches_df)
+                sync_selector_state(
+                    selector_key="batch_selector",
+                    selected_id_key="selected_batch_id",
+                    options_map=batch_options,
+                    placeholder=batch_labels[0],
+                )
+                selected_batch_label = st.selectbox(
+                    "选择批次",
+                    options=batch_labels,
+                    key="batch_selector",
+                )
+                new_batch_id = batch_options[selected_batch_label]
+                if new_batch_id != selected_batch_id:
+                    st.session_state["selected_batch_id"] = new_batch_id
+                    st.rerun()
+
+                batch_table = localize_dataframe_columns(format_datetime_column(batches_df, "created_at"))
+                st.dataframe(batch_table, width="stretch", hide_index=True)
+
+                if selected_batch_id is not None:
+                    current_batch = get_batch(selected_batch_id)
+                    with st.expander("编辑当前批次"):
+                        st.markdown("**批次固定信息**")
+                        st.text(f"仪器：{current_batch['instrument']}")
+                        st.text(f"试剂：{current_batch['reagent']}")
+                        st.text(f"质控品：{current_batch['qc_material']}")
+                        st.text(f"浓度：{current_batch['concentration']}")
+                        st.text(f"建靶所需次数：{current_batch['target_n']}")
+                        st.markdown("**可编辑信息**")
+                        with st.form("edit_batch_form"):
+                            edit_lot_no = st.text_input(
+                                "质控品批号",
+                                value=current_batch["lot_no"],
+                            )
+                            edit_batch_submitted = st.form_submit_button(
+                                "保存批次修改",
+                                width="stretch",
+                            )
+                            if edit_batch_submitted:
+                                if not edit_lot_no.strip():
+                                    st.error("请填写质控品批号。")
+                                else:
+                                    update_batch(selected_batch_id, edit_lot_no.strip())
+                                    st.success("批次质控品批号已更新。")
+                                    st.rerun()
+
+
 def compute_log10_display(value: float) -> tuple[str, float | None]:
     if math.isclose(value, 0.0, abs_tol=1e-12):
         return "", None
@@ -452,6 +638,39 @@ def build_operator_options(results_df: pd.DataFrame) -> list[str]:
         if cleaned and cleaned not in operators:
             operators.append(cleaned)
     return operators
+
+
+def build_zscore_operator_options(history_runs: list[dict[str, Any]]) -> list[str]:
+    operators: list[str] = []
+    for run in reversed(history_runs):
+        cleaned = str(run.get("operator", "") or "").strip()
+        if cleaned and cleaned not in operators:
+            operators.append(cleaned)
+    return operators
+
+
+def format_optional_float(value: Any, digits: int = 4, suffix: str = "") -> str:
+    try:
+        if value is None or (isinstance(value, float) and math.isnan(value)):
+            return "-"
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return "-"
+    if not math.isfinite(numeric):
+        return "-"
+    return f"{numeric:.{digits}f}{suffix}"
+
+
+def format_optional_input_value(value: Any, digits: int = 4) -> str:
+    try:
+        if value is None or (isinstance(value, float) and math.isnan(value)):
+            return ""
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if not math.isfinite(numeric):
+        return ""
+    return f"{numeric:.{digits}f}"
 
 
 def get_latest_status_context(qc_df: pd.DataFrame) -> tuple[str, str]:
@@ -997,6 +1216,62 @@ def render_zscore_rules_config_expander(
         for rule in template["rules"]:
             prefix = "正式期规则预览" if not formal_rules_enabled else "规则"
             st.markdown(f"- {prefix} `{rule['rule_id']}` | `{rule['severity']}` | `{rule['scope']}`")
+
+
+def render_zscore_profile_stat_line(label: str, mean_value: Any, sd_value: Any, cv_value: Any) -> None:
+    st.caption(
+        f"{label}："
+        f"Mean {format_optional_float(mean_value)} | "
+        f"SD {format_optional_float(sd_value)} | "
+        f"CV {format_optional_float(cv_value, digits=2, suffix='%')}"
+    )
+
+
+def render_zscore_vendor_reference_editor(
+    batch_id: int,
+    template_id: str,
+    level_id: str,
+    required_n: int,
+    profile: dict[str, Any],
+) -> None:
+    with st.expander("厂家参考值（仅供参考）", expanded=False):
+        mean_default = format_optional_input_value(profile.get("vendor_reference_mean"))
+        sd_default = format_optional_input_value(profile.get("vendor_reference_sd"))
+        source_default = str(profile.get("vendor_reference_source_note", "") or "")
+        state_prefix = f"zscore_vendor_{batch_id}_{template_id}_{level_id.replace(' ', '_')}"
+        form_key = f"{state_prefix}_form"
+        with st.form(form_key):
+            mean_text = st.text_input("参考 Mean", value=mean_default, key=f"{state_prefix}_mean")
+            sd_text = st.text_input("参考 SD", value=sd_default, key=f"{state_prefix}_sd")
+            source_note = st.text_input("来源备注（可选）", value=source_default, key=f"{state_prefix}_source")
+            vendor_mean, _, _ = parse_numeric_input(mean_text)
+            vendor_sd, _, _ = parse_numeric_input(sd_text)
+            vendor_cv = None
+            if vendor_mean is not None and vendor_sd is not None and not math.isclose(vendor_mean, 0.0, abs_tol=1e-12):
+                vendor_cv = vendor_sd / vendor_mean * 100
+            st.caption(f"参考 CV%：{format_optional_float(vendor_cv, digits=2, suffix='%')}")
+            submitted = st.form_submit_button("保存厂家参考值", width="stretch")
+
+            if submitted:
+                validation_errors: list[str] = []
+                if mean_text.strip() and vendor_mean is None:
+                    validation_errors.append("厂家参考 Mean 必须为有效正数。")
+                if sd_text.strip() and vendor_sd is None:
+                    validation_errors.append("厂家参考 SD 必须为有效正数。")
+
+                if validation_errors:
+                    st.error("\n".join(validation_errors))
+                else:
+                    upsert_zscore_level_target(
+                        batch_id=batch_id,
+                        level_id=level_id,
+                        vendor_reference_mean=vendor_mean,
+                        vendor_reference_sd=vendor_sd,
+                        vendor_reference_source_note=source_note.strip() or None,
+                        required_n=int(required_n),
+                    )
+                    st.session_state["zscore_notice"] = f"{level_id} 厂家参考值已保存。"
+                    st.rerun()
 
 
 def render_batch_summary_row(batch) -> None:
@@ -1880,52 +2155,49 @@ def render_main_entry_page() -> None:
 
 def render_zscore_placeholder_page() -> None:
     st.subheader("Z-score")
-    st.caption("Z-score 当前按 IQC 多水平流程运行，支持建靶期与正式质控期两阶段工作流。")
-    manage_tab, work_tab = st.tabs(["管理 / 准备", "当前工作区"])
+    st.caption("Z-score 当前按 IQC 多水平流程运行，支持建靶期、自建靶转正式与正式期实时统计。")
+    projects_df, selected_project_id, batches_df, selected_batch_id = prepare_project_batch_context()
+    manage_tab, work_tab = st.tabs([TEXT["manage"], TEXT["current_batch"]])
+    render_project_batch_management(
+        manage_tab,
+        projects_df,
+        selected_project_id,
+        batches_df,
+        selected_batch_id,
+    )
 
-    with manage_tab:
-        st.markdown("**管理与准备**")
-        st.caption("后续在这里接入项目、批次、target_n 配置与正式落库。")
+    guard_work_tab_selection(work_tab, selected_project_id, selected_batch_id)
+
+    batch = get_batch(selected_batch_id)
+    templates = build_zscore_rule_templates()
+    if "zscore_entry_test_time" not in st.session_state:
+        st.session_state["zscore_entry_test_time"] = datetime.now()
+    if "zscore_entry_operator" not in st.session_state:
+        st.session_state["zscore_entry_operator"] = ""
+    if "zscore_level1_value" not in st.session_state:
+        st.session_state["zscore_level1_value"] = ""
+    if "zscore_level2_value" not in st.session_state:
+        st.session_state["zscore_level2_value"] = ""
+    if "zscore_level3_value" not in st.session_state:
+        st.session_state["zscore_level3_value"] = ""
+    if "zscore_view_mode" not in st.session_state:
+        st.session_state["zscore_view_mode"] = "单水平视图"
+    if "zscore_rule_template" not in st.session_state:
+        st.session_state["zscore_rule_template"] = "2_level_classic"
+    if "zscore_selected_level" not in st.session_state:
+        st.session_state["zscore_selected_level"] = "Level 1"
+    if "zscore_reset_entry_form" not in st.session_state:
+        st.session_state["zscore_reset_entry_form"] = False
+
+    initial_template_id = st.session_state.get("zscore_rule_template", "2_level_classic")
+    if initial_template_id not in templates:
+        initial_template_id = "2_level_classic"
+        st.session_state["zscore_rule_template"] = initial_template_id
 
     with work_tab:
-        templates = build_zscore_rule_templates()
-        if "zscore_entry_test_time" not in st.session_state:
-            st.session_state["zscore_entry_test_time"] = datetime.now()
-        if "zscore_entry_operator" not in st.session_state:
-            st.session_state["zscore_entry_operator"] = ""
-        if "zscore_level1_value" not in st.session_state:
-            st.session_state["zscore_level1_value"] = ""
-        if "zscore_level2_value" not in st.session_state:
-            st.session_state["zscore_level2_value"] = ""
-        if "zscore_level3_value" not in st.session_state:
-            st.session_state["zscore_level3_value"] = ""
-        if "zscore_view_mode" not in st.session_state:
-            st.session_state["zscore_view_mode"] = "单水平视图"
-        if "zscore_rule_template" not in st.session_state:
-            st.session_state["zscore_rule_template"] = "2_level_classic"
-        if "zscore_selected_level" not in st.session_state:
-            st.session_state["zscore_selected_level"] = "Level 1"
-        if "zscore_reset_entry_form" not in st.session_state:
-            st.session_state["zscore_reset_entry_form"] = False
-        if "zscore_run_history" not in st.session_state or not isinstance(st.session_state["zscore_run_history"], dict):
-            st.session_state["zscore_run_history"] = {template_key: [] for template_key in templates}
-        for template_key in templates:
-            st.session_state["zscore_run_history"].setdefault(template_key, [])
-
-        if st.session_state.get("zscore_reset_entry_form", False):
-            st.session_state["zscore_entry_operator"] = str(
-                st.session_state.get("zscore_entry_operator", "") or ""
-            ).strip()
-            st.session_state["zscore_level1_value"] = ""
-            st.session_state["zscore_level2_value"] = ""
-            st.session_state["zscore_level3_value"] = ""
-            st.session_state["zscore_entry_test_time"] = datetime.now()
-            st.session_state["zscore_reset_entry_form"] = False
-
-        initial_template_id = st.session_state.get("zscore_rule_template", "2_level_classic")
-        if initial_template_id not in templates:
-            initial_template_id = "2_level_classic"
-            st.session_state["zscore_rule_template"] = initial_template_id
+        st.caption(f"当前项目：{batch['project_name']}")
+        with st.container():
+            render_batch_summary_row(batch)
 
         entry_col, chart_col = st.columns([1.0, 1.18], gap="large")
 
@@ -1936,26 +2208,38 @@ def render_zscore_placeholder_page() -> None:
                 initial_template_id,
             )
 
-        history_store = st.session_state["zscore_run_history"]
-        history_runs = list(history_store.get(template_id, []))
-        required_n = int(template.get("required_n", 5))
-        level_target_profiles = build_level_target_profiles(history_runs, template_id, required_n)
+        history_runs = get_zscore_runs(selected_batch_id, template_id)
+        operator_options = build_zscore_operator_options(history_runs)
+        required_n = int(batch["target_n"])
+        level_target_profiles = get_zscore_level_targets(selected_batch_id, template_id, required_n=required_n)
         overall_phase = determine_zscore_phase(level_target_profiles, template["level_ids"])
         overall_phase_label = get_phase_label(overall_phase)
         formal_rules_enabled = should_enable_formal_rules(level_target_profiles, template["level_ids"])
 
-        current_level_results, input_errors, has_any_input = build_zscore_current_level_results(template)
-        draft_run = evaluate_zscore_run_with_phase(current_level_results, history_runs, template_id, required_n)
-        draft_run["test_time"] = pd.Timestamp(st.session_state["zscore_entry_test_time"])
-        draft_run["operator"] = str(st.session_state.get("zscore_entry_operator", "") or "").strip()
-        draft_run["template_id"] = template_id
-        draft_run["template_label"] = template["label"]
-        draft_run["is_preview"] = has_any_input
+        if st.session_state.get("zscore_entry_batch_id") != selected_batch_id:
+            st.session_state["zscore_entry_batch_id"] = selected_batch_id
+            st.session_state["zscore_entry_operator"] = operator_options[0] if operator_options else ""
+            st.session_state["zscore_level1_value"] = ""
+            st.session_state["zscore_level2_value"] = ""
+            st.session_state["zscore_level3_value"] = ""
+            st.session_state["zscore_entry_test_time"] = datetime.now()
+        if st.session_state.get("zscore_reset_entry_form", False):
+            st.session_state["zscore_entry_operator"] = str(st.session_state.get("zscore_entry_operator", "") or "").strip()
+            st.session_state["zscore_level1_value"] = ""
+            st.session_state["zscore_level2_value"] = ""
+            st.session_state["zscore_level3_value"] = ""
+            st.session_state["zscore_entry_test_time"] = datetime.now()
+            st.session_state["zscore_reset_entry_form"] = False
 
+        current_level_results, input_errors, _ = build_zscore_current_level_results(template)
+
+        notice_message = str(st.session_state.pop("zscore_notice", "") or "")
         with entry_col:
             st.subheader("录入与统计")
+            if notice_message:
+                st.success(notice_message)
             st.caption(
-                f"当前模板：{template['label']}｜建靶门槛：每个 level 累计 {required_n} 次后进入正式质控。"
+                f"当前模板：{template['label']}｜建靶门槛：每个 level 累计 {required_n} 次且具备有效 SD 后才算 ready。"
             )
 
             st.markdown("**本次数据录入**")
@@ -1965,6 +2249,8 @@ def render_zscore_placeholder_page() -> None:
                 key="zscore_entry_operator",
                 placeholder="请输入本次检测人",
             )
+            if operator_options:
+                st.caption(f"历史检测人：{', '.join(operator_options[:5])}")
 
             st.divider()
             st.markdown("**多水平结果录入**")
@@ -1996,20 +2282,24 @@ def render_zscore_placeholder_page() -> None:
                 if validation_errors:
                     st.error("\n".join(dict.fromkeys(validation_errors)))
                 else:
-                    saved_run = evaluate_zscore_run_with_phase(current_level_results, history_runs, template_id, required_n)
-                    saved_run["run_id"] = len(history_runs) + 1
-                    saved_run["test_time"] = pd.Timestamp(st.session_state["zscore_entry_test_time"])
-                    saved_run["operator"] = cleaned_operator
-                    saved_run["template_id"] = template_id
-                    saved_run["template_label"] = template["label"]
-                    saved_run["is_preview"] = False
-                    history_store[template_id] = history_runs + [saved_run]
-                    st.session_state["zscore_run_history"] = history_store
-                    st.session_state["zscore_reset_entry_form"] = True
-                    st.rerun()
+                    try:
+                        create_zscore_run(
+                            batch_id=selected_batch_id,
+                            test_time=st.session_state["zscore_entry_test_time"],
+                            operator=cleaned_operator,
+                            level_results=current_level_results,
+                            template_id=template_id,
+                            required_n=required_n,
+                        )
+                    except ValueError as exc:
+                        st.error(str(exc))
+                    else:
+                        st.session_state["zscore_notice"] = "Z-score run 已保存。"
+                        st.session_state["zscore_reset_entry_form"] = True
+                        st.rerun()
 
             st.divider()
-            st.markdown("**各 Level 建靶统计**")
+            st.markdown("**各 Level 建靶 / 正式统计**")
             stat_cols = st.columns(len(template["level_ids"]), gap="large")
             for stat_col, level_id in zip(stat_cols, template["level_ids"]):
                 profile = level_target_profiles[level_id]
@@ -2019,28 +2309,43 @@ def render_zscore_placeholder_page() -> None:
                         [
                             ("已收集", f"{profile['collected_n']}"),
                             ("required_n", f"{profile['required_n']}"),
-                            (
-                                "暂定 Mean",
-                                "-" if profile["target_mean_provisional"] is None else f"{profile['target_mean_provisional']:.4f}",
-                            ),
-                            (
-                                "暂定 SD",
-                                "-" if profile["target_sd_provisional"] is None else f"{profile['target_sd_provisional']:.4f}",
-                            ),
-                            (
-                                "暂定 CV%",
-                                "-" if profile["target_cv_provisional"] is None else f"{profile['target_cv_provisional']:.2f}%",
-                            ),
+                            ("Ready", "是" if profile["is_ready"] else "否"),
+                            ("阶段", profile["phase_label"]),
                         ]
                     )
-                    if profile["is_ready"]:
-                        st.caption(
-                            "当前阶段："
-                            f"{profile['phase_label']}｜正式 Mean / SD / CV%："
-                            f"{profile['target_mean_final']:.4f} / {profile['target_sd_final']:.4f} / {profile['target_cv_final']:.2f}%"
-                        )
-                    else:
-                        st.caption(f"当前阶段：{profile['phase_label']}｜正式靶值：待达到门槛后建立")
+                    render_zscore_profile_stat_line(
+                        "厂家参考（仅参考）",
+                        profile.get("vendor_reference_mean"),
+                        profile.get("vendor_reference_sd"),
+                        profile.get("vendor_reference_cv"),
+                    )
+                    if profile.get("vendor_reference_source_note"):
+                        st.caption(f"来源备注：{profile['vendor_reference_source_note']}")
+                    render_zscore_profile_stat_line(
+                        "建靶统计",
+                        profile.get("provisional_mean"),
+                        profile.get("provisional_sd"),
+                        profile.get("provisional_cv"),
+                    )
+                    render_zscore_profile_stat_line(
+                        "正式靶值",
+                        profile.get("final_target_mean"),
+                        profile.get("final_target_sd"),
+                        profile.get("final_target_cv"),
+                    )
+                    render_zscore_profile_stat_line(
+                        "正式期实时统计",
+                        profile.get("realtime_mean"),
+                        profile.get("realtime_sd"),
+                        profile.get("realtime_cv"),
+                    )
+                    render_zscore_vendor_reference_editor(
+                        batch_id=selected_batch_id,
+                        template_id=template_id,
+                        level_id=level_id,
+                        required_n=required_n,
+                        profile=profile,
+                    )
 
             st.divider()
             st.markdown("**总体阶段状态**")
@@ -2052,20 +2357,18 @@ def render_zscore_placeholder_page() -> None:
                 ]
             )
             st.write(
-                "当前工作区已进入正式质控，后续 run 将按正式规则模板判读。"
+                "当前工作区已进入正式质控，正式规则与正式期实时统计均按真实持久化历史计算。"
                 if formal_rules_enabled
-                else "当前仍处于建靶中，当前 run 仅用于累计靶值与观察趋势。"
+                else "当前仍处于建靶中，正式规则未启用；本次 run 会继续累计 provisional 与 level readiness。"
             )
 
         plot_df = build_zscore_plot_dataframe(
             history_runs,
-            draft_run if draft_run.get("is_preview") and draft_run.get("run_status") != "pending" else None,
+            None,
             display_phase=overall_phase,
         )
         formal_history_runs = [run for run in history_runs if str(run.get("phase")) == PHASE_FORMAL_QC]
-        if draft_run.get("is_preview"):
-            latest_run = draft_run
-        elif overall_phase == PHASE_FORMAL_QC:
+        if overall_phase == PHASE_FORMAL_QC:
             latest_run = formal_history_runs[-1] if formal_history_runs else None
         else:
             latest_run = history_runs[-1] if history_runs else None
@@ -2124,180 +2427,15 @@ def render_instant_placeholder_page() -> None:
 
 
 def render_lj_mode() -> None:
-    projects_df = list_projects()
-    selected_project_id = ensure_selected_project(projects_df)
-    batches_df = list_batches(selected_project_id) if selected_project_id is not None else pd.DataFrame()
-    selected_batch_id = ensure_selected_batch(batches_df)
-
+    projects_df, selected_project_id, batches_df, selected_batch_id = prepare_project_batch_context()
     manage_tab, work_tab = st.tabs([TEXT["manage"], TEXT["current_batch"]])
-
-    with manage_tab:
-        top_left, top_right = st.columns([1, 1.4])
-
-        with top_left:
-            st.subheader("\u65b0\u5efa\u9879\u76ee")
-            with st.form("create_project_form", clear_on_submit=True):
-                project_name = st.text_input("\u9879\u76ee\u540d\u79f0")
-                project_submitted = st.form_submit_button("\u521b\u5efa\u9879\u76ee", width="stretch")
-
-                if project_submitted:
-                    if not project_name.strip():
-                        st.error(TEXT["fill_project"])
-                    else:
-                        try:
-                            project_id = create_project(project_name.strip())
-                        except ValueError as exc:
-                            st.error(str(exc))
-                        else:
-                            st.session_state["selected_project_id"] = project_id
-                            st.success(f"\u9879\u76ee {project_id} \u5df2\u521b\u5efa\u3002")
-                            st.rerun()
-
-            st.subheader("\u9879\u76ee\u5217\u8868\u4e0e\u9009\u62e9")
-            if projects_df.empty:
-                st.info(TEXT["no_project"])
-            else:
-                project_labels, project_options = build_project_select_options(projects_df)
-                sync_selector_state(
-                    selector_key="project_selector",
-                    selected_id_key="selected_project_id",
-                    options_map=project_options,
-                    placeholder=project_labels[0],
-                )
-                selected_project_label = st.selectbox(
-                    "\u9009\u62e9\u9879\u76ee",
-                    options=project_labels,
-                    key="project_selector",
-                )
-                new_project_id = project_options[selected_project_label]
-                if new_project_id != selected_project_id:
-                    st.session_state["selected_project_id"] = new_project_id
-                    st.session_state["selected_batch_id"] = None
-                    st.session_state["batch_selector"] = "\u8bf7\u9009\u62e9\u6279\u6b21"
-                    st.rerun()
-
-                project_table = localize_dataframe_columns(format_datetime_column(projects_df, "created_at"))
-                st.dataframe(project_table, width="stretch", hide_index=True)
-
-                if selected_project_id is not None:
-                    current_project = get_project(selected_project_id)
-                    with st.expander("\u7f16\u8f91\u5f53\u524d\u9879\u76ee"):
-                        with st.form("edit_project_form"):
-                            edit_project_name = st.text_input(
-                                "\u9879\u76ee\u540d\u79f0",
-                                value=current_project["name"],
-                            )
-                            edit_project_submitted = st.form_submit_button(
-                                "\u4fdd\u5b58\u9879\u76ee\u4fee\u6539",
-                                width="stretch",
-                            )
-                            if edit_project_submitted:
-                                cleaned_name = edit_project_name.strip()
-                                if not cleaned_name:
-                                    st.error(TEXT["fill_project"])
-                                else:
-                                    try:
-                                        update_project(selected_project_id, cleaned_name)
-                                    except ValueError as exc:
-                                        st.error(str(exc))
-                                    else:
-                                        st.success("\u9879\u76ee\u540d\u79f0\u5df2\u66f4\u65b0\u3002")
-                                        st.rerun()
-
-        with top_right:
-            st.subheader("\u65b0\u5efa\u6279\u6b21")
-            if selected_project_id is None:
-                st.info(TEXT["choose_project"])
-            else:
-                current_project = get_project(selected_project_id)
-                st.caption(f"\u5f53\u524d\u6279\u6b21\u5c06\u5f52\u5c5e\u4e8e\u9879\u76ee\uff1a{current_project['name']}")
-                with st.form("create_batch_form", clear_on_submit=True):
-                    instrument = st.text_input("\u4eea\u5668")
-                    reagent = st.text_input("\u8bd5\u5242")
-                    qc_material = st.text_input("\u8d28\u63a7\u54c1")
-                    concentration = st.text_input("\u6d53\u5ea6")
-                    lot_no = st.text_input("\u8d28\u63a7\u54c1\u6279\u53f7")
-                    target_n = st.selectbox(
-                        "\u5efa\u9776\u6240\u9700\u6b21\u6570",
-                        options=list(range(5, 21)),
-                        index=15,
-                    )
-                    create_submitted = st.form_submit_button("\u521b\u5efa\u6279\u6b21", width="stretch")
-
-                    if create_submitted:
-                        fields = [instrument, reagent, qc_material, concentration, lot_no]
-                        if any(not field.strip() for field in fields):
-                            st.error(TEXT["fill_batch"])
-                        else:
-                            try:
-                                batch_id = create_batch(
-                                    project_id=selected_project_id,
-                                    instrument=instrument.strip(),
-                                    reagent=reagent.strip(),
-                                    qc_material=qc_material.strip(),
-                                    concentration=concentration.strip(),
-                                    lot_no=lot_no.strip(),
-                                    target_n=int(target_n),
-                                )
-                            except ValueError as exc:
-                                st.error(str(exc))
-                            else:
-                                st.session_state["selected_batch_id"] = batch_id
-                                st.success(f"\u6279\u6b21 {batch_id} \u5df2\u521b\u5efa\u3002")
-                                st.rerun()
-
-            st.subheader("\u6279\u6b21\u5217\u8868\u4e0e\u9009\u62e9")
-            if selected_project_id is None:
-                st.info(TEXT["choose_project"])
-            elif batches_df.empty:
-                st.info(TEXT["no_batch"])
-            else:
-                batch_labels, batch_options = build_batch_select_options(batches_df)
-                sync_selector_state(
-                    selector_key="batch_selector",
-                    selected_id_key="selected_batch_id",
-                    options_map=batch_options,
-                    placeholder=batch_labels[0],
-                )
-                selected_batch_label = st.selectbox(
-                    "\u9009\u62e9\u6279\u6b21",
-                    options=batch_labels,
-                    key="batch_selector",
-                )
-                new_batch_id = batch_options[selected_batch_label]
-                if new_batch_id != selected_batch_id:
-                    st.session_state["selected_batch_id"] = new_batch_id
-                    st.rerun()
-
-                batch_table = localize_dataframe_columns(format_datetime_column(batches_df, "created_at"))
-                st.dataframe(batch_table, width="stretch", hide_index=True)
-
-                if selected_batch_id is not None:
-                    current_batch = get_batch(selected_batch_id)
-                    with st.expander("\u7f16\u8f91\u5f53\u524d\u6279\u6b21"):
-                        st.markdown("**\u6279\u6b21\u56fa\u5b9a\u4fe1\u606f**")
-                        st.text(f"\u4eea\u5668\uff1a{current_batch['instrument']}")
-                        st.text(f"\u8bd5\u5242\uff1a{current_batch['reagent']}")
-                        st.text(f"\u8d28\u63a7\u54c1\uff1a{current_batch['qc_material']}")
-                        st.text(f"\u6d53\u5ea6\uff1a{current_batch['concentration']}")
-                        st.text(f"\u5efa\u9776\u6240\u9700\u6b21\u6570\uff1a{current_batch['target_n']}")
-                        st.markdown("**\u53ef\u7f16\u8f91\u4fe1\u606f**")
-                        with st.form("edit_batch_form"):
-                            edit_lot_no = st.text_input(
-                                "\u8d28\u63a7\u54c1\u6279\u53f7",
-                                value=current_batch["lot_no"],
-                            )
-                            edit_batch_submitted = st.form_submit_button(
-                                "\u4fdd\u5b58\u6279\u6b21\u4fee\u6539",
-                                width="stretch",
-                            )
-                            if edit_batch_submitted:
-                                if not edit_lot_no.strip():
-                                    st.error("\u8bf7\u586b\u5199\u8d28\u63a7\u54c1\u6279\u53f7\u3002")
-                                else:
-                                    update_batch(selected_batch_id, edit_lot_no.strip())
-                                    st.success("\u6279\u6b21\u8d28\u63a7\u54c1\u6279\u53f7\u5df2\u66f4\u65b0\u3002")
-                                    st.rerun()
+    render_project_batch_management(
+        manage_tab,
+        projects_df,
+        selected_project_id,
+        batches_df,
+        selected_batch_id,
+    )
 
     guard_work_tab_selection(work_tab, selected_project_id, selected_batch_id)
     render_lj_page(work_tab, selected_batch_id)

@@ -1,21 +1,29 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 import pandas as pd
 
+import database
+from database import create_batch, create_project, init_db
 from zscore_logic import (
     PHASE_FORMAL_QC,
     PHASE_TARGET_BUILDING,
     build_level_target_profiles,
     build_zscore_rule_templates,
+    create_zscore_run,
     determine_zscore_phase,
     evaluate_zscore_run,
     evaluate_zscore_run_with_phase,
     get_phase_label,
+    get_zscore_level_targets,
+    get_zscore_runs,
     should_enable_formal_rules,
+    upsert_zscore_level_target,
 )
 from zscore_plotting import plot_zscore_overlay, plot_zscore_single_level
 
@@ -35,6 +43,25 @@ PLOT_COLUMNS = [
     "is_preview",
 ]
 BASE_TIME = pd.Timestamp("2026-03-28 08:00:00")
+
+
+class TemporaryDatabaseContext:
+    def __enter__(self):
+        self._tempdir = TemporaryDirectory()
+        self._original_db_path = database.DB_PATH
+        self._original_legacy_candidates = list(database.LEGACY_DB_CANDIDATES)
+        database.DB_PATH = Path(self._tempdir.name) / "zscore_smoke_test.db"
+        database.LEGACY_DB_CANDIDATES = []
+        init_db()
+        return self
+
+    def __exit__(self, exc_type, exc, exc_tb):
+        database.DB_PATH = self._original_db_path
+        database.LEGACY_DB_CANDIDATES = self._original_legacy_candidates
+        try:
+            self._tempdir.cleanup()
+        except PermissionError:
+            pass
 
 
 def make_level_results(template_id: str, zscore_map: dict[str, float]) -> list[dict[str, float]]:
@@ -341,6 +368,124 @@ def test_formal_rules_enable_only_after_all_levels_ready() -> None:
     assert run["run_status"] == "reject"
 
 
+def test_db_persistence_supports_vendor_targets_and_formal_realtime_stats() -> None:
+    with TemporaryDatabaseContext():
+        project_id = create_project("Z-score Smoke Project")
+        batch_id = create_batch(
+            project_id=project_id,
+            instrument="AU5800",
+            reagent="Chemistry",
+            qc_material="Control A",
+            concentration="Normal",
+            lot_no="LOT-001",
+            target_n=5,
+        )
+
+        upsert_zscore_level_target(
+            batch_id=batch_id,
+            level_id="Level 1",
+            vendor_reference_mean=100.0,
+            vendor_reference_sd=5.0,
+            vendor_reference_source_note="COA",
+            required_n=3,
+        )
+        upsert_zscore_level_target(
+            batch_id=batch_id,
+            level_id="Level 2",
+            vendor_reference_mean=150.0,
+            vendor_reference_sd=7.5,
+            vendor_reference_source_note="手工录入",
+            required_n=3,
+        )
+
+        create_zscore_run(
+            batch_id=batch_id,
+            test_time=BASE_TIME,
+            operator="tester-1",
+            level_results=[
+                {"level_id": "Level 1", "raw_value": 100.0},
+                {"level_id": "Level 2", "raw_value": 150.0},
+            ],
+            template_id="2_level_classic",
+            required_n=3,
+        )
+        create_zscore_run(
+            batch_id=batch_id,
+            test_time=BASE_TIME + pd.Timedelta(hours=1),
+            operator="tester-2",
+            level_results=[
+                {"level_id": "Level 1", "raw_value": 101.0},
+                {"level_id": "Level 2", "raw_value": 151.0},
+            ],
+            template_id="2_level_classic",
+            required_n=3,
+        )
+        transition_run = create_zscore_run(
+            batch_id=batch_id,
+            test_time=BASE_TIME + pd.Timedelta(hours=2),
+            operator="tester-3",
+            level_results=[
+                {"level_id": "Level 1", "raw_value": 99.0},
+                {"level_id": "Level 2", "raw_value": 149.0},
+            ],
+            template_id="2_level_classic",
+            required_n=3,
+        )
+        assert transition_run["phase"] == PHASE_FORMAL_QC
+        assert transition_run["run_status"] == "accept"
+
+        create_zscore_run(
+            batch_id=batch_id,
+            test_time=BASE_TIME + pd.Timedelta(hours=3),
+            operator="tester-4",
+            level_results=[
+                {"level_id": "Level 1", "raw_value": 100.0},
+                {"level_id": "Level 2", "raw_value": 150.0},
+            ],
+            template_id="2_level_classic",
+            required_n=3,
+        )
+        warning_run = create_zscore_run(
+            batch_id=batch_id,
+            test_time=BASE_TIME + pd.Timedelta(hours=4),
+            operator="tester-5",
+            level_results=[
+                {"level_id": "Level 1", "raw_value": 102.1},
+                {"level_id": "Level 2", "raw_value": 150.0},
+            ],
+            template_id="2_level_classic",
+            required_n=3,
+        )
+        assert warning_run["run_status"] == "warning"
+
+        saved_runs = get_zscore_runs(batch_id, "2_level_classic")
+        assert len(saved_runs) == 5
+        assert len(saved_runs[-1]["level_results"]) == 2
+        assert all(
+            not level_result["is_in_control_for_realtime_stats"]
+            for level_result in saved_runs[-1]["level_results"]
+        )
+
+        targets = get_zscore_level_targets(batch_id, "2_level_classic", required_n=3)
+        level_1 = targets["Level 1"]
+        level_2 = targets["Level 2"]
+        assert level_1["vendor_reference_mean"] == 100.0
+        assert level_1["vendor_reference_sd"] == 5.0
+        assert level_1["vendor_reference_cv"] == 5.0
+        assert level_1["vendor_reference_source_note"] == "COA"
+        assert level_1["collected_n"] == 3
+        assert level_1["is_ready"] is True
+        assert level_1["phase"] == PHASE_FORMAL_QC
+        assert level_1["final_target_mean"] == 100.0
+        assert round(level_1["final_target_sd"], 6) == 1.0
+        assert round(level_1["realtime_mean"], 6) == 99.5
+        assert round(level_1["realtime_sd"], 6) == round(math.sqrt(0.5), 6)
+        assert round(level_1["realtime_cv"], 6) == round(math.sqrt(0.5) / 99.5 * 100, 6)
+        assert level_2["vendor_reference_source_note"] == "手工录入"
+        assert round(level_2["realtime_mean"], 6) == 149.5
+        assert round(level_2["realtime_sd"], 6) == round(math.sqrt(0.5), 6)
+
+
 def test_plotting_handles_empty_frames() -> None:
     bare_empty_df = pd.DataFrame()
     fixed_empty_df = pd.DataFrame(columns=PLOT_COLUMNS)
@@ -384,6 +529,7 @@ def run_all_tests() -> None:
         test_phase_stays_target_building_until_all_levels_ready,
         test_target_building_run_does_not_trigger_formal_rules,
         test_formal_rules_enable_only_after_all_levels_ready,
+        test_db_persistence_supports_vendor_targets_and_formal_realtime_stats,
         test_plotting_handles_empty_frames,
         test_plotting_single_level_returns_figure,
         test_plotting_overlay_returns_figure,
