@@ -17,14 +17,20 @@ from database import (
     add_result,
     create_batch,
     create_project,
+    create_zscore_batch,
+    create_zscore_project,
     delete_result,
     export_batch_results,
     get_batch,
     get_project,
     get_results,
+    get_zscore_batch,
+    get_zscore_project,
     init_db,
     list_batches,
     list_projects,
+    list_zscore_batches,
+    list_zscore_projects,
     update_result,
     update_batch,
     update_project,
@@ -34,12 +40,12 @@ from qc_logic import calculate_qc_results, calculate_realtime_stats, format_stat
 from zscore_logic import (
     PHASE_FORMAL_QC,
     PHASE_TARGET_BUILDING,
-    build_zscore_rule_templates,
     create_zscore_run,
     determine_zscore_phase,
     get_zscore_level_targets,
     get_phase_label,
     get_zscore_runs,
+    resolve_zscore_batch_context,
     should_enable_formal_rules,
     upsert_zscore_level_target,
 )
@@ -71,6 +77,13 @@ DISPLAY_COLUMN_LABELS = {
     "concentration": "\u6d53\u5ea6",
     "lot_no": "\u8d28\u63a7\u54c1\u6279\u53f7",
     "target_n": "\u5efa\u9776\u6240\u9700\u6b21\u6570",
+    "level_count": "Level 数",
+}
+
+ZSCORE_PHASE_VIEW_OPTIONS = {
+    "building": "建靶期图",
+    "formal": "正式质控图",
+    "all": "全图",
 }
 
 
@@ -252,6 +265,25 @@ def build_batch_label(row: pd.Series) -> str:
     )
 
 
+def build_zscore_project_label(row: pd.Series) -> str:
+    row = dict(row)
+    project_name = _clean_selector_label_part(row.get("name"), "未命名项目")
+    level_count = int(row.get("level_count", 0) or 0)
+    return f"项目 {row['id']} | {project_name} | {level_count}-level"
+
+
+def build_zscore_batch_label(row: pd.Series) -> str:
+    row = dict(row)
+    instrument = _clean_selector_label_part(row.get("instrument"), "未填写仪器")
+    reagent = _clean_selector_label_part(row.get("reagent"), "未填写试剂")
+    lot_no = _clean_selector_label_part(row.get("lot_no"), "未填写")
+    level_count = int(row.get("level_count", 0) or 0)
+    return (
+        f"批次 {row['id']} | {level_count}-level | {instrument} | "
+        f"{reagent} | 质控批号 {lot_no}"
+    )
+
+
 def format_datetime_column(dataframe: pd.DataFrame, column_name: str) -> pd.DataFrame:
     formatted = dataframe.copy()
     if not formatted.empty and column_name in formatted.columns:
@@ -405,6 +437,44 @@ def prepare_project_batch_context() -> tuple[pd.DataFrame, int | None, pd.DataFr
     selected_project_id = ensure_selected_project(projects_df)
     batches_df = list_batches(selected_project_id) if selected_project_id is not None else pd.DataFrame()
     selected_batch_id = ensure_selected_batch(batches_df)
+    return projects_df, selected_project_id, batches_df, selected_batch_id
+
+
+def ensure_selected_zscore_project(projects_df: pd.DataFrame) -> int | None:
+    if projects_df.empty:
+        st.session_state["zscore_selected_project_id"] = None
+        st.session_state["zscore_project_selector"] = "请选择 Z-score 项目"
+        return None
+
+    valid_ids = set(projects_df["id"].astype(int).tolist())
+    current_id = st.session_state.get("zscore_selected_project_id")
+    if current_id is not None and current_id not in valid_ids:
+        st.session_state["zscore_selected_project_id"] = None
+        st.session_state["zscore_project_selector"] = "请选择 Z-score 项目"
+        return None
+    return None if current_id is None else int(current_id)
+
+
+def ensure_selected_zscore_batch(batches_df: pd.DataFrame) -> int | None:
+    if batches_df.empty:
+        st.session_state["zscore_selected_batch_id"] = None
+        st.session_state["zscore_batch_selector"] = "请选择 Z-score 批次"
+        return None
+
+    valid_ids = set(batches_df["id"].astype(int).tolist())
+    current_id = st.session_state.get("zscore_selected_batch_id")
+    if current_id is not None and current_id not in valid_ids:
+        st.session_state["zscore_selected_batch_id"] = None
+        st.session_state["zscore_batch_selector"] = "请选择 Z-score 批次"
+        return None
+    return None if current_id is None else int(current_id)
+
+
+def prepare_zscore_project_batch_context() -> tuple[pd.DataFrame, int | None, pd.DataFrame, int | None]:
+    projects_df = list_zscore_projects()
+    selected_project_id = ensure_selected_zscore_project(projects_df)
+    batches_df = list_zscore_batches(selected_project_id) if selected_project_id is not None else pd.DataFrame()
+    selected_batch_id = ensure_selected_zscore_batch(batches_df)
     return projects_df, selected_project_id, batches_df, selected_batch_id
 
 
@@ -581,6 +651,184 @@ def render_project_batch_management(
                                 else:
                                     update_batch(selected_batch_id, edit_lot_no.strip())
                                     st.success("批次质控品批号已更新。")
+                                    st.rerun()
+
+
+def render_zscore_project_batch_management(
+    manage_tab,
+    projects_df: pd.DataFrame,
+    selected_project_id: int | None,
+    batches_df: pd.DataFrame,
+    selected_batch_id: int | None,
+) -> None:
+    with manage_tab:
+        top_left, top_right = st.columns([1, 1.4])
+
+        with top_left:
+            st.subheader("新建 Z-score 项目")
+            with st.form("create_zscore_project_form", clear_on_submit=True):
+                project_name = st.text_input("项目名称")
+                level_count = st.radio(
+                    "项目 level_count",
+                    options=[2, 3],
+                    horizontal=True,
+                )
+                project_submitted = st.form_submit_button("创建 Z-score 项目", width="stretch")
+
+                if project_submitted:
+                    if not project_name.strip():
+                        st.error(TEXT["fill_project"])
+                    else:
+                        try:
+                            project_id = create_zscore_project(project_name.strip(), int(level_count))
+                        except ValueError as exc:
+                            st.error(str(exc))
+                        else:
+                            st.session_state["zscore_selected_project_id"] = project_id
+                            st.session_state["zscore_selected_batch_id"] = None
+                            st.success(f"Z-score 项目 {project_id} 已创建。")
+                            st.rerun()
+
+            st.subheader("Z-score 项目列表与选择")
+            if projects_df.empty:
+                st.info("当前还没有 Z-score 项目，请先创建项目并确定 2-level 或 3-level。")
+            else:
+                project_labels, project_options = build_zscore_project_select_options(projects_df)
+                sync_selector_state(
+                    selector_key="zscore_project_selector",
+                    selected_id_key="zscore_selected_project_id",
+                    options_map=project_options,
+                    placeholder=project_labels[0],
+                )
+                selected_project_label = st.selectbox(
+                    "选择 Z-score 项目",
+                    options=project_labels,
+                    key="zscore_project_selector",
+                )
+                new_project_id = project_options[selected_project_label]
+                if new_project_id != selected_project_id:
+                    st.session_state["zscore_selected_project_id"] = new_project_id
+                    st.session_state["zscore_selected_batch_id"] = None
+                    st.session_state["zscore_batch_selector"] = "请选择 Z-score 批次"
+                    st.rerun()
+
+                project_table = localize_dataframe_columns(format_datetime_column(projects_df, "created_at"))
+                st.dataframe(project_table, width="stretch", hide_index=True)
+
+                if selected_project_id is not None:
+                    current_project = get_zscore_project(selected_project_id)
+                    with st.expander("当前 Z-score 项目配置"):
+                        st.text(f"项目名称：{current_project['name']}")
+                        st.text(f"level_count：{int(current_project['level_count'])}-level")
+                        with st.form("edit_zscore_project_form"):
+                            edit_project_name = st.text_input(
+                                "项目名称",
+                                value=current_project["name"],
+                            )
+                            edit_project_submitted = st.form_submit_button("保存项目修改", width="stretch")
+                            if edit_project_submitted:
+                                cleaned_name = edit_project_name.strip()
+                                if not cleaned_name:
+                                    st.error(TEXT["fill_project"])
+                                else:
+                                    try:
+                                        update_project(selected_project_id, cleaned_name)
+                                    except ValueError as exc:
+                                        st.error(str(exc))
+                                    else:
+                                        st.success("项目名称已更新，level_count 保持不变。")
+                                        st.rerun()
+
+        with top_right:
+            st.subheader("新建 Z-score 批次")
+            if selected_project_id is None:
+                st.info("请先选择 Z-score 项目。")
+            else:
+                current_project = get_zscore_project(selected_project_id)
+                project_level_count = int(current_project["level_count"])
+                st.caption(
+                    f"当前批次将归属于项目：{current_project['name']}｜固定为 {project_level_count}-level。"
+                )
+                with st.form("create_zscore_batch_form", clear_on_submit=True):
+                    instrument = st.text_input("仪器")
+                    reagent = st.text_input("试剂")
+                    qc_material = st.text_input("质控品")
+                    concentration = st.text_input("浓度")
+                    lot_no = st.text_input("质控品批号")
+                    target_n = st.selectbox(
+                        "建靶所需次数",
+                        options=list(range(5, 21)),
+                        index=15,
+                    )
+                    create_submitted = st.form_submit_button("创建 Z-score 批次", width="stretch")
+
+                    if create_submitted:
+                        fields = [instrument, reagent, qc_material, concentration, lot_no]
+                        if any(not field.strip() for field in fields):
+                            st.error(TEXT["fill_batch"])
+                        else:
+                            try:
+                                batch_id = create_zscore_batch(
+                                    project_id=selected_project_id,
+                                    instrument=instrument.strip(),
+                                    reagent=reagent.strip(),
+                                    qc_material=qc_material.strip(),
+                                    concentration=concentration.strip(),
+                                    lot_no=lot_no.strip(),
+                                    target_n=int(target_n),
+                                )
+                            except ValueError as exc:
+                                st.error(str(exc))
+                            else:
+                                st.session_state["zscore_selected_batch_id"] = batch_id
+                                st.success(f"Z-score 批次 {batch_id} 已创建。")
+                                st.rerun()
+
+            st.subheader("Z-score 批次列表与选择")
+            if selected_project_id is None:
+                st.info("请先选择 Z-score 项目。")
+            elif batches_df.empty:
+                st.info("当前项目下还没有 Z-score 批次，请先创建批次。")
+            else:
+                batch_labels, batch_options = build_zscore_batch_select_options(batches_df)
+                sync_selector_state(
+                    selector_key="zscore_batch_selector",
+                    selected_id_key="zscore_selected_batch_id",
+                    options_map=batch_options,
+                    placeholder=batch_labels[0],
+                )
+                selected_batch_label = st.selectbox(
+                    "选择 Z-score 批次",
+                    options=batch_labels,
+                    key="zscore_batch_selector",
+                )
+                new_batch_id = batch_options[selected_batch_label]
+                if new_batch_id != selected_batch_id:
+                    st.session_state["zscore_selected_batch_id"] = new_batch_id
+                    st.rerun()
+
+                batch_table = localize_dataframe_columns(format_datetime_column(batches_df, "created_at"))
+                st.dataframe(batch_table, width="stretch", hide_index=True)
+
+                if selected_batch_id is not None:
+                    current_batch = get_zscore_batch(selected_batch_id)
+                    with st.expander("当前 Z-score 批次配置"):
+                        st.text(f"项目：{current_batch['project_name']}")
+                        st.text(f"批次：{current_batch['id']}")
+                        st.text(f"level_count：{int(current_batch['level_count'])}-level")
+                        st.text(f"建靶所需次数：{current_batch['target_n']}")
+                        with st.form("edit_zscore_batch_form"):
+                            edit_lot_no = st.text_input(
+                                "质控品批号",
+                                value=current_batch["lot_no"],
+                            )
+                            edit_batch_submitted = st.form_submit_button("保存批次修改", width="stretch")
+                            if edit_batch_submitted:
+                                if not edit_lot_no.strip():
+                                    st.error("请填写质控品批号。")
+                                else:
+                                    update_batch(selected_batch_id, edit_lot_no.strip())
+                                    st.success("批次质控品批号已更新，level_count 保持不变。")
                                     st.rerun()
 
 
@@ -1274,6 +1522,93 @@ def render_zscore_vendor_reference_editor(
                     st.rerun()
 
 
+def format_zscore_rule_hits(rule_hits: list[dict[str, Any]]) -> str:
+    if not rule_hits:
+        return "无"
+    ordered_rule_ids = list(dict.fromkeys(hit["rule_id"] for hit in rule_hits))
+    return "、".join(ordered_rule_ids)
+
+
+def build_zscore_chart_control_title(
+    template: dict[str, Any],
+    phase_scope: str,
+    view_mode: str,
+    selected_level: str,
+) -> str:
+    scope_text = selected_level if view_mode == "单水平视图" else "全部 Level"
+    phase_scope_label = ZSCORE_PHASE_VIEW_OPTIONS.get(phase_scope, "全图")
+    return f"图表控制（点击展开）｜{template['label']}｜{phase_scope_label}｜{view_mode}｜{scope_text}"
+
+
+def render_zscore_chart_controls(
+    template: dict[str, Any],
+    default_phase_scope: str,
+) -> tuple[str, str, str]:
+    phase_scope = st.session_state.get("zscore_phase_scope", default_phase_scope)
+    if phase_scope not in ZSCORE_PHASE_VIEW_OPTIONS:
+        phase_scope = default_phase_scope
+        st.session_state["zscore_phase_scope"] = phase_scope
+
+    view_mode = st.session_state.get("zscore_view_mode", "单水平视图")
+    if view_mode not in {"单水平视图", "合并视图"}:
+        view_mode = "单水平视图"
+    selected_level = st.session_state.get("zscore_selected_level", template["level_ids"][0])
+    if selected_level not in template["level_ids"]:
+        selected_level = template["level_ids"][0]
+        st.session_state["zscore_selected_level"] = selected_level
+
+    with st.expander(
+        build_zscore_chart_control_title(template, phase_scope, view_mode, selected_level),
+        expanded=False,
+    ):
+        control_col1, control_col2 = st.columns([1.05, 1.15], gap="large")
+        phase_scope = control_col1.radio(
+            "数据范围视图",
+            options=list(ZSCORE_PHASE_VIEW_OPTIONS.keys()),
+            index=list(ZSCORE_PHASE_VIEW_OPTIONS.keys()).index(phase_scope),
+            format_func=lambda option: ZSCORE_PHASE_VIEW_OPTIONS[option],
+            horizontal=True,
+            key="zscore_phase_scope",
+        )
+        view_mode = control_col2.radio(
+            "图形呈现方式",
+            options=["单水平视图", "合并视图"],
+            horizontal=True,
+            key="zscore_view_mode",
+        )
+        if st.session_state.get("zscore_selected_level") not in template["level_ids"]:
+            st.session_state["zscore_selected_level"] = template["level_ids"][0]
+        if view_mode == "单水平视图":
+            selected_level = st.radio(
+                "Level Selector",
+                options=template["level_ids"],
+                horizontal=True,
+                key="zscore_selected_level",
+            )
+        else:
+            selected_level = st.session_state.get("zscore_selected_level", template["level_ids"][0])
+    return phase_scope, view_mode, selected_level
+
+
+def sync_zscore_workbench_state(
+    batch_id: int,
+    template: dict[str, Any],
+    default_phase_scope: str,
+) -> None:
+    if st.session_state.get("zscore_workbench_batch_id") != batch_id:
+        st.session_state["zscore_workbench_batch_id"] = batch_id
+        st.session_state["zscore_phase_scope"] = default_phase_scope
+        st.session_state["zscore_selected_level"] = template["level_ids"][0]
+        if st.session_state.get("zscore_view_mode") not in {"单水平视图", "合并视图"}:
+            st.session_state["zscore_view_mode"] = "单水平视图"
+        return
+
+    if st.session_state.get("zscore_phase_scope") not in ZSCORE_PHASE_VIEW_OPTIONS:
+        st.session_state["zscore_phase_scope"] = default_phase_scope
+    if st.session_state.get("zscore_selected_level") not in template["level_ids"]:
+        st.session_state["zscore_selected_level"] = template["level_ids"][0]
+
+
 def render_batch_summary_row(batch) -> None:
     summary_items = [
         ("\u4eea\u5668", batch["instrument"]),
@@ -1282,6 +1617,42 @@ def render_batch_summary_row(batch) -> None:
         ("\u6d53\u5ea6", batch["concentration"]),
         ("\u8d28\u63a7\u54c1\u6279\u53f7", batch["lot_no"]),
         ("\u5efa\u9776\u6240\u9700\u6b21\u6570", batch["target_n"]),
+    ]
+    cards = []
+    for label, value in summary_items:
+        cards.append(
+            dedent(
+                f"""
+                <div class="batch-summary-item">
+                    <div class="batch-summary-label">{html_escape(str(label))}</div>
+                    <div class="batch-summary-value">{html_escape(str(value))}</div>
+                </div>
+                """
+            ).strip()
+        )
+
+    summary_html = dedent(
+        f"""
+        <div class="batch-summary-grid">
+            {''.join(cards)}
+        </div>
+        """
+    ).strip()
+    render_html_block(summary_html)
+
+
+def render_zscore_batch_summary_row(batch, phase_label: str, template_label: str) -> None:
+    summary_items = [
+        ("项目名称", batch["project_name"]),
+        ("批次编号", batch["id"]),
+        ("仪器", batch["instrument"]),
+        ("试剂", batch["reagent"]),
+        ("质控品", batch["qc_material"]),
+        ("浓度", batch["concentration"]),
+        ("质控品批号", batch["lot_no"]),
+        ("level_count", f"{int(batch['level_count'])}-level"),
+        ("规则模板", template_label),
+        ("当前阶段", phase_label),
     ]
     cards = []
     for label, value in summary_items:
@@ -1660,6 +2031,20 @@ def build_batch_select_options(batches_df: pd.DataFrame) -> tuple[list[str], dic
     option_map = {"\u8bf7\u9009\u62e9\u6279\u6b21": None}
     for _, row in batches_df.iterrows():
         option_map[build_batch_label(row)] = int(row["id"])
+    return list(option_map.keys()), option_map
+
+
+def build_zscore_project_select_options(projects_df: pd.DataFrame) -> tuple[list[str], dict[str, int | None]]:
+    option_map = {"请选择 Z-score 项目": None}
+    for _, row in projects_df.iterrows():
+        option_map[build_zscore_project_label(row)] = int(row["id"])
+    return list(option_map.keys()), option_map
+
+
+def build_zscore_batch_select_options(batches_df: pd.DataFrame) -> tuple[list[str], dict[str, int | None]]:
+    option_map = {"请选择 Z-score 批次": None}
+    for _, row in batches_df.iterrows():
+        option_map[build_zscore_batch_label(row)] = int(row["id"])
     return list(option_map.keys()), option_map
 
 
@@ -2155,10 +2540,10 @@ def render_main_entry_page() -> None:
 
 def render_zscore_placeholder_page() -> None:
     st.subheader("Z-score")
-    st.caption("Z-score 当前按 IQC 多水平流程运行，支持建靶期、自建靶转正式与正式期实时统计。")
-    projects_df, selected_project_id, batches_df, selected_batch_id = prepare_project_batch_context()
+    st.caption("Z-score 当前按 IQC 多水平流程运行，项目创建时固定 2-level 或 3-level，批次自动继承。")
+    projects_df, selected_project_id, batches_df, selected_batch_id = prepare_zscore_project_batch_context()
     manage_tab, work_tab = st.tabs([TEXT["manage"], TEXT["current_batch"]])
-    render_project_batch_management(
+    render_zscore_project_batch_management(
         manage_tab,
         projects_df,
         selected_project_id,
@@ -2168,8 +2553,8 @@ def render_zscore_placeholder_page() -> None:
 
     guard_work_tab_selection(work_tab, selected_project_id, selected_batch_id)
 
-    batch = get_batch(selected_batch_id)
-    templates = build_zscore_rule_templates()
+    batch_context = resolve_zscore_batch_context(selected_batch_id)
+    batch = batch_context["batch"]
     if "zscore_entry_test_time" not in st.session_state:
         st.session_state["zscore_entry_test_time"] = datetime.now()
     if "zscore_entry_operator" not in st.session_state:
@@ -2182,39 +2567,40 @@ def render_zscore_placeholder_page() -> None:
         st.session_state["zscore_level3_value"] = ""
     if "zscore_view_mode" not in st.session_state:
         st.session_state["zscore_view_mode"] = "单水平视图"
-    if "zscore_rule_template" not in st.session_state:
-        st.session_state["zscore_rule_template"] = "2_level_classic"
+    if "zscore_phase_scope" not in st.session_state:
+        st.session_state["zscore_phase_scope"] = "building"
     if "zscore_selected_level" not in st.session_state:
         st.session_state["zscore_selected_level"] = "Level 1"
     if "zscore_reset_entry_form" not in st.session_state:
         st.session_state["zscore_reset_entry_form"] = False
 
-    initial_template_id = st.session_state.get("zscore_rule_template", "2_level_classic")
-    if initial_template_id not in templates:
-        initial_template_id = "2_level_classic"
-        st.session_state["zscore_rule_template"] = initial_template_id
+    level_count = int(batch_context["level_count"])
+    template_id = str(batch_context["template_id"])
+    template = batch_context["template"]
+    required_level_ids = list(batch_context["required_level_ids"])
 
     with work_tab:
-        st.caption(f"当前项目：{batch['project_name']}")
-        with st.container():
-            render_batch_summary_row(batch)
-
         entry_col, chart_col = st.columns([1.0, 1.18], gap="large")
-
-        with chart_col:
-            st.subheader("图表与判读")
-            template_id, template, view_mode, selected_level = render_zscore_chart_controls(
-                templates,
-                initial_template_id,
-            )
 
         history_runs = get_zscore_runs(selected_batch_id, template_id)
         operator_options = build_zscore_operator_options(history_runs)
-        required_n = int(batch["target_n"])
+        required_n = int(batch_context["required_n"])
         level_target_profiles = get_zscore_level_targets(selected_batch_id, template_id, required_n=required_n)
-        overall_phase = determine_zscore_phase(level_target_profiles, template["level_ids"])
+        overall_phase = determine_zscore_phase(level_target_profiles, required_level_ids)
         overall_phase_label = get_phase_label(overall_phase)
-        formal_rules_enabled = should_enable_formal_rules(level_target_profiles, template["level_ids"])
+        formal_rules_enabled = should_enable_formal_rules(level_target_profiles, required_level_ids)
+        default_phase_scope = "building" if overall_phase == PHASE_TARGET_BUILDING else "formal"
+        sync_zscore_workbench_state(selected_batch_id, template, default_phase_scope)
+
+        with st.container():
+            render_zscore_batch_summary_row(batch, overall_phase_label, template["label"])
+
+        with chart_col:
+            st.subheader("图表与判读")
+            phase_scope, view_mode, selected_level = render_zscore_chart_controls(
+                template,
+                default_phase_scope,
+            )
 
         if st.session_state.get("zscore_entry_batch_id") != selected_batch_id:
             st.session_state["zscore_entry_batch_id"] = selected_batch_id
@@ -2239,7 +2625,8 @@ def render_zscore_placeholder_page() -> None:
             if notice_message:
                 st.success(notice_message)
             st.caption(
-                f"当前模板：{template['label']}｜建靶门槛：每个 level 累计 {required_n} 次且具备有效 SD 后才算 ready。"
+                f"当前项目固定为 {level_count}-level｜模板自动绑定为 {template['label']}｜"
+                f"每个 level 累计 {required_n} 次且具备有效 SD 后才算 ready。"
             )
 
             st.markdown("**本次数据录入**")
@@ -2300,8 +2687,8 @@ def render_zscore_placeholder_page() -> None:
 
             st.divider()
             st.markdown("**各 Level 建靶 / 正式统计**")
-            stat_cols = st.columns(len(template["level_ids"]), gap="large")
-            for stat_col, level_id in zip(stat_cols, template["level_ids"]):
+            stat_cols = st.columns(len(required_level_ids), gap="large")
+            for stat_col, level_id in zip(stat_cols, required_level_ids):
                 profile = level_target_profiles[level_id]
                 with stat_col:
                     st.markdown(f"**{level_id}**")
@@ -2362,37 +2749,35 @@ def render_zscore_placeholder_page() -> None:
                 else "当前仍处于建靶中，正式规则未启用；本次 run 会继续累计 provisional 与 level readiness。"
             )
 
-        plot_df = build_zscore_plot_dataframe(
-            history_runs,
-            None,
-            display_phase=overall_phase,
-        )
+        plot_df = build_zscore_plot_dataframe(history_runs, None, display_phase=None)
+        building_history_runs = [run for run in history_runs if str(run.get("phase")) == PHASE_TARGET_BUILDING]
         formal_history_runs = [run for run in history_runs if str(run.get("phase")) == PHASE_FORMAL_QC]
-        if overall_phase == PHASE_FORMAL_QC:
+        if phase_scope == "building":
+            latest_run = building_history_runs[-1] if building_history_runs else None
+        elif phase_scope == "formal":
             latest_run = formal_history_runs[-1] if formal_history_runs else None
         else:
             latest_run = history_runs[-1] if history_runs else None
 
         with chart_col:
+            phase_title = {
+                "building": "建靶观察图",
+                "formal": "正式 Z-score 图",
+                "all": "全图",
+            }[phase_scope]
             if view_mode == "单水平视图":
                 figure = plot_zscore_single_level(
                     plot_df=plot_df,
                     level_id=selected_level,
-                    title=(
-                        f"单 Level 建靶观察图｜{selected_level}"
-                        if overall_phase == PHASE_TARGET_BUILDING
-                        else f"单 Level 正式 Z-score 图｜{selected_level}"
-                    ),
+                    title=f"{phase_title}｜{selected_level}",
+                    phase_scope=phase_scope,
                 )
             else:
                 figure = plot_zscore_overlay(
                     plot_df=plot_df,
-                    title=(
-                        f"合并建靶观察图｜{template['label']}"
-                        if overall_phase == PHASE_TARGET_BUILDING
-                        else f"合并 Z-score / SDI 视图｜{template['label']}"
-                    ),
-                    active_levels=template["level_ids"],
+                    title=f"{phase_title}｜{template['label']}",
+                    active_levels=required_level_ids,
+                    phase_scope=phase_scope,
                 )
             st.pyplot(figure, clear_figure=False, width="stretch")
             render_zscore_latest_analysis_panel(latest_run, overall_phase, formal_rules_enabled)

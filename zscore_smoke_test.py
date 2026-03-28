@@ -9,7 +9,13 @@ from matplotlib.figure import Figure
 import pandas as pd
 
 import database
-from database import create_batch, create_project, init_db
+from database import (
+    create_zscore_batch,
+    create_zscore_project,
+    get_zscore_batch,
+    get_zscore_project,
+    init_db,
+)
 from zscore_logic import (
     PHASE_FORMAL_QC,
     PHASE_TARGET_BUILDING,
@@ -19,13 +25,16 @@ from zscore_logic import (
     determine_zscore_phase,
     evaluate_zscore_run,
     evaluate_zscore_run_with_phase,
+    get_level_ids_for_level_count,
     get_phase_label,
+    get_template_id_for_level_count,
     get_zscore_level_targets,
     get_zscore_runs,
+    resolve_zscore_batch_context,
     should_enable_formal_rules,
     upsert_zscore_level_target,
 )
-from zscore_plotting import plot_zscore_overlay, plot_zscore_single_level
+from zscore_plotting import filter_zscore_plot_df, plot_zscore_overlay, plot_zscore_single_level
 
 
 TEMPLATES = build_zscore_rule_templates()
@@ -184,6 +193,38 @@ def build_plot_df() -> pd.DataFrame:
                 "is_preview": False,
             }
         )
+    return pd.DataFrame(rows, columns=PLOT_COLUMNS)
+
+
+def build_mixed_phase_plot_df() -> pd.DataFrame:
+    rows = [
+        {
+            "run_id": 1,
+            "run_index": 1,
+            "test_time": BASE_TIME,
+            "level_id": "Level 1",
+            "zscore": 0.2,
+            "status": PHASE_TARGET_BUILDING,
+            "rule_hits": "",
+            "raw_value": 101.0,
+            "log_value": math.log10(101.0),
+            "phase": PHASE_TARGET_BUILDING,
+            "is_preview": False,
+        },
+        {
+            "run_id": 2,
+            "run_index": 2,
+            "test_time": BASE_TIME + pd.Timedelta(hours=1),
+            "level_id": "Level 1",
+            "zscore": -0.1,
+            "status": "accept",
+            "rule_hits": "",
+            "raw_value": 99.0,
+            "log_value": math.log10(99.0),
+            "phase": PHASE_FORMAL_QC,
+            "is_preview": False,
+        },
+    ]
     return pd.DataFrame(rows, columns=PLOT_COLUMNS)
 
 
@@ -370,8 +411,8 @@ def test_formal_rules_enable_only_after_all_levels_ready() -> None:
 
 def test_db_persistence_supports_vendor_targets_and_formal_realtime_stats() -> None:
     with TemporaryDatabaseContext():
-        project_id = create_project("Z-score Smoke Project")
-        batch_id = create_batch(
+        project_id = create_zscore_project("Z-score Smoke Project", level_count=2)
+        batch_id = create_zscore_batch(
             project_id=project_id,
             instrument="AU5800",
             reagent="Chemistry",
@@ -486,6 +527,174 @@ def test_db_persistence_supports_vendor_targets_and_formal_realtime_stats() -> N
         assert round(level_2["realtime_sd"], 6) == round(math.sqrt(0.5), 6)
 
 
+def test_zscore_project_level_count_persistence() -> None:
+    with TemporaryDatabaseContext():
+        project_id_2 = create_zscore_project("2-level Project", level_count=2)
+        project_id_3 = create_zscore_project("3-level Project", level_count=3)
+        assert int(get_zscore_project(project_id_2)["level_count"]) == 2
+        assert int(get_zscore_project(project_id_3)["level_count"]) == 3
+
+
+def test_zscore_batch_inherits_level_count() -> None:
+    with TemporaryDatabaseContext():
+        project_id_2 = create_zscore_project("2-level Batch Project", level_count=2)
+        project_id_3 = create_zscore_project("3-level Batch Project", level_count=3)
+        batch_id_2 = create_zscore_batch(
+            project_id=project_id_2,
+            instrument="Inst-2",
+            reagent="Reagent-2",
+            qc_material="QC-2",
+            concentration="Normal",
+            lot_no="LOT-2",
+            target_n=5,
+        )
+        batch_id_3 = create_zscore_batch(
+            project_id=project_id_3,
+            instrument="Inst-3",
+            reagent="Reagent-3",
+            qc_material="QC-3",
+            concentration="High",
+            lot_no="LOT-3",
+            target_n=5,
+        )
+        assert int(get_zscore_batch(batch_id_2)["level_count"]) == 2
+        assert int(get_zscore_batch(batch_id_3)["level_count"]) == 3
+
+
+def test_level_count_binds_template_and_required_level_ids() -> None:
+    assert get_template_id_for_level_count(2) == "2_level_classic"
+    assert get_template_id_for_level_count(3) == "3_level_threes"
+    assert get_level_ids_for_level_count(2) == ["Level 1", "Level 2"]
+    assert get_level_ids_for_level_count(3) == ["Level 1", "Level 2", "Level 3"]
+
+
+def test_batch_context_auto_shapes_template_by_level_count() -> None:
+    with TemporaryDatabaseContext():
+        project_id = create_zscore_project("Context Project", level_count=3)
+        batch_id = create_zscore_batch(
+            project_id=project_id,
+            instrument="Ctx-Inst",
+            reagent="Ctx-Reagent",
+            qc_material="Ctx-QC",
+            concentration="High",
+            lot_no="CTX-LOT",
+            target_n=6,
+        )
+        context = resolve_zscore_batch_context(batch_id)
+        assert context["level_count"] == 3
+        assert context["template_id"] == "3_level_threes"
+        assert context["required_level_ids"] == ["Level 1", "Level 2", "Level 3"]
+        assert context["required_n"] == 6
+
+
+def test_create_zscore_run_respects_batch_level_count() -> None:
+    with TemporaryDatabaseContext():
+        project_id_2 = create_zscore_project("Run Project 2", level_count=2)
+        batch_id_2 = create_zscore_batch(
+            project_id=project_id_2,
+            instrument="Inst-A",
+            reagent="Reagent-A",
+            qc_material="QC-A",
+            concentration="Normal",
+            lot_no="LOT-A",
+            target_n=5,
+        )
+        run_2 = create_zscore_run(
+            batch_id=batch_id_2,
+            test_time=BASE_TIME,
+            operator="tester",
+            level_results=[
+                {"level_id": "Level 1", "raw_value": 100.0},
+                {"level_id": "Level 2", "raw_value": 150.0},
+            ],
+            template_id="2_level_classic",
+            required_n=5,
+        )
+        assert len(run_2["level_results"]) == 2
+
+        project_id_3 = create_zscore_project("Run Project 3", level_count=3)
+        batch_id_3 = create_zscore_batch(
+            project_id=project_id_3,
+            instrument="Inst-B",
+            reagent="Reagent-B",
+            qc_material="QC-B",
+            concentration="High",
+            lot_no="LOT-B",
+            target_n=5,
+        )
+        try:
+            create_zscore_run(
+                batch_id=batch_id_3,
+                test_time=BASE_TIME,
+                operator="tester",
+                level_results=[
+                    {"level_id": "Level 1", "raw_value": 100.0},
+                    {"level_id": "Level 2", "raw_value": 150.0},
+                ],
+                template_id="3_level_threes",
+                required_n=5,
+            )
+        except ValueError as exc:
+            assert "Level 3" in str(exc)
+        else:
+            raise AssertionError("3-level 批次缺少 Level 3 时应报错")
+
+
+def test_plot_phase_filtering_views() -> None:
+    mixed_df = build_mixed_phase_plot_df()
+    building_df = filter_zscore_plot_df(mixed_df, "building")
+    formal_df = filter_zscore_plot_df(mixed_df, "formal")
+    all_df = filter_zscore_plot_df(mixed_df, "all")
+    assert building_df["phase"].tolist() == [PHASE_TARGET_BUILDING]
+    assert formal_df["phase"].tolist() == [PHASE_FORMAL_QC]
+    assert set(all_df["phase"].tolist()) == {PHASE_TARGET_BUILDING, PHASE_FORMAL_QC}
+
+
+def test_create_zscore_run_rejects_unexpected_level_for_two_level_batch() -> None:
+    with TemporaryDatabaseContext():
+        project_id = create_zscore_project("Unexpected Level Project", level_count=2)
+        batch_id = create_zscore_batch(
+            project_id=project_id,
+            instrument="Inst-X",
+            reagent="Reagent-X",
+            qc_material="QC-X",
+            concentration="Normal",
+            lot_no="LOT-X",
+            target_n=5,
+        )
+        try:
+            create_zscore_run(
+                batch_id=batch_id,
+                test_time=BASE_TIME,
+                operator="tester",
+                level_results=[
+                    {"level_id": "Level 1", "raw_value": 100.0},
+                    {"level_id": "Level 2", "raw_value": 150.0},
+                    {"level_id": "Level 3", "raw_value": 200.0},
+                ],
+                template_id="2_level_classic",
+                required_n=5,
+            )
+        except ValueError as exc:
+            assert "Level 3" in str(exc)
+        else:
+            raise AssertionError("2-level batch should reject Level 3 input")
+
+
+def test_plotting_all_view_visually_splits_building_and_formal_phases() -> None:
+    figure = plot_zscore_single_level(
+        build_mixed_phase_plot_df(),
+        "Level 1",
+        "全图",
+        phase_scope="all",
+    )
+    assert_is_figure(figure)
+    _, labels = figure.axes[0].get_legend_handles_labels()
+    assert "Level 1 | 建靶期" in labels
+    assert "Level 1 | 正式期" in labels
+    plt.close(figure)
+
+
 def test_plotting_handles_empty_frames() -> None:
     bare_empty_df = pd.DataFrame()
     fixed_empty_df = pd.DataFrame(columns=PLOT_COLUMNS)
@@ -530,6 +739,14 @@ def run_all_tests() -> None:
         test_target_building_run_does_not_trigger_formal_rules,
         test_formal_rules_enable_only_after_all_levels_ready,
         test_db_persistence_supports_vendor_targets_and_formal_realtime_stats,
+        test_zscore_project_level_count_persistence,
+        test_zscore_batch_inherits_level_count,
+        test_level_count_binds_template_and_required_level_ids,
+        test_batch_context_auto_shapes_template_by_level_count,
+        test_create_zscore_run_respects_batch_level_count,
+        test_plot_phase_filtering_views,
+        test_create_zscore_run_rejects_unexpected_level_for_two_level_batch,
+        test_plotting_all_view_visually_splits_building_and_formal_phases,
         test_plotting_handles_empty_frames,
         test_plotting_single_level_returns_figure,
         test_plotting_overlay_returns_figure,

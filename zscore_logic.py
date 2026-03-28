@@ -11,7 +11,7 @@ import pandas as pd
 from database import (
     add_zscore_level_results as db_add_zscore_level_results,
     add_zscore_run as db_add_zscore_run,
-    get_batch,
+    get_zscore_batch,
     get_zscore_level_results_df,
     get_zscore_level_targets_df,
     get_zscore_runs_df,
@@ -201,6 +201,35 @@ def build_zscore_rule_templates() -> dict[str, dict[str, Any]]:
             "note": spec["note"],
         }
     return deepcopy(templates)
+
+
+def get_template_id_for_level_count(level_count: int) -> str:
+    normalized_level_count = int(level_count)
+    if normalized_level_count == 2:
+        return "2_level_classic"
+    if normalized_level_count == 3:
+        return "3_level_threes"
+    raise ValueError("Z-score level_count 只能是 2 或 3")
+
+
+def get_level_ids_for_level_count(level_count: int) -> list[str]:
+    template_id = get_template_id_for_level_count(level_count)
+    return list(build_zscore_rule_templates()[template_id]["level_ids"])
+
+
+def resolve_zscore_batch_context(batch_id: int) -> dict[str, Any]:
+    batch = get_zscore_batch(batch_id)
+    level_count = int(batch["level_count"])
+    template_id = get_template_id_for_level_count(level_count)
+    template = deepcopy(build_zscore_rule_templates()[template_id])
+    return {
+        "batch": batch,
+        "level_count": level_count,
+        "template_id": template_id,
+        "template": template,
+        "required_level_ids": list(template["level_ids"]),
+        "required_n": int(batch["target_n"] or template["required_n"]),
+    }
 
 
 def get_zscore_level_results(
@@ -448,10 +477,14 @@ def create_zscore_run(
     template_id: str,
     required_n: int | None = None,
 ) -> dict[str, Any]:
-    templates = build_zscore_rule_templates()
-    template = templates[template_id]
-    batch = get_batch(batch_id)
-    target_n = int(required_n or batch["target_n"] or template["required_n"])
+    batch_context = resolve_zscore_batch_context(batch_id)
+    batch = batch_context["batch"]
+    expected_template_id = str(batch_context["template_id"])
+    if template_id != expected_template_id:
+        raise ValueError("当前 Z-score 批次的规则模板必须与批次 level_count 一致")
+
+    template = deepcopy(batch_context["template"])
+    target_n = int(required_n or batch_context["required_n"])
 
     normalized_level_results = _normalize_input_level_results(level_results, template)
     for level_result in normalized_level_results:
@@ -1146,6 +1179,7 @@ def _persist_target_profile(batch_id: int, level_id: str, profile: dict[str, Any
 
 
 def _normalize_input_level_results(level_results: list[dict[str, Any]], template: dict[str, Any]) -> list[dict[str, Any]]:
+    _validate_input_level_ids(level_results, template)
     input_map = {str(item.get("level_id")): deepcopy(item) for item in level_results}
     normalized_results: list[dict[str, Any]] = []
     for level_id in template["level_ids"]:
@@ -1161,6 +1195,31 @@ def _normalize_input_level_results(level_results: list[dict[str, Any]], template
             current["log_value"] = math.log10(raw_value)
         normalized_results.append(current)
     return normalized_results
+
+
+def _validate_input_level_ids(level_results: list[dict[str, Any]], template: dict[str, Any]) -> None:
+    expected_level_ids = set(template["level_ids"])
+    observed_level_counts: dict[str, int] = {}
+    unexpected_level_ids: set[str] = set()
+
+    for item in level_results:
+        level_id = str(item.get("level_id") or "").strip()
+        if not level_id:
+            continue
+        observed_level_counts[level_id] = observed_level_counts.get(level_id, 0) + 1
+        if level_id not in expected_level_ids:
+            unexpected_level_ids.add(level_id)
+
+    if unexpected_level_ids:
+        level_list = ", ".join(sorted(unexpected_level_ids))
+        raise ValueError(f"当前批次固定为 {len(expected_level_ids)}-level，不接受 {level_list}。")
+
+    duplicated_level_ids = sorted(
+        level_id for level_id, count in observed_level_counts.items() if count > 1 and level_id in expected_level_ids
+    )
+    if duplicated_level_ids:
+        level_list = ", ".join(duplicated_level_ids)
+        raise ValueError(f"当前 run 存在重复 level 录入：{level_list}。")
 
 
 def _parse_json_list(raw_value: Any) -> list[Any]:

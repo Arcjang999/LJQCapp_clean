@@ -79,6 +79,8 @@ def init_db() -> None:
         _ensure_projects_table(connection)
         _ensure_batches_table(connection)
         _ensure_results_table(connection)
+        _ensure_zscore_project_config_table(connection)
+        _ensure_zscore_batch_config_table(connection)
         _ensure_zscore_runs_table(connection)
         _ensure_zscore_level_results_table(connection)
         _ensure_zscore_level_targets_table(connection)
@@ -98,6 +100,12 @@ def init_db() -> None:
             """
             CREATE INDEX IF NOT EXISTS idx_zscore_runs_batch_time
             ON zscore_runs (batch_id, rule_template_id, test_time, id)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_zscore_batch_config_project
+            ON zscore_batch_config (project_id, level_count, batch_id)
             """
         )
         connection.execute(
@@ -307,6 +315,34 @@ def _create_results_table(connection: sqlite3.Connection) -> None:
             reagent_lot_changed INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (batch_id) REFERENCES batches (id) ON DELETE CASCADE
+        )
+        """
+    )
+
+
+def _ensure_zscore_project_config_table(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS zscore_project_config (
+            project_id INTEGER PRIMARY KEY,
+            level_count INTEGER NOT NULL CHECK (level_count IN (2, 3)),
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
+        )
+        """
+    )
+
+
+def _ensure_zscore_batch_config_table(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS zscore_batch_config (
+            batch_id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL,
+            level_count INTEGER NOT NULL CHECK (level_count IN (2, 3)),
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (batch_id) REFERENCES batches (id) ON DELETE CASCADE,
+            FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
         )
         """
     )
@@ -561,6 +597,190 @@ def get_batch(batch_id: int) -> sqlite3.Row:
 
     if row is None:
         raise ValueError(f"\u672a\u627e\u5230\u6279\u6b21 {batch_id}")
+    return row
+
+
+def create_zscore_project(name: str, level_count: int) -> int:
+    if int(level_count) not in {2, 3}:
+        raise ValueError("Z-score 项目 level_count 只能是 2 或 3")
+
+    with get_connection() as connection:
+        try:
+            cursor = connection.execute(
+                "INSERT INTO projects (name) VALUES (?)",
+                (name,),
+            )
+            project_id = int(cursor.lastrowid)
+            connection.execute(
+                """
+                INSERT INTO zscore_project_config (project_id, level_count)
+                VALUES (?, ?)
+                """,
+                (project_id, int(level_count)),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("\u9879\u76ee\u540d\u79f0\u5df2\u5b58\u5728") from exc
+    return project_id
+
+
+def list_zscore_projects() -> pd.DataFrame:
+    with get_connection() as connection:
+        dataframe = pd.read_sql_query(
+            """
+            SELECT
+                projects.id,
+                projects.name,
+                projects.created_at,
+                config.level_count
+            FROM projects
+            INNER JOIN zscore_project_config AS config
+                ON config.project_id = projects.id
+            ORDER BY projects.id DESC
+            """,
+            connection,
+        )
+
+    if not dataframe.empty:
+        dataframe["level_count"] = dataframe["level_count"].astype(int)
+    return dataframe
+
+
+def get_zscore_project(project_id: int) -> sqlite3.Row:
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT
+                projects.*,
+                config.level_count
+            FROM projects
+            INNER JOIN zscore_project_config AS config
+                ON config.project_id = projects.id
+            WHERE projects.id = ?
+            """,
+            (project_id,),
+        ).fetchone()
+
+    if row is None:
+        raise ValueError(f"未找到 Z-score 项目 {project_id}")
+    return row
+
+
+def create_zscore_batch(
+    instrument: str,
+    reagent: str,
+    qc_material: str,
+    concentration: str,
+    lot_no: str,
+    target_n: int,
+    project_id: int | None = None,
+) -> int:
+    if project_id is None:
+        raise ValueError("\u8bf7\u5148\u9009\u62e9\u9879\u76ee")
+
+    with get_connection() as connection:
+        project_row = connection.execute(
+            """
+            SELECT level_count
+            FROM zscore_project_config
+            WHERE project_id = ?
+            """,
+            (project_id,),
+        ).fetchone()
+        if project_row is None:
+            raise ValueError("所选项目不是 Z-score 项目")
+
+        cursor = connection.execute(
+            """
+            INSERT INTO batches (
+                project_id, instrument, reagent, qc_material, concentration, lot_no, target_n
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (project_id, instrument, reagent, qc_material, concentration, lot_no, target_n),
+        )
+        batch_id = int(cursor.lastrowid)
+        connection.execute(
+            """
+            INSERT INTO zscore_batch_config (batch_id, project_id, level_count)
+            VALUES (?, ?, ?)
+            """,
+            (batch_id, project_id, int(project_row["level_count"])),
+        )
+    return batch_id
+
+
+def list_zscore_batches(project_id: int | None = None) -> pd.DataFrame:
+    with get_connection() as connection:
+        if project_id is None:
+            dataframe = pd.read_sql_query(
+                """
+                SELECT
+                    batches.id,
+                    batches.project_id,
+                    projects.name AS project_name,
+                    batches.instrument,
+                    batches.reagent,
+                    batches.qc_material,
+                    batches.concentration,
+                    batches.lot_no,
+                    batches.target_n,
+                    batches.created_at,
+                    config.level_count
+                FROM batches
+                INNER JOIN zscore_batch_config AS config ON config.batch_id = batches.id
+                LEFT JOIN projects ON projects.id = batches.project_id
+                ORDER BY batches.id DESC
+                """,
+                connection,
+            )
+        else:
+            dataframe = pd.read_sql_query(
+                """
+                SELECT
+                    batches.id,
+                    batches.project_id,
+                    projects.name AS project_name,
+                    batches.instrument,
+                    batches.reagent,
+                    batches.qc_material,
+                    batches.concentration,
+                    batches.lot_no,
+                    batches.target_n,
+                    batches.created_at,
+                    config.level_count
+                FROM batches
+                INNER JOIN zscore_batch_config AS config ON config.batch_id = batches.id
+                LEFT JOIN projects ON projects.id = batches.project_id
+                WHERE batches.project_id = ?
+                ORDER BY batches.id DESC
+                """,
+                connection,
+                params=(project_id,),
+            )
+
+    if not dataframe.empty:
+        dataframe["level_count"] = dataframe["level_count"].astype(int)
+    return dataframe
+
+
+def get_zscore_batch(batch_id: int) -> sqlite3.Row:
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT
+                batches.*,
+                projects.name AS project_name,
+                config.level_count
+            FROM batches
+            INNER JOIN zscore_batch_config AS config ON config.batch_id = batches.id
+            LEFT JOIN projects ON projects.id = batches.project_id
+            WHERE batches.id = ?
+            """,
+            (batch_id,),
+        ).fetchone()
+
+    if row is None:
+        raise ValueError(f"未找到 Z-score 批次 {batch_id}")
     return row
 
 
@@ -977,3 +1197,133 @@ def upsert_zscore_level_target(batch_id: int, level_id: str, **fields) -> None:
             """,
             insert_values,
         )
+
+
+def get_zscore_project_level_count(project_id: int) -> int:
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT level_count
+            FROM zscore_project_config
+            WHERE project_id = ?
+            """,
+            (project_id,),
+        ).fetchone()
+
+    if row is None:
+        raise ValueError("所选项目不是 Z-score 项目")
+    return int(row["level_count"])
+
+
+def create_zscore_project(name: str, level_count: int) -> int:
+    cleaned_name = str(name or "").strip()
+    normalized_level_count = int(level_count)
+    if normalized_level_count not in {2, 3}:
+        raise ValueError("Z-score 项目 level_count 只能是 2 或 3")
+    if not cleaned_name:
+        raise ValueError("项目名称不能为空")
+
+    with get_connection() as connection:
+        try:
+            cursor = connection.execute(
+                "INSERT INTO projects (name) VALUES (?)",
+                (cleaned_name,),
+            )
+            project_id = int(cursor.lastrowid)
+            connection.execute(
+                """
+                INSERT INTO zscore_project_config (project_id, level_count)
+                VALUES (?, ?)
+                """,
+                (project_id, normalized_level_count),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("项目名称已存在") from exc
+    return project_id
+
+
+def create_zscore_batch(
+    instrument: str,
+    reagent: str,
+    qc_material: str,
+    concentration: str,
+    lot_no: str,
+    target_n: int,
+    project_id: int | None = None,
+) -> int:
+    if project_id is None:
+        raise ValueError("请先选择项目")
+
+    project_level_count = get_zscore_project_level_count(project_id)
+    with get_connection() as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO batches (
+                project_id, instrument, reagent, qc_material, concentration, lot_no, target_n
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (project_id, instrument, reagent, qc_material, concentration, lot_no, target_n),
+        )
+        batch_id = int(cursor.lastrowid)
+        connection.execute(
+            """
+            INSERT INTO zscore_batch_config (batch_id, project_id, level_count)
+            VALUES (?, ?, ?)
+            """,
+            (batch_id, project_id, project_level_count),
+        )
+    return batch_id
+
+
+def add_zscore_run(
+    batch_id: int,
+    project_id: int,
+    test_time: str,
+    operator: str,
+    level_count: int,
+    phase: str,
+    run_status: str,
+    rule_template_id: str,
+    rule_hits_run,
+    error_type_hint: str,
+    analysis_prompt: str,
+) -> int:
+    normalized_level_count = int(level_count)
+    if normalized_level_count not in {2, 3}:
+        raise ValueError("Z-score run 的 level_count 只能是 2 或 3")
+
+    serialized_rule_hits = json.dumps(rule_hits_run or [], ensure_ascii=False)
+    with get_connection() as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO zscore_runs (
+                batch_id,
+                project_id,
+                test_time,
+                operator,
+                level_count,
+                phase,
+                run_status,
+                rule_template_id,
+                rule_hits_run,
+                error_type_hint,
+                analysis_prompt
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                batch_id,
+                project_id,
+                test_time,
+                operator,
+                normalized_level_count,
+                phase,
+                run_status,
+                rule_template_id,
+                serialized_rule_hits,
+                error_type_hint,
+                analysis_prompt,
+            ),
+        )
+        return int(cursor.lastrowid)

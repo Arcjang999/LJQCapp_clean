@@ -45,6 +45,9 @@ STATUS_EDGE_COLORS = {
     "formal_qc": "#59a14f",
 }
 
+PHASE_TARGET_BUILDING = "target_building"
+PHASE_FORMAL_QC = "formal_qc"
+
 
 def _get_available_font_fallbacks() -> list[str]:
     available_fonts: dict[str, str] = {}
@@ -74,31 +77,49 @@ def configure_matplotlib_fonts() -> None:
 configure_matplotlib_fonts()
 
 
+def filter_zscore_plot_df(plot_df: pd.DataFrame, phase_scope: str) -> pd.DataFrame:
+    normalized_scope = _normalize_phase_scope(phase_scope)
+    if plot_df is None:
+        return pd.DataFrame()
+    if plot_df.empty or "phase" not in plot_df.columns:
+        return plot_df.copy()
+    if normalized_scope == "building":
+        return plot_df[plot_df["phase"] == PHASE_TARGET_BUILDING].copy()
+    if normalized_scope == "formal":
+        return plot_df[plot_df["phase"] == PHASE_FORMAL_QC].copy()
+    return plot_df.copy()
+
+
 def plot_zscore_single_level(
     plot_df: pd.DataFrame,
     level_id: str,
     title: str,
+    phase_scope: str = "all",
 ):
-    if not _can_plot_zscore_frame(plot_df):
-        return _build_empty_zscore_figure(title, "暂无可绘制数据", "请先录入本次多水平结果")
+    normalized_scope = _normalize_phase_scope(phase_scope)
+    scoped_df = filter_zscore_plot_df(plot_df, normalized_scope)
+    if not _can_plot_zscore_frame(scoped_df):
+        return _build_empty_zscore_figure(title, "暂无可绘制数据", "请先录入当前批次的 Z-score 结果。")
 
     figure, axis = plt.subplots(figsize=(9.4, 5.9), dpi=150)
-    level_df = plot_df[plot_df["level_id"] == level_id].sort_values("run_index").copy()
+    level_df = scoped_df[scoped_df["level_id"] == level_id].sort_values("run_index").copy()
     if level_df.empty:
         plt.close(figure)
-        return _build_empty_zscore_figure(title, "暂无可绘制数据", "请先录入本次多水平结果")
+        return _build_empty_zscore_figure(title, "暂无可绘制数据", "当前视图下还没有该水平的记录。")
 
     _draw_zscore_reference_lines(axis)
     level_color = LEVEL_COLORS.get(level_id, "#4e79a7")
-    axis.plot(
-        level_df["run_index"],
-        level_df["zscore"],
-        color=level_color,
-        linewidth=1.3,
-        alpha=0.85,
-        label=level_id,
-    )
-    _plot_status_points(axis, level_df, level_color)
+    if normalized_scope == "all":
+        for phase in [PHASE_TARGET_BUILDING, PHASE_FORMAL_QC]:
+            phase_df = level_df[level_df["phase"] == phase].sort_values("run_index").copy()
+            if phase_df.empty:
+                continue
+            _plot_phase_line(axis, phase_df, level_color, f"{level_id} | {_phase_label(phase)}")
+            _plot_status_points(axis, phase_df, level_color)
+    else:
+        _plot_phase_line(axis, level_df, level_color, level_id)
+        _plot_status_points(axis, level_df, level_color)
+
     _configure_x_axis(axis, level_df)
     axis.set_title(title, pad=10)
     axis.set_xlabel("Run 序号")
@@ -114,32 +135,35 @@ def plot_zscore_overlay(
     plot_df: pd.DataFrame,
     title: str,
     active_levels: list[str] | None = None,
+    phase_scope: str = "all",
 ):
-    if not _can_plot_zscore_frame(plot_df):
-        return _build_empty_zscore_figure(title, "暂无可绘制数据", "请先录入本次多水平结果")
+    normalized_scope = _normalize_phase_scope(phase_scope)
+    scoped_df = filter_zscore_plot_df(plot_df, normalized_scope)
+    if not _can_plot_zscore_frame(scoped_df):
+        return _build_empty_zscore_figure(title, "暂无可绘制数据", "请先录入当前批次的 Z-score 结果。")
 
     figure, axis = plt.subplots(figsize=(9.4, 5.9), dpi=150)
-
-    overlay_df = plot_df.copy()
+    overlay_df = scoped_df.copy()
     if active_levels:
         overlay_df = overlay_df[overlay_df["level_id"].isin(active_levels)].copy()
     if overlay_df.empty:
         plt.close(figure)
-        return _build_empty_zscore_figure(title, "暂无可绘制数据", "请先录入本次多水平结果")
+        return _build_empty_zscore_figure(title, "暂无可绘制数据", "当前视图下还没有可叠加的水平数据。")
 
     _draw_zscore_reference_lines(axis)
-    for level_id in overlay_df["level_id"].drop_duplicates().tolist():
-        level_df = overlay_df[overlay_df["level_id"] == level_id].sort_values("run_index").copy()
-        level_color = LEVEL_COLORS.get(level_id, "#4e79a7")
-        axis.plot(
-            level_df["run_index"],
-            level_df["zscore"],
-            color=level_color,
-            linewidth=1.3,
-            alpha=0.85,
-            label=level_id,
-        )
-        _plot_status_points(axis, level_df, level_color)
+    for current_level_id in overlay_df["level_id"].drop_duplicates().tolist():
+        level_df = overlay_df[overlay_df["level_id"] == current_level_id].sort_values("run_index").copy()
+        level_color = LEVEL_COLORS.get(current_level_id, "#4e79a7")
+        if normalized_scope == "all":
+            for phase in [PHASE_TARGET_BUILDING, PHASE_FORMAL_QC]:
+                phase_df = level_df[level_df["phase"] == phase].sort_values("run_index").copy()
+                if phase_df.empty:
+                    continue
+                _plot_phase_line(axis, phase_df, level_color, f"{current_level_id} | {_phase_label(phase)}")
+                _plot_status_points(axis, phase_df, level_color)
+        else:
+            _plot_phase_line(axis, level_df, level_color, current_level_id)
+            _plot_status_points(axis, level_df, level_color)
 
     _configure_x_axis(axis, overlay_df)
     axis.set_title(title, pad=10)
@@ -165,12 +189,26 @@ def _draw_zscore_reference_lines(axis) -> None:
         axis.text(1.01, lower, f"-{multiplier}", transform=axis.get_yaxis_transform(), fontsize=8, va="center")
 
 
+def _plot_phase_line(axis, phase_df: pd.DataFrame, level_color: str, label: str) -> None:
+    phase = str(phase_df["phase"].iloc[0]) if not phase_df.empty else PHASE_FORMAL_QC
+    axis.plot(
+        phase_df["run_index"],
+        phase_df["zscore"],
+        color=level_color,
+        linewidth=1.3,
+        alpha=0.58 if phase == PHASE_TARGET_BUILDING else 0.88,
+        linestyle=_phase_linestyle(phase),
+        label=label,
+    )
+
+
 def _plot_status_points(axis, plot_df: pd.DataFrame, level_color: str) -> None:
     for _, point in plot_df.iterrows():
         status = str(point.get("status", "accept"))
         is_preview = bool(point.get("is_preview", False))
+        phase = str(point.get("phase", PHASE_FORMAL_QC))
         edge_color = STATUS_EDGE_COLORS.get(status, "#7a8ca5")
-        marker = "D" if is_preview else "o"
+        marker = "D" if is_preview else "s" if phase == PHASE_TARGET_BUILDING else "o"
         size = 74 if status == "reject" else 66 if status == "warning" else 52
         axis.scatter(
             [point["run_index"]],
@@ -181,7 +219,7 @@ def _plot_status_points(axis, plot_df: pd.DataFrame, level_color: str) -> None:
             edgecolors=edge_color,
             linewidths=2.0 if status in {"warning", "reject"} else 1.0,
             zorder=4,
-            alpha=0.98 if is_preview else 0.92,
+            alpha=0.98 if is_preview else 0.74 if phase == PHASE_TARGET_BUILDING else 0.92,
         )
 
 
@@ -239,3 +277,17 @@ def _build_empty_zscore_figure(title: str, message: str, subtitle: str = ""):
     axis.set_axis_off()
     figure.tight_layout(pad=0.7)
     return figure
+
+
+def _normalize_phase_scope(phase_scope: str) -> str:
+    if phase_scope in {"building", "formal", "all"}:
+        return phase_scope
+    return "all"
+
+
+def _phase_linestyle(phase: str) -> str:
+    return "--" if phase == PHASE_TARGET_BUILDING else "-"
+
+
+def _phase_label(phase: str) -> str:
+    return "建靶期" if phase == PHASE_TARGET_BUILDING else "正式期"
