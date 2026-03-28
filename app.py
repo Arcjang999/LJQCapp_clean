@@ -1855,10 +1855,22 @@ def render_zscore_placeholder_page() -> None:
             st.session_state["zscore_rule_template"] = "2_level_classic"
         if "zscore_selected_level" not in st.session_state:
             st.session_state["zscore_selected_level"] = "Level 1"
+        if "zscore_reset_entry_form" not in st.session_state:
+            st.session_state["zscore_reset_entry_form"] = False
         if "zscore_run_history" not in st.session_state or not isinstance(st.session_state["zscore_run_history"], dict):
             st.session_state["zscore_run_history"] = {template_key: [] for template_key in templates}
         for template_key in templates:
             st.session_state["zscore_run_history"].setdefault(template_key, [])
+
+        if st.session_state.get("zscore_reset_entry_form", False):
+            st.session_state["zscore_entry_operator"] = str(
+                st.session_state.get("zscore_entry_operator", "") or ""
+            ).strip()
+            st.session_state["zscore_level1_value"] = ""
+            st.session_state["zscore_level2_value"] = ""
+            st.session_state["zscore_level3_value"] = ""
+            st.session_state["zscore_entry_test_time"] = datetime.now()
+            st.session_state["zscore_reset_entry_form"] = False
 
         initial_template_id = st.session_state.get("zscore_rule_template", "2_level_classic")
         if initial_template_id not in templates:
@@ -1937,11 +1949,7 @@ def render_zscore_placeholder_page() -> None:
                     saved_run["is_preview"] = False
                     history_store[template_id] = history_runs + [saved_run]
                     st.session_state["zscore_run_history"] = history_store
-                    st.session_state["zscore_level1_value"] = ""
-                    st.session_state["zscore_level2_value"] = ""
-                    st.session_state["zscore_level3_value"] = ""
-                    st.session_state["zscore_entry_test_time"] = datetime.now()
-                    st.success("Z-score run \u5df2\u4fdd\u5b58\u5230\u5f53\u524d\u4f1a\u8bdd\u3002")
+                    st.session_state["zscore_reset_entry_form"] = True
                     st.rerun()
 
             st.divider()

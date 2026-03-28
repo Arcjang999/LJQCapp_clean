@@ -77,13 +77,13 @@ def plot_zscore_single_level(
     level_id: str,
     title: str,
 ):
-    required_columns = {"level_id", "run_index", "zscore"}
-    if plot_df is None or plot_df.empty or not required_columns.issubset(plot_df.columns):
+    if not _can_plot_zscore_frame(plot_df):
         return _build_empty_zscore_figure(title, "暂无可绘制数据", "请先录入本次多水平结果")
 
     figure, axis = plt.subplots(figsize=(9.4, 5.9), dpi=150)
     level_df = plot_df[plot_df["level_id"] == level_id].sort_values("run_index").copy()
     if level_df.empty:
+        plt.close(figure)
         return _build_empty_zscore_figure(title, "暂无可绘制数据", "请先录入本次多水平结果")
 
     _draw_zscore_reference_lines(axis)
@@ -113,8 +113,7 @@ def plot_zscore_overlay(
     title: str,
     active_levels: list[str] | None = None,
 ):
-    required_columns = {"level_id", "run_index", "zscore"}
-    if plot_df is None or plot_df.empty or not required_columns.issubset(plot_df.columns):
+    if not _can_plot_zscore_frame(plot_df):
         return _build_empty_zscore_figure(title, "暂无可绘制数据", "请先录入本次多水平结果")
 
     figure, axis = plt.subplots(figsize=(9.4, 5.9), dpi=150)
@@ -123,6 +122,7 @@ def plot_zscore_overlay(
     if active_levels:
         overlay_df = overlay_df[overlay_df["level_id"].isin(active_levels)].copy()
     if overlay_df.empty:
+        plt.close(figure)
         return _build_empty_zscore_figure(title, "暂无可绘制数据", "请先录入本次多水平结果")
 
     _draw_zscore_reference_lines(axis)
@@ -184,12 +184,14 @@ def _plot_status_points(axis, plot_df: pd.DataFrame, level_color: str) -> None:
 
 
 def _configure_x_axis(axis, plot_df: pd.DataFrame) -> None:
-    run_axis_df = (
-        plot_df[["run_index", "test_time"]]
-        .drop_duplicates()
-        .sort_values("run_index")
-        .reset_index(drop=True)
-    )
+    if "run_index" not in plot_df.columns:
+        return
+
+    run_axis_columns = ["run_index"]
+    if "test_time" in plot_df.columns:
+        run_axis_columns.append("test_time")
+
+    run_axis_df = plot_df[run_axis_columns].drop_duplicates().sort_values("run_index").reset_index(drop=True)
     run_indices = run_axis_df["run_index"].astype(int).tolist()
     if not run_indices:
         return
@@ -205,11 +207,16 @@ def _configure_x_axis(axis, plot_df: pd.DataFrame) -> None:
     for run_index in tick_positions:
         row = run_axis_df.loc[run_axis_df["run_index"] == run_index].iloc[0]
         label = str(run_index)
-        if pd.notna(row["test_time"]):
+        if "test_time" in run_axis_df.columns and pd.notna(row["test_time"]):
             timestamp = pd.Timestamp(row["test_time"])
             label = f"{run_index}\n{timestamp.strftime('%m-%d')}"
         tick_labels.append(label)
     axis.set_xticklabels(tick_labels)
+
+
+def _can_plot_zscore_frame(plot_df: pd.DataFrame | None) -> bool:
+    required_columns = {"level_id", "run_index", "zscore"}
+    return plot_df is not None and not plot_df.empty and required_columns.issubset(plot_df.columns)
 
 
 def _build_empty_zscore_figure(title: str, message: str, subtitle: str = ""):
