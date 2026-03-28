@@ -20,14 +20,19 @@ from zscore_logic import (
     PHASE_FORMAL_QC,
     PHASE_TARGET_BUILDING,
     build_level_target_profiles,
+    build_zscore_batch_summary_items,
+    build_zscore_plot_dataframe,
     build_zscore_rule_templates,
     create_zscore_run,
     determine_zscore_phase,
     evaluate_zscore_run,
     evaluate_zscore_run_with_phase,
+    format_zscore_level_label_summary,
+    get_building_stat_run_ids,
     get_level_ids_for_level_count,
     get_phase_label,
     get_template_id_for_level_count,
+    get_zscore_level_label_map,
     get_zscore_level_targets,
     get_zscore_runs,
     resolve_zscore_batch_context,
@@ -49,6 +54,8 @@ PLOT_COLUMNS = [
     "raw_value",
     "log_value",
     "phase",
+    "plot_phase",
+    "is_building_stat_point",
     "is_preview",
 ]
 BASE_TIME = pd.Timestamp("2026-03-28 08:00:00")
@@ -190,6 +197,8 @@ def build_plot_df() -> pd.DataFrame:
                 "raw_value": raw_value,
                 "log_value": math.log10(raw_value),
                 "phase": PHASE_FORMAL_QC,
+                "plot_phase": PHASE_FORMAL_QC,
+                "is_building_stat_point": False,
                 "is_preview": False,
             }
         )
@@ -209,6 +218,8 @@ def build_mixed_phase_plot_df() -> pd.DataFrame:
             "raw_value": 101.0,
             "log_value": math.log10(101.0),
             "phase": PHASE_TARGET_BUILDING,
+            "plot_phase": PHASE_TARGET_BUILDING,
+            "is_building_stat_point": True,
             "is_preview": False,
         },
         {
@@ -222,6 +233,8 @@ def build_mixed_phase_plot_df() -> pd.DataFrame:
             "raw_value": 99.0,
             "log_value": math.log10(99.0),
             "phase": PHASE_FORMAL_QC,
+            "plot_phase": PHASE_FORMAL_QC,
+            "is_building_stat_point": False,
             "is_preview": False,
         },
     ]
@@ -561,6 +574,43 @@ def test_zscore_batch_inherits_level_count() -> None:
         assert int(get_zscore_batch(batch_id_3)["level_count"]) == 3
 
 
+def test_zscore_level_labels_persist_and_fallback() -> None:
+    with TemporaryDatabaseContext():
+        project_id_2 = create_zscore_project("Label Project 2", level_count=2)
+        batch_id_2 = create_zscore_batch(
+            project_id=project_id_2,
+            instrument="Inst-L2",
+            reagent="Reagent-L2",
+            qc_material="QC-L2",
+            concentration="Normal",
+            lot_no="LOT-L2",
+            target_n=5,
+            level_1_label="Low",
+            level_2_label="High",
+        )
+        batch_2 = get_zscore_batch(batch_id_2)
+        label_map_2 = get_zscore_level_label_map(batch_2, ["Level 1", "Level 2"])
+        assert label_map_2 == {"Level 1": "Low", "Level 2": "High"}
+        assert format_zscore_level_label_summary(batch_2, ["Level 1", "Level 2"]) == "L1: Low | L2: High"
+
+        project_id_3 = create_zscore_project("Label Project 3", level_count=3)
+        batch_id_3 = create_zscore_batch(
+            project_id=project_id_3,
+            instrument="Inst-L3",
+            reagent="Reagent-L3",
+            qc_material="QC-L3",
+            concentration="High",
+            lot_no="LOT-L3",
+            target_n=5,
+            level_1_label="Low",
+            level_2_label="",
+            level_3_label="High",
+        )
+        batch_3 = get_zscore_batch(batch_id_3)
+        label_map_3 = get_zscore_level_label_map(batch_3, ["Level 1", "Level 2", "Level 3"])
+        assert label_map_3 == {"Level 1": "Low", "Level 2": "Level 2", "Level 3": "High"}
+
+
 def test_level_count_binds_template_and_required_level_ids() -> None:
     assert get_template_id_for_level_count(2) == "2_level_classic"
     assert get_template_id_for_level_count(3) == "3_level_threes"
@@ -585,6 +635,59 @@ def test_batch_context_auto_shapes_template_by_level_count() -> None:
         assert context["template_id"] == "3_level_threes"
         assert context["required_level_ids"] == ["Level 1", "Level 2", "Level 3"]
         assert context["required_n"] == 6
+
+
+def test_zscore_summary_items_update_with_batch_context() -> None:
+    with TemporaryDatabaseContext():
+        project_id = create_zscore_project("Summary Project", level_count=2)
+        batch_id_1 = create_zscore_batch(
+            project_id=project_id,
+            instrument="Inst-S1",
+            reagent="Reagent-S1",
+            qc_material="QC-S1",
+            concentration="Normal",
+            lot_no="LOT-S1",
+            target_n=5,
+            level_1_label="Low",
+            level_2_label="High",
+        )
+        batch_id_2 = create_zscore_batch(
+            project_id=project_id,
+            instrument="Inst-S2",
+            reagent="Reagent-S2",
+            qc_material="QC-S2",
+            concentration="High",
+            lot_no="LOT-S2",
+            target_n=5,
+            level_1_label="A",
+            level_2_label="B",
+        )
+        summary_1 = dict(
+            build_zscore_batch_summary_items(
+                get_zscore_batch(batch_id_1),
+                phase_label="建靶中",
+                formal_rules_enabled=False,
+                template_label="2-level classic",
+                level_ids=["Level 1", "Level 2"],
+            )
+        )
+        summary_2 = dict(
+            build_zscore_batch_summary_items(
+                get_zscore_batch(batch_id_2),
+                phase_label="正式质控",
+                formal_rules_enabled=True,
+                template_label="2-level classic",
+                level_ids=["Level 1", "Level 2"],
+            )
+        )
+        assert summary_1["当前阶段"] == "建靶中"
+        assert summary_1["全部 Level 已完成"] == "否"
+        assert summary_1["正式规则已启用"] == "否"
+        assert summary_1["水平说明"] == "L1: Low | L2: High"
+        assert summary_2["当前阶段"] == "正式质控"
+        assert summary_2["全部 Level 已完成"] == "是"
+        assert summary_2["项目名称"] == "Summary Project"
+        assert summary_2["批次编号"] != summary_1["批次编号"]
 
 
 def test_create_zscore_run_respects_batch_level_count() -> None:
@@ -648,6 +751,53 @@ def test_plot_phase_filtering_views() -> None:
     assert building_df["phase"].tolist() == [PHASE_TARGET_BUILDING]
     assert formal_df["phase"].tolist() == [PHASE_FORMAL_QC]
     assert set(all_df["phase"].tolist()) == {PHASE_TARGET_BUILDING, PHASE_FORMAL_QC}
+
+
+def test_collected_n_matches_building_plot_points() -> None:
+    with TemporaryDatabaseContext():
+        project_id = create_zscore_project("Collected Plot Project", level_count=2)
+        batch_id = create_zscore_batch(
+            project_id=project_id,
+            instrument="Inst-C",
+            reagent="Reagent-C",
+            qc_material="QC-C",
+            concentration="Normal",
+            lot_no="LOT-C",
+            target_n=5,
+        )
+        for hour, values in enumerate(
+            [
+                (100.0, 150.0),
+                (101.0, 151.0),
+                (99.0, 149.0),
+                (100.5, 150.5),
+                (99.5, 149.5),
+            ],
+            start=0,
+        ):
+            create_zscore_run(
+                batch_id=batch_id,
+                test_time=BASE_TIME + pd.Timedelta(hours=hour),
+                operator=f"tester-{hour}",
+                level_results=[
+                    {"level_id": "Level 1", "raw_value": values[0]},
+                    {"level_id": "Level 2", "raw_value": values[1]},
+                ],
+                template_id="2_level_classic",
+                required_n=5,
+            )
+
+        profiles = get_zscore_level_targets(batch_id, "2_level_classic", required_n=5)
+        saved_runs = get_zscore_runs(batch_id, "2_level_classic")
+        assert get_building_stat_run_ids(saved_runs) == {1, 2, 3, 4, 5}
+        plot_df = build_zscore_plot_dataframe(saved_runs)
+        building_df = filter_zscore_plot_df(plot_df, "building")
+        level_1_building_points = building_df[building_df["level_id"] == "Level 1"]
+        level_2_building_points = building_df[building_df["level_id"] == "Level 2"]
+        assert profiles["Level 1"]["collected_n"] == 5
+        assert profiles["Level 2"]["collected_n"] == 5
+        assert len(level_1_building_points) == 5
+        assert len(level_2_building_points) == 5
 
 
 def test_create_zscore_run_rejects_unexpected_level_for_two_level_batch() -> None:
@@ -741,10 +891,13 @@ def run_all_tests() -> None:
         test_db_persistence_supports_vendor_targets_and_formal_realtime_stats,
         test_zscore_project_level_count_persistence,
         test_zscore_batch_inherits_level_count,
+        test_zscore_level_labels_persist_and_fallback,
         test_level_count_binds_template_and_required_level_ids,
         test_batch_context_auto_shapes_template_by_level_count,
+        test_zscore_summary_items_update_with_batch_context,
         test_create_zscore_run_respects_batch_level_count,
         test_plot_phase_filtering_views,
+        test_collected_n_matches_building_plot_points,
         test_create_zscore_run_rejects_unexpected_level_for_two_level_batch,
         test_plotting_all_view_visually_splits_building_and_formal_phases,
         test_plotting_handles_empty_frames,

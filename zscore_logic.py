@@ -45,6 +45,12 @@ DEFAULT_TARGETS = {
     "Level 3": {"target_mean": 200.0, "target_sd": 10.0},
 }
 
+LEVEL_LABEL_FIELD_MAP = {
+    "Level 1": "level_1_label",
+    "Level 2": "level_2_label",
+    "Level 3": "level_3_label",
+}
+
 
 @dataclass(frozen=True)
 class ZScoreRuleDefinition:
@@ -217,17 +223,211 @@ def get_level_ids_for_level_count(level_count: int) -> list[str]:
     return list(build_zscore_rule_templates()[template_id]["level_ids"])
 
 
+def get_zscore_level_label_map(batch: Any, level_ids: list[str] | None = None) -> dict[str, str]:
+    resolved_level_ids = list(level_ids or get_level_ids_for_level_count(int(_mapping_get(batch, "level_count") or 2)))
+    label_map: dict[str, str] = {}
+    for level_id in resolved_level_ids:
+        field_name = LEVEL_LABEL_FIELD_MAP[level_id]
+        cleaned_label = str(_mapping_get(batch, field_name) or "").strip()
+        label_map[level_id] = cleaned_label or level_id
+    return label_map
+
+
+def format_zscore_level_label_summary(batch: Any, level_ids: list[str] | None = None) -> str:
+    label_map = get_zscore_level_label_map(batch, level_ids)
+    segments = []
+    for level_id, level_label in label_map.items():
+        level_short = level_id.replace("Level ", "L")
+        segments.append(f"{level_short}: {level_label}")
+    return " | ".join(segments)
+
+
+def build_zscore_batch_summary_items(
+    batch: Any,
+    phase_label: str,
+    formal_rules_enabled: bool,
+    template_label: str,
+    level_ids: list[str] | None = None,
+) -> list[tuple[str, str]]:
+    resolved_level_ids = list(level_ids or get_level_ids_for_level_count(int(_mapping_get(batch, "level_count") or 2)))
+    return [
+        ("当前阶段", str(phase_label)),
+        ("全部 Level 已完成", "是" if formal_rules_enabled else "否"),
+        ("正式规则已启用", "是" if formal_rules_enabled else "否"),
+        ("项目名称", str(_mapping_get(batch, "project_name") or "-")),
+        ("批次编号", str(_mapping_get(batch, "id") or "-")),
+        ("仪器", str(_mapping_get(batch, "instrument") or "-")),
+        ("试剂", str(_mapping_get(batch, "reagent") or "-")),
+        ("质控品", str(_mapping_get(batch, "qc_material") or "-")),
+        ("浓度", str(_mapping_get(batch, "concentration") or "-")),
+        ("水平说明", format_zscore_level_label_summary(batch, resolved_level_ids)),
+        ("质控品批号", str(_mapping_get(batch, "lot_no") or "-")),
+        ("Level 数", f"{int(_mapping_get(batch, 'level_count') or 0)}-level"),
+        ("规则模板", str(template_label or "-")),
+    ]
+
+
+def get_building_stat_run_ids(history_runs: list[dict[str, Any]]) -> set[int]:
+    ordered_runs: list[tuple[int, dict[str, Any]]] = []
+    for index, run in enumerate(history_runs, start=1):
+        run_id = int(run.get("run_id") or index)
+        ordered_runs.append((run_id, run))
+    ordered_runs.sort(key=lambda item: item[0])
+
+    building_run_ids: set[int] = set()
+    saw_building_prefix = False
+    building_window_closed = False
+    for run_id, run in ordered_runs:
+        current_phase = _normalize_run_phase(run.get("phase"))
+        if not building_window_closed and current_phase == PHASE_TARGET_BUILDING:
+            building_run_ids.add(run_id)
+            saw_building_prefix = True
+            continue
+        if not building_window_closed and current_phase == PHASE_FORMAL_QC and saw_building_prefix:
+            building_run_ids.add(run_id)
+            building_window_closed = True
+            continue
+        building_window_closed = True
+    return building_run_ids
+
+
+def build_zscore_plot_dataframe(
+    saved_runs: list[dict[str, Any]],
+    draft_run: dict[str, Any] | None = None,
+    display_phase: str | None = None,
+) -> pd.DataFrame:
+    expected_columns = [
+        "run_id",
+        "run_index",
+        "test_time",
+        "level_id",
+        "zscore",
+        "status",
+        "rule_hits",
+        "raw_value",
+        "log_value",
+        "phase",
+        "plot_phase",
+        "is_building_stat_point",
+        "is_preview",
+    ]
+    building_run_ids = get_building_stat_run_ids(saved_runs)
+    building_display_zscores = _build_building_display_zscores(saved_runs, building_run_ids)
+    rows: list[dict[str, Any]] = []
+    for index, run in enumerate(saved_runs, start=1):
+        run_id = int(run.get("run_id") or index)
+        run_phase = _normalize_run_phase(run.get("phase"))
+        is_building_stat_point = run_id in building_run_ids
+        if display_phase == PHASE_TARGET_BUILDING and not is_building_stat_point:
+            continue
+        if display_phase == PHASE_FORMAL_QC and run_phase != PHASE_FORMAL_QC:
+            continue
+        for level_result in run.get("level_results", []):
+            level_id = str(level_result.get("level_id"))
+            zscore = level_result.get("zscore")
+            if zscore is None and is_building_stat_point:
+                zscore = building_display_zscores.get((run_id, level_id))
+            if zscore is None:
+                continue
+            rows.append(
+                {
+                    "run_id": run_id,
+                    "run_index": run_id,
+                    "test_time": run.get("test_time"),
+                    "level_id": level_id,
+                    "zscore": zscore,
+                    "status": level_result.get("status", run.get("run_status", "accept")),
+                    "rule_hits": ",".join(level_result.get("rule_hits_local", [])),
+                    "raw_value": level_result.get("raw_value"),
+                    "log_value": level_result.get("log_value"),
+                    "phase": run_phase,
+                    "plot_phase": run_phase,
+                    "is_building_stat_point": is_building_stat_point,
+                    "is_preview": False,
+                }
+            )
+
+    if draft_run and draft_run.get("run_status") != "pending":
+        draft_phase = _normalize_run_phase(draft_run.get("phase"))
+        draft_is_building_stat_point = draft_phase == PHASE_TARGET_BUILDING
+        if not (
+            display_phase == PHASE_TARGET_BUILDING and not draft_is_building_stat_point
+            or display_phase == PHASE_FORMAL_QC and draft_phase != PHASE_FORMAL_QC
+        ):
+            preview_run_index = len(saved_runs) + 1
+            for level_result in draft_run.get("level_results", []):
+                zscore = level_result.get("zscore")
+                if zscore is None:
+                    continue
+                rows.append(
+                    {
+                        "run_id": preview_run_index,
+                        "run_index": preview_run_index,
+                        "test_time": draft_run.get("test_time"),
+                        "level_id": level_result.get("level_id"),
+                        "zscore": zscore,
+                        "status": level_result.get("status", draft_run.get("run_status", "accept")),
+                        "rule_hits": ",".join(level_result.get("rule_hits_local", [])),
+                        "raw_value": level_result.get("raw_value"),
+                        "log_value": level_result.get("log_value"),
+                        "phase": draft_phase,
+                        "plot_phase": draft_phase,
+                        "is_building_stat_point": draft_is_building_stat_point,
+                        "is_preview": True,
+                    }
+                )
+
+    return pd.DataFrame(rows, columns=expected_columns)
+
+
+def _build_building_display_zscores(
+    saved_runs: list[dict[str, Any]],
+    building_run_ids: set[int],
+) -> dict[tuple[int, str], float]:
+    fallback_map: dict[tuple[int, str], float] = {}
+    if not saved_runs or not building_run_ids:
+        return fallback_map
+
+    level_ids = sorted(
+        {
+            str(level_result.get("level_id"))
+            for run in saved_runs
+            for level_result in run.get("level_results", [])
+            if level_result.get("level_id")
+        }
+    )
+    for level_id in level_ids:
+        raw_values: list[float] = []
+        ordered_building_runs = [
+            run for run in sorted(saved_runs, key=lambda item: int(item.get("run_id") or 0)) if int(run.get("run_id") or 0) in building_run_ids
+        ]
+        for run in ordered_building_runs:
+            run_id = int(run.get("run_id") or 0)
+            raw_value = _get_level_raw_value(run, level_id)
+            if raw_value is None:
+                continue
+            raw_values.append(float(raw_value))
+            stats = calculate_level_target_stats(raw_values)
+            computed_zscore = compute_zscore(raw_value, stats["target_mean"], stats["target_sd"])
+            fallback_map[(run_id, level_id)] = float(computed_zscore) if computed_zscore is not None else 0.0
+    return fallback_map
+
+
 def resolve_zscore_batch_context(batch_id: int) -> dict[str, Any]:
     batch = get_zscore_batch(batch_id)
     level_count = int(batch["level_count"])
     template_id = get_template_id_for_level_count(level_count)
     template = deepcopy(build_zscore_rule_templates()[template_id])
+    required_level_ids = list(template["level_ids"])
+    level_label_map = get_zscore_level_label_map(batch, required_level_ids)
     return {
         "batch": batch,
         "level_count": level_count,
         "template_id": template_id,
         "template": template,
-        "required_level_ids": list(template["level_ids"]),
+        "required_level_ids": required_level_ids,
+        "level_label_map": level_label_map,
+        "level_label_summary": format_zscore_level_label_summary(batch, required_level_ids),
         "required_n": int(batch["target_n"] or template["required_n"]),
     }
 
@@ -1220,6 +1420,17 @@ def _validate_input_level_ids(level_results: list[dict[str, Any]], template: dic
     if duplicated_level_ids:
         level_list = ", ".join(duplicated_level_ids)
         raise ValueError(f"当前 run 存在重复 level 录入：{level_list}。")
+
+
+def _mapping_get(row: Any, field_name: str, default: Any = None) -> Any:
+    if isinstance(row, dict):
+        return row.get(field_name, default)
+    if hasattr(row, "keys") and field_name in row.keys():
+        return row[field_name]
+    try:
+        return row[field_name]
+    except (KeyError, IndexError, TypeError):
+        return default
 
 
 def _parse_json_list(raw_value: Any) -> list[Any]:

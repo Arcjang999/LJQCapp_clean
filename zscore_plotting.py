@@ -84,10 +84,22 @@ def filter_zscore_plot_df(plot_df: pd.DataFrame, phase_scope: str) -> pd.DataFra
     if plot_df.empty or "phase" not in plot_df.columns:
         return plot_df.copy()
     if normalized_scope == "building":
-        return plot_df[plot_df["phase"] == PHASE_TARGET_BUILDING].copy()
+        if "is_building_stat_point" in plot_df.columns:
+            scoped_df = plot_df[plot_df["is_building_stat_point"]].copy()
+        else:
+            scoped_df = plot_df[plot_df["phase"] == PHASE_TARGET_BUILDING].copy()
+        if not scoped_df.empty:
+            scoped_df["plot_phase"] = PHASE_TARGET_BUILDING
+        return scoped_df
     if normalized_scope == "formal":
-        return plot_df[plot_df["phase"] == PHASE_FORMAL_QC].copy()
-    return plot_df.copy()
+        scoped_df = plot_df[plot_df["phase"] == PHASE_FORMAL_QC].copy()
+        if not scoped_df.empty:
+            scoped_df["plot_phase"] = PHASE_FORMAL_QC
+        return scoped_df
+    scoped_df = plot_df.copy()
+    if not scoped_df.empty and "plot_phase" not in scoped_df.columns:
+        scoped_df["plot_phase"] = scoped_df["phase"]
+    return scoped_df
 
 
 def plot_zscore_single_level(
@@ -190,7 +202,7 @@ def _draw_zscore_reference_lines(axis) -> None:
 
 
 def _plot_phase_line(axis, phase_df: pd.DataFrame, level_color: str, label: str) -> None:
-    phase = str(phase_df["phase"].iloc[0]) if not phase_df.empty else PHASE_FORMAL_QC
+    phase = _resolve_plot_phase(phase_df)
     axis.plot(
         phase_df["run_index"],
         phase_df["zscore"],
@@ -206,7 +218,7 @@ def _plot_status_points(axis, plot_df: pd.DataFrame, level_color: str) -> None:
     for _, point in plot_df.iterrows():
         status = str(point.get("status", "accept"))
         is_preview = bool(point.get("is_preview", False))
-        phase = str(point.get("phase", PHASE_FORMAL_QC))
+        phase = str(point.get("plot_phase", point.get("phase", PHASE_FORMAL_QC)))
         edge_color = STATUS_EDGE_COLORS.get(status, "#7a8ca5")
         marker = "D" if is_preview else "s" if phase == PHASE_TARGET_BUILDING else "o"
         size = 74 if status == "reject" else 66 if status == "warning" else 52
@@ -283,6 +295,12 @@ def _normalize_phase_scope(phase_scope: str) -> str:
     if phase_scope in {"building", "formal", "all"}:
         return phase_scope
     return "all"
+
+
+def _resolve_plot_phase(plot_df: pd.DataFrame) -> str:
+    if plot_df.empty:
+        return PHASE_FORMAL_QC
+    return str(plot_df["plot_phase"].iloc[0] if "plot_phase" in plot_df.columns else plot_df["phase"].iloc[0])
 
 
 def _phase_linestyle(phase: str) -> str:

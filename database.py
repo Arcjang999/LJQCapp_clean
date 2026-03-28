@@ -340,12 +340,27 @@ def _ensure_zscore_batch_config_table(connection: sqlite3.Connection) -> None:
             batch_id INTEGER PRIMARY KEY,
             project_id INTEGER NOT NULL,
             level_count INTEGER NOT NULL CHECK (level_count IN (2, 3)),
+            level_1_label TEXT,
+            level_2_label TEXT,
+            level_3_label TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (batch_id) REFERENCES batches (id) ON DELETE CASCADE,
             FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
         )
         """
     )
+    existing_columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(zscore_batch_config)").fetchall()
+    }
+    missing_columns = {
+        "level_1_label": "TEXT",
+        "level_2_label": "TEXT",
+        "level_3_label": "TEXT",
+    }
+    for column_name, column_type in missing_columns.items():
+        if column_name in existing_columns:
+            continue
+        connection.execute(f"ALTER TABLE zscore_batch_config ADD COLUMN {column_name} {column_type}")
 
 
 def _ensure_zscore_runs_table(connection: sqlite3.Connection) -> None:
@@ -509,6 +524,9 @@ def create_batch(
     lot_no: str,
     target_n: int,
     project_id: int | None = None,
+    level_1_label: str | None = None,
+    level_2_label: str | None = None,
+    level_3_label: str | None = None,
 ) -> int:
     if project_id is None:
         raise ValueError("\u8bf7\u5148\u9009\u62e9\u9879\u76ee")
@@ -673,6 +691,9 @@ def create_zscore_batch(
     lot_no: str,
     target_n: int,
     project_id: int | None = None,
+    level_1_label: str | None = None,
+    level_2_label: str | None = None,
+    level_3_label: str | None = None,
 ) -> int:
     if project_id is None:
         raise ValueError("\u8bf7\u5148\u9009\u62e9\u9879\u76ee")
@@ -725,7 +746,10 @@ def list_zscore_batches(project_id: int | None = None) -> pd.DataFrame:
                     batches.lot_no,
                     batches.target_n,
                     batches.created_at,
-                    config.level_count
+                    config.level_count,
+                    config.level_1_label,
+                    config.level_2_label,
+                    config.level_3_label
                 FROM batches
                 INNER JOIN zscore_batch_config AS config ON config.batch_id = batches.id
                 LEFT JOIN projects ON projects.id = batches.project_id
@@ -747,7 +771,10 @@ def list_zscore_batches(project_id: int | None = None) -> pd.DataFrame:
                     batches.lot_no,
                     batches.target_n,
                     batches.created_at,
-                    config.level_count
+                    config.level_count,
+                    config.level_1_label,
+                    config.level_2_label,
+                    config.level_3_label
                 FROM batches
                 INNER JOIN zscore_batch_config AS config ON config.batch_id = batches.id
                 LEFT JOIN projects ON projects.id = batches.project_id
@@ -770,7 +797,10 @@ def get_zscore_batch(batch_id: int) -> sqlite3.Row:
             SELECT
                 batches.*,
                 projects.name AS project_name,
-                config.level_count
+                config.level_count,
+                config.level_1_label,
+                config.level_2_label,
+                config.level_3_label
             FROM batches
             INNER JOIN zscore_batch_config AS config ON config.batch_id = batches.id
             LEFT JOIN projects ON projects.id = batches.project_id
@@ -1250,11 +1280,19 @@ def create_zscore_batch(
     lot_no: str,
     target_n: int,
     project_id: int | None = None,
+    level_1_label: str | None = None,
+    level_2_label: str | None = None,
+    level_3_label: str | None = None,
 ) -> int:
     if project_id is None:
         raise ValueError("请先选择项目")
 
     project_level_count = get_zscore_project_level_count(project_id)
+    cleaned_level_labels = [
+        str(level_1_label or "").strip() or None,
+        str(level_2_label or "").strip() or None,
+        str(level_3_label or "").strip() or None,
+    ]
     with get_connection() as connection:
         cursor = connection.execute(
             """
@@ -1268,10 +1306,17 @@ def create_zscore_batch(
         batch_id = int(cursor.lastrowid)
         connection.execute(
             """
-            INSERT INTO zscore_batch_config (batch_id, project_id, level_count)
-            VALUES (?, ?, ?)
+            INSERT INTO zscore_batch_config (
+                batch_id,
+                project_id,
+                level_count,
+                level_1_label,
+                level_2_label,
+                level_3_label
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (batch_id, project_id, project_level_count),
+            (batch_id, project_id, project_level_count, *cleaned_level_labels),
         )
     return batch_id
 

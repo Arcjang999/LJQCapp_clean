@@ -40,8 +40,13 @@ from qc_logic import calculate_qc_results, calculate_realtime_stats, format_stat
 from zscore_logic import (
     PHASE_FORMAL_QC,
     PHASE_TARGET_BUILDING,
+    build_zscore_batch_summary_items,
+    build_zscore_plot_dataframe as build_zscore_plot_dataframe_logic,
     create_zscore_run,
     determine_zscore_phase,
+    format_zscore_level_label_summary,
+    get_building_stat_run_ids,
+    get_zscore_level_label_map,
     get_zscore_level_targets,
     get_phase_label,
     get_zscore_runs,
@@ -77,6 +82,9 @@ DISPLAY_COLUMN_LABELS = {
     "concentration": "\u6d53\u5ea6",
     "lot_no": "\u8d28\u63a7\u54c1\u6279\u53f7",
     "target_n": "\u5efa\u9776\u6240\u9700\u6b21\u6570",
+    "level_1_label": "Level 1 说明",
+    "level_2_label": "Level 2 说明",
+    "level_3_label": "Level 3 说明",
     "level_count": "Level 数",
 }
 
@@ -214,6 +222,33 @@ st.markdown(
         line-height: 1.2;
         word-break: break-word;
     }
+    .zscore-summary-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+        gap: 6px;
+        margin: 2px 0 10px 0;
+        align-items: stretch;
+    }
+    .zscore-summary-item {
+        border: 1px solid #dde5ef;
+        border-radius: 8px;
+        background: #f8fbff;
+        padding: 4px 7px;
+        min-height: 46px;
+    }
+    .zscore-summary-label {
+        font-size: 10px;
+        color: #6c788a;
+        line-height: 1.15;
+    }
+    .zscore-summary-value {
+        margin-top: 2px;
+        font-size: 13px;
+        font-weight: 700;
+        color: #233246;
+        line-height: 1.15;
+        word-break: break-word;
+    }
     @media (max-width: 1680px) {
         .batch-summary-grid {
             grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
@@ -222,6 +257,9 @@ st.markdown(
         .compact-summary-grid {
             grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
             gap: 8px;
+        }
+        .zscore-summary-grid {
+            grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
         }
     }
     @media (max-width: 1280px) {
@@ -233,6 +271,9 @@ st.markdown(
         }
         .compact-summary-grid {
             grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+        }
+        .zscore-summary-grid {
+            grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
         }
     }
     </style>
@@ -755,6 +796,12 @@ def render_zscore_project_batch_management(
                     qc_material = st.text_input("质控品")
                     concentration = st.text_input("浓度")
                     lot_no = st.text_input("质控品批号")
+                    st.markdown("**水平说明**")
+                    level_1_label = st.text_input("Level 1 说明", placeholder="例如 Low / 低值")
+                    level_2_label = st.text_input("Level 2 说明", placeholder="例如 High / 高值")
+                    level_3_label = None
+                    if project_level_count == 3:
+                        level_3_label = st.text_input("Level 3 说明", placeholder="例如 High / 高值")
                     target_n = st.selectbox(
                         "建靶所需次数",
                         options=list(range(5, 21)),
@@ -776,6 +823,9 @@ def render_zscore_project_batch_management(
                                     concentration=concentration.strip(),
                                     lot_no=lot_no.strip(),
                                     target_n=int(target_n),
+                                    level_1_label=level_1_label,
+                                    level_2_label=level_2_label,
+                                    level_3_label=level_3_label,
                                 )
                             except ValueError as exc:
                                 st.error(str(exc))
@@ -813,9 +863,11 @@ def render_zscore_project_batch_management(
                 if selected_batch_id is not None:
                     current_batch = get_zscore_batch(selected_batch_id)
                     with st.expander("当前 Z-score 批次配置"):
+                        current_level_ids = list(resolve_zscore_batch_context(selected_batch_id)["required_level_ids"])
                         st.text(f"项目：{current_batch['project_name']}")
                         st.text(f"批次：{current_batch['id']}")
                         st.text(f"level_count：{int(current_batch['level_count'])}-level")
+                        st.text(f"水平说明：{format_zscore_level_label_summary(current_batch, current_level_ids)}")
                         st.text(f"建靶所需次数：{current_batch['target_n']}")
                         with st.form("edit_zscore_batch_form"):
                             edit_lot_no = st.text_input(
@@ -1200,8 +1252,11 @@ def render_zscore_level_input_block(
     value_key: str,
     value_element_id: str,
     hint_element_id: str,
+    level_caption: str | None = None,
 ) -> None:
     st.markdown(f"**{level_label}**")
+    if level_caption:
+        st.caption(level_caption)
     field_label = f"{level_label} 检测值（支持实时 log10）"
     value_text = st.text_input(
         field_label,
@@ -1214,6 +1269,13 @@ def render_zscore_level_input_block(
         value_element_id=value_element_id,
         hint_element_id=hint_element_id,
     )
+
+
+def format_zscore_level_display(level_id: str, level_label_map: dict[str, str]) -> tuple[str, str | None]:
+    level_label = str(level_label_map.get(level_id, level_id) or level_id).strip() or level_id
+    if level_label == level_id:
+        return level_id, None
+    return level_label, level_id
 
 
 def build_zscore_current_level_results(template: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str], bool]:
@@ -1251,70 +1313,11 @@ def build_zscore_plot_dataframe(
     draft_run: dict[str, Any] | None = None,
     display_phase: str | None = None,
 ) -> pd.DataFrame:
-    expected_columns = [
-        "run_id",
-        "run_index",
-        "test_time",
-        "level_id",
-        "zscore",
-        "status",
-        "rule_hits",
-        "raw_value",
-        "log_value",
-        "phase",
-        "is_preview",
-    ]
-    rows: list[dict[str, Any]] = []
-    for run in saved_runs:
-        run_phase = str(run.get("phase", PHASE_TARGET_BUILDING))
-        if display_phase and run_phase != display_phase:
-            continue
-        for level_result in run.get("level_results", []):
-            zscore = level_result.get("zscore")
-            if zscore is None:
-                continue
-            rows.append(
-                {
-                    "run_id": run.get("run_id"),
-                    "run_index": run.get("run_id"),
-                    "test_time": run.get("test_time"),
-                    "level_id": level_result.get("level_id"),
-                    "zscore": zscore,
-                    "status": level_result.get("status", run.get("run_status", "accept")),
-                    "rule_hits": ",".join(level_result.get("rule_hits_local", [])),
-                    "raw_value": level_result.get("raw_value"),
-                    "log_value": level_result.get("log_value"),
-                    "phase": run_phase,
-                    "is_preview": False,
-                }
-            )
-
-    if draft_run and draft_run.get("run_status") != "pending":
-        draft_phase = str(draft_run.get("phase", PHASE_TARGET_BUILDING))
-        if display_phase and draft_phase != display_phase:
-            return pd.DataFrame(rows, columns=expected_columns)
-        preview_run_index = len(saved_runs) + 1
-        for level_result in draft_run.get("level_results", []):
-            zscore = level_result.get("zscore")
-            if zscore is None:
-                continue
-            rows.append(
-                {
-                    "run_id": preview_run_index,
-                    "run_index": preview_run_index,
-                    "test_time": draft_run.get("test_time"),
-                    "level_id": level_result.get("level_id"),
-                    "zscore": zscore,
-                    "status": level_result.get("status", draft_run.get("run_status", "accept")),
-                    "rule_hits": ",".join(level_result.get("rule_hits_local", [])),
-                    "raw_value": level_result.get("raw_value"),
-                    "log_value": level_result.get("log_value"),
-                    "phase": draft_phase,
-                    "is_preview": True,
-                }
-            )
-
-    return pd.DataFrame(rows, columns=expected_columns)
+    return build_zscore_plot_dataframe_logic(
+        saved_runs=saved_runs,
+        draft_run=draft_run,
+        display_phase=display_phase,
+    )
 
 
 def format_zscore_rule_hits(rule_hits: list[dict[str, Any]]) -> str:
@@ -1534,8 +1537,9 @@ def build_zscore_chart_control_title(
     phase_scope: str,
     view_mode: str,
     selected_level: str,
+    level_label_map: dict[str, str],
 ) -> str:
-    scope_text = selected_level if view_mode == "单水平视图" else "全部 Level"
+    scope_text = format_zscore_level_display(selected_level, level_label_map)[0] if view_mode == "单水平视图" else "全部 Level"
     phase_scope_label = ZSCORE_PHASE_VIEW_OPTIONS.get(phase_scope, "全图")
     return f"图表控制（点击展开）｜{template['label']}｜{phase_scope_label}｜{view_mode}｜{scope_text}"
 
@@ -1543,6 +1547,7 @@ def build_zscore_chart_control_title(
 def render_zscore_chart_controls(
     template: dict[str, Any],
     default_phase_scope: str,
+    level_label_map: dict[str, str],
 ) -> tuple[str, str, str]:
     phase_scope = st.session_state.get("zscore_phase_scope", default_phase_scope)
     if phase_scope not in ZSCORE_PHASE_VIEW_OPTIONS:
@@ -1558,7 +1563,7 @@ def render_zscore_chart_controls(
         st.session_state["zscore_selected_level"] = selected_level
 
     with st.expander(
-        build_zscore_chart_control_title(template, phase_scope, view_mode, selected_level),
+        build_zscore_chart_control_title(template, phase_scope, view_mode, selected_level, level_label_map),
         expanded=False,
     ):
         control_col1, control_col2 = st.columns([1.05, 1.15], gap="large")
@@ -1584,6 +1589,7 @@ def render_zscore_chart_controls(
                 options=template["level_ids"],
                 horizontal=True,
                 key="zscore_selected_level",
+                format_func=lambda option: format_zscore_level_display(option, level_label_map)[0],
             )
         else:
             selected_level = st.session_state.get("zscore_selected_level", template["level_ids"][0])
@@ -1641,27 +1647,28 @@ def render_batch_summary_row(batch) -> None:
     render_html_block(summary_html)
 
 
-def render_zscore_batch_summary_row(batch, phase_label: str, template_label: str) -> None:
-    summary_items = [
-        ("项目名称", batch["project_name"]),
-        ("批次编号", batch["id"]),
-        ("仪器", batch["instrument"]),
-        ("试剂", batch["reagent"]),
-        ("质控品", batch["qc_material"]),
-        ("浓度", batch["concentration"]),
-        ("质控品批号", batch["lot_no"]),
-        ("level_count", f"{int(batch['level_count'])}-level"),
-        ("规则模板", template_label),
-        ("当前阶段", phase_label),
-    ]
+def render_zscore_batch_summary_row(
+    batch,
+    phase_label: str,
+    formal_rules_enabled: bool,
+    template_label: str,
+    level_ids: list[str],
+) -> None:
+    summary_items = build_zscore_batch_summary_items(
+        batch=batch,
+        phase_label=phase_label,
+        formal_rules_enabled=formal_rules_enabled,
+        template_label=template_label,
+        level_ids=level_ids,
+    )
     cards = []
     for label, value in summary_items:
         cards.append(
             dedent(
                 f"""
-                <div class="batch-summary-item">
-                    <div class="batch-summary-label">{html_escape(str(label))}</div>
-                    <div class="batch-summary-value">{html_escape(str(value))}</div>
+                <div class="zscore-summary-item">
+                    <div class="zscore-summary-label">{html_escape(str(label))}</div>
+                    <div class="zscore-summary-value">{html_escape(str(value))}</div>
                 </div>
                 """
             ).strip()
@@ -1669,7 +1676,7 @@ def render_zscore_batch_summary_row(batch, phase_label: str, template_label: str
 
     summary_html = dedent(
         f"""
-        <div class="batch-summary-grid">
+        <div class="zscore-summary-grid">
             {''.join(cards)}
         </div>
         """
@@ -2578,6 +2585,7 @@ def render_zscore_placeholder_page() -> None:
     template_id = str(batch_context["template_id"])
     template = batch_context["template"]
     required_level_ids = list(batch_context["required_level_ids"])
+    level_label_map = dict(batch_context["level_label_map"])
 
     with work_tab:
         entry_col, chart_col = st.columns([1.0, 1.18], gap="large")
@@ -2593,13 +2601,20 @@ def render_zscore_placeholder_page() -> None:
         sync_zscore_workbench_state(selected_batch_id, template, default_phase_scope)
 
         with st.container():
-            render_zscore_batch_summary_row(batch, overall_phase_label, template["label"])
+            render_zscore_batch_summary_row(
+                batch,
+                overall_phase_label,
+                formal_rules_enabled,
+                template["label"],
+                required_level_ids,
+            )
 
         with chart_col:
             st.subheader("图表与判读")
             phase_scope, view_mode, selected_level = render_zscore_chart_controls(
                 template,
                 default_phase_scope,
+                level_label_map,
             )
 
         if st.session_state.get("zscore_entry_batch_id") != selected_batch_id:
@@ -2647,12 +2662,14 @@ def render_zscore_placeholder_page() -> None:
                 "Level 3": ("zscore_level3_value", "zscore-level3-log10-value", "zscore-level3-log10-hint"),
             }
             for level_id in template["level_ids"]:
+                display_label, level_caption = format_zscore_level_display(level_id, level_label_map)
                 value_key, value_element_id, hint_element_id = level_render_config[level_id]
                 render_zscore_level_input_block(
-                    level_label=level_id,
+                    level_label=display_label,
                     value_key=value_key,
                     value_element_id=value_element_id,
                     hint_element_id=hint_element_id,
+                    level_caption=level_caption,
                 )
 
             if st.button("保存本次检测结果", type="primary", width="stretch"):
@@ -2690,8 +2707,11 @@ def render_zscore_placeholder_page() -> None:
             stat_cols = st.columns(len(required_level_ids), gap="large")
             for stat_col, level_id in zip(stat_cols, required_level_ids):
                 profile = level_target_profiles[level_id]
+                display_label, level_caption = format_zscore_level_display(level_id, level_label_map)
                 with stat_col:
-                    st.markdown(f"**{level_id}**")
+                    st.markdown(f"**{display_label}**")
+                    if level_caption:
+                        st.caption(level_caption)
                     render_compact_stat_metrics(
                         [
                             ("已收集", f"{profile['collected_n']}"),
@@ -2734,23 +2754,11 @@ def render_zscore_placeholder_page() -> None:
                         profile=profile,
                     )
 
-            st.divider()
-            st.markdown("**总体阶段状态**")
-            render_compact_stat_metrics(
-                [
-                    ("当前阶段", overall_phase_label),
-                    ("全部 Level 已完成", "是" if formal_rules_enabled else "否"),
-                    ("正式规则已启用", "是" if formal_rules_enabled else "否"),
-                ]
-            )
-            st.write(
-                "当前工作区已进入正式质控，正式规则与正式期实时统计均按真实持久化历史计算。"
-                if formal_rules_enabled
-                else "当前仍处于建靶中，正式规则未启用；本次 run 会继续累计 provisional 与 level readiness。"
-            )
-
         plot_df = build_zscore_plot_dataframe(history_runs, None, display_phase=None)
-        building_history_runs = [run for run in history_runs if str(run.get("phase")) == PHASE_TARGET_BUILDING]
+        building_run_ids = get_building_stat_run_ids(history_runs)
+        building_history_runs = [
+            run for run in history_runs if int(run.get("run_id") or 0) in building_run_ids
+        ]
         formal_history_runs = [run for run in history_runs if str(run.get("phase")) == PHASE_FORMAL_QC]
         if phase_scope == "building":
             latest_run = building_history_runs[-1] if building_history_runs else None
@@ -2758,6 +2766,14 @@ def render_zscore_placeholder_page() -> None:
             latest_run = formal_history_runs[-1] if formal_history_runs else None
         else:
             latest_run = history_runs[-1] if history_runs else None
+        if phase_scope == "building" and latest_run is not None:
+            latest_run = dict(latest_run)
+            latest_run["phase"] = PHASE_TARGET_BUILDING
+            latest_run["phase_label"] = get_phase_label(PHASE_TARGET_BUILDING)
+            latest_run["run_status"] = PHASE_TARGET_BUILDING
+            latest_run["rule_hits_run"] = []
+            latest_run["error_type_hint"] = "not_applicable"
+            latest_run["analysis_prompt"] = "当前视图仅显示纳入建靶统计的观察点，不输出正式规则结论。"
 
         with chart_col:
             phase_title = {
@@ -2769,7 +2785,7 @@ def render_zscore_placeholder_page() -> None:
                 figure = plot_zscore_single_level(
                     plot_df=plot_df,
                     level_id=selected_level,
-                    title=f"{phase_title}｜{selected_level}",
+                    title=f"{phase_title}｜{format_zscore_level_display(selected_level, level_label_map)[0]}",
                     phase_scope=phase_scope,
                 )
             else:
