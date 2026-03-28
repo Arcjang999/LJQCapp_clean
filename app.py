@@ -716,6 +716,27 @@ def render_compact_stat_metrics(metrics: list[tuple[str, str]]) -> None:
     render_html_block(stats_html)
 
 
+def render_zscore_level_input_block(
+    level_label: str,
+    value_key: str,
+    value_element_id: str,
+    hint_element_id: str,
+) -> None:
+    st.markdown(f"**{level_label}**")
+    field_label = f"{level_label} 检测值（支持实时 log10）"
+    value_text = st.text_input(
+        field_label,
+        key=value_key,
+        placeholder="例如：123.4567",
+    )
+    render_live_log10_panel(
+        value_text=value_text,
+        field_label=field_label,
+        value_element_id=value_element_id,
+        hint_element_id=hint_element_id,
+    )
+
+
 def render_batch_summary_row(batch) -> None:
     summary_items = [
         ("\u4eea\u5668", batch["instrument"]),
@@ -1597,102 +1618,80 @@ def render_main_entry_page() -> None:
 
 def render_zscore_placeholder_page() -> None:
     st.subheader("Z-score")
-    st.caption("\u8be5\u9875\u9762\u9884\u7559\u7ed9\u540e\u7eed\u72ec\u7acb\u7684 Z-score \u5de5\u4f5c\u6d41\uff0c\u5f53\u524d\u4ec5\u63d0\u4f9b\u9759\u6001\u9875\u9762\u7ed3\u6784\uff0c\u4e0d\u5305\u542b\u5206\u6790\u903b\u8f91\u3002")
-    st.warning("Z-score \u5206\u6790\u903b\u8f91\u3001\u8ba1\u7b97\u6d41\u7a0b\u4e0e\u7ed3\u679c\u5224\u8bfb\u76ee\u524d\u5c1a\u672a\u5b9e\u73b0\u3002")
+    st.caption("Z-score \u5f53\u524d\u4e3a\u7ed3\u6784\u5360\u4f4d\u9875\uff0c\u5c1a\u672a\u63a5\u5165\u8ba1\u7b97\u903b\u8f91\u3002")
     manage_tab, work_tab = st.tabs(["\u7ba1\u7406 / \u51c6\u5907", "\u5f53\u524d\u5de5\u4f5c\u533a"])
 
     with manage_tab:
         st.markdown("**\u7ba1\u7406\u4e0e\u51c6\u5907**")
-        st.caption("\u8fd9\u91cc\u9884\u7559\u7ed9\u540e\u7eed Z-score \u7684\u7ba1\u7406\u6d41\u7a0b\uff0c\u4f46\u76ee\u524d\u4ecd\u4fdd\u6301\u9759\u6001\u5360\u4f4d\u3002")
-        st.markdown("**\u8ba1\u5212\u4e2d\u7684\u6d41\u7a0b**")
-        st.markdown(
-            "- \u5efa\u7acb\u6216\u9009\u62e9\u540e\u7eed Z-score \u5de5\u4f5c\u5bf9\u8c61\n"
-            "- \u6574\u7406\u540e\u7eed\u9700\u8981\u7684\u6570\u636e\u6765\u6e90\u4e0e\u8f93\u5165\u65b9\u5f0f\n"
-            "- \u4e3a\u540e\u7eed\u6279\u6b21\u6216\u5de5\u4f5c\u4e0a\u4e0b\u6587\u9884\u7559\u7ba1\u7406\u533a\u57df"
-        )
-        st.info("Z-score \u7684\u7ba1\u7406\u903b\u8f91\u76ee\u524d\u5c1a\u672a\u63a5\u5165\u3002\u5f53\u524d\u9875\u9762\u8fd8\u6ca1\u6709\u9879\u76ee\u3001\u6279\u6b21\u6216\u9009\u62e9\u884c\u4e3a\u3002")
+        st.caption("\u540e\u7eed\u5728\u8fd9\u91cc\u63a5\u5165\u9879\u76ee\u3001\u6279\u6b21\u4e0e\u5de5\u4f5c\u4e0a\u4e0b\u6587\u3002")
 
     with work_tab:
-        st.markdown("**\u5f53\u524d\u5de5\u4f5c / \u5206\u6790 / \u8f93\u51fa**")
-        st.caption("\u8fd9\u91cc\u9884\u7559\u7ed9\u540e\u7eed Z-score \u7684\u5f53\u524d\u5de5\u4f5c\u89c6\u56fe\uff0c\u4f46\u76ee\u524d\u4ecd\u4fdd\u6301\u4e3a\u9759\u6001\u7ed3\u6784\u3002")
-        st.info("\u8be5\u5de5\u4f5c\u533a\u6309\u7167\u540e\u7eed 2 \u6c34\u5e73 / 3 \u6c34\u5e73 Z-score \u65b9\u5411\u9884\u7559\uff0c\u4f46\u76ee\u524d\u4ecd\u4e0d\u5305\u542b\u8ba1\u7b97\u3001\u7ba1\u7406\u6216\u8f93\u51fa\u903b\u8f91\u3002")
-
         shared_target_status = "\u5f85\u540e\u7eed\u63a5\u5165"
-        st.markdown("**\u5f53\u524d\u6279\u6b21 / \u5f53\u524d\u5de5\u4f5c\u5efa\u9776\u72b6\u6001**")
-        st.caption("\u8be5\u72b6\u6001\u4e3a\u5f53\u524d\u6279\u6b21 / \u5f53\u524d\u5de5\u4f5c\u533a\u7ea7\u522b\u7684\u5171\u4eab\u5efa\u9776\u72b6\u6001\uff0c\u4e0d\u6309 Level \u5355\u72ec\u533a\u5206\u3002")
-        st.write(shared_target_status)
+        if "zscore_entry_test_time" not in st.session_state:
+            st.session_state["zscore_entry_test_time"] = datetime.now()
+        if "zscore_entry_operator" not in st.session_state:
+            st.session_state["zscore_entry_operator"] = ""
+        if "zscore_level1_value" not in st.session_state:
+            st.session_state["zscore_level1_value"] = ""
+        if "zscore_level2_value" not in st.session_state:
+            st.session_state["zscore_level2_value"] = ""
 
-        level_configs = [
-            ("Level 1", "zscore_level1_result"),
-            ("Level 2", "zscore_level2_result"),
-        ]
+        st.subheader("录入与统计")
+        st.caption("左侧专注本次运行录入与建靶统计，避免把输入项和统计项混在同一个表里。")
+        st.caption(f"当前共享建靶状态：{shared_target_status}")
 
-        with st.container():
-            st.markdown("**\u5f53\u524d\u68c0\u6d4b\u8bb0\u5f55**")
-            st.caption("\u5f53\u524d\u9875\u9762\u6309\u4e00\u6b21\u68c0\u6d4b / \u4e00\u6761\u8bb0\u5f55\u5305\u542b\u591a\u4e2a\u6c34\u5e73\u7ed3\u679c\u7684\u7ed3\u6784\u9884\u7559\uff1b\u68c0\u6d4b\u65f6\u95f4\u3001\u68c0\u6d4b\u4eba\u4e0e\u5404\u6c34\u5e73\u7ed3\u679c\u5c5e\u4e8e\u540c\u4e00\u6761\u8fd0\u884c\u8bb0\u5f55\u3002")
+        st.markdown("**本次数据录入**")
+        st.datetime_input("检测时间", key="zscore_entry_test_time")
+        st.text_input(
+            "检测人",
+            key="zscore_entry_operator",
+            placeholder="请输入本次检测人",
+        )
 
-            run_meta_col1, run_meta_col2 = st.columns(2)
-            with run_meta_col1:
-                st.markdown("**\u68c0\u6d4b\u65f6\u95f4**")
-                st.write("-")
-            with run_meta_col2:
-                st.markdown("**\u68c0\u6d4b\u4eba**")
-                st.write("-")
+        st.divider()
+        st.markdown("**多水平结果录入**")
+        render_zscore_level_input_block(
+            level_label="Level 1",
+            value_key="zscore_level1_value",
+            value_element_id="zscore-level1-log10-value",
+            hint_element_id="zscore-level1-log10-hint",
+        )
+        render_zscore_level_input_block(
+            level_label="Level 2",
+            value_key="zscore_level2_value",
+            value_element_id="zscore-level2-log10-value",
+            hint_element_id="zscore-level2-log10-hint",
+        )
+        if st.button("保存本次检测结果", type="primary", width="stretch"):
+            st.write("当前仅为结构占位，保存逻辑尚未接入。")
 
-            st.markdown("**\u672c\u6b21\u68c0\u6d4b\u591a\u6c34\u5e73\u7ed3\u679c**")
-            st.caption("\u4ee5\u4e0b\u5404\u6c34\u5e73\u4f5c\u4e3a\u540c\u4e00\u6761\u68c0\u6d4b\u8bb0\u5f55\u5185\u7684\u7ed3\u679c\u884c\u663e\u793a\uff1b\u68c0\u6d4b\u7ed3\u679c\u4e3a\u5f53\u524d\u53ef\u5f55\u5165\u9879\uff0c\u9776\u503c\u76f8\u5173\u5b57\u6bb5\u6682\u4ee5\u53ea\u8bfb\u5360\u4f4d\u663e\u793a\u3002")
-
-            header_cols = st.columns([1.0, 2.2, 1.2, 1.2, 0.9])
-            header_cols[0].markdown("**\u6c34\u5e73**")
-            header_cols[1].markdown("**\u68c0\u6d4b\u7ed3\u679c**")
-            header_cols[2].markdown("**\u76ee\u6807\u5747\u503c**")
-            header_cols[3].markdown("**\u76ee\u6807\u6807\u51c6\u5dee**")
-            header_cols[4].markdown("**CV%**")
-
-            for level_label, result_key in level_configs:
-                row_cols = st.columns([1.0, 2.2, 1.2, 1.2, 0.9])
-                row_cols[0].write(level_label)
-                with row_cols[1]:
-                    st.text_input(
-                        f"{level_label} \u68c0\u6d4b\u7ed3\u679c",
-                        key=result_key,
-                        label_visibility="collapsed",
-                    )
-                row_cols[2].write("-")
-                row_cols[3].write("-")
-                row_cols[4].write("-")
-
-        summary_rows: list[dict[str, str]] = []
-        for level_label, result_key in level_configs:
-            raw_result = (st.session_state.get(result_key, "") or "").strip()
-            raw_result_status = "\u5df2\u5f55\u5165" if raw_result else "\u672a\u586b\u5199"
-
-            summary_rows.append(
-                {
-                    "\u6c34\u5e73": level_label,
-                    "\u68c0\u6d4b\u7ed3\u679c": raw_result or "-",
-                    "\u539f\u59cb\u7ed3\u679c\u72b6\u6001": raw_result_status,
-                    "\u5f53\u524d\u5de5\u4f5c\u533a\u5efa\u9776\u72b6\u6001": shared_target_status,
-                    "\u5df2\u5efa\u7acb\u9776\u503c\u53ef\u7528\u6027": "\u672a\u53ef\u7528",
-                }
+        st.divider()
+        st.markdown("**建靶统计**")
+        stat_col1, stat_col2 = st.columns(2, gap="large")
+        with stat_col1:
+            st.markdown("**Level 1**")
+            render_compact_stat_metrics(
+                [
+                    ("Mean", "-"),
+                    ("SD", "-"),
+                    ("CV%", "-"),
+                ]
+            )
+        with stat_col2:
+            st.markdown("**Level 2**")
+            render_compact_stat_metrics(
+                [
+                    ("Mean", "-"),
+                    ("SD", "-"),
+                    ("CV%", "-"),
+                ]
             )
 
-        st.markdown("**\u8f93\u5165\u6458\u8981**")
-        st.caption("\u8fd9\u91cc\u4ec5\u6c47\u603b\u5f53\u524d\u68c0\u6d4b\u8bb0\u5f55\u5185\u5404\u6c34\u5e73\u7684\u539f\u59cb\u7ed3\u679c\u5f55\u5165\u60c5\u51b5\u3001\u5f53\u524d\u5de5\u4f5c\u533a\u5171\u4eab\u5efa\u9776\u72b6\u6001\uff0c\u4ee5\u53ca\u5404\u6c34\u5e73\u9776\u503c\u53ef\u7528\u6027\u72b6\u6001\uff0c\u4e0d\u5305\u542b\u4efb\u4f55\u8ba1\u7b97\u6216\u7ed3\u679c\u89e3\u91ca\u3002")
-        st.table(pd.DataFrame(summary_rows))
-
-        st.markdown("**Level 3\uff08\u9884\u7559\uff09**")
-        st.info("Level 3 \u76ee\u524d\u4ec5\u4f5c\u4e3a\u9884\u7559\u533a\uff0c\u7528\u4e8e\u540e\u7eed 3 \u6c34\u5e73\u6269\u5c55\uff0c\u5f53\u524d\u4e0d\u89c6\u4e3a\u542f\u7528\u72b6\u6001\u3002")
-
-        st.markdown("**\u7ed3\u679c\u6c47\u603b\u9884\u7559\u533a**")
-        st.info("\u540e\u7eed\u5c06\u5728\u8fd9\u91cc\u653e\u7f6e\u5404\u6c34\u5e73\u7684\u6c47\u603b\u7ed3\u679c\u3001\u72b6\u6001\u63d0\u793a\u548c\u7b80\u8981\u5224\u8bfb\u5185\u5bb9\u3002")
-
-        st.markdown("**\u56fe\u8868 / \u8f93\u51fa\u9884\u7559\u533a**")
-        st.info("\u540e\u7eed\u5c06\u5728\u8fd9\u91cc\u653e\u7f6e\u56fe\u8868\u3001\u5bfc\u51fa\u548c\u8f93\u51fa\u5185\u5bb9\u3002\u76ee\u524d\u6682\u672a\u5b9e\u73b0\u3002")
-
-        with st.container():
-            st.markdown("**\u5f53\u524d\u72b6\u6001**")
-            st.write("Level 1 \u548c Level 2 \u88ab\u89c6\u4e3a\u540e\u7eed\u4e3b\u8981\u5de5\u4f5c\u6c34\u5e73\uff1bLevel 3 \u4ec5\u4e3a\u9884\u7559\u6269\u5c55\u533a\u3002\u7ba1\u7406\u3001\u8ba1\u7b97\u3001\u56fe\u8868\u4e0e\u8f93\u51fa\u76ee\u524d\u5747\u672a\u63a5\u5165\u3002")
+        st.divider()
+        st.markdown("**建靶状态说明**")
+        st.write(f"当前共享建靶状态：{shared_target_status}")
+        st.write("当前靶值可用性：未可用")
+        st.write("后续判读接入：未接入")
 
 
 def render_instant_placeholder_page() -> None:
