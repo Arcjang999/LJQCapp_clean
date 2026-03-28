@@ -41,6 +41,8 @@ STATUS_EDGE_COLORS = {
     "warning": "#f28e2b",
     "reject": "#e15759",
     "pending": "#7a8ca5",
+    "target_building": "#4e79a7",
+    "formal_qc": "#59a14f",
 }
 
 

@@ -6,7 +6,17 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 import pandas as pd
 
-from zscore_logic import build_zscore_rule_templates, evaluate_zscore_run
+from zscore_logic import (
+    PHASE_FORMAL_QC,
+    PHASE_TARGET_BUILDING,
+    build_level_target_profiles,
+    build_zscore_rule_templates,
+    determine_zscore_phase,
+    evaluate_zscore_run,
+    evaluate_zscore_run_with_phase,
+    get_phase_label,
+    should_enable_formal_rules,
+)
 from zscore_plotting import plot_zscore_overlay, plot_zscore_single_level
 
 
@@ -21,6 +31,7 @@ PLOT_COLUMNS = [
     "rule_hits",
     "raw_value",
     "log_value",
+    "phase",
     "is_preview",
 ]
 BASE_TIME = pd.Timestamp("2026-03-28 08:00:00")
@@ -57,6 +68,26 @@ def build_history_runs(template_id: str, history_zscores: list[dict[str, float]]
     return history_runs
 
 
+def build_phase_history_runs(
+    template_id: str,
+    history_zscores: list[dict[str, float]],
+    required_n: int,
+) -> list[dict[str, object]]:
+    history_runs: list[dict[str, object]] = []
+    for run_index, zscore_map in enumerate(history_zscores, start=1):
+        run = evaluate_zscore_run_with_phase(
+            make_level_results(template_id, zscore_map),
+            history_runs,
+            template_id,
+            required_n,
+        )
+        run["run_id"] = run_index
+        run["test_time"] = BASE_TIME + pd.Timedelta(hours=run_index)
+        run["operator"] = f"phase-tester-{run_index}"
+        history_runs.append(run)
+    return history_runs
+
+
 def evaluate_case(
     template_id: str,
     current_zscores: dict[str, float],
@@ -67,6 +98,25 @@ def evaluate_case(
     current_run["run_id"] = len(history_runs) + 1
     current_run["test_time"] = BASE_TIME + pd.Timedelta(hours=len(history_runs) + 1)
     current_run["operator"] = "current-user"
+    return current_run
+
+
+def evaluate_phase_case(
+    template_id: str,
+    current_zscores: dict[str, float],
+    history_zscores: list[dict[str, float]] | None = None,
+    required_n: int = 5,
+) -> dict[str, object]:
+    history_runs = build_phase_history_runs(template_id, history_zscores or [], required_n)
+    current_run = evaluate_zscore_run_with_phase(
+        make_level_results(template_id, current_zscores),
+        history_runs,
+        template_id,
+        required_n,
+    )
+    current_run["run_id"] = len(history_runs) + 1
+    current_run["test_time"] = BASE_TIME + pd.Timedelta(hours=len(history_runs) + 1)
+    current_run["operator"] = "phase-current-user"
     return current_run
 
 
@@ -103,6 +153,7 @@ def build_plot_df() -> pd.DataFrame:
                 "rule_hits": "",
                 "raw_value": raw_value,
                 "log_value": math.log10(raw_value),
+                "phase": PHASE_FORMAL_QC,
                 "is_preview": False,
             }
         )
@@ -116,6 +167,8 @@ def assert_is_figure(figure: object) -> None:
 def test_template_rule_sets() -> None:
     assert TEMPLATES["2_level_classic"]["rule_ids"] == ["1_2s", "1_3s", "2_2s", "R_4s", "4_1s", "10_x"]
     assert TEMPLATES["3_level_threes"]["rule_ids"] == ["1_2s", "1_3s", "2of3_2s", "R_4s", "3_1s", "12_x"]
+    assert TEMPLATES["2_level_classic"]["required_n"] == 5
+    assert TEMPLATES["3_level_threes"]["required_n"] == 5
 
 
 def test_2_level_1_2s_warning() -> None:
@@ -216,6 +269,78 @@ def test_3_level_12_x() -> None:
     assert run["run_status"] == "reject"
 
 
+def test_level_target_profiles_track_each_level_independently() -> None:
+    history_runs = build_phase_history_runs(
+        "2_level_classic",
+        [
+            {"Level 1": 0.1, "Level 2": -0.2},
+            {"Level 1": 0.3, "Level 2": 0.0},
+        ],
+        required_n=3,
+    )
+    profiles = build_level_target_profiles(history_runs, "2_level_classic", required_n=3)
+    level_1 = profiles["Level 1"]
+    assert level_1["collected_n"] == 2
+    assert level_1["required_n"] == 3
+    assert level_1["target_mean_provisional"] is not None
+    assert level_1["target_sd_provisional"] is not None
+    assert level_1["target_cv_provisional"] is not None
+    assert level_1["is_ready"] is False
+    assert level_1["phase"] == PHASE_TARGET_BUILDING
+
+
+def test_phase_stays_target_building_until_all_levels_ready() -> None:
+    target_profiles = {
+        "Level 1": {"is_ready": True},
+        "Level 2": {"is_ready": False},
+    }
+    assert should_enable_formal_rules(target_profiles, ["Level 1", "Level 2"]) is False
+    assert determine_zscore_phase(target_profiles, ["Level 1", "Level 2"]) == PHASE_TARGET_BUILDING
+    assert get_phase_label(PHASE_TARGET_BUILDING) == "建靶中"
+
+
+def test_target_building_run_does_not_trigger_formal_rules() -> None:
+    run = evaluate_phase_case(
+        "2_level_classic",
+        {"Level 1": 3.5, "Level 2": 0.0},
+        history_zscores=[
+            {"Level 1": 0.2, "Level 2": 0.1},
+            {"Level 1": 0.3, "Level 2": -0.1},
+        ],
+        required_n=3,
+    )
+    assert run["phase"] == PHASE_TARGET_BUILDING
+    assert run["run_status"] == PHASE_TARGET_BUILDING
+    assert run["formal_rules_enabled"] is False
+    assert run["rule_hits_run"] == []
+
+
+def test_formal_rules_enable_only_after_all_levels_ready() -> None:
+    history_runs = build_phase_history_runs(
+        "2_level_classic",
+        [
+            {"Level 1": -0.3, "Level 2": 0.1},
+            {"Level 1": 0.1, "Level 2": -0.2},
+            {"Level 1": 0.4, "Level 2": 0.3},
+        ],
+        required_n=3,
+    )
+    profiles = build_level_target_profiles(history_runs, "2_level_classic", required_n=3)
+    assert should_enable_formal_rules(profiles, ["Level 1", "Level 2"]) is True
+    assert determine_zscore_phase(profiles, ["Level 1", "Level 2"]) == PHASE_FORMAL_QC
+
+    run = evaluate_zscore_run_with_phase(
+        make_level_results("2_level_classic", {"Level 1": 3.2, "Level 2": 0.0}),
+        history_runs,
+        "2_level_classic",
+        required_n=3,
+    )
+    assert run["phase"] == PHASE_FORMAL_QC
+    assert run["formal_rules_enabled"] is True
+    assert "1_3s" in get_rule_ids(run)
+    assert run["run_status"] == "reject"
+
+
 def test_plotting_handles_empty_frames() -> None:
     bare_empty_df = pd.DataFrame()
     fixed_empty_df = pd.DataFrame(columns=PLOT_COLUMNS)
@@ -255,6 +380,10 @@ def run_all_tests() -> None:
         test_3_level_r_4s,
         test_3_level_3_1s,
         test_3_level_12_x,
+        test_level_target_profiles_track_each_level_independently,
+        test_phase_stays_target_building_until_all_levels_ready,
+        test_target_building_run_does_not_trigger_formal_rules,
+        test_formal_rules_enable_only_after_all_levels_ready,
         test_plotting_handles_empty_frames,
         test_plotting_single_level_returns_figure,
         test_plotting_overlay_returns_figure,

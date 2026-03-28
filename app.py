@@ -31,7 +31,16 @@ from database import (
 )
 from plotting import figure_to_png_bytes, plot_lj_chart
 from qc_logic import calculate_qc_results, calculate_realtime_stats, format_stats_message
-from zscore_logic import build_zscore_rule_templates, evaluate_zscore_run
+from zscore_logic import (
+    PHASE_FORMAL_QC,
+    PHASE_TARGET_BUILDING,
+    build_level_target_profiles,
+    build_zscore_rule_templates,
+    determine_zscore_phase,
+    evaluate_zscore_run_with_phase,
+    get_phase_label,
+    should_enable_formal_rules,
+)
 from zscore_plotting import plot_zscore_overlay, plot_zscore_single_level
 
 
@@ -773,6 +782,7 @@ def build_zscore_current_level_results(template: dict[str, Any]) -> tuple[list[d
 def build_zscore_plot_dataframe(
     saved_runs: list[dict[str, Any]],
     draft_run: dict[str, Any] | None = None,
+    display_phase: str | None = None,
 ) -> pd.DataFrame:
     expected_columns = [
         "run_id",
@@ -784,10 +794,14 @@ def build_zscore_plot_dataframe(
         "rule_hits",
         "raw_value",
         "log_value",
+        "phase",
         "is_preview",
     ]
     rows: list[dict[str, Any]] = []
     for run in saved_runs:
+        run_phase = str(run.get("phase", PHASE_TARGET_BUILDING))
+        if display_phase and run_phase != display_phase:
+            continue
         for level_result in run.get("level_results", []):
             zscore = level_result.get("zscore")
             if zscore is None:
@@ -803,11 +817,15 @@ def build_zscore_plot_dataframe(
                     "rule_hits": ",".join(level_result.get("rule_hits_local", [])),
                     "raw_value": level_result.get("raw_value"),
                     "log_value": level_result.get("log_value"),
+                    "phase": run_phase,
                     "is_preview": False,
                 }
             )
 
     if draft_run and draft_run.get("run_status") != "pending":
+        draft_phase = str(draft_run.get("phase", PHASE_TARGET_BUILDING))
+        if display_phase and draft_phase != display_phase:
+            return pd.DataFrame(rows, columns=expected_columns)
         preview_run_index = len(saved_runs) + 1
         for level_result in draft_run.get("level_results", []):
             zscore = level_result.get("zscore")
@@ -824,6 +842,7 @@ def build_zscore_plot_dataframe(
                     "rule_hits": ",".join(level_result.get("rule_hits_local", [])),
                     "raw_value": level_result.get("raw_value"),
                     "log_value": level_result.get("log_value"),
+                    "phase": draft_phase,
                     "is_preview": True,
                 }
             )
@@ -889,10 +908,17 @@ def render_zscore_chart_controls(
     return template_id, template, view_mode, selected_level
 
 
-def render_zscore_latest_analysis_panel(latest_run: dict[str, Any] | None) -> None:
+def render_zscore_latest_analysis_panel(
+    latest_run: dict[str, Any] | None,
+    overall_phase: str,
+    formal_rules_enabled: bool,
+) -> None:
     st.markdown("**最新结果分析**")
     if latest_run is None:
-        st.info("请先完整录入一个 run，右侧将显示 Z-score 判读结果。")
+        if overall_phase == PHASE_FORMAL_QC:
+            st.info("建靶已完成，正式规则已启用。请录入首个正式质控 run。")
+        else:
+            st.info("当前阶段为建靶中。请先录入 run，用于累计靶值与观察趋势。")
         return
 
     palette = {
@@ -900,10 +926,19 @@ def render_zscore_latest_analysis_panel(latest_run: dict[str, Any] | None) -> No
         "warning": {"background": "#fff6db", "border": "#edc948", "text": "#785b00", "badge": "#c89b00"},
         "reject": {"background": "#fdeaea", "border": "#e15759", "text": "#8f1f28", "badge": "#c23b3d"},
         "pending": {"background": "#f3f6fb", "border": "#7a8ca5", "text": "#31445a", "badge": "#58708f"},
+        PHASE_TARGET_BUILDING: {
+            "background": "#eef4fb",
+            "border": "#4e79a7",
+            "text": "#24476d",
+            "badge": "#4e79a7",
+        },
     }
-    status = str(latest_run.get("run_status", "pending"))
+    is_building_phase = (not formal_rules_enabled) or latest_run.get("phase") != PHASE_FORMAL_QC
+    status = PHASE_TARGET_BUILDING if is_building_phase else str(latest_run.get("run_status", "pending"))
     style = palette.get(status, palette["pending"])
     source_text = "当前输入预览" if latest_run.get("is_preview") else f"最近已保存 run #{latest_run.get('run_id', '-')}"
+    phase_label = str(latest_run.get("phase_label") or get_phase_label(latest_run.get("phase", overall_phase)))
+    badge_text = phase_label if is_building_phase else status
     html = dedent(
         f"""
         <div style="
@@ -922,15 +957,21 @@ def render_zscore_latest_analysis_panel(latest_run: dict[str, Any] | None) -> No
                     font-weight:700;
                     border-radius:999px;
                     padding:3px 9px;
-                ">{html_escape(status)}</span>
+                ">{html_escape(badge_text)}</span>
                 <span style="color:{style['text']};font-size:12px;font-weight:600;">
                     {html_escape(source_text)}
                 </span>
             </div>
             <div style="color:{style['text']};font-size:13px;line-height:1.55;">
-                <div><strong>触发规则：</strong>{html_escape(format_zscore_rule_hits(latest_run.get('rule_hits_run', [])))}</div>
-                <div><strong>误差类型提示：</strong>{html_escape(str(latest_run.get('error_type_hint', 'unknown')))}</div>
-                <div style="margin-top:6px;">{html_escape(str(latest_run.get('analysis_prompt', '暂无分析提示。')))}</div>
+                <div><strong>当前阶段：</strong>{html_escape(phase_label)}</div>
+                {
+                    '<div><strong>正式规则：</strong>当前仅用于累计靶值与观察趋势，暂不进行正式规则判读。</div>'
+                    '<div style="margin-top:6px;">当前阶段为建靶中，本次结果只作为建靶观察，不输出正式 warning / reject。</div>'
+                    if is_building_phase
+                    else f"<div><strong>触发规则：</strong>{html_escape(format_zscore_rule_hits(latest_run.get('rule_hits_run', [])))}</div>"
+                    f"<div><strong>误差类型提示：</strong>{html_escape(str(latest_run.get('error_type_hint', 'unknown')))}</div>"
+                    f"<div style=\"margin-top:6px;\">{html_escape(str(latest_run.get('analysis_prompt', '暂无分析提示。')))}</div>"
+                }
             </div>
         </div>
         """
@@ -938,15 +979,24 @@ def render_zscore_latest_analysis_panel(latest_run: dict[str, Any] | None) -> No
     render_html_block(html)
 
 
-def render_zscore_rules_config_expander(template: dict[str, Any]) -> None:
+def render_zscore_rules_config_expander(
+    template: dict[str, Any],
+    overall_phase: str,
+    formal_rules_enabled: bool,
+) -> None:
     with st.expander("规则模板说明（点击展开）", expanded=False):
         st.caption(template["note"])
         st.markdown(f"- 当前模板：`{template['label']}`")
-        st.markdown(f"- 当前启用规则：`{', '.join(template['rule_ids'])}`")
+        st.markdown(f"- 当前阶段：`{get_phase_label(overall_phase)}`")
+        st.markdown(f"- 正式规则启用：`{'是' if formal_rules_enabled else '否'}`")
+        if formal_rules_enabled:
+            st.markdown(f"- 当前启用规则：`{', '.join(template['rule_ids'])}`")
+        else:
+            st.markdown(f"- 模板规则预览：`{', '.join(template['rule_ids'])}`")
+            st.caption("当前处于建靶中，以下规则仅作为正式质控期启用前的模板预览。")
         for rule in template["rules"]:
-            st.markdown(
-                f"- `{rule['rule_id']}` | `{rule['severity']}` | `{rule['scope']}`"
-            )
+            prefix = "正式期规则预览" if not formal_rules_enabled else "规则"
+            st.markdown(f"- {prefix} `{rule['rule_id']}` | `{rule['severity']}` | `{rule['scope']}`")
 
 
 def render_batch_summary_row(batch) -> None:
@@ -1830,12 +1880,12 @@ def render_main_entry_page() -> None:
 
 def render_zscore_placeholder_page() -> None:
     st.subheader("Z-score")
-    st.caption("Z-score \u5f53\u524d\u4e3a\u72ec\u7acb MVR \u9875\u9762\uff0c\u5df2\u63a5\u5165\u6700\u5c0f\u89c4\u5219\u9aa8\u67b6\u4e0e\u53f3\u4fa7\u56fe\u8868\u6846\u67b6\uff0c\u5efa\u9776\u843d\u5e93\u4ecd\u7559\u5f85\u540e\u7eed\u63a5\u5165\u3002")
-    manage_tab, work_tab = st.tabs(["\u7ba1\u7406 / \u51c6\u5907", "\u5f53\u524d\u5de5\u4f5c\u533a"])
+    st.caption("Z-score 当前按 IQC 多水平流程运行，支持建靶期与正式质控期两阶段工作流。")
+    manage_tab, work_tab = st.tabs(["管理 / 准备", "当前工作区"])
 
     with manage_tab:
-        st.markdown("**\u7ba1\u7406\u4e0e\u51c6\u5907**")
-        st.caption("\u540e\u7eed\u5728\u8fd9\u91cc\u63a5\u5165\u9879\u76ee\u3001\u6279\u6b21\u4e0e\u5de5\u4f5c\u4e0a\u4e0b\u6587\u3002")
+        st.markdown("**管理与准备**")
+        st.caption("后续在这里接入项目、批次、target_n 配置与正式落库。")
 
     with work_tab:
         templates = build_zscore_rule_templates()
@@ -1850,7 +1900,7 @@ def render_zscore_placeholder_page() -> None:
         if "zscore_level3_value" not in st.session_state:
             st.session_state["zscore_level3_value"] = ""
         if "zscore_view_mode" not in st.session_state:
-            st.session_state["zscore_view_mode"] = "\u5355\u6c34\u5e73\u89c6\u56fe"
+            st.session_state["zscore_view_mode"] = "单水平视图"
         if "zscore_rule_template" not in st.session_state:
             st.session_state["zscore_rule_template"] = "2_level_classic"
         if "zscore_selected_level" not in st.session_state:
@@ -1880,7 +1930,7 @@ def render_zscore_placeholder_page() -> None:
         entry_col, chart_col = st.columns([1.0, 1.18], gap="large")
 
         with chart_col:
-            st.subheader("\u56fe\u8868\u4e0e\u5224\u8bfb")
+            st.subheader("图表与判读")
             template_id, template, view_mode, selected_level = render_zscore_chart_controls(
                 templates,
                 initial_template_id,
@@ -1888,8 +1938,14 @@ def render_zscore_placeholder_page() -> None:
 
         history_store = st.session_state["zscore_run_history"]
         history_runs = list(history_store.get(template_id, []))
+        required_n = int(template.get("required_n", 5))
+        level_target_profiles = build_level_target_profiles(history_runs, template_id, required_n)
+        overall_phase = determine_zscore_phase(level_target_profiles, template["level_ids"])
+        overall_phase_label = get_phase_label(overall_phase)
+        formal_rules_enabled = should_enable_formal_rules(level_target_profiles, template["level_ids"])
+
         current_level_results, input_errors, has_any_input = build_zscore_current_level_results(template)
-        draft_run = evaluate_zscore_run(current_level_results, history_runs, template_id)
+        draft_run = evaluate_zscore_run_with_phase(current_level_results, history_runs, template_id, required_n)
         draft_run["test_time"] = pd.Timestamp(st.session_state["zscore_entry_test_time"])
         draft_run["operator"] = str(st.session_state.get("zscore_entry_operator", "") or "").strip()
         draft_run["template_id"] = template_id
@@ -1897,21 +1953,21 @@ def render_zscore_placeholder_page() -> None:
         draft_run["is_preview"] = has_any_input
 
         with entry_col:
-            shared_target_status = "\u6a21\u677f\u9ed8\u8ba4\u9776\u503c"
-            st.subheader("\u5f55\u5165\u4e0e\u7edf\u8ba1")
-            st.caption("\u5de6\u4fa7\u4e13\u6ce8 run \u5f55\u5165\u4e0e Z-score \u5efa\u9776\u7edf\u8ba1\uff0c\u53f3\u4fa7\u7528\u4e8e\u56fe\u8868\u4e0e\u89c4\u5219\u5224\u8bfb\u3002")
-            st.caption(f"\u5f53\u524d\u6a21\u677f\uff1a{template['label']}\uff5c\u5171\u4eab\u5efa\u9776\u72b6\u6001\uff1a{shared_target_status}")
+            st.subheader("录入与统计")
+            st.caption(
+                f"当前模板：{template['label']}｜建靶门槛：每个 level 累计 {required_n} 次后进入正式质控。"
+            )
 
-            st.markdown("**\u672c\u6b21\u6570\u636e\u5f55\u5165**")
-            st.datetime_input("\u68c0\u6d4b\u65f6\u95f4", key="zscore_entry_test_time")
+            st.markdown("**本次数据录入**")
+            st.datetime_input("检测时间", key="zscore_entry_test_time")
             st.text_input(
-                "\u68c0\u6d4b\u4eba",
+                "检测人",
                 key="zscore_entry_operator",
-                placeholder="\u8bf7\u8f93\u5165\u672c\u6b21\u68c0\u6d4b\u4eba",
+                placeholder="请输入本次检测人",
             )
 
             st.divider()
-            st.markdown("**\u591a\u6c34\u5e73\u7ed3\u679c\u5f55\u5165**")
+            st.markdown("**多水平结果录入**")
             level_render_config = {
                 "Level 1": ("zscore_level1_value", "zscore-level1-log10-value", "zscore-level1-log10-hint"),
                 "Level 2": ("zscore_level2_value", "zscore-level2-log10-value", "zscore-level2-log10-hint"),
@@ -1926,21 +1982,21 @@ def render_zscore_placeholder_page() -> None:
                     hint_element_id=hint_element_id,
                 )
 
-            if st.button("\u4fdd\u5b58\u672c\u6b21\u68c0\u6d4b\u7ed3\u679c", type="primary", width="stretch"):
+            if st.button("保存本次检测结果", type="primary", width="stretch"):
                 validation_errors = list(input_errors)
                 cleaned_operator = str(st.session_state.get("zscore_entry_operator", "") or "").strip()
                 if st.session_state.get("zscore_entry_test_time") is None:
-                    validation_errors.append("\u8bf7\u586b\u5199\u68c0\u6d4b\u65f6\u95f4\u3002")
+                    validation_errors.append("请填写检测时间。")
                 if not cleaned_operator:
-                    validation_errors.append("\u8bf7\u586b\u5199\u68c0\u6d4b\u4eba\u3002")
+                    validation_errors.append("请填写检测人。")
                 for level_result in current_level_results:
                     if level_result["raw_value"] is None:
-                        validation_errors.append(f"{level_result['level_id']} \u68c0\u6d4b\u503c\u5fc5\u987b\u4e3a\u6709\u6548\u6b63\u6570\u3002")
+                        validation_errors.append(f"{level_result['level_id']} 检测值必须为有效正数。")
 
                 if validation_errors:
                     st.error("\n".join(dict.fromkeys(validation_errors)))
                 else:
-                    saved_run = evaluate_zscore_run(current_level_results, history_runs, template_id)
+                    saved_run = evaluate_zscore_run_with_phase(current_level_results, history_runs, template_id, required_n)
                     saved_run["run_id"] = len(history_runs) + 1
                     saved_run["test_time"] = pd.Timestamp(st.session_state["zscore_entry_test_time"])
                     saved_run["operator"] = cleaned_operator
@@ -1953,49 +2009,91 @@ def render_zscore_placeholder_page() -> None:
                     st.rerun()
 
             st.divider()
-            st.markdown("**\u5efa\u9776\u7edf\u8ba1**")
+            st.markdown("**各 Level 建靶统计**")
             stat_cols = st.columns(len(template["level_ids"]), gap="large")
             for stat_col, level_id in zip(stat_cols, template["level_ids"]):
-                target_info = template["default_targets"][level_id]
+                profile = level_target_profiles[level_id]
                 with stat_col:
                     st.markdown(f"**{level_id}**")
                     render_compact_stat_metrics(
                         [
-                            ("Mean", f"{target_info['target_mean']:.4f}"),
-                            ("SD", f"{target_info['target_sd']:.4f}"),
-                            ("CV%", f"{target_info['target_cv']:.2f}%"),
+                            ("已收集", f"{profile['collected_n']}"),
+                            ("required_n", f"{profile['required_n']}"),
+                            (
+                                "暂定 Mean",
+                                "-" if profile["target_mean_provisional"] is None else f"{profile['target_mean_provisional']:.4f}",
+                            ),
+                            (
+                                "暂定 SD",
+                                "-" if profile["target_sd_provisional"] is None else f"{profile['target_sd_provisional']:.4f}",
+                            ),
+                            (
+                                "暂定 CV%",
+                                "-" if profile["target_cv_provisional"] is None else f"{profile['target_cv_provisional']:.2f}%",
+                            ),
                         ]
                     )
+                    if profile["is_ready"]:
+                        st.caption(
+                            "当前阶段："
+                            f"{profile['phase_label']}｜正式 Mean / SD / CV%："
+                            f"{profile['target_mean_final']:.4f} / {profile['target_sd_final']:.4f} / {profile['target_cv_final']:.2f}%"
+                        )
+                    else:
+                        st.caption(f"当前阶段：{profile['phase_label']}｜正式靶值：待达到门槛后建立")
 
             st.divider()
-            st.markdown("**\u5efa\u9776\u72b6\u6001\u8bf4\u660e**")
-            st.write(f"\u5f53\u524d\u5171\u4eab\u5efa\u9776\u72b6\u6001\uff1a{shared_target_status}")
-            st.write("\u5f53\u524d\u9776\u503c\u53ef\u7528\u6027\uff1a\u6a21\u677f\u9ed8\u8ba4\u503c\uff08\u4e34\u65f6\u53ef\u7528\uff09")
-            st.write("\u540e\u7eed\u5224\u8bfb\u63a5\u5165\uff1aMVR \u89c4\u5219\u5df2\u63a5\u5165")
+            st.markdown("**总体阶段状态**")
+            render_compact_stat_metrics(
+                [
+                    ("当前阶段", overall_phase_label),
+                    ("全部 Level 已完成", "是" if formal_rules_enabled else "否"),
+                    ("正式规则已启用", "是" if formal_rules_enabled else "否"),
+                ]
+            )
+            st.write(
+                "当前工作区已进入正式质控，后续 run 将按正式规则模板判读。"
+                if formal_rules_enabled
+                else "当前仍处于建靶中，当前 run 仅用于累计靶值与观察趋势。"
+            )
 
         plot_df = build_zscore_plot_dataframe(
             history_runs,
             draft_run if draft_run.get("is_preview") and draft_run.get("run_status") != "pending" else None,
+            display_phase=overall_phase,
         )
-        latest_run = draft_run if draft_run.get("is_preview") else (history_runs[-1] if history_runs else None)
+        formal_history_runs = [run for run in history_runs if str(run.get("phase")) == PHASE_FORMAL_QC]
+        if draft_run.get("is_preview"):
+            latest_run = draft_run
+        elif overall_phase == PHASE_FORMAL_QC:
+            latest_run = formal_history_runs[-1] if formal_history_runs else None
+        else:
+            latest_run = history_runs[-1] if history_runs else None
 
         with chart_col:
-            if view_mode == "\u5355\u6c34\u5e73\u89c6\u56fe":
+            if view_mode == "单水平视图":
                 figure = plot_zscore_single_level(
                     plot_df=plot_df,
                     level_id=selected_level,
-                    title=f"\u5355 Level Z-score \u56fe\uff5c{selected_level}",
+                    title=(
+                        f"单 Level 建靶观察图｜{selected_level}"
+                        if overall_phase == PHASE_TARGET_BUILDING
+                        else f"单 Level 正式 Z-score 图｜{selected_level}"
+                    ),
                 )
             else:
                 figure = plot_zscore_overlay(
                     plot_df=plot_df,
-                    title=f"\u5408\u5e76 Z-score / SDI \u89c6\u56fe\uff5c{template['label']}",
+                    title=(
+                        f"合并建靶观察图｜{template['label']}"
+                        if overall_phase == PHASE_TARGET_BUILDING
+                        else f"合并 Z-score / SDI 视图｜{template['label']}"
+                    ),
                     active_levels=template["level_ids"],
                 )
             st.pyplot(figure, clear_figure=False, width="stretch")
-            render_zscore_latest_analysis_panel(latest_run)
-            render_zscore_rules_config_expander(template)
-
+            render_zscore_latest_analysis_panel(latest_run, overall_phase, formal_rules_enabled)
+            render_zscore_rules_config_expander(template, overall_phase, formal_rules_enabled)
 
 def render_instant_placeholder_page() -> None:
     st.subheader("Instant")

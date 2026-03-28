@@ -6,6 +6,14 @@ import math
 from typing import Any
 
 
+PHASE_TARGET_BUILDING = "target_building"
+PHASE_FORMAL_QC = "formal_qc"
+
+PHASE_LABELS = {
+    PHASE_TARGET_BUILDING: "建靶中",
+    PHASE_FORMAL_QC: "正式质控",
+}
+
 RULE_PRIORITY = {
     "1_3s": 1,
     "R_4s": 2,
@@ -39,49 +47,49 @@ RULE_DEFINITIONS = {
         rule_id="1_2s",
         severity="warning",
         scope="within-run / within-level",
-        description="当前 run 单水平超出 ±2SD，作为警告信号。",
+        description="当前 run 单水平超过 ±2SD，作为警告信号。",
         error_bias="warning",
     ),
     "1_3s": ZScoreRuleDefinition(
         rule_id="1_3s",
         severity="reject",
         scope="within-run / within-level",
-        description="当前 run 单水平超出 ±3SD，提示明显随机误差风险。",
+        description="当前 run 单水平超过 ±3SD，提示明显随机误差风险。",
         error_bias="random",
     ),
     "2_2s": ZScoreRuleDefinition(
         rule_id="2_2s",
         severity="reject",
         scope="across-run / within-level",
-        description="同一水平连续 2 次位于均值同侧且超出 ±2SD。",
+        description="同一水平连续 2 次位于均值同侧且超过 ±2SD。",
         error_bias="systematic",
     ),
     "2of3_2s": ZScoreRuleDefinition(
         rule_id="2of3_2s",
         severity="reject",
         scope="within-run / across-level",
-        description="3 水平同一次 run 中有 2 个结果位于均值同侧且超出 ±2SD。",
+        description="3 水平同一 run 中有 2 个结果位于均值同侧且超过 ±2SD。",
         error_bias="systematic",
     ),
     "R_4s": ZScoreRuleDefinition(
         rule_id="R_4s",
         severity="reject",
         scope="within-run / across-level",
-        description="同一次 run 内至少 2 个水平相差超过 4SD，且方向相反。",
+        description="同一 run 内至少 2 个水平相差超过 4SD，且方向相反。",
         error_bias="random",
     ),
     "4_1s": ZScoreRuleDefinition(
         rule_id="4_1s",
         severity="reject",
         scope="across-run / within-level",
-        description="同一水平连续 4 次位于均值同侧且超出 ±1SD。",
+        description="同一水平连续 4 次位于均值同侧且超过 ±1SD。",
         error_bias="systematic",
     ),
     "3_1s": ZScoreRuleDefinition(
         rule_id="3_1s",
         severity="reject",
         scope="within-run / across-level",
-        description="3 水平同一次 run 全部位于均值同侧且超出 ±1SD。",
+        description="3 水平同一 run 全部位于均值同侧且超过 ±1SD。",
         error_bias="systematic",
     ),
     "10_x": ZScoreRuleDefinition(
@@ -101,6 +109,10 @@ RULE_DEFINITIONS = {
 }
 
 
+def get_phase_label(phase: str) -> str:
+    return PHASE_LABELS.get(str(phase), str(phase))
+
+
 def compute_zscore(raw_value: float | None, target_mean: float | None, target_sd: float | None) -> float | None:
     if raw_value is None or target_mean is None or target_sd is None:
         return None
@@ -111,25 +123,56 @@ def compute_zscore(raw_value: float | None, target_mean: float | None, target_sd
     return float((raw_value - target_mean) / target_sd)
 
 
+def calculate_level_target_stats(raw_values: list[float]) -> dict[str, Any]:
+    cleaned_values = [float(value) for value in raw_values if value is not None and math.isfinite(float(value))]
+    if not cleaned_values:
+        return {
+            "count": 0,
+            "target_mean": None,
+            "target_sd": None,
+            "target_cv": None,
+        }
+
+    mean_value = float(sum(cleaned_values) / len(cleaned_values))
+    if len(cleaned_values) >= 2:
+        variance = sum((value - mean_value) ** 2 for value in cleaned_values) / (len(cleaned_values) - 1)
+        sd_value = math.sqrt(variance)
+    else:
+        sd_value = None
+    cv_value = (
+        float(sd_value / mean_value * 100)
+        if sd_value is not None and not math.isclose(mean_value, 0.0, abs_tol=1e-12)
+        else None
+    )
+    return {
+        "count": len(cleaned_values),
+        "target_mean": mean_value,
+        "target_sd": float(sd_value) if sd_value is not None else None,
+        "target_cv": cv_value,
+    }
+
+
 def build_zscore_rule_templates() -> dict[str, dict[str, Any]]:
     template_specs = {
         "2_level_classic": {
             "label": "2-level classic",
             "level_ids": ["Level 1", "Level 2"],
             "rule_ids": ["1_2s", "1_3s", "2_2s", "R_4s", "4_1s", "10_x"],
-            "note": "经典 2 水平 multirule 骨架，重点保留 across-run within-level 判读。",
+            "required_n": 5,
+            "note": "两水平模板使用 classic multirule 组合，正式规则只对正式质控期生效。",
         },
         "3_level_threes": {
             "label": "3-level threes",
             "level_ids": ["Level 1", "Level 2", "Level 3"],
             "rule_ids": ["1_2s", "1_3s", "2of3_2s", "R_4s", "3_1s", "12_x"],
-            "note": "3 水平模板显式采用 within-run across-level 规则，不直接照搬 classic 2-level 组合。",
+            "required_n": 5,
+            "note": "三水平模板采用 3-level 规则骨架，避免直接套用 2-level classic 组合。",
         },
     }
 
     templates: dict[str, dict[str, Any]] = {}
     for template_id, spec in template_specs.items():
-        target_map: dict[str, dict[str, float]] = {}
+        target_map: dict[str, dict[str, float | None]] = {}
         for level_id in spec["level_ids"]:
             target_mean = float(DEFAULT_TARGETS[level_id]["target_mean"])
             target_sd = float(DEFAULT_TARGETS[level_id]["target_sd"])
@@ -145,19 +188,132 @@ def build_zscore_rule_templates() -> dict[str, dict[str, Any]]:
             "rule_ids": list(spec["rule_ids"]),
             "rules": [rule_to_dict(RULE_DEFINITIONS[rule_id]) for rule_id in spec["rule_ids"]],
             "default_targets": target_map,
+            "required_n": int(spec["required_n"]),
             "note": spec["note"],
         }
     return deepcopy(templates)
+
+
+def build_level_target_profiles(
+    history_runs: list[dict[str, Any]],
+    template_id: str,
+    required_n: int | None = None,
+) -> dict[str, dict[str, Any]]:
+    templates = build_zscore_rule_templates()
+    template = templates[template_id]
+    target_n = int(required_n or template.get("required_n") or 5)
+
+    target_profiles: dict[str, dict[str, Any]] = {}
+    for level_id in template["level_ids"]:
+        building_values: list[float] = []
+        for run in history_runs:
+            if _normalize_run_phase(run.get("phase")) != PHASE_TARGET_BUILDING:
+                continue
+            raw_value = _get_level_raw_value(run, level_id)
+            if raw_value is None:
+                continue
+            building_values.append(float(raw_value))
+
+        provisional_stats = calculate_level_target_stats(building_values)
+        final_stats = calculate_level_target_stats(building_values[:target_n]) if len(building_values) >= target_n else {
+            "target_mean": None,
+            "target_sd": None,
+            "target_cv": None,
+        }
+        is_ready = len(building_values) >= target_n and final_stats["target_sd"] is not None
+        phase = PHASE_FORMAL_QC if is_ready else PHASE_TARGET_BUILDING
+        target_profiles[level_id] = {
+            "level_id": level_id,
+            "phase": phase,
+            "phase_label": get_phase_label(phase),
+            "target_mean_provisional": provisional_stats["target_mean"],
+            "target_sd_provisional": provisional_stats["target_sd"],
+            "target_cv_provisional": provisional_stats["target_cv"],
+            "target_mean_final": final_stats["target_mean"] if is_ready else None,
+            "target_sd_final": final_stats["target_sd"] if is_ready else None,
+            "target_cv_final": final_stats["target_cv"] if is_ready else None,
+            "collected_n": len(building_values),
+            "required_n": target_n,
+            "is_ready": is_ready,
+        }
+    return target_profiles
+
+
+def should_enable_formal_rules(
+    target_profiles: dict[str, dict[str, Any]],
+    required_level_ids: list[str] | None = None,
+) -> bool:
+    level_ids = required_level_ids or list(target_profiles.keys())
+    if not level_ids:
+        return False
+    return all(bool(target_profiles.get(level_id, {}).get("is_ready")) for level_id in level_ids)
+
+
+def determine_zscore_phase(
+    target_profiles: dict[str, dict[str, Any]],
+    required_level_ids: list[str] | None = None,
+) -> str:
+    return PHASE_FORMAL_QC if should_enable_formal_rules(target_profiles, required_level_ids) else PHASE_TARGET_BUILDING
+
+
+def evaluate_zscore_run_with_phase(
+    level_results: list[dict[str, Any]],
+    history_runs: list[dict[str, Any]],
+    template_id: str,
+    required_n: int | None = None,
+) -> dict[str, Any]:
+    templates = build_zscore_rule_templates()
+    template = templates[template_id]
+    target_profiles = build_level_target_profiles(history_runs, template_id, required_n)
+    current_phase = determine_zscore_phase(target_profiles, template["level_ids"])
+    formal_rules_enabled = should_enable_formal_rules(target_profiles, template["level_ids"])
+    formal_history_runs = [
+        deepcopy(run) for run in history_runs if _normalize_run_phase(run.get("phase")) == PHASE_FORMAL_QC
+    ]
+
+    current_run = evaluate_zscore_run(
+        level_results=level_results,
+        history_runs=formal_history_runs if formal_rules_enabled else [],
+        template_id=template_id,
+        target_profiles=target_profiles,
+    )
+    current_run["phase"] = current_phase
+    current_run["phase_label"] = get_phase_label(current_phase)
+    current_run["formal_rules_enabled"] = formal_rules_enabled
+    current_run["target_profiles"] = deepcopy(target_profiles)
+
+    if current_run["run_status"] == "pending":
+        return current_run
+
+    if not formal_rules_enabled:
+        current_run["run_status"] = PHASE_TARGET_BUILDING
+        current_run["rule_hits_run"] = []
+        current_run["error_type_hint"] = "not_applicable"
+        current_run["analysis_prompt"] = "当前阶段为建靶中，本次 run 仅累计靶值，不进行正式规则判读。"
+        for level_result in current_run["level_results"]:
+            level_result["rule_hits_local"] = []
+            level_result["status"] = PHASE_TARGET_BUILDING
+        return current_run
+
+    current_run["analysis_prompt"] = build_zscore_analysis_prompt(
+        current_run["run_status"],
+        current_run["rule_hits_run"],
+        current_run["error_type_hint"],
+        phase=current_phase,
+    )
+    return current_run
 
 
 def evaluate_zscore_run(
     level_results: list[dict[str, Any]],
     history_runs: list[dict[str, Any]],
     template_id: str,
+    target_profiles: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     templates = build_zscore_rule_templates()
     template = templates[template_id]
-    current_run = _build_run_shell(level_results, template, history_runs)
+    current_phase = determine_zscore_phase(target_profiles or {}, template["level_ids"]) if target_profiles else PHASE_FORMAL_QC
+    current_run = _build_run_shell(level_results, template, history_runs, target_profiles, current_phase)
     if current_run["run_status"] == "pending":
         return current_run
 
@@ -172,6 +328,7 @@ def evaluate_zscore_run(
         current_run["run_status"],
         current_run["rule_hits_run"],
         current_run["error_type_hint"],
+        phase=current_phase,
     )
 
     for level_result in current_run["level_results"]:
@@ -195,9 +352,16 @@ def classify_zscore_error_type(rule_hits: list[dict[str, Any]]) -> str:
     return "mixed"
 
 
-def build_zscore_analysis_prompt(status: str, rule_hits: list[dict[str, Any]], error_type_hint: str) -> str:
+def build_zscore_analysis_prompt(
+    status: str,
+    rule_hits: list[dict[str, Any]],
+    error_type_hint: str,
+    phase: str = PHASE_FORMAL_QC,
+) -> str:
     if status == "pending":
-        return "请完整录入当前模板要求的所有水平结果后再进行判读。"
+        return "请完整录入当前模板要求的所有水平结果后再进行分析。"
+    if phase != PHASE_FORMAL_QC:
+        return "当前阶段为建靶中，仅用于累计靶值与观察趋势，不进行正式规则判读。"
     if status == "accept":
         return "当前 run 未触发已启用的 Z-score 规则，可继续观察后续趋势。"
     if status == "warning":
@@ -260,7 +424,7 @@ def rule_2_2s(level_results: list[dict[str, Any]], history_runs: list[dict[str, 
                 _make_rule_hit(
                     "2_2s",
                     [level_result["level_id"]],
-                    f"{level_result['level_id']} \u8fde\u7eed 2 \u6b21\u540c\u4fa7\u8d85 2SD",
+                    f"{level_result['level_id']} 连续 2 次同侧超 2SD",
                 )
             )
     return hits
@@ -272,9 +436,9 @@ def rule_2of3_2s(level_results: list[dict[str, Any]], history_runs: list[dict[st
     positive_levels = [level_id for level_id, value in zscores.items() if value is not None and value >= 2]
     negative_levels = [level_id for level_id, value in zscores.items() if value is not None and value <= -2]
     if len(positive_levels) >= 2:
-        return [_make_rule_hit("2of3_2s", positive_levels, "\u5f53\u524d run \u4e2d 2/3 \u6c34\u5e73\u540c\u4fa7\u8d85 2SD")]
+        return [_make_rule_hit("2of3_2s", positive_levels, "当前 run 中 2/3 水平同侧超 2SD")]
     if len(negative_levels) >= 2:
-        return [_make_rule_hit("2of3_2s", negative_levels, "\u5f53\u524d run \u4e2d 2/3 \u6c34\u5e73\u540c\u4fa7\u8d85 2SD")]
+        return [_make_rule_hit("2of3_2s", negative_levels, "当前 run 中 2/3 水平同侧超 2SD")]
     return []
 
 
@@ -294,7 +458,7 @@ def rule_R_4s(level_results: list[dict[str, Any]], history_runs: list[dict[str, 
         _make_rule_hit(
             "R_4s",
             [min_result["level_id"], max_result["level_id"]],
-            f"{min_result['level_id']} / {max_result['level_id']} within-run \u5dee\u503c\u8d85 4SD",
+            f"{min_result['level_id']} / {max_result['level_id']} within-run 差值超 4SD",
         )
     ]
 
@@ -309,7 +473,7 @@ def rule_3_1s(level_results: list[dict[str, Any]], history_runs: list[dict[str, 
     if len(zscores) < 3 or any(zscore is None for zscore in zscores):
         return []
     if all(zscore >= 1 for zscore in zscores) or all(zscore <= -1 for zscore in zscores):
-        return [_make_rule_hit("3_1s", [level_result["level_id"] for level_result in level_results], "3 \u6c34\u5e73 within-run \u540c\u4fa7\u8d85 1SD")]
+        return [_make_rule_hit("3_1s", [level_result["level_id"] for level_result in level_results], "3 水平 within-run 同侧超 1SD")]
     return []
 
 
@@ -348,22 +512,28 @@ def _build_run_shell(
     level_results: list[dict[str, Any]],
     template: dict[str, Any],
     history_runs: list[dict[str, Any]],
+    target_profiles: dict[str, dict[str, Any]] | None = None,
+    phase: str = PHASE_FORMAL_QC,
 ) -> dict[str, Any]:
     input_map = {str(item.get("level_id")): deepcopy(item) for item in level_results}
     normalized_results = []
     for level_id in template["level_ids"]:
         default_target = template["default_targets"][level_id]
+        target_profile = deepcopy((target_profiles or {}).get(level_id, {}))
+        target_mean, target_sd = _resolve_level_target_reference(target_profile, default_target, phase)
         current = {
             "level_id": level_id,
             "raw_value": None,
             "log_value": None,
-            "target_mean": default_target["target_mean"],
-            "target_sd": default_target["target_sd"],
-            "zscore": None,
+            "target_mean": target_mean,
+            "target_sd": target_sd,
+            "target_phase": target_profile.get("phase", PHASE_FORMAL_QC if target_profiles else phase),
             "rule_hits_local": [],
             "status": "pending",
         }
         current.update(input_map.get(level_id, {}))
+        current["target_mean"] = target_mean
+        current["target_sd"] = target_sd
         raw_value = current.get("raw_value")
         if raw_value is not None and current.get("log_value") is None and raw_value > 0:
             current["log_value"] = math.log10(raw_value)
@@ -372,14 +542,15 @@ def _build_run_shell(
             current.get("target_mean"),
             current.get("target_sd"),
         )
-        current["status"] = "accept" if current["zscore"] is not None else "pending"
+        current["status"] = "accept" if current["raw_value"] is not None else "pending"
         normalized_results.append(current)
 
-    run_status = "accept" if all(result["zscore"] is not None for result in normalized_results) else "pending"
+    has_all_values = all(result["raw_value"] is not None for result in normalized_results)
+    run_status = "accept" if has_all_values else "pending"
     analysis_prompt = (
-        "请完整录入当前模板要求的所有水平结果后再进行判读。"
+        "请完整录入当前模板要求的所有水平结果后再进行分析。"
         if run_status == "pending"
-        else "当前 run 未触发已启用的 Z-score 规则，可继续观察后续趋势。"
+        else build_zscore_analysis_prompt(run_status, [], "unknown", phase=phase)
     )
     return {
         "run_id": len(history_runs) + 1,
@@ -388,10 +559,14 @@ def _build_run_shell(
         "template_id": template["template_id"],
         "template_label": template["label"],
         "level_results": normalized_results,
+        "phase": phase,
+        "phase_label": get_phase_label(phase),
         "run_status": run_status,
         "rule_hits_run": [],
         "error_type_hint": "unknown",
         "analysis_prompt": analysis_prompt,
+        "formal_rules_enabled": phase == PHASE_FORMAL_QC,
+        "target_profiles": deepcopy(target_profiles or {}),
     }
 
 
@@ -445,7 +620,7 @@ def _run_length_rule(
                 _make_rule_hit(
                     rule_id,
                     [level_result["level_id"]],
-                    f"{level_result['level_id']} \u8fde\u7eed {lookback} \u6b21\u540c\u4fa7\u8d85 {threshold:g}SD",
+                    f"{level_result['level_id']} 连续 {lookback} 次同侧超 {threshold:g}SD",
                 )
             )
     return hits
@@ -470,7 +645,7 @@ def _x_rule(
                 _make_rule_hit(
                     rule_id,
                     [level_result["level_id"]],
-                    f"{level_result['level_id']} \u8fde\u7eed {lookback} \u6b21\u4f4d\u4e8e\u5747\u503c\u540c\u4fa7",
+                    f"{level_result['level_id']} 连续 {lookback} 次位于均值同侧",
                 )
             )
     return hits
@@ -506,3 +681,41 @@ def _derive_run_status(rule_hits: list[dict[str, Any]]) -> str:
     if any(hit["severity"] == "warning" for hit in rule_hits):
         return "warning"
     return "accept"
+
+
+def _normalize_run_phase(phase: Any) -> str:
+    normalized = str(phase or PHASE_TARGET_BUILDING)
+    if normalized not in {PHASE_TARGET_BUILDING, PHASE_FORMAL_QC}:
+        return PHASE_TARGET_BUILDING
+    return normalized
+
+
+def _get_level_raw_value(run: dict[str, Any], level_id: str) -> float | None:
+    for level_result in run.get("level_results", []):
+        if level_result.get("level_id") == level_id:
+            raw_value = level_result.get("raw_value")
+            if raw_value is None:
+                return None
+            return float(raw_value)
+    return None
+
+
+def _resolve_level_target_reference(
+    target_profile: dict[str, Any],
+    default_target: dict[str, Any],
+    phase: str,
+) -> tuple[float | None, float | None]:
+    if phase == PHASE_FORMAL_QC:
+        final_mean = target_profile.get("target_mean_final")
+        final_sd = target_profile.get("target_sd_final")
+        if final_mean is not None and final_sd is not None:
+            return float(final_mean), float(final_sd)
+
+    provisional_mean = target_profile.get("target_mean_provisional")
+    provisional_sd = target_profile.get("target_sd_provisional")
+    if provisional_mean is not None and provisional_sd is not None:
+        return float(provisional_mean), float(provisional_sd)
+
+    if phase == PHASE_FORMAL_QC:
+        return float(default_target["target_mean"]), float(default_target["target_sd"])
+    return provisional_mean, provisional_sd
