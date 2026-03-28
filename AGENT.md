@@ -279,3 +279,10 @@ When tradeoffs appear, prioritize in this order:
 6. improve elegance
 
 Stable and reviewable is better than clever and broad.
+
+## QC domain rules
+- Z-score in this app follows the QC workflow, not a generic manual calculator model.
+- Raw QC results are entered first.
+- Target mean and target SD are derived from target establishment.
+- Target-establishment status is batch-level, not level-level.
+- Level 1 and Level 2 are the primary working levels; Level 3 is reserved.

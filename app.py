@@ -1473,8 +1473,14 @@ def render_lj_page(
             csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
             xlsx_bytes = dataframe_to_xlsx_bytes(export_df)
             png_bytes = figure_to_png_bytes(figure)
-            project_name_fragment = build_safe_export_name(batch.get("project_name"), "project")
-            lot_no_fragment = build_safe_export_name(batch.get("lot_no"), f"batch_{batch['id']}")
+            project_name_fragment = build_safe_export_name(
+                batch["project_name"] if "project_name" in batch.keys() else None,
+                "project",
+            )
+            lot_no_fragment = build_safe_export_name(
+                batch["lot_no"] if "lot_no" in batch.keys() else None,
+                f"batch_{batch['id']}",
+            )
 
             st.markdown("**\u5f53\u524d\u6279\u6b21\u5bfc\u51fa**")
             export_format = st.radio(
@@ -1611,14 +1617,69 @@ def render_zscore_placeholder_page() -> None:
         st.caption("\u8fd9\u91cc\u9884\u7559\u7ed9\u540e\u7eed Z-score \u7684\u5f53\u524d\u5de5\u4f5c\u89c6\u56fe\uff0c\u4f46\u76ee\u524d\u4ecd\u4fdd\u6301\u4e3a\u9759\u6001\u7ed3\u6784\u3002")
         st.info("\u8be5\u5de5\u4f5c\u533a\u6309\u7167\u540e\u7eed 2 \u6c34\u5e73 / 3 \u6c34\u5e73 Z-score \u65b9\u5411\u9884\u7559\uff0c\u4f46\u76ee\u524d\u4ecd\u4e0d\u5305\u542b\u8ba1\u7b97\u3001\u7ba1\u7406\u6216\u8f93\u51fa\u903b\u8f91\u3002")
 
-        level_one_col, level_two_col = st.columns(2)
-        with level_one_col:
-            st.markdown("**Level 1**")
-            st.info("\u8fd9\u91cc\u9884\u7559\u7ed9\u540e\u7eed Level 1 \u7684\u8f93\u5165\u3001\u8ba1\u7b97\u4e0e\u7ed3\u679c\u5c55\u793a\u533a\u57df\u3002")
+        shared_target_status = "\u5f85\u540e\u7eed\u63a5\u5165"
+        st.markdown("**\u5f53\u524d\u6279\u6b21 / \u5f53\u524d\u5de5\u4f5c\u5efa\u9776\u72b6\u6001**")
+        st.caption("\u8be5\u72b6\u6001\u4e3a\u5f53\u524d\u6279\u6b21 / \u5f53\u524d\u5de5\u4f5c\u533a\u7ea7\u522b\u7684\u5171\u4eab\u5efa\u9776\u72b6\u6001\uff0c\u4e0d\u6309 Level \u5355\u72ec\u533a\u5206\u3002")
+        st.write(shared_target_status)
 
-        with level_two_col:
-            st.markdown("**Level 2**")
-            st.info("\u8fd9\u91cc\u9884\u7559\u7ed9\u540e\u7eed Level 2 \u7684\u8f93\u5165\u3001\u8ba1\u7b97\u4e0e\u7ed3\u679c\u5c55\u793a\u533a\u57df\u3002")
+        level_configs = [
+            ("Level 1", "zscore_level1_result"),
+            ("Level 2", "zscore_level2_result"),
+        ]
+
+        with st.container():
+            st.markdown("**\u5f53\u524d\u68c0\u6d4b\u8bb0\u5f55**")
+            st.caption("\u5f53\u524d\u9875\u9762\u6309\u4e00\u6b21\u68c0\u6d4b / \u4e00\u6761\u8bb0\u5f55\u5305\u542b\u591a\u4e2a\u6c34\u5e73\u7ed3\u679c\u7684\u7ed3\u6784\u9884\u7559\uff1b\u68c0\u6d4b\u65f6\u95f4\u3001\u68c0\u6d4b\u4eba\u4e0e\u5404\u6c34\u5e73\u7ed3\u679c\u5c5e\u4e8e\u540c\u4e00\u6761\u8fd0\u884c\u8bb0\u5f55\u3002")
+
+            run_meta_col1, run_meta_col2 = st.columns(2)
+            with run_meta_col1:
+                st.markdown("**\u68c0\u6d4b\u65f6\u95f4**")
+                st.write("-")
+            with run_meta_col2:
+                st.markdown("**\u68c0\u6d4b\u4eba**")
+                st.write("-")
+
+            st.markdown("**\u672c\u6b21\u68c0\u6d4b\u591a\u6c34\u5e73\u7ed3\u679c**")
+            st.caption("\u4ee5\u4e0b\u5404\u6c34\u5e73\u4f5c\u4e3a\u540c\u4e00\u6761\u68c0\u6d4b\u8bb0\u5f55\u5185\u7684\u7ed3\u679c\u884c\u663e\u793a\uff1b\u68c0\u6d4b\u7ed3\u679c\u4e3a\u5f53\u524d\u53ef\u5f55\u5165\u9879\uff0c\u9776\u503c\u76f8\u5173\u5b57\u6bb5\u6682\u4ee5\u53ea\u8bfb\u5360\u4f4d\u663e\u793a\u3002")
+
+            header_cols = st.columns([1.0, 2.2, 1.2, 1.2, 0.9])
+            header_cols[0].markdown("**\u6c34\u5e73**")
+            header_cols[1].markdown("**\u68c0\u6d4b\u7ed3\u679c**")
+            header_cols[2].markdown("**\u76ee\u6807\u5747\u503c**")
+            header_cols[3].markdown("**\u76ee\u6807\u6807\u51c6\u5dee**")
+            header_cols[4].markdown("**CV%**")
+
+            for level_label, result_key in level_configs:
+                row_cols = st.columns([1.0, 2.2, 1.2, 1.2, 0.9])
+                row_cols[0].write(level_label)
+                with row_cols[1]:
+                    st.text_input(
+                        f"{level_label} \u68c0\u6d4b\u7ed3\u679c",
+                        key=result_key,
+                        label_visibility="collapsed",
+                    )
+                row_cols[2].write("-")
+                row_cols[3].write("-")
+                row_cols[4].write("-")
+
+        summary_rows: list[dict[str, str]] = []
+        for level_label, result_key in level_configs:
+            raw_result = (st.session_state.get(result_key, "") or "").strip()
+            raw_result_status = "\u5df2\u5f55\u5165" if raw_result else "\u672a\u586b\u5199"
+
+            summary_rows.append(
+                {
+                    "\u6c34\u5e73": level_label,
+                    "\u68c0\u6d4b\u7ed3\u679c": raw_result or "-",
+                    "\u539f\u59cb\u7ed3\u679c\u72b6\u6001": raw_result_status,
+                    "\u5f53\u524d\u5de5\u4f5c\u533a\u5efa\u9776\u72b6\u6001": shared_target_status,
+                    "\u5df2\u5efa\u7acb\u9776\u503c\u53ef\u7528\u6027": "\u672a\u53ef\u7528",
+                }
+            )
+
+        st.markdown("**\u8f93\u5165\u6458\u8981**")
+        st.caption("\u8fd9\u91cc\u4ec5\u6c47\u603b\u5f53\u524d\u68c0\u6d4b\u8bb0\u5f55\u5185\u5404\u6c34\u5e73\u7684\u539f\u59cb\u7ed3\u679c\u5f55\u5165\u60c5\u51b5\u3001\u5f53\u524d\u5de5\u4f5c\u533a\u5171\u4eab\u5efa\u9776\u72b6\u6001\uff0c\u4ee5\u53ca\u5404\u6c34\u5e73\u9776\u503c\u53ef\u7528\u6027\u72b6\u6001\uff0c\u4e0d\u5305\u542b\u4efb\u4f55\u8ba1\u7b97\u6216\u7ed3\u679c\u89e3\u91ca\u3002")
+        st.table(pd.DataFrame(summary_rows))
 
         st.markdown("**Level 3\uff08\u9884\u7559\uff09**")
         st.info("Level 3 \u76ee\u524d\u4ec5\u4f5c\u4e3a\u9884\u7559\u533a\uff0c\u7528\u4e8e\u540e\u7eed 3 \u6c34\u5e73\u6269\u5c55\uff0c\u5f53\u524d\u4e0d\u89c6\u4e3a\u542f\u7528\u72b6\u6001\u3002")
