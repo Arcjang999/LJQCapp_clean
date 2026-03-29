@@ -104,6 +104,12 @@ def init_db() -> None:
         )
         connection.execute(
             """
+            CREATE INDEX IF NOT EXISTS idx_zscore_runs_batch_sequence
+            ON zscore_runs (batch_id, test_sequence, id)
+            """
+        )
+        connection.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_zscore_batch_config_project
             ON zscore_batch_config (project_id, level_count, batch_id)
             """
@@ -370,6 +376,7 @@ def _ensure_zscore_runs_table(connection: sqlite3.Connection) -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             batch_id INTEGER NOT NULL,
             project_id INTEGER NOT NULL,
+            test_sequence INTEGER,
             test_time TEXT NOT NULL,
             operator TEXT NOT NULL DEFAULT '',
             level_count INTEGER NOT NULL CHECK (level_count BETWEEN 1 AND 3),
@@ -385,6 +392,52 @@ def _ensure_zscore_runs_table(connection: sqlite3.Connection) -> None:
         )
         """
     )
+    existing_columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(zscore_runs)").fetchall()
+    }
+    if "test_sequence" not in existing_columns:
+        connection.execute("ALTER TABLE zscore_runs ADD COLUMN test_sequence INTEGER")
+    _backfill_missing_zscore_test_sequences(connection)
+
+
+def _backfill_missing_zscore_test_sequences(connection: sqlite3.Connection) -> None:
+    batch_rows = connection.execute(
+        """
+        SELECT DISTINCT batch_id
+        FROM zscore_runs
+        ORDER BY batch_id ASC
+        """
+    ).fetchall()
+    for batch_row in batch_rows:
+        batch_id = int(batch_row["batch_id"])
+        max_existing_sequence = connection.execute(
+            """
+            SELECT COALESCE(MAX(test_sequence), 0)
+            FROM zscore_runs
+            WHERE batch_id = ? AND test_sequence IS NOT NULL
+            """,
+            (batch_id,),
+        ).fetchone()[0]
+        next_sequence = int(max_existing_sequence or 0) + 1
+        missing_rows = connection.execute(
+            """
+            SELECT id
+            FROM zscore_runs
+            WHERE batch_id = ? AND test_sequence IS NULL
+            ORDER BY datetime(test_time) ASC, id ASC
+            """,
+            (batch_id,),
+        ).fetchall()
+        for row in missing_rows:
+            connection.execute(
+                """
+                UPDATE zscore_runs
+                SET test_sequence = ?
+                WHERE id = ?
+                """,
+                (next_sequence, int(row["id"])),
+            )
+            next_sequence += 1
 
 
 def _ensure_zscore_level_results_table(connection: sqlite3.Connection) -> None:
@@ -620,7 +673,7 @@ def get_batch(batch_id: int) -> sqlite3.Row:
 
 def create_zscore_project(name: str, level_count: int) -> int:
     if int(level_count) not in {2, 3}:
-        raise ValueError("Z-score 项目 level_count 只能是 2 或 3")
+        raise ValueError("Z-score 项目水平数只能是 2 或 3。")
 
     with get_connection() as connection:
         try:
@@ -1015,6 +1068,341 @@ def add_zscore_run(
         return int(cursor.lastrowid)
 
 
+def update_zscore_run(
+    run_id: int,
+    test_sequence: int | None = None,
+    test_time: str | None = None,
+    operator: str | None = None,
+    level_count: int | None = None,
+    phase: str | None = None,
+    run_status: str | None = None,
+    rule_template_id: str | None = None,
+    rule_hits_run=None,
+    error_type_hint: str | None = None,
+    analysis_prompt: str | None = None,
+) -> None:
+    assignments: list[str] = []
+    values: list[object] = []
+
+    if test_sequence is not None:
+        assignments.append("test_sequence = ?")
+        values.append(int(test_sequence))
+    if test_time is not None:
+        assignments.append("test_time = ?")
+        values.append(test_time)
+    if operator is not None:
+        assignments.append("operator = ?")
+        values.append(str(operator))
+    if level_count is not None:
+        normalized_level_count = int(level_count)
+        if normalized_level_count not in {2, 3}:
+            raise ValueError("Z-score 检测记录的水平数只能是 2 或 3。")
+        assignments.append("level_count = ?")
+        values.append(normalized_level_count)
+    if phase is not None:
+        assignments.append("phase = ?")
+        values.append(str(phase))
+    if run_status is not None:
+        assignments.append("run_status = ?")
+        values.append(str(run_status))
+    if rule_template_id is not None:
+        assignments.append("rule_template_id = ?")
+        values.append(str(rule_template_id))
+    if rule_hits_run is not None:
+        assignments.append("rule_hits_run = ?")
+        values.append(json.dumps(rule_hits_run or [], ensure_ascii=False))
+    if error_type_hint is not None:
+        assignments.append("error_type_hint = ?")
+        values.append(str(error_type_hint))
+    if analysis_prompt is not None:
+        assignments.append("analysis_prompt = ?")
+        values.append(str(analysis_prompt))
+
+    if not assignments:
+        return
+
+    values.append(int(run_id))
+    with get_connection() as connection:
+        cursor = connection.execute(
+            f"""
+            UPDATE zscore_runs
+            SET {", ".join(assignments)}
+            WHERE id = ?
+            """,
+            tuple(values),
+        )
+        if cursor.rowcount == 0:
+            raise ValueError(f"未找到 Z-score run {run_id}")
+
+
+def update_zscore_level_results(run_id: int, level_results: list[dict]) -> None:
+    if not level_results:
+        return
+
+    with get_connection() as connection:
+        run_row = connection.execute(
+            "SELECT id FROM zscore_runs WHERE id = ?",
+            (run_id,),
+        ).fetchone()
+        if run_row is None:
+            raise ValueError(f"未找到 Z-score run {run_id}")
+
+        existing_rows = connection.execute(
+            """
+            SELECT id, level_id
+            FROM zscore_level_results
+            WHERE run_id = ?
+            """,
+            (run_id,),
+        ).fetchall()
+        existing_by_level = {str(row["level_id"]): int(row["id"]) for row in existing_rows}
+        provided_level_ids = {str(level_result.get("level_id") or "").strip() for level_result in level_results}
+        extra_level_ids = {
+            level_id
+            for level_id in existing_by_level
+            if level_id and level_id not in provided_level_ids
+        }
+        if extra_level_ids:
+            placeholders = ", ".join("?" for _ in extra_level_ids)
+            connection.execute(
+                f"""
+                DELETE FROM zscore_level_results
+                WHERE run_id = ? AND level_id IN ({placeholders})
+                """,
+                (run_id, *sorted(extra_level_ids)),
+            )
+            existing_by_level = {
+                level_id: result_id
+                for level_id, result_id in existing_by_level.items()
+                if level_id not in extra_level_ids
+            }
+
+        for level_result in level_results:
+            level_id = str(level_result.get("level_id") or "").strip()
+            if not level_id:
+                raise ValueError("多水平结果缺少水平标识。")
+
+            raw_value_provided = "raw_value" in level_result
+            raw_value = level_result.get("raw_value")
+            if raw_value_provided and raw_value is None:
+                raise ValueError(f"{level_id} 的原始值不能为空。")
+
+            log_value_provided = "log_value" in level_result
+            log_value = level_result.get("log_value")
+            if raw_value_provided and not log_value_provided:
+                log_value = _safe_log10(float(raw_value))
+                log_value_provided = True
+
+            zscore_provided = "zscore" in level_result
+            zscore = level_result.get("zscore")
+            status_provided = "level_status" in level_result or "status" in level_result
+            status_value = level_result.get("level_status", level_result.get("status"))
+            rule_hits_provided = "rule_hits_local" in level_result
+            rule_hits_local = level_result.get("rule_hits_local")
+            in_control_provided = "is_in_control_for_realtime_stats" in level_result
+            in_control_value = level_result.get("is_in_control_for_realtime_stats")
+
+            existing_result_id = existing_by_level.get(level_id)
+            if existing_result_id is not None:
+                assignments: list[str] = []
+                values: list[object] = []
+                if raw_value_provided:
+                    assignments.append("raw_value = ?")
+                    values.append(float(raw_value))
+                if log_value_provided:
+                    assignments.append("log_value = ?")
+                    values.append(None if log_value is None else float(log_value))
+                if zscore_provided:
+                    assignments.append("zscore = ?")
+                    values.append(None if zscore is None else float(zscore))
+                if status_provided:
+                    assignments.append("level_status = ?")
+                    values.append(str(status_value or "pending"))
+                if rule_hits_provided:
+                    assignments.append("rule_hits_local = ?")
+                    values.append(json.dumps(rule_hits_local or [], ensure_ascii=False))
+                if in_control_provided:
+                    assignments.append("is_in_control_for_realtime_stats = ?")
+                    values.append(int(bool(in_control_value)))
+
+                if assignments:
+                    values.append(existing_result_id)
+                    connection.execute(
+                        f"""
+                        UPDATE zscore_level_results
+                        SET {", ".join(assignments)}
+                        WHERE id = ?
+                        """,
+                        tuple(values),
+                    )
+                continue
+
+            if raw_value is None:
+                raise ValueError(f"{level_id} 缺少原始值，无法创建该水平结果。")
+
+            connection.execute(
+                """
+                INSERT INTO zscore_level_results (
+                    run_id,
+                    level_id,
+                    raw_value,
+                    log_value,
+                    zscore,
+                    level_status,
+                    rule_hits_local,
+                    is_in_control_for_realtime_stats
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(run_id),
+                    level_id,
+                    float(raw_value),
+                    None if log_value is None else float(log_value),
+                    None if zscore is None else float(zscore),
+                    str(status_value or "pending"),
+                    json.dumps(rule_hits_local or [], ensure_ascii=False),
+                    int(bool(in_control_value)),
+                ),
+            )
+
+
+def delete_zscore_run(run_id: int) -> None:
+    with get_connection() as connection:
+        cursor = connection.execute(
+            "DELETE FROM zscore_runs WHERE id = ?",
+            (run_id,),
+        )
+        if cursor.rowcount == 0:
+            raise ValueError(f"未找到 Z-score run {run_id}")
+
+
+def delete_zscore_level_results_by_run(run_id: int) -> None:
+    with get_connection() as connection:
+        connection.execute(
+            "DELETE FROM zscore_level_results WHERE run_id = ?",
+            (run_id,),
+        )
+
+
+def delete_zscore_targets_by_batch(batch_id: int) -> None:
+    with get_connection() as connection:
+        connection.execute(
+            "DELETE FROM zscore_level_targets WHERE batch_id = ?",
+            (batch_id,),
+        )
+
+
+def _deserialize_json_list(raw_value) -> list:
+    if raw_value is None:
+        return []
+    if isinstance(raw_value, list):
+        return raw_value
+    text = str(raw_value).strip()
+    if not text:
+        return []
+    try:
+        decoded = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+    return decoded if isinstance(decoded, list) else []
+
+
+def _build_zscore_level_result_record(row: sqlite3.Row) -> dict:
+    status = str(row["level_status"])
+    return {
+        "id": int(row["id"]),
+        "run_id": int(row["run_id"]),
+        "level_id": str(row["level_id"]),
+        "raw_value": float(row["raw_value"]),
+        "log_value": None if row["log_value"] is None else float(row["log_value"]),
+        "zscore": None if row["zscore"] is None else float(row["zscore"]),
+        "level_status": status,
+        "status": status,
+        "rule_hits_local": _deserialize_json_list(row["rule_hits_local"]),
+        "is_in_control_for_realtime_stats": bool(row["is_in_control_for_realtime_stats"]),
+        "created_at": row["created_at"],
+    }
+
+
+def _build_zscore_run_record(row: sqlite3.Row) -> dict:
+    return {
+        "id": int(row["id"]),
+        "run_id": int(row["id"]),
+        "test_sequence": int(row["test_sequence"]) if row["test_sequence"] is not None else None,
+        "batch_id": int(row["batch_id"]),
+        "project_id": int(row["project_id"]),
+        "test_time": row["test_time"],
+        "operator": str(row["operator"] or ""),
+        "level_count": int(row["level_count"]),
+        "phase": str(row["phase"]),
+        "run_status": str(row["run_status"]),
+        "rule_template_id": str(row["rule_template_id"]),
+        "rule_hits_run": _deserialize_json_list(row["rule_hits_run"]),
+        "error_type_hint": str(row["error_type_hint"] or "unknown"),
+        "analysis_prompt": str(row["analysis_prompt"] or ""),
+        "created_at": row["created_at"],
+        "level_results": [],
+    }
+
+
+def get_zscore_run_with_levels(run_id: int) -> dict:
+    with get_connection() as connection:
+        run_row = connection.execute(
+            """
+            SELECT *
+            FROM zscore_runs
+            WHERE id = ?
+            """,
+            (run_id,),
+        ).fetchone()
+        if run_row is None:
+            raise ValueError(f"未找到 Z-score run {run_id}")
+
+        level_rows = connection.execute(
+            """
+            SELECT *
+            FROM zscore_level_results
+            WHERE run_id = ?
+            ORDER BY level_id ASC, id ASC
+            """,
+            (run_id,),
+        ).fetchall()
+
+    run_record = _build_zscore_run_record(run_row)
+    run_record["level_results"] = [_build_zscore_level_result_record(row) for row in level_rows]
+    return run_record
+
+
+def get_zscore_runs_with_levels_for_batch(batch_id: int) -> list[dict]:
+    with get_connection() as connection:
+        run_rows = connection.execute(
+            """
+            SELECT *
+            FROM zscore_runs
+            WHERE batch_id = ?
+            ORDER BY datetime(test_time) ASC, id ASC
+            """,
+            (batch_id,),
+        ).fetchall()
+        level_rows = connection.execute(
+            """
+            SELECT level_results.*, runs.test_time
+            FROM zscore_level_results AS level_results
+            INNER JOIN zscore_runs AS runs ON runs.id = level_results.run_id
+            WHERE runs.batch_id = ?
+            ORDER BY datetime(runs.test_time) ASC, runs.id ASC, level_results.level_id ASC, level_results.id ASC
+            """,
+            (batch_id,),
+        ).fetchall()
+
+    run_records = [_build_zscore_run_record(row) for row in run_rows]
+    run_map = {int(run["id"]): run for run in run_records}
+    for level_row in level_rows:
+        run_map[int(level_row["run_id"])]["level_results"].append(_build_zscore_level_result_record(level_row))
+    return run_records
+
+
 def add_zscore_level_results(run_id: int, level_results: list[dict]) -> None:
     if not level_results:
         return
@@ -1249,7 +1637,7 @@ def create_zscore_project(name: str, level_count: int) -> int:
     cleaned_name = str(name or "").strip()
     normalized_level_count = int(level_count)
     if normalized_level_count not in {2, 3}:
-        raise ValueError("Z-score 项目 level_count 只能是 2 或 3")
+        raise ValueError("Z-score 项目水平数只能是 2 或 3。")
     if not cleaned_name:
         raise ValueError("项目名称不能为空")
 
@@ -1324,6 +1712,7 @@ def create_zscore_batch(
 def add_zscore_run(
     batch_id: int,
     project_id: int,
+    test_sequence: int,
     test_time: str,
     operator: str,
     level_count: int,
@@ -1336,7 +1725,7 @@ def add_zscore_run(
 ) -> int:
     normalized_level_count = int(level_count)
     if normalized_level_count not in {2, 3}:
-        raise ValueError("Z-score run 的 level_count 只能是 2 或 3")
+        raise ValueError("Z-score 检测记录的水平数只能是 2 或 3。")
 
     serialized_rule_hits = json.dumps(rule_hits_run or [], ensure_ascii=False)
     with get_connection() as connection:
@@ -1345,6 +1734,7 @@ def add_zscore_run(
             INSERT INTO zscore_runs (
                 batch_id,
                 project_id,
+                test_sequence,
                 test_time,
                 operator,
                 level_count,
@@ -1355,11 +1745,12 @@ def add_zscore_run(
                 error_type_hint,
                 analysis_prompt
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 batch_id,
                 project_id,
+                int(test_sequence),
                 test_time,
                 operator,
                 normalized_level_count,

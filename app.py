@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime
 from html import escape as html_escape
 from io import BytesIO
@@ -40,26 +41,32 @@ from qc_logic import calculate_qc_results, calculate_realtime_stats, format_stat
 from zscore_logic import (
     PHASE_FORMAL_QC,
     PHASE_TARGET_BUILDING,
+    build_zscore_maintenance_dialog_state,
     build_zscore_batch_summary_items,
     build_zscore_plot_dataframe as build_zscore_plot_dataframe_logic,
     create_zscore_run,
+    delete_saved_zscore_run,
     determine_zscore_phase,
+    format_level_id_display,
     format_zscore_level_label_summary,
     get_building_stat_run_ids,
+    get_zscore_display_sequence,
     get_zscore_level_label_map,
     get_zscore_level_targets,
     get_phase_label,
     get_zscore_runs,
     resolve_zscore_batch_context,
+    sort_zscore_runs_for_maintenance,
     should_enable_formal_rules,
+    update_saved_zscore_run,
     upsert_zscore_level_target,
 )
 from zscore_plotting import plot_zscore_overlay, plot_zscore_single_level
 
 
-PAGE_TITLE = "\u5b9e\u9a8c\u5ba4\u8d28\u63a7 LJ \u66f2\u7ebf"
+PAGE_TITLE = "实验室室内质控管理工具"
 TEXT = {
-    "app_title": "\u5b9e\u9a8c\u5ba4\u8d28\u63a7 LJ \u66f2\u7ebf\u8f6f\u4ef6",
+    "app_title": "实验室室内质控管理工具",
     "manage": "\u9879\u76ee\u4e0e\u6279\u6b21\u7ba1\u7406",
     "current_batch": "\u5f53\u524d\u6279\u6b21",
     "no_project": "\u5f53\u524d\u8fd8\u6ca1\u6709\u9879\u76ee\uff0c\u8bf7\u5148\u521b\u5efa\u9879\u76ee\u3002",
@@ -82,10 +89,54 @@ DISPLAY_COLUMN_LABELS = {
     "concentration": "\u6d53\u5ea6",
     "lot_no": "\u8d28\u63a7\u54c1\u6279\u53f7",
     "target_n": "\u5efa\u9776\u6240\u9700\u6b21\u6570",
-    "level_1_label": "Level 1 说明",
-    "level_2_label": "Level 2 说明",
-    "level_3_label": "Level 3 说明",
-    "level_count": "Level 数",
+    "level_1_label": "水平 1 说明",
+    "level_2_label": "水平 2 说明",
+    "level_3_label": "水平 3 说明",
+    "level_count": "水平数",
+}
+
+ZSCORE_TEMPLATE_DISPLAY_NAMES = {
+    "2_level_classic": "两水平经典多规则组合",
+    "3_level_threes": "三水平多规则组合",
+    "2-level classic": "两水平经典多规则组合",
+    "3-level threes": "三水平多规则组合",
+}
+
+RULE_DISPLAY_NAMES = {
+    "10_x": "10x",
+    "12_x": "12x",
+}
+
+RULE_DESCRIPTION_MAP = {
+    "1_2s": "单次结果超过均值 ±2SD，提示警告。",
+    "1_3s": "单次结果超过均值 ±3SD，判定失控。",
+    "2_2s": "连续 2 次结果位于均值同侧且均超过 2SD，判定失控。",
+    "R_4s": "连续 2 次结果差值超过 4SD，提示随机误差风险。",
+    "4_1s": "连续 4 次结果位于均值同侧且均超过 1SD，提示系统误差风险。",
+    "10x": "连续 10 次结果位于均值同侧，提示系统偏移风险。",
+    "10_x": "连续 10 次结果位于均值同侧，提示系统偏移风险。",
+    "2of3_2s": "同一次多水平结果中有 2 个水平位于均值同侧且超过 2SD，判定失控。",
+    "3_1s": "同一次三水平结果均位于均值同侧且超过 1SD，提示系统误差风险。",
+    "12x": "连续 12 次结果位于均值同侧，提示系统偏移风险。",
+    "12_x": "连续 12 次结果位于均值同侧，提示系统偏移风险。",
+}
+
+ZSCORE_STATUS_LABELS = {
+    "accept": "在控",
+    "warning": "警告",
+    "reject": "失控",
+    "pending": "待判读",
+    PHASE_TARGET_BUILDING: "建靶期观察",
+}
+
+ERROR_TYPE_LABELS = {
+    "random": "随机误差风险",
+    "systematic": "系统误差风险",
+    "shift": "系统偏移风险",
+    "trend": "趋势性漂移风险",
+    "mixed": "混合误差风险",
+    "not_applicable": "建靶阶段不适用",
+    "unknown": "待进一步判断",
 }
 
 ZSCORE_PHASE_VIEW_OPTIONS = {
@@ -94,6 +145,8 @@ ZSCORE_PHASE_VIEW_OPTIONS = {
     "all": "全图",
 }
 
+
+ZSCORE_Y_AXIS_OPTIONS = ["标准视图", "全范围视图"]
 
 st.set_page_config(page_title=PAGE_TITLE, layout="wide")
 init_db()
@@ -276,6 +329,67 @@ st.markdown(
             grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
         }
     }
+    .welcome-chip-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+    }
+    .welcome-chip {
+        border: 1px solid #d7e1ec;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.85);
+        padding: 6px 12px;
+        font-size: 12px;
+        font-weight: 600;
+        color: #2f4e6e;
+        line-height: 1.2;
+    }
+    .main-entry-card {
+        border: 1px solid #dce5ef;
+        border-radius: 16px;
+        background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+        padding: 16px 16px 14px 16px;
+        min-height: 236px;
+        box-shadow: 0 4px 14px rgba(26, 59, 96, 0.05);
+    }
+    .main-entry-card-title {
+        font-size: 22px;
+        font-weight: 800;
+        color: #1b3553;
+        line-height: 1.2;
+    }
+    .main-entry-card-caption {
+        margin-top: 8px;
+        font-size: 13px;
+        color: #48627d;
+        line-height: 1.6;
+    }
+    .main-entry-card-list {
+        margin-top: 10px;
+        padding-left: 18px;
+        color: #34495f;
+        font-size: 13px;
+        line-height: 1.7;
+    }
+    .main-highlight-box {
+        border: 1px solid #dbe4ef;
+        border-radius: 14px;
+        background: #f8fbff;
+        padding: 14px 16px;
+        margin: 10px 0 0 0;
+    }
+    .main-highlight-title {
+        font-size: 13px;
+        font-weight: 700;
+        color: #24476d;
+        margin-bottom: 8px;
+    }
+    .main-highlight-body {
+        font-size: 13px;
+        line-height: 1.7;
+        color: #44586d;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -310,7 +424,7 @@ def build_zscore_project_label(row: pd.Series) -> str:
     row = dict(row)
     project_name = _clean_selector_label_part(row.get("name"), "未命名项目")
     level_count = int(row.get("level_count", 0) or 0)
-    return f"项目 {row['id']} | {project_name} | {level_count}-level"
+    return f"项目 {row['id']} | {project_name} | {level_count} 水平"
 
 
 def build_zscore_batch_label(row: pd.Series) -> str:
@@ -320,9 +434,39 @@ def build_zscore_batch_label(row: pd.Series) -> str:
     lot_no = _clean_selector_label_part(row.get("lot_no"), "未填写")
     level_count = int(row.get("level_count", 0) or 0)
     return (
-        f"批次 {row['id']} | {level_count}-level | {instrument} | "
+        f"批次 {row['id']} | {level_count} 水平 | {instrument} | "
         f"{reagent} | 质控批号 {lot_no}"
     )
+
+
+def format_zscore_template_display_name(template_or_label: Any) -> str:
+    if isinstance(template_or_label, dict):
+        template_key = str(template_or_label.get("template_id") or template_or_label.get("label") or "").strip()
+        fallback = str(template_or_label.get("label") or template_key)
+    else:
+        template_key = str(template_or_label or "").strip()
+        fallback = template_key
+    return ZSCORE_TEMPLATE_DISPLAY_NAMES.get(template_key, ZSCORE_TEMPLATE_DISPLAY_NAMES.get(fallback, fallback or "规则组合"))
+
+
+def format_rule_code(rule_id: str) -> str:
+    normalized_rule_id = str(rule_id or "").strip()
+    return RULE_DISPLAY_NAMES.get(normalized_rule_id, normalized_rule_id)
+
+
+def format_rule_description(rule_id: str) -> str:
+    normalized_rule_id = str(rule_id or "").strip()
+    return RULE_DESCRIPTION_MAP.get(normalized_rule_id, "当前版本已启用该规则，请结合本页判读说明使用。")
+
+
+def format_zscore_status_label(status: Any) -> str:
+    normalized_status = str(status or "").strip()
+    return ZSCORE_STATUS_LABELS.get(normalized_status, normalized_status or "状态未知")
+
+
+def format_error_type_label(error_type_hint: Any) -> str:
+    normalized_hint = str(error_type_hint or "").strip()
+    return ERROR_TYPE_LABELS.get(normalized_hint, normalized_hint or "待进一步判断")
 
 
 def format_datetime_column(dataframe: pd.DataFrame, column_name: str) -> pd.DataFrame:
@@ -370,6 +514,11 @@ def build_safe_export_name(text: str | None, fallback: str) -> str:
 
     safe_text = "".join(safe_characters).strip("_")
     return safe_text or fallback
+
+
+def switch_top_level_method(target_method: str) -> None:
+    st.session_state["top_level_method_selector"] = target_method
+    st.rerun()
 
 
 def prepare_display_records(qc_df: pd.DataFrame) -> pd.DataFrame:
@@ -710,7 +859,7 @@ def render_zscore_project_batch_management(
             with st.form("create_zscore_project_form", clear_on_submit=True):
                 project_name = st.text_input("项目名称")
                 level_count = st.radio(
-                    "项目 level_count",
+                    "项目水平数",
                     options=[2, 3],
                     horizontal=True,
                 )
@@ -732,7 +881,7 @@ def render_zscore_project_batch_management(
 
             st.subheader("Z-score 项目列表与选择")
             if projects_df.empty:
-                st.info("当前还没有 Z-score 项目，请先创建项目并确定 2-level 或 3-level。")
+                st.info("当前还没有 Z-score 项目，请先创建项目并确定双水平或三水平流程。")
             else:
                 project_labels, project_options = build_zscore_project_select_options(projects_df)
                 sync_selector_state(
@@ -760,7 +909,7 @@ def render_zscore_project_batch_management(
                     current_project = get_zscore_project(selected_project_id)
                     with st.expander("当前 Z-score 项目配置"):
                         st.text(f"项目名称：{current_project['name']}")
-                        st.text(f"level_count：{int(current_project['level_count'])}-level")
+                        st.text(f"水平数：{int(current_project['level_count'])} 水平")
                         with st.form("edit_zscore_project_form"):
                             edit_project_name = st.text_input(
                                 "项目名称",
@@ -777,7 +926,7 @@ def render_zscore_project_batch_management(
                                     except ValueError as exc:
                                         st.error(str(exc))
                                     else:
-                                        st.success("项目名称已更新，level_count 保持不变。")
+                                        st.success("项目名称已更新，水平数保持不变。")
                                         st.rerun()
 
         with top_right:
@@ -788,7 +937,7 @@ def render_zscore_project_batch_management(
                 current_project = get_zscore_project(selected_project_id)
                 project_level_count = int(current_project["level_count"])
                 st.caption(
-                    f"当前批次将归属于项目：{current_project['name']}｜固定为 {project_level_count}-level。"
+                    f"当前批次将归属于项目：{current_project['name']}｜固定为 {project_level_count} 水平。"
                 )
                 with st.form("create_zscore_batch_form", clear_on_submit=True):
                     instrument = st.text_input("仪器")
@@ -796,12 +945,12 @@ def render_zscore_project_batch_management(
                     qc_material = st.text_input("质控品")
                     concentration = st.text_input("浓度")
                     lot_no = st.text_input("质控品批号")
-                    st.markdown("**水平说明**")
-                    level_1_label = st.text_input("Level 1 说明", placeholder="例如 Low / 低值")
-                    level_2_label = st.text_input("Level 2 说明", placeholder="例如 High / 高值")
+                    st.markdown("**各水平名称与说明**")
+                    level_1_label = st.text_input("水平 1 说明", placeholder="例如：低值质控")
+                    level_2_label = st.text_input("水平 2 说明", placeholder="例如：中值或高值质控")
                     level_3_label = None
                     if project_level_count == 3:
-                        level_3_label = st.text_input("Level 3 说明", placeholder="例如 High / 高值")
+                        level_3_label = st.text_input("水平 3 说明", placeholder="例如：高值质控")
                     target_n = st.selectbox(
                         "建靶所需次数",
                         options=list(range(5, 21)),
@@ -866,7 +1015,7 @@ def render_zscore_project_batch_management(
                         current_level_ids = list(resolve_zscore_batch_context(selected_batch_id)["required_level_ids"])
                         st.text(f"项目：{current_batch['project_name']}")
                         st.text(f"批次：{current_batch['id']}")
-                        st.text(f"level_count：{int(current_batch['level_count'])}-level")
+                        st.text(f"水平数：{int(current_batch['level_count'])} 水平")
                         st.text(f"水平说明：{format_zscore_level_label_summary(current_batch, current_level_ids)}")
                         st.text(f"建靶所需次数：{current_batch['target_n']}")
                         with st.form("edit_zscore_batch_form"):
@@ -880,7 +1029,7 @@ def render_zscore_project_batch_management(
                                     st.error("请填写质控品批号。")
                                 else:
                                     update_batch(selected_batch_id, edit_lot_no.strip())
-                                    st.success("批次质控品批号已更新，level_count 保持不变。")
+                                    st.success("批次质控品批号已更新，水平数保持不变。")
                                     st.rerun()
 
 
@@ -1061,7 +1210,7 @@ def render_status_panel(status: str, message: str, rule_hits: str = "\u65e0") ->
 def render_standard_view_help(standard_sd_limit: float) -> None:
     st.caption(
         (
-            f"标准视图按 Mean ± {standard_sd_limit:g}SD 聚焦主要波动区间，超界点会用边界标记和原始值提示；"
+            f"标准视图按均值 ± {standard_sd_limit:g}SD 聚焦主要波动区间，超界点会用边界标记和原始值提示；"
             "切换到全范围视图可查看真实完整范围。"
         )
     )
@@ -1272,10 +1421,11 @@ def render_zscore_level_input_block(
 
 
 def format_zscore_level_display(level_id: str, level_label_map: dict[str, str]) -> tuple[str, str | None]:
+    default_level_label = format_level_id_display(level_id)
     level_label = str(level_label_map.get(level_id, level_id) or level_id).strip() or level_id
     if level_label == level_id:
-        return level_id, None
-    return level_label, level_id
+        return default_level_label, None
+    return level_label, default_level_label
 
 
 def build_zscore_current_level_results(template: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str], bool]:
@@ -1293,7 +1443,7 @@ def build_zscore_current_level_results(template: dict[str, Any]) -> tuple[list[d
         raw_value, _, log_value = parse_numeric_input(raw_text)
         has_any_input = has_any_input or bool(raw_text.strip())
         if raw_text.strip() and raw_value is None:
-            validation_errors.append(f"{level_id} 检测值必须为有效正数。")
+            validation_errors.append(f"{format_level_id_display(level_id)}的检测值必须为有效正数。")
 
         target_info = template["default_targets"][level_id]
         level_results.append(
@@ -1324,12 +1474,12 @@ def format_zscore_rule_hits(rule_hits: list[dict[str, Any]]) -> str:
     if not rule_hits:
         return "无"
     ordered_rule_ids = list(dict.fromkeys(hit["rule_id"] for hit in rule_hits))
-    return "、".join(ordered_rule_ids)
+    return "、".join(format_rule_code(rule_id) for rule_id in ordered_rule_ids)
 
 
 def build_zscore_chart_control_title(template: dict[str, Any], view_mode: str, selected_level: str) -> str:
-    scope_text = selected_level if view_mode == "单水平视图" else "全部 Level"
-    return f"图表控制（点击展开）｜{template['label']}｜{view_mode}｜{scope_text}"
+    scope_text = format_level_id_display(selected_level) if view_mode == "单水平视图" else "全部水平"
+    return f"图表控制（点击展开）｜{format_zscore_template_display_name(template)}｜{view_mode}｜{scope_text}"
 
 
 def render_zscore_chart_controls(
@@ -1368,10 +1518,11 @@ def render_zscore_chart_controls(
             st.session_state["zscore_selected_level"] = template["level_ids"][0]
         if view_mode == "单水平视图":
             selected_level = st.radio(
-                "Level Selector",
+                "选择显示水平",
                 options=template["level_ids"],
                 horizontal=True,
                 key="zscore_selected_level",
+                format_func=format_level_id_display,
             )
         else:
             selected_level = st.session_state.get("zscore_selected_level", template["level_ids"][0])
@@ -1386,9 +1537,9 @@ def render_zscore_latest_analysis_panel(
     st.markdown("**最新结果分析**")
     if latest_run is None:
         if overall_phase == PHASE_FORMAL_QC:
-            st.info("建靶已完成，正式规则已启用。请录入首个正式质控 run。")
+            st.info("建靶已完成，正式规则已启用。请录入首条正式质控检测记录。")
         else:
-            st.info("当前阶段为建靶中。请先录入 run，用于累计靶值与观察趋势。")
+            st.info("当前处于建靶期，请先录入检测记录，用于累计实验室靶值并观察多水平趋势。")
         return
 
     palette = {
@@ -1406,9 +1557,13 @@ def render_zscore_latest_analysis_panel(
     is_building_phase = (not formal_rules_enabled) or latest_run.get("phase") != PHASE_FORMAL_QC
     status = PHASE_TARGET_BUILDING if is_building_phase else str(latest_run.get("run_status", "pending"))
     style = palette.get(status, palette["pending"])
-    source_text = "当前输入预览" if latest_run.get("is_preview") else f"最近已保存 run #{latest_run.get('run_id', '-')}"
+    source_text = (
+        "当前输入预览"
+        if latest_run.get("is_preview")
+        else f"最近已保存检测序号 #{get_zscore_display_sequence(latest_run)}"
+    )
     phase_label = str(latest_run.get("phase_label") or get_phase_label(latest_run.get("phase", overall_phase)))
-    badge_text = phase_label if is_building_phase else status
+    badge_text = phase_label if is_building_phase else format_zscore_status_label(status)
     html = dedent(
         f"""
         <div style="
@@ -1435,11 +1590,11 @@ def render_zscore_latest_analysis_panel(
             <div style="color:{style['text']};font-size:13px;line-height:1.55;">
                 <div><strong>当前阶段：</strong>{html_escape(phase_label)}</div>
                 {
-                    '<div><strong>正式规则：</strong>当前仅用于累计靶值与观察趋势，暂不进行正式规则判读。</div>'
-                    '<div style="margin-top:6px;">当前阶段为建靶中，本次结果只作为建靶观察，不输出正式 warning / reject。</div>'
+                    '<div><strong>正式规则判读：</strong>当前仅用于累计靶值与观察趋势，暂不输出正式警告或失控结论。</div>'
+                    '<div style="margin-top:6px;">本次结果纳入建靶观察，不作为正式质控结论。</div>'
                     if is_building_phase
                     else f"<div><strong>触发规则：</strong>{html_escape(format_zscore_rule_hits(latest_run.get('rule_hits_run', [])))}</div>"
-                    f"<div><strong>误差类型提示：</strong>{html_escape(str(latest_run.get('error_type_hint', 'unknown')))}</div>"
+                    f"<div><strong>误差类型提示：</strong>{html_escape(format_error_type_label(latest_run.get('error_type_hint', 'unknown')))}</div>"
                     f"<div style=\"margin-top:6px;\">{html_escape(str(latest_run.get('analysis_prompt', '暂无分析提示。')))}</div>"
                 }
             </div>
@@ -1454,27 +1609,24 @@ def render_zscore_rules_config_expander(
     overall_phase: str,
     formal_rules_enabled: bool,
 ) -> None:
-    with st.expander("规则模板说明（点击展开）", expanded=False):
+    with st.expander("规则说明与判读口径（点击展开）", expanded=False):
+        template_display_name = format_zscore_template_display_name(template)
         st.caption(template["note"])
-        st.markdown(f"- 当前模板：`{template['label']}`")
+        st.markdown(f"- 当前规则组合：`{template_display_name}`")
         st.markdown(f"- 当前阶段：`{get_phase_label(overall_phase)}`")
-        st.markdown(f"- 正式规则启用：`{'是' if formal_rules_enabled else '否'}`")
-        if formal_rules_enabled:
-            st.markdown(f"- 当前启用规则：`{', '.join(template['rule_ids'])}`")
-        else:
-            st.markdown(f"- 模板规则预览：`{', '.join(template['rule_ids'])}`")
-            st.caption("当前处于建靶中，以下规则仅作为正式质控期启用前的模板预览。")
-        for rule in template["rules"]:
-            prefix = "正式期规则预览" if not formal_rules_enabled else "规则"
-            st.markdown(f"- {prefix} `{rule['rule_id']}` | `{rule['severity']}` | `{rule['scope']}`")
+        st.markdown(f"- 正式规则已启用：`{'是' if formal_rules_enabled else '否'}`")
+        if not formal_rules_enabled:
+            st.info("当前仍处于建靶期，以下规则说明仅供进入正式质控期后的判读参考。")
+        for rule_id in template["rule_ids"]:
+            st.markdown(f"- `{format_rule_code(rule_id)}`：{format_rule_description(rule_id)}")
 
 
 def render_zscore_profile_stat_line(label: str, mean_value: Any, sd_value: Any, cv_value: Any) -> None:
     st.caption(
         f"{label}："
-        f"Mean {format_optional_float(mean_value)} | "
+        f"均值 {format_optional_float(mean_value)} | "
         f"SD {format_optional_float(sd_value)} | "
-        f"CV {format_optional_float(cv_value, digits=2, suffix='%')}"
+        f"CV% {format_optional_float(cv_value, digits=2, suffix='%')}"
     )
 
 
@@ -1482,18 +1634,19 @@ def render_zscore_vendor_reference_editor(
     batch_id: int,
     template_id: str,
     level_id: str,
+    level_display_name: str,
     required_n: int,
     profile: dict[str, Any],
 ) -> None:
-    with st.expander("厂家参考值（仅供参考）", expanded=False):
+    with st.expander("厂家参考值（仅作参考）", expanded=False):
         mean_default = format_optional_input_value(profile.get("vendor_reference_mean"))
         sd_default = format_optional_input_value(profile.get("vendor_reference_sd"))
         source_default = str(profile.get("vendor_reference_source_note", "") or "")
         state_prefix = f"zscore_vendor_{batch_id}_{template_id}_{level_id.replace(' ', '_')}"
         form_key = f"{state_prefix}_form"
         with st.form(form_key):
-            mean_text = st.text_input("参考 Mean", value=mean_default, key=f"{state_prefix}_mean")
-            sd_text = st.text_input("参考 SD", value=sd_default, key=f"{state_prefix}_sd")
+            mean_text = st.text_input("参考均值", value=mean_default, key=f"{state_prefix}_mean")
+            sd_text = st.text_input("参考标准差", value=sd_default, key=f"{state_prefix}_sd")
             source_note = st.text_input("来源备注（可选）", value=source_default, key=f"{state_prefix}_source")
             vendor_mean, _, _ = parse_numeric_input(mean_text)
             vendor_sd, _, _ = parse_numeric_input(sd_text)
@@ -1506,9 +1659,9 @@ def render_zscore_vendor_reference_editor(
             if submitted:
                 validation_errors: list[str] = []
                 if mean_text.strip() and vendor_mean is None:
-                    validation_errors.append("厂家参考 Mean 必须为有效正数。")
+                    validation_errors.append("厂家参考均值必须为有效正数。")
                 if sd_text.strip() and vendor_sd is None:
-                    validation_errors.append("厂家参考 SD 必须为有效正数。")
+                    validation_errors.append("厂家参考标准差必须为有效正数。")
 
                 if validation_errors:
                     st.error("\n".join(validation_errors))
@@ -1521,7 +1674,7 @@ def render_zscore_vendor_reference_editor(
                         vendor_reference_source_note=source_note.strip() or None,
                         required_n=int(required_n),
                     )
-                    st.session_state["zscore_notice"] = f"{level_id} 厂家参考值已保存。"
+                    st.session_state["zscore_notice"] = f"{level_display_name}的厂家参考值已保存。"
                     st.rerun()
 
 
@@ -1529,7 +1682,7 @@ def format_zscore_rule_hits(rule_hits: list[dict[str, Any]]) -> str:
     if not rule_hits:
         return "无"
     ordered_rule_ids = list(dict.fromkeys(hit["rule_id"] for hit in rule_hits))
-    return "、".join(ordered_rule_ids)
+    return "、".join(format_rule_code(rule_id) for rule_id in ordered_rule_ids)
 
 
 def build_zscore_chart_control_title(
@@ -1538,17 +1691,24 @@ def build_zscore_chart_control_title(
     view_mode: str,
     selected_level: str,
     level_label_map: dict[str, str],
+    y_axis_mode: str,
+    standard_sd_limit: float,
 ) -> str:
-    scope_text = format_zscore_level_display(selected_level, level_label_map)[0] if view_mode == "单水平视图" else "全部 Level"
+    scope_text = format_zscore_level_display(selected_level, level_label_map)[0] if view_mode == "单水平视图" else "全部水平"
     phase_scope_label = ZSCORE_PHASE_VIEW_OPTIONS.get(phase_scope, "全图")
-    return f"图表控制（点击展开）｜{template['label']}｜{phase_scope_label}｜{view_mode}｜{scope_text}"
+    template_display_name = format_zscore_template_display_name(template)
+    if y_axis_mode == "标准视图":
+        range_text = f"±{standard_sd_limit:g}SD"
+    else:
+        range_text = "全范围"
+    return f"图表控制（点击展开）｜{template_display_name}｜{phase_scope_label}｜{view_mode}｜{scope_text}｜{range_text}"
 
 
 def render_zscore_chart_controls(
     template: dict[str, Any],
     default_phase_scope: str,
     level_label_map: dict[str, str],
-) -> tuple[str, str, str]:
+) -> tuple[str, str, str, str, float]:
     phase_scope = st.session_state.get("zscore_phase_scope", default_phase_scope)
     if phase_scope not in ZSCORE_PHASE_VIEW_OPTIONS:
         phase_scope = default_phase_scope
@@ -1557,13 +1717,33 @@ def render_zscore_chart_controls(
     view_mode = st.session_state.get("zscore_view_mode", "单水平视图")
     if view_mode not in {"单水平视图", "合并视图"}:
         view_mode = "单水平视图"
+        st.session_state["zscore_view_mode"] = view_mode
+
+    y_axis_mode = st.session_state.get("zscore_y_axis_mode", ZSCORE_Y_AXIS_OPTIONS[0])
+    if y_axis_mode not in ZSCORE_Y_AXIS_OPTIONS:
+        y_axis_mode = ZSCORE_Y_AXIS_OPTIONS[0]
+        st.session_state["zscore_y_axis_mode"] = y_axis_mode
+
+    standard_sd_limit = float(st.session_state.get("zscore_standard_sd_limit", 4.0) or 4.0)
+    if standard_sd_limit <= 0:
+        standard_sd_limit = 4.0
+        st.session_state["zscore_standard_sd_limit"] = standard_sd_limit
+
     selected_level = st.session_state.get("zscore_selected_level", template["level_ids"][0])
     if selected_level not in template["level_ids"]:
         selected_level = template["level_ids"][0]
         st.session_state["zscore_selected_level"] = selected_level
 
     with st.expander(
-        build_zscore_chart_control_title(template, phase_scope, view_mode, selected_level, level_label_map),
+        build_zscore_chart_control_title(
+            template,
+            phase_scope,
+            view_mode,
+            selected_level,
+            level_label_map,
+            y_axis_mode,
+            standard_sd_limit,
+        ),
         expanded=False,
     ):
         control_col1, control_col2 = st.columns([1.05, 1.15], gap="large")
@@ -1581,11 +1761,31 @@ def render_zscore_chart_controls(
             horizontal=True,
             key="zscore_view_mode",
         )
+        y_axis_mode = st.radio(
+            "Y 轴范围",
+            options=ZSCORE_Y_AXIS_OPTIONS,
+            horizontal=True,
+            key="zscore_y_axis_mode",
+        )
+        if y_axis_mode == "标准视图":
+            standard_sd_limit = float(
+                st.slider(
+                    "标准视图范围（均值 ± nSD）",
+                    min_value=2.0,
+                    max_value=6.0,
+                    value=float(st.session_state.get("zscore_standard_sd_limit", standard_sd_limit)),
+                    step=1.0,
+                    key="zscore_standard_sd_limit",
+                )
+            )
+            render_standard_view_help(standard_sd_limit)
+        else:
+            standard_sd_limit = float(st.session_state.get("zscore_standard_sd_limit", standard_sd_limit))
         if st.session_state.get("zscore_selected_level") not in template["level_ids"]:
             st.session_state["zscore_selected_level"] = template["level_ids"][0]
         if view_mode == "单水平视图":
             selected_level = st.radio(
-                "Level Selector",
+                "选择显示水平",
                 options=template["level_ids"],
                 horizontal=True,
                 key="zscore_selected_level",
@@ -1593,7 +1793,7 @@ def render_zscore_chart_controls(
             )
         else:
             selected_level = st.session_state.get("zscore_selected_level", template["level_ids"][0])
-    return phase_scope, view_mode, selected_level
+    return phase_scope, view_mode, selected_level, y_axis_mode, standard_sd_limit
 
 
 def sync_zscore_workbench_state(
@@ -1607,12 +1807,22 @@ def sync_zscore_workbench_state(
         st.session_state["zscore_selected_level"] = template["level_ids"][0]
         if st.session_state.get("zscore_view_mode") not in {"单水平视图", "合并视图"}:
             st.session_state["zscore_view_mode"] = "单水平视图"
+        if st.session_state.get("zscore_y_axis_mode") not in ZSCORE_Y_AXIS_OPTIONS:
+            st.session_state["zscore_y_axis_mode"] = ZSCORE_Y_AXIS_OPTIONS[0]
+        if float(st.session_state.get("zscore_standard_sd_limit", 4.0) or 4.0) <= 0:
+            st.session_state["zscore_standard_sd_limit"] = 4.0
         return
 
     if st.session_state.get("zscore_phase_scope") not in ZSCORE_PHASE_VIEW_OPTIONS:
         st.session_state["zscore_phase_scope"] = default_phase_scope
     if st.session_state.get("zscore_selected_level") not in template["level_ids"]:
         st.session_state["zscore_selected_level"] = template["level_ids"][0]
+    if st.session_state.get("zscore_view_mode") not in {"单水平视图", "合并视图"}:
+        st.session_state["zscore_view_mode"] = "单水平视图"
+    if st.session_state.get("zscore_y_axis_mode") not in ZSCORE_Y_AXIS_OPTIONS:
+        st.session_state["zscore_y_axis_mode"] = ZSCORE_Y_AXIS_OPTIONS[0]
+    if float(st.session_state.get("zscore_standard_sd_limit", 4.0) or 4.0) <= 0:
+        st.session_state["zscore_standard_sd_limit"] = 4.0
 
 
 def render_batch_summary_row(batch) -> None:
@@ -1832,6 +2042,212 @@ def render_record_maintenance_dialog(qc_df: pd.DataFrame) -> None:
     st.divider()
     if st.button("\u5173\u95ed", key="close_record_dialog", width="stretch"):
         close_record_maintenance_dialog()
+        st.rerun()
+
+
+def bump_zscore_record_maintenance_dialog_nonce() -> int:
+    next_nonce = int(st.session_state.get("zscore_record_maintenance_dialog_nonce", 0)) + 1
+    st.session_state["zscore_record_maintenance_dialog_nonce"] = next_nonce
+    return next_nonce
+
+
+def close_zscore_record_maintenance_dialog() -> None:
+    st.session_state["show_zscore_record_maintenance_dialog"] = False
+    bump_zscore_record_maintenance_dialog_nonce()
+
+
+@st.dialog("Z-score 记录维护", width="large", on_dismiss=close_zscore_record_maintenance_dialog)
+def render_zscore_record_maintenance_dialog(
+    saved_runs: list[dict[str, Any]],
+    batch_context: dict[str, Any],
+) -> None:
+    notice_message = str(st.session_state.pop("zscore_record_maintenance_notice", "") or "")
+    if notice_message:
+        st.success(notice_message)
+
+    st.caption("在此查看当前批次已保存的多水平检测记录，并维护检测时间、检测人和各水平原始值；保存或删除后会自动整批次重算。")
+    if not saved_runs:
+        st.info("当前批次暂无已保存的检测记录可维护。")
+        if st.button("关闭", key="close_zscore_record_dialog_empty", width="stretch"):
+            close_zscore_record_maintenance_dialog()
+            st.rerun()
+        return
+
+    template = batch_context["template"]
+    level_label_map = dict(batch_context["level_label_map"])
+    maintenance_runs = sort_zscore_runs_for_maintenance(saved_runs)
+
+    st.dataframe(
+        build_zscore_record_maintenance_dataframe(maintenance_runs, level_label_map),
+        hide_index=True,
+        width="stretch",
+    )
+
+    run_labels, run_options = build_zscore_run_select_options(maintenance_runs, level_label_map)
+    sync_selector_state(
+        selector_key="zscore_run_selector",
+        selected_id_key="selected_zscore_run_id",
+        options_map=run_options,
+        placeholder=run_labels[0],
+    )
+    selected_run_label = st.selectbox(
+        "选择需要编辑或删除的检测记录",
+        options=run_labels,
+        key="zscore_run_selector",
+    )
+    selected_run_id = run_options[selected_run_label]
+    current_run_id = st.session_state.get("selected_zscore_run_id")
+    if selected_run_id != current_run_id:
+        st.session_state["selected_zscore_run_id"] = selected_run_id
+        bump_zscore_record_maintenance_dialog_nonce()
+        st.rerun()
+
+    if selected_run_id is None:
+        st.info("请选择一条已保存的检测记录。")
+    else:
+        selected_run = next(
+            (run for run in maintenance_runs if int(run["run_id"]) == int(selected_run_id)),
+            None,
+        )
+        if selected_run is not None:
+            dialog_nonce = int(st.session_state.get("zscore_record_maintenance_dialog_nonce", 0))
+            confirm_delete_key = f"confirm_delete_zscore_run_{dialog_nonce}_{int(selected_run_id)}"
+            delete_button_key = f"delete_zscore_run_button_{dialog_nonce}_{int(selected_run_id)}"
+            is_locked_for_maintenance = bool(selected_run.get("is_locked_for_maintenance"))
+            sequence_number = get_zscore_display_sequence(selected_run)
+            maintenance_left, maintenance_right = st.columns([1.25, 0.75], gap="large")
+
+            with maintenance_left:
+                st.caption(
+                    f"当前选中：检测序号 {sequence_number} | "
+                    f"{pd.Timestamp(selected_run['test_time']).strftime('%Y-%m-%d %H:%M:%S')} | "
+                    f"阶段 {selected_run.get('phase_label')} | 判定 {format_zscore_status_label(selected_run.get('run_status'))} | "
+                    f"触发规则 {format_zscore_rule_hits(selected_run.get('rule_hits_run', []))}"
+                )
+                if is_locked_for_maintenance:
+                    st.info("建靶期数据在正式期启用后已锁定，只可查看，不可编辑或删除。")
+
+                with st.form(f"edit_zscore_run_form_{dialog_nonce}_{int(selected_run_id)}"):
+                    edit_test_time = st.datetime_input(
+                        "检测时间",
+                        value=pd.Timestamp(selected_run["test_time"]).to_pydatetime(),
+                        disabled=is_locked_for_maintenance,
+                    )
+                    edit_operator = st.text_input(
+                        "检测人",
+                        value=str(selected_run.get("operator", "") or ""),
+                        disabled=is_locked_for_maintenance,
+                    )
+                    st.markdown("**多水平原始值**")
+                    edited_level_values: dict[str, float] = {}
+                    level_result_map = {
+                        str(level_result.get("level_id")): level_result
+                        for level_result in selected_run.get("level_results", [])
+                    }
+                    for level_id in template["level_ids"]:
+                        display_label, level_caption = format_zscore_level_display(level_id, level_label_map)
+                        current_level_result = level_result_map.get(level_id, {})
+                        edited_level_values[level_id] = st.number_input(
+                            display_label,
+                            value=float(current_level_result.get("raw_value") or 0.0),
+                            format="%.4f",
+                            key=f"edit_zscore_run_{dialog_nonce}_{int(selected_run_id)}_{level_id.replace(' ', '_')}",
+                            disabled=is_locked_for_maintenance,
+                        )
+                        if level_caption:
+                            st.caption(level_caption)
+                    edit_submitted = st.form_submit_button(
+                        "保存记录修改",
+                        width="stretch",
+                        disabled=is_locked_for_maintenance,
+                    )
+
+                    if edit_submitted:
+                        validation_errors: list[str] = []
+                        cleaned_operator = edit_operator.strip()
+                        updated_level_results: list[dict[str, Any]] = []
+
+                        if edit_test_time is None:
+                            validation_errors.append("请填写检测时间。")
+                        if not cleaned_operator:
+                            validation_errors.append("请填写检测人，不能为空。")
+
+                        for level_id in template["level_ids"]:
+                            display_level = format_zscore_level_display(level_id, level_label_map)[0]
+                            raw_value = edited_level_values[level_id]
+                            if not isinstance(raw_value, (int, float)) or not math.isfinite(float(raw_value)):
+                                validation_errors.append(f"{display_level}的原始值必须为有效数字。")
+                                continue
+                            if float(raw_value) <= 0:
+                                validation_errors.append(f"{display_level}的原始值必须大于 0。")
+                                continue
+                            updated_level_results.append(
+                                {
+                                    "level_id": level_id,
+                                    "raw_value": float(raw_value),
+                                }
+                            )
+
+                        if validation_errors:
+                            st.error("\n".join(dict.fromkeys(validation_errors)))
+                        else:
+                            try:
+                                rebuild_state = update_saved_zscore_run(
+                                    run_id=int(selected_run_id),
+                                    test_time=edit_test_time,
+                                    operator=cleaned_operator,
+                                    level_results=updated_level_results,
+                                )
+                            except ValueError as exc:
+                                st.error(str(exc))
+                            else:
+                                dialog_state = build_zscore_maintenance_dialog_state(
+                                    action="update",
+                                    available_runs=rebuild_state.get("runs", []),
+                                    preferred_run_id=int(selected_run_id),
+                                )
+                                st.session_state["show_zscore_record_maintenance_dialog"] = bool(
+                                    dialog_state["keep_dialog_open"]
+                                )
+                                st.session_state["selected_zscore_run_id"] = dialog_state["selected_run_id"]
+                                st.session_state["zscore_record_maintenance_notice"] = dialog_state["dialog_notice"]
+                                bump_zscore_record_maintenance_dialog_nonce()
+                                st.rerun()
+
+            with maintenance_right:
+                st.caption("删除后会同步重算当前批次的建靶统计、正式靶值、正式期实时统计、阶段判定、结果判读和图表基础数据。")
+                confirm_delete = st.checkbox(
+                    "我确认删除这条检测记录",
+                    key=confirm_delete_key,
+                    disabled=is_locked_for_maintenance,
+                )
+                if st.button(
+                    "删除所选记录",
+                    key=delete_button_key,
+                    width="stretch",
+                    disabled=is_locked_for_maintenance or not confirm_delete,
+                ):
+                    try:
+                        rebuild_state = delete_saved_zscore_run(int(selected_run_id))
+                    except ValueError as exc:
+                        st.error(str(exc))
+                    else:
+                        dialog_state = build_zscore_maintenance_dialog_state(
+                            action="delete",
+                            available_runs=rebuild_state.get("runs", []),
+                            preferred_run_id=int(selected_run_id),
+                        )
+                        st.session_state["show_zscore_record_maintenance_dialog"] = bool(
+                            dialog_state["keep_dialog_open"]
+                        )
+                        st.session_state["selected_zscore_run_id"] = dialog_state["selected_run_id"]
+                        st.session_state["zscore_record_maintenance_notice"] = dialog_state["dialog_notice"]
+                        bump_zscore_record_maintenance_dialog_nonce()
+                        st.rerun()
+
+    st.divider()
+    if st.button("关闭", key="close_zscore_record_dialog", width="stretch"):
+        close_zscore_record_maintenance_dialog()
         st.rerun()
 
 
@@ -2058,7 +2474,7 @@ def build_zscore_batch_select_options(batches_df: pd.DataFrame) -> tuple[list[st
 def build_result_label(row: pd.Series) -> str:
     test_time = pd.Timestamp(row["test_time"]).strftime("%Y-%m-%d %H:%M:%S")
     return (
-        f"\u8bb0\u5f55 {int(row['id'])} | \u5e8f\u53f7 {int(row['sequence'])} | "
+        f"\u68c0\u6d4b\u5e8f\u53f7 {int(row['sequence'])} | "
         f"{test_time} | {float(row['value']):.4f} | {row['operator']}"
     )
 
@@ -2068,6 +2484,57 @@ def build_result_select_options(results_df: pd.DataFrame) -> tuple[list[str], di
     for _, row in results_df.iterrows():
         option_map[build_result_label(row)] = int(row["id"])
     return list(option_map.keys()), option_map
+
+
+def build_zscore_run_level_summary(
+    level_results: list[dict[str, Any]],
+    level_label_map: dict[str, str],
+) -> str:
+    summary_items: list[str] = []
+    for level_result in sorted(level_results, key=lambda item: str(item.get("level_id") or "")):
+        level_id = str(level_result.get("level_id") or "")
+        display_label, _ = format_zscore_level_display(level_id, level_label_map)
+        raw_value = level_result.get("raw_value")
+        value_text = "-" if raw_value is None else f"{float(raw_value):.4f}"
+        summary_items.append(f"{display_label}={value_text}")
+    return " | ".join(summary_items)
+
+
+def build_zscore_run_label(run: dict[str, Any], level_label_map: dict[str, str]) -> str:
+    test_time = pd.Timestamp(run["test_time"]).strftime("%Y-%m-%d %H:%M:%S")
+    level_summary = build_zscore_run_level_summary(run.get("level_results", []), level_label_map)
+    test_sequence = get_zscore_display_sequence(run)
+    return f"序号 {test_sequence} | {test_time} | {run.get('operator', '')} | {level_summary}"
+
+
+def build_zscore_run_select_options(
+    saved_runs: list[dict[str, Any]],
+    level_label_map: dict[str, str],
+) -> tuple[list[str], dict[str, int | None]]:
+    option_map = {"请选择需要维护的检测记录": None}
+    for run in saved_runs:
+        option_map[build_zscore_run_label(run, level_label_map)] = int(run["run_id"])
+    return list(option_map.keys()), option_map
+
+
+def build_zscore_record_maintenance_dataframe(
+    saved_runs: list[dict[str, Any]],
+    level_label_map: dict[str, str],
+) -> pd.DataFrame:
+    rows = []
+    for run in saved_runs:
+        rows.append(
+            {
+                "检测序号": get_zscore_display_sequence(run),
+                "检测时间": pd.Timestamp(run["test_time"]).strftime("%Y-%m-%d %H:%M:%S"),
+                "检测人": str(run.get("operator", "") or ""),
+                "阶段": str(run.get("phase_label") or get_phase_label(run.get("phase"))),
+                "判定": format_zscore_status_label(run.get("run_status", "pending")),
+                "维护状态": "已锁定" if bool(run.get("is_locked_for_maintenance")) else "可维护",
+                "水平摘要": build_zscore_run_level_summary(run.get("level_results", []), level_label_map),
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def build_monthly_export_dataframe(
@@ -2256,7 +2723,7 @@ def render_lj_page(
             st.markdown("**\u5efa\u9776\u7edf\u8ba1**")
             render_compact_stat_metrics(
                 [
-                    ("Mean", "-" if stats["mean"] is None else f"{stats['mean']:.4f}"),
+                    ("均值", "-" if stats["mean"] is None else f"{stats['mean']:.4f}"),
                     ("SD", "-" if stats["sd"] is None else f"{stats['sd']:.4f}"),
                     ("CV%", "-" if stats["cv"] is None else f"{stats['cv']:.2f}%"),
                 ]
@@ -2302,7 +2769,7 @@ def render_lj_page(
                 )
                 render_compact_stat_metrics(
                     [
-                        ("\u5b9e\u65f6 Mean", "-" if realtime_stats["mean"] is None else f"{realtime_stats['mean']:.4f}"),
+                        ("\u5b9e\u65f6\u5747\u503c", "-" if realtime_stats["mean"] is None else f"{realtime_stats['mean']:.4f}"),
                         ("\u5b9e\u65f6 SD", "-" if realtime_stats["sd"] is None else f"{realtime_stats['sd']:.4f}"),
                         ("\u5b9e\u65f6 CV%", "-" if realtime_stats["cv"] is None else f"{realtime_stats['cv']:.2f}%"),
                     ]
@@ -2312,7 +2779,7 @@ def render_lj_page(
                 st.caption(
                     "\u7edf\u8ba1\u53e3\u5f84\uff1a\u5b9e\u65f6\u7edf\u8ba1\u4ec5\u57fa\u4e8e\u5f53\u524d\u6279\u6b21\u4e2d\u5224\u5b9a\u4e3a\u201c\u5728\u63a7\u201d\u7684\u6b63\u5f0f\u6570\u636e\u8ba1\u7b97\uff0c"
                     "\u5df2\u81ea\u52a8\u6392\u9664\u8b66\u544a\u548c\u5931\u63a7\u7ed3\u679c\uff1b"
-                    "\u5f53\u68c0\u6d4b\u8bb0\u5f55\u88ab\u4fee\u6539\u6216\u5220\u9664\u540e\uff0c\u5b9e\u65f6 Mean / SD / CV% \u53ef\u80fd\u968f\u4e4b\u81ea\u52a8\u53d8\u5316\u3002"
+                    "\u5f53\u68c0\u6d4b\u8bb0\u5f55\u88ab\u4fee\u6539\u6216\u5220\u9664\u540e\uff0c\u5b9e\u65f6\u5747\u503c / SD / CV% \u4f1a\u968f\u4e4b\u81ea\u52a8\u53d8\u5316\u3002"
                 )
 
         with chart_col:
@@ -2341,7 +2808,7 @@ def render_lj_page(
                 st.session_state["chart_y_axis_mode"] = chart_y_axis_mode
                 if chart_y_axis_mode == "\u6807\u51c6\u89c6\u56fe":
                     chart_standard_sd_limit = st.slider(
-                        "\u6807\u51c6\u89c6\u56fe\u8303\u56f4\uff08Mean \u00b1 nSD\uff09",
+                        "\u6807\u51c6\u89c6\u56fe\u8303\u56f4\uff08\u5747\u503c \u00b1 nSD\uff09",
                         min_value=3.0,
                         max_value=6.0,
                         value=float(standard_sd_limit),
@@ -2383,14 +2850,12 @@ def render_lj_page(
         render_rule_summary_metrics(stats.get("rule_summary", {}))
 
         with st.expander("Westgard\u89c4\u5219\u8bf4\u660e\uff08\u70b9\u51fb\u5c55\u5f00\uff09", expanded=False):
-            st.markdown(
-                "- `1_2s`\uff1a\u5355\u70b9\u8d85\u8fc7 \u00b12SD\uff0c\u8b66\u544a\n"
-                "- `1_3s`\uff1a\u5355\u70b9\u8d85\u8fc7 \u00b13SD\uff0c\u5931\u63a7\n"
-                "- `2_2s`\uff1a\u8fde\u7eed 2 \u4e2a\u70b9\u540c\u4fa7\u8d85\u8fc7 \u00b12SD\uff0c\u5931\u63a7\n"
-                "- `R_4s`\uff1a\u8fde\u7eed 2 \u4e2a\u70b9\u5dee\u503c\u8d85\u8fc7 4SD\uff0c\u5931\u63a7\n"
-                "- `4_1s`\uff1a\u8fde\u7eed 4 \u4e2a\u70b9\u540c\u4fa7\u8d85\u8fc7 \u00b11SD\uff0c\u5931\u63a7\n"
-                "- `10x`\uff1a\u8fde\u7eed 10 \u4e2a\u70b9\u4f4d\u4e8e\u5747\u503c\u540c\u4fa7\uff0c\u5931\u63a7"
+            st.caption(
+                "\u4ee5\u4e0b\u8bf4\u660e\u5bf9\u5e94\u5f53\u524d\u7248\u672c\u7684 Westgard \u5224\u8bfb\u53e3\u5f84\uff1b"
+                "\u5efa\u9776\u671f\u4ec5\u7528\u4e8e\u53c2\u8003\uff0c\u6b63\u5f0f\u8d28\u63a7\u671f\u624d\u8f93\u51fa\u89c4\u5219\u7ed3\u8bba\u3002"
             )
+            for rule_id in ["1_2s", "1_3s", "2_2s", "R_4s", "4_1s", "10x"]:
+                st.markdown(f"- `{format_rule_code(rule_id)}`\uff1a{format_rule_description(rule_id)}")
 
         st.divider()
         with st.expander("\u5f53\u524d\u6279\u6b21\u68c0\u6d4b\u8bb0\u5f55\uff08\u70b9\u51fb\u6298\u53e0/\u5c55\u5f00\uff09", expanded=True):
@@ -2540,14 +3005,197 @@ def render_lj_page(
 
 
 def render_main_entry_page() -> None:
-    st.subheader("\u65b9\u6cd5\u5165\u53e3")
-    st.caption("\u8bf7\u5148\u9009\u62e9\u5f53\u524d\u9700\u8981\u4f7f\u7528\u7684\u8d28\u63a7\u65b9\u6cd5\u9875\u9762\u3002")
-    st.info("LJ \u9875\u9762\u4fdd\u7559\u5f53\u524d\u5b8c\u6574\u5de5\u4f5c\u6d41\uff1bZ-score \u548c Instant \u9875\u9762\u6682\u4e3a\u5360\u4f4d\u9875\u3002")
+    chips = "".join(
+        f'<div class="welcome-chip">{html_escape(label)}</div>'
+        for label in [
+            "LJ 曲线",
+            "多水平 Z-score",
+            "项目与批次管理",
+            "建靶与正式质控",
+            "图表分析与记录维护",
+        ]
+    )
+    hero_html = dedent(
+        f"""
+        <div style="
+            border:1px solid #d9e2ee;
+            border-radius:18px;
+            padding:20px 22px;
+            background:linear-gradient(135deg, #f7fbff 0%, #eef5fb 55%, #f9fbfd 100%);
+            margin:4px 0 14px 0;
+        ">
+            <div style="font-size:28px;font-weight:800;color:#1c3553;line-height:1.2;">
+                实验室室内质控管理工具
+            </div>
+            <div style="margin-top:8px;font-size:14px;font-weight:600;color:#36587f;">
+                用于实验室室内质控的 LJ 与多水平 Z-score 管理与判读工具
+            </div>
+            <div style="margin-top:10px;font-size:14px;line-height:1.7;color:#4e6076;">
+                当前版本支持 LJ 曲线、多水平 Z-score、项目与批次管理、建靶与正式质控、
+                图表查看、结果分析和记录维护，可作为内部试用、演示与小范围部署的交付基线。
+            </div>
+            <div class="welcome-chip-row">{chips}</div>
+        </div>
+        """
+    ).strip()
+    render_html_block(hero_html)
+
+    render_html_block(
+        dedent(
+            """
+            <div class="main-highlight-box">
+                <div class="main-highlight-title">从哪里开始</div>
+                <div class="main-highlight-body">
+                    首次使用建议先选择 <strong>LJ</strong> 或 <strong>Z-score</strong> 页面，按“先建项目、再建批次、再录入结果”的顺序开始。
+                    如果只是想了解方法差异和当前版本边界，可先阅读下方方法说明与使用教程。
+                </div>
+            </div>
+            """
+        ).strip()
+    )
+
+    st.divider()
+    st.markdown("**功能入口与方法说明**")
+    method_cards = [
+        (
+            "LJ",
+            "适用于单水平 LJ 曲线质控。",
+            [
+                "支持项目与批次管理、建靶、正式质控与 Westgard 判读。",
+                "支持标准视图 / 全范围视图、规则汇总、最新结果分析与记录维护。",
+                "适合常规单水平室内质控流程。",
+            ],
+            "进入 LJ 页面",
+            "LJ",
+        ),
+        (
+            "Z-score",
+            "适用于双水平 / 三水平多水平 IQC。",
+            [
+                "支持项目级水平数配置与批次级水平说明。",
+                "支持建靶期 / 正式质控期、多水平检测记录录入、图表与结果分析。",
+                "支持正式期记录维护，以及删除或编辑后的整批次重算。",
+            ],
+            "进入 Z-score 页面",
+            "Z-score",
+        ),
+        (
+            "Instant",
+            "当前为预留页面。",
+            [
+                "本版本尚未接入正式业务逻辑。",
+                "页面仅保留模块定位说明，不参与当前 LJ 与 Z-score 主流程。",
+                "如需可用功能，请优先进入 LJ 或 Z-score 页面。",
+            ],
+            "查看 Instant 说明",
+            "Instant",
+        ),
+    ]
+    method_cols = st.columns(3, gap="large")
+    for column, (title, caption, bullets, button_label, target_method) in zip(method_cols, method_cards):
+        with column:
+            bullet_html = "".join(f"<li>{html_escape(item)}</li>" for item in bullets)
+            render_html_block(
+                dedent(
+                    f"""
+                    <div class="main-entry-card">
+                        <div class="main-entry-card-title">{html_escape(title)}</div>
+                        <div class="main-entry-card-caption">{html_escape(caption)}</div>
+                        <ul class="main-entry-card-list">{bullet_html}</ul>
+                    </div>
+                    """
+                ).strip()
+            )
+            if st.button(button_label, key=f"main_jump_{target_method}", width="stretch"):
+                switch_top_level_method(target_method)
+
+    st.divider()
+    st.markdown("**快速开始**")
+    quick_start_col1, quick_start_col2 = st.columns(2, gap="large")
+    with quick_start_col1:
+        st.markdown("**LJ 快速开始**")
+        st.markdown(
+            "1. 新建 LJ 项目。\n"
+            "2. 新建批次，并确认建靶所需次数。\n"
+            "3. 录入检测结果，累计建靶数据。\n"
+            "4. 建靶完成后自动进入正式质控，并开始 Westgard 判读。\n"
+            "5. 在图表区查看趋势、规则汇总与最新结果分析；如需修正历史数据，可进入记录维护。"
+        )
+        if st.button("从 LJ 开始", key="main_quickstart_lj", width="stretch"):
+            switch_top_level_method("LJ")
+    with quick_start_col2:
+        st.markdown("**Z-score 快速开始**")
+        st.markdown(
+            "1. 新建 Z-score 项目，并选择双水平或三水平。\n"
+            "2. 新建批次并配置各水平名称或说明。\n"
+            "3. 录入多水平检测记录，完成建靶。\n"
+            "4. 建靶完成后进入正式质控，查看单水平图、合并图和最新结果分析。\n"
+            "5. 如需修正正式期检测记录，可通过记录维护入口编辑或删除，系统会自动整批次重算。"
+        )
+        if st.button("从 Z-score 开始", key="main_quickstart_zscore", width="stretch"):
+            switch_top_level_method("Z-score")
+
+    st.divider()
+    st.markdown("**使用说明与版本边界**")
+    with st.expander("LJ 使用说明", expanded=False):
+        st.markdown(
+            "- 适用场景：单水平室内质控、LJ 曲线查看与 Westgard 规则判读。\n"
+            "- 基本概念：项目用于区分分析物或方法，批次用于承载同一组质控材料、批号和建靶参数。\n"
+            "- 建靶所需次数：以批次中的“建靶所需次数”为准；完成前仅累计统计，不启用正式规则判读。\n"
+            "- 正式质控后：可在图表区查看建靶图、正式质控图、全部数据图，以及标准视图 / 全范围视图。\n"
+            "- 记录维护：可修改或删除历史检测记录；删除后会重算后续检测序号、阶段和判读结果。"
+        )
+
+    with st.expander("Z-score 使用说明", expanded=False):
+        st.markdown(
+            "- 适用场景：双水平 / 三水平多水平 IQC 管理与判读。\n"
+            "- 项目级水平数配置：决定该项目固定采用双水平或三水平流程；创建后批次会自动继承。\n"
+            "- 批次级水平说明：用于给默认的水平 1 / 水平 2 / 水平 3 添加业务名称，便于录入与维护。\n"
+            "- 建靶期与正式质控期：建靶期用于累计实验室正式靶值；只有全部水平达到建靶条件后，才进入正式质控期。\n"
+            "- 图表理解：单水平图用于查看单个水平趋势；合并图用于对比多个水平；数据范围可切换为建靶期图、正式质控图或全图。\n"
+            "- 厂家参考值：仅供参考，不直接替代实验室正式靶值；当前版本仅支持手工录入。\n"
+            "- 正式期实时统计：只基于正式期在控数据计算，警告和失控结果不纳入统计。"
+        )
+
+    with st.expander("常见说明 / 注意事项", expanded=False):
+        st.markdown(
+            "- 建靶期不启用正式规则判读。\n"
+            "- Z-score 批次进入正式质控后，建靶期检测记录会被锁定，只可查看，不可再维护。\n"
+            "- 删除 Z-score 检测记录后会触发整批次重算，包括建靶统计、正式靶值、正式期实时统计和图表基础数据。\n"
+            "- 检测序号是业务序号，与数据库内部编号不同。\n"
+            "- 厂家参考值当前仅支持手工录入，不支持 COA 自动解析。"
+        )
+
+    with st.expander("当前版本说明", expanded=False):
+        st.caption("当前版本已具备主流程使用能力，但仍以内部试用、演示和小范围部署为主要交付场景。")
+        support_col, limit_col = st.columns(2, gap="large")
+        with support_col:
+            st.markdown("**已支持**")
+            st.markdown(
+                "- LJ 主流程\n"
+                "- Z-score 双水平 / 三水平主流程\n"
+                "- 多水平检测记录持久化\n"
+                "- 建靶 / 正式质控\n"
+                "- 图表查看、结果分析与记录维护\n"
+                "- LJ 导出与月度质控图导出"
+            )
+        with limit_col:
+            st.markdown("**暂未支持**")
+            st.markdown(
+                "- 批量导入\n"
+                "- Z-score 导出\n"
+                "- COA 解析\n"
+                "- peer-group 数据\n"
+                "- target freeze / re-establish 等高级流程\n"
+                "- Instant 正式业务功能"
+            )
+
+    st.info("可直接点击上方按钮进入 LJ、Z-score 或 Instant 页面；也可以使用顶部“功能入口”切换。")
 
 
 def render_zscore_placeholder_page() -> None:
     st.subheader("Z-score")
-    st.caption("Z-score 当前按 IQC 多水平流程运行，项目创建时固定 2-level 或 3-level，批次自动继承。")
+    st.caption("Z-score 页面用于多水平 IQC 流程管理；项目创建时固定双水平或三水平，批次自动继承。")
     projects_df, selected_project_id, batches_df, selected_batch_id = prepare_zscore_project_batch_context()
     manage_tab, work_tab = st.tabs([TEXT["manage"], TEXT["current_batch"]])
     render_zscore_project_batch_management(
@@ -2605,13 +3253,13 @@ def render_zscore_placeholder_page() -> None:
                 batch,
                 overall_phase_label,
                 formal_rules_enabled,
-                template["label"],
+                format_zscore_template_display_name(template),
                 required_level_ids,
             )
 
         with chart_col:
             st.subheader("图表与判读")
-            phase_scope, view_mode, selected_level = render_zscore_chart_controls(
+            phase_scope, view_mode, selected_level, y_axis_mode, standard_sd_limit = render_zscore_chart_controls(
                 template,
                 default_phase_scope,
                 level_label_map,
@@ -2640,8 +3288,8 @@ def render_zscore_placeholder_page() -> None:
             if notice_message:
                 st.success(notice_message)
             st.caption(
-                f"当前项目固定为 {level_count}-level｜模板自动绑定为 {template['label']}｜"
-                f"每个 level 累计 {required_n} 次且具备有效 SD 后才算 ready。"
+                f"当前项目固定为 {level_count} 水平｜当前采用 {format_zscore_template_display_name(template)}｜"
+                f"各水平累计达到 {required_n} 次且形成有效 SD 后，系统才进入正式质控。"
             )
 
             st.markdown("**本次数据录入**")
@@ -2652,7 +3300,7 @@ def render_zscore_placeholder_page() -> None:
                 placeholder="请输入本次检测人",
             )
             if operator_options:
-                st.caption(f"历史检测人：{', '.join(operator_options[:5])}")
+                st.caption(f"最近使用的检测人：{', '.join(operator_options[:5])}")
 
             st.divider()
             st.markdown("**多水平结果录入**")
@@ -2681,7 +3329,9 @@ def render_zscore_placeholder_page() -> None:
                     validation_errors.append("请填写检测人。")
                 for level_result in current_level_results:
                     if level_result["raw_value"] is None:
-                        validation_errors.append(f"{level_result['level_id']} 检测值必须为有效正数。")
+                        validation_errors.append(
+                            f"{format_level_id_display(level_result['level_id'])}的检测值必须为有效正数。"
+                        )
 
                 if validation_errors:
                     st.error("\n".join(dict.fromkeys(validation_errors)))
@@ -2698,12 +3348,12 @@ def render_zscore_placeholder_page() -> None:
                     except ValueError as exc:
                         st.error(str(exc))
                     else:
-                        st.session_state["zscore_notice"] = "Z-score run 已保存。"
+                        st.session_state["zscore_notice"] = "Z-score 检测记录已保存。"
                         st.session_state["zscore_reset_entry_form"] = True
                         st.rerun()
 
             st.divider()
-            st.markdown("**各 Level 建靶 / 正式统计**")
+            st.markdown("**各水平建靶与正式统计**")
             stat_cols = st.columns(len(required_level_ids), gap="large")
             for stat_col, level_id in zip(stat_cols, required_level_ids):
                 profile = level_target_profiles[level_id]
@@ -2715,8 +3365,8 @@ def render_zscore_placeholder_page() -> None:
                     render_compact_stat_metrics(
                         [
                             ("已收集", f"{profile['collected_n']}"),
-                            ("required_n", f"{profile['required_n']}"),
-                            ("Ready", "是" if profile["is_ready"] else "否"),
+                            ("建靶要求", f"{profile['required_n']} 次"),
+                            ("已达建靶条件", "是" if profile["is_ready"] else "否"),
                             ("阶段", profile["phase_label"]),
                         ]
                     )
@@ -2750,6 +3400,7 @@ def render_zscore_placeholder_page() -> None:
                         batch_id=selected_batch_id,
                         template_id=template_id,
                         level_id=level_id,
+                        level_display_name=display_label,
                         required_n=required_n,
                         profile=profile,
                     )
@@ -2773,12 +3424,12 @@ def render_zscore_placeholder_page() -> None:
             latest_run["run_status"] = PHASE_TARGET_BUILDING
             latest_run["rule_hits_run"] = []
             latest_run["error_type_hint"] = "not_applicable"
-            latest_run["analysis_prompt"] = "当前视图仅显示纳入建靶统计的观察点，不输出正式规则结论。"
+            latest_run["analysis_prompt"] = "当前视图仅显示纳入建靶统计的观察点，不输出正式质控结论。"
 
         with chart_col:
             phase_title = {
-                "building": "建靶观察图",
-                "formal": "正式 Z-score 图",
+                "building": "建靶期图",
+                "formal": "正式质控图",
                 "all": "全图",
             }[phase_scope]
             if view_mode == "单水平视图":
@@ -2787,44 +3438,60 @@ def render_zscore_placeholder_page() -> None:
                     level_id=selected_level,
                     title=f"{phase_title}｜{format_zscore_level_display(selected_level, level_label_map)[0]}",
                     phase_scope=phase_scope,
+                    y_axis_mode=y_axis_mode,
+                    standard_sd_limit=standard_sd_limit,
                 )
             else:
                 figure = plot_zscore_overlay(
                     plot_df=plot_df,
-                    title=f"{phase_title}｜{template['label']}",
+                    title=f"{phase_title}｜{format_zscore_template_display_name(template)}",
                     active_levels=required_level_ids,
                     phase_scope=phase_scope,
+                    y_axis_mode=y_axis_mode,
+                    standard_sd_limit=standard_sd_limit,
                 )
             st.pyplot(figure, clear_figure=False, width="stretch")
             render_zscore_latest_analysis_panel(latest_run, overall_phase, formal_rules_enabled)
             render_zscore_rules_config_expander(template, overall_phase, formal_rules_enabled)
 
+        st.divider()
+        st.subheader("记录维护")
+        st.caption("主工作区保持录入与判读；如需修正历史检测记录，请在弹窗中编辑或删除，系统会按当前批次全量重算。")
+        open_zscore_maintenance_disabled = not history_runs
+        if st.button(
+            "打开 Z-score 记录维护",
+            key="open_zscore_record_maintenance_dialog",
+            width="stretch",
+            disabled=open_zscore_maintenance_disabled,
+        ):
+            bump_zscore_record_maintenance_dialog_nonce()
+            st.session_state["show_zscore_record_maintenance_dialog"] = True
+        if open_zscore_maintenance_disabled:
+            st.info("当前批次暂无已保存的检测记录可维护。")
+        if st.session_state.get("show_zscore_record_maintenance_dialog", False):
+            render_zscore_record_maintenance_dialog(history_runs, batch_context)
+
 def render_instant_placeholder_page() -> None:
     st.subheader("Instant")
-    st.caption("\u8be5\u9875\u9762\u9884\u7559\u7ed9\u540e\u7eed\u72ec\u7acb\u7684 Instant \u5de5\u4f5c\u6d41\uff0c\u5f53\u524d\u4ec5\u63d0\u4f9b\u9759\u6001\u9875\u9762\u7ed3\u6784\uff0c\u4e0d\u5305\u542b\u5206\u6790\u903b\u8f91\u3002")
+    st.caption("Instant 页面目前作为预留入口保留。当前版本暂未接入正式业务流程。")
 
-    st.markdown("**\u8ba1\u5212\u4e2d\u7684\u6d41\u7a0b**")
-    st.markdown(
-        "- \u5efa\u7acb\u6216\u9009\u62e9\u540e\u7eed Instant \u5de5\u4f5c\u5bf9\u8c61\n"
-        "- \u5f55\u5165\u6216\u5bfc\u5165\u5f85\u5206\u6790\u6570\u636e\n"
-        "- \u5728\u9875\u9762\u5185\u67e5\u770b\u540e\u7eed\u6458\u8981\u3001\u7ed3\u679c\u4e0e\u8f93\u51fa\u533a\u57df\n"
-        "- \u5728\u65b9\u6cd5\u5b66\u5b9e\u73b0\u540e\u8865\u5145\u5bfc\u51fa\u4e0e\u62a5\u544a\u80fd\u529b"
-    )
+    status_col, guide_col = st.columns(2, gap="large")
+    with status_col:
+        st.markdown("**当前版本状态**")
+        st.markdown(
+            "- 本页当前仅用于说明模块定位。\n"
+            "- 暂不提供正式数据录入、规则判读、图表输出或导出能力。\n"
+            "- 该页面不会影响 LJ 与 Z-score 现有主流程。"
+        )
+    with guide_col:
+        st.markdown("**建议使用路径**")
+        st.markdown(
+            "- 如需立即开展单水平室内质控，请进入 LJ 页面。\n"
+            "- 如需开展双水平 / 三水平多水平 IQC，请进入 Z-score 页面。\n"
+            "- Instant 后续若接入正式功能，会在此页面补充明确说明。"
+        )
 
-    st.warning("Instant \u5206\u6790\u903b\u8f91\u3001\u8ba1\u7b97\u6d41\u7a0b\u4e0e\u7ed3\u679c\u5224\u8bfb\u76ee\u524d\u5c1a\u672a\u5b9e\u73b0\u3002")
-
-    future_input_col, future_result_col = st.columns(2)
-    with future_input_col:
-        st.markdown("**\u9884\u7559\u8f93\u5165\u533a**")
-        st.info("\u540e\u7eed\u5c06\u5728\u8fd9\u91cc\u653e\u7f6e Instant \u7684\u8f93\u5165\u8868\u5355\u3001\u6570\u636e\u5bfc\u5165\u5165\u53e3\u6216\u5de5\u4f5c\u5bf9\u8c61\u9009\u62e9\u533a\u57df\u3002")
-
-    with future_result_col:
-        st.markdown("**\u9884\u7559\u7ed3\u679c\u533a**")
-        st.info("\u540e\u7eed\u5c06\u5728\u8fd9\u91cc\u653e\u7f6e Instant \u7684\u6458\u8981\u7ed3\u679c\u3001\u56fe\u8868\u548c\u5bfc\u51fa\u533a\u57df\u3002")
-
-    with st.container():
-        st.markdown("**\u5f53\u524d\u72b6\u6001**")
-        st.write("\u5f53\u524d\u9875\u9762\u4ec5\u4e3a\u7ed3\u6784\u9aa8\u67b6\uff0c\u7528\u4e8e\u540e\u7eed\u72ec\u7acb\u63a5\u5165 Instant \u9875\u9762\u5185\u5bb9\u3002")
+    st.info("当前可用的质控流程请从顶部“功能入口”进入 LJ 或 Z-score 页面。")
 
 
 def render_lj_mode() -> None:
@@ -2860,18 +3527,18 @@ def render_page_chrome() -> None:
         ).strip()
     )
     st.title(TEXT["app_title"])
-    st.caption("\u65e9\u671f\u5f00\u53d1\u7248\u672c\uff0c\u4ec5\u4f9b\u53c2\u8003\uff0c\u5982\u6709\u7591\u95ee\u53ef\u8054\u7cfb\u5f00\u53d1\u8005\u6216\u53f3\u4e0a\u89d2\u201c\u95ee\u9898\u53cd\u9988\u201d\u7559\u8a00\u3002")
+    st.caption("当前版本适用于内部试用、演示与小范围部署；如需反馈问题，可使用右上角“问题反馈”。")
 
 
 render_page_chrome()
 selected_method = st.radio(
-    "\u65b9\u6cd5\u9875\u9762",
-    options=["Main", "LJ", "Z-score", "Instant"],
+    "功能入口",
+    options=["首页", "LJ", "Z-score", "Instant"],
     horizontal=True,
     key="top_level_method_selector",
 )
 
-if selected_method == "Main":
+if selected_method in {"首页", "Main"}:
     render_main_entry_page()
 elif selected_method == "LJ":
     render_lj_mode()

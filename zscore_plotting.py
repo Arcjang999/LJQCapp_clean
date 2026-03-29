@@ -4,12 +4,15 @@ import math
 
 import matplotlib
 from matplotlib import font_manager
+from matplotlib.lines import Line2D
 from matplotlib.ticker import FixedLocator
 import pandas as pd
 
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
+from zscore_logic import format_level_id_display
 
 
 CJK_FONT_CANDIDATES = [
@@ -36,17 +39,23 @@ LEVEL_COLORS = {
     "Level 3": "#9c755f",
 }
 
-STATUS_EDGE_COLORS = {
-    "accept": "#ffffff",
-    "warning": "#f28e2b",
-    "reject": "#e15759",
-    "pending": "#7a8ca5",
-    "target_building": "#4e79a7",
-    "formal_qc": "#59a14f",
-}
-
 PHASE_TARGET_BUILDING = "target_building"
 PHASE_FORMAL_QC = "formal_qc"
+
+STATUS_POINT_STYLES = {
+    "accept": {"color": "#59a14f", "marker": "o", "size": 46},
+    "warning": {"color": "#f28e2b", "marker": "^", "size": 72},
+    "reject": {"color": "#e15759", "marker": "x", "size": 82},
+    "pending": {"color": "#9c9c9c", "marker": "s", "size": 46},
+    PHASE_TARGET_BUILDING: {"color": "#4e79a7", "marker": "s", "size": 48},
+}
+
+REFERENCE_LINE_COLORS = {
+    0: "#222222",
+    1: "#76b7b2",
+    2: "#edc948",
+    3: "#ff9da7",
+}
 
 
 def _get_available_font_fallbacks() -> list[str]:
@@ -107,8 +116,11 @@ def plot_zscore_single_level(
     level_id: str,
     title: str,
     phase_scope: str = "all",
+    y_axis_mode: str = "标准视图",
+    standard_sd_limit: float = 4.0,
 ):
     normalized_scope = _normalize_phase_scope(phase_scope)
+    normalized_y_axis_mode = _normalize_y_axis_mode(y_axis_mode)
     scoped_df = filter_zscore_plot_df(plot_df, normalized_scope)
     if not _can_plot_zscore_frame(scoped_df):
         return _build_empty_zscore_figure(title, "暂无可绘制数据", "请先录入当前批次的 Z-score 结果。")
@@ -119,26 +131,34 @@ def plot_zscore_single_level(
         plt.close(figure)
         return _build_empty_zscore_figure(title, "暂无可绘制数据", "当前视图下还没有该水平的记录。")
 
-    _draw_zscore_reference_lines(axis)
+    prepared_df = _prepare_plot_dataframe(level_df)
+    y_limits = _get_value_y_limits(prepared_df, normalized_y_axis_mode, float(standard_sd_limit))
+    display_df = _build_display_dataframe(prepared_df, y_limits)
     level_color = LEVEL_COLORS.get(level_id, "#4e79a7")
+    display_level = format_level_id_display(level_id)
+
     if normalized_scope == "all":
         for phase in [PHASE_TARGET_BUILDING, PHASE_FORMAL_QC]:
-            phase_df = level_df[level_df["phase"] == phase].sort_values("run_index").copy()
+            phase_df = display_df[display_df["phase"] == phase].sort_values("run_index").copy()
             if phase_df.empty:
                 continue
-            _plot_phase_line(axis, phase_df, level_color, f"{level_id} | {_phase_label(phase)}")
+            _plot_reference_lines(axis, phase_df)
+            _plot_phase_line(axis, phase_df, level_color, f"{display_level} | {_phase_label(phase)}")
             _plot_status_points(axis, phase_df, level_color)
     else:
-        _plot_phase_line(axis, level_df, level_color, level_id)
-        _plot_status_points(axis, level_df, level_color)
+        _plot_reference_lines(axis, display_df)
+        _plot_phase_line(axis, display_df, level_color, display_level)
+        _plot_status_points(axis, display_df, level_color)
 
-    _configure_x_axis(axis, level_df)
+    if y_limits is not None:
+        axis.set_ylim(y_limits)
+        _plot_out_of_range_markers(axis, display_df, y_limits)
+    _configure_x_axis(axis, display_df)
     axis.set_title(title, pad=10)
-    axis.set_xlabel("Run 序号")
-    axis.set_ylabel("Z-score / SDI")
-    axis.set_ylim(-3.6, 3.6)
+    axis.set_xlabel("检测序号")
+    axis.set_ylabel("检测值")
     axis.grid(True, linestyle=":", alpha=0.3)
-    axis.legend(loc="best")
+    _add_manual_legends(axis, display_df)
     figure.tight_layout(pad=0.7)
     return figure
 
@@ -148,8 +168,11 @@ def plot_zscore_overlay(
     title: str,
     active_levels: list[str] | None = None,
     phase_scope: str = "all",
+    y_axis_mode: str = "标准视图",
+    standard_sd_limit: float = 4.0,
 ):
     normalized_scope = _normalize_phase_scope(phase_scope)
+    normalized_y_axis_mode = _normalize_y_axis_mode(y_axis_mode)
     scoped_df = filter_zscore_plot_df(plot_df, normalized_scope)
     if not _can_plot_zscore_frame(scoped_df):
         return _build_empty_zscore_figure(title, "暂无可绘制数据", "请先录入当前批次的 Z-score 结果。")
@@ -162,50 +185,139 @@ def plot_zscore_overlay(
         plt.close(figure)
         return _build_empty_zscore_figure(title, "暂无可绘制数据", "当前视图下还没有可叠加的水平数据。")
 
-    _draw_zscore_reference_lines(axis)
-    for current_level_id in overlay_df["level_id"].drop_duplicates().tolist():
-        level_df = overlay_df[overlay_df["level_id"] == current_level_id].sort_values("run_index").copy()
+    prepared_df = _prepare_plot_dataframe(overlay_df)
+    y_limits = _get_value_y_limits(prepared_df, normalized_y_axis_mode, float(standard_sd_limit))
+    display_df = _build_display_dataframe(prepared_df, y_limits)
+
+    for current_level_id in display_df["level_id"].drop_duplicates().tolist():
+        level_df = display_df[display_df["level_id"] == current_level_id].sort_values("run_index").copy()
         level_color = LEVEL_COLORS.get(current_level_id, "#4e79a7")
+        display_level = format_level_id_display(current_level_id)
         if normalized_scope == "all":
             for phase in [PHASE_TARGET_BUILDING, PHASE_FORMAL_QC]:
                 phase_df = level_df[level_df["phase"] == phase].sort_values("run_index").copy()
                 if phase_df.empty:
                     continue
-                _plot_phase_line(axis, phase_df, level_color, f"{current_level_id} | {_phase_label(phase)}")
+                _plot_reference_lines(axis, phase_df)
+                _plot_phase_line(axis, phase_df, level_color, f"{display_level} | {_phase_label(phase)}")
                 _plot_status_points(axis, phase_df, level_color)
         else:
-            _plot_phase_line(axis, level_df, level_color, current_level_id)
+            _plot_reference_lines(axis, level_df)
+            _plot_phase_line(axis, level_df, level_color, display_level)
             _plot_status_points(axis, level_df, level_color)
 
-    _configure_x_axis(axis, overlay_df)
+    if y_limits is not None:
+        axis.set_ylim(y_limits)
+        _plot_out_of_range_markers(axis, display_df, y_limits)
+    _configure_x_axis(axis, display_df)
     axis.set_title(title, pad=10)
-    axis.set_xlabel("Run 序号")
-    axis.set_ylabel("Z-score / SDI")
-    axis.set_ylim(-3.6, 3.6)
+    axis.set_xlabel("检测序号")
+    axis.set_ylabel("检测值")
     axis.grid(True, linestyle=":", alpha=0.3)
-    axis.legend(loc="best")
+    _add_manual_legends(
+        axis,
+        display_df,
+        level_ids=display_df["level_id"].drop_duplicates().tolist(),
+    )
     figure.tight_layout(pad=0.7)
     return figure
 
 
-def _draw_zscore_reference_lines(axis) -> None:
-    reference_colors = {1: "#76b7b2", 2: "#edc948", 3: "#ff9da7"}
-    axis.axhline(0, color="#222222", linewidth=1.2, linestyle="-")
-    axis.text(1.01, 0, "0", transform=axis.get_yaxis_transform(), fontsize=8, va="center")
+def _prepare_plot_dataframe(plot_df: pd.DataFrame) -> pd.DataFrame:
+    prepared_df = _ensure_plot_columns(plot_df)
+    if prepared_df.empty:
+        return prepared_df
+
+    building_mask = prepared_df["plot_phase"] == PHASE_TARGET_BUILDING
+    prepared_df["reference_mean"] = prepared_df["formal_reference_mean"].combine_first(
+        prepared_df["building_reference_mean"]
+    )
+    prepared_df["reference_sd"] = prepared_df["formal_reference_sd"].combine_first(
+        prepared_df["building_reference_sd"]
+    )
+    prepared_df.loc[building_mask, "reference_mean"] = prepared_df.loc[
+        building_mask, "building_reference_mean"
+    ].combine_first(prepared_df.loc[building_mask, "formal_reference_mean"])
+    prepared_df.loc[building_mask, "reference_sd"] = prepared_df.loc[
+        building_mask, "building_reference_sd"
+    ].combine_first(prepared_df.loc[building_mask, "formal_reference_sd"])
+    prepared_df["plot_status"] = prepared_df["status"]
+    prepared_df.loc[building_mask, "plot_status"] = PHASE_TARGET_BUILDING
+    return prepared_df
+
+
+def _ensure_plot_columns(plot_df: pd.DataFrame) -> pd.DataFrame:
+    prepared_df = plot_df.copy()
+    default_columns = {
+        "run_index": None,
+        "raw_value": None,
+        "phase": PHASE_FORMAL_QC,
+        "plot_phase": None,
+        "status": "pending",
+        "building_reference_mean": None,
+        "building_reference_sd": None,
+        "formal_reference_mean": None,
+        "formal_reference_sd": None,
+        "is_preview": False,
+    }
+    for column_name, default_value in default_columns.items():
+        if column_name not in prepared_df.columns:
+            prepared_df[column_name] = default_value
+    if "plot_phase" in prepared_df.columns:
+        prepared_df["plot_phase"] = prepared_df["plot_phase"].where(
+            prepared_df["plot_phase"].notna(),
+            prepared_df["phase"],
+        )
+    return prepared_df
+
+
+def _plot_reference_lines(axis, plot_df: pd.DataFrame) -> None:
+    if plot_df.empty or "reference_mean" not in plot_df.columns:
+        return
+    if plot_df["reference_mean"].isna().all():
+        return
+
+    x_values = plot_df["run_index"]
+    axis.plot(
+        x_values,
+        plot_df["reference_mean"],
+        color=REFERENCE_LINE_COLORS[0],
+        linewidth=1.1,
+        linestyle="-",
+        alpha=0.8,
+        zorder=1,
+    )
     for multiplier in (1, 2, 3):
-        upper = float(multiplier)
-        lower = float(-multiplier)
-        axis.axhline(upper, color=reference_colors[multiplier], linewidth=1, linestyle="--")
-        axis.axhline(lower, color=reference_colors[multiplier], linewidth=1, linestyle="--")
-        axis.text(1.01, upper, f"+{multiplier}", transform=axis.get_yaxis_transform(), fontsize=8, va="center")
-        axis.text(1.01, lower, f"-{multiplier}", transform=axis.get_yaxis_transform(), fontsize=8, va="center")
+        valid_mask = plot_df["reference_sd"].notna()
+        if not valid_mask.any():
+            continue
+        upper = plot_df["reference_mean"] + multiplier * plot_df["reference_sd"]
+        lower = plot_df["reference_mean"] - multiplier * plot_df["reference_sd"]
+        axis.plot(
+            x_values,
+            upper,
+            color=REFERENCE_LINE_COLORS[multiplier],
+            linewidth=0.95,
+            linestyle="--",
+            alpha=0.85,
+            zorder=1,
+        )
+        axis.plot(
+            x_values,
+            lower,
+            color=REFERENCE_LINE_COLORS[multiplier],
+            linewidth=0.95,
+            linestyle="--",
+            alpha=0.85,
+            zorder=1,
+        )
 
 
 def _plot_phase_line(axis, phase_df: pd.DataFrame, level_color: str, label: str) -> None:
     phase = _resolve_plot_phase(phase_df)
     axis.plot(
         phase_df["run_index"],
-        phase_df["zscore"],
+        phase_df["display_value"],
         color=level_color,
         linewidth=1.3,
         alpha=0.58 if phase == PHASE_TARGET_BUILDING else 0.88,
@@ -216,22 +328,41 @@ def _plot_phase_line(axis, phase_df: pd.DataFrame, level_color: str, label: str)
 
 def _plot_status_points(axis, plot_df: pd.DataFrame, level_color: str) -> None:
     for _, point in plot_df.iterrows():
-        status = str(point.get("status", "accept"))
+        status = str(point.get("plot_status", point.get("status", "accept")))
         is_preview = bool(point.get("is_preview", False))
-        phase = str(point.get("plot_phase", point.get("phase", PHASE_FORMAL_QC)))
-        edge_color = STATUS_EDGE_COLORS.get(status, "#7a8ca5")
-        marker = "D" if is_preview else "s" if phase == PHASE_TARGET_BUILDING else "o"
-        size = 74 if status == "reject" else 66 if status == "warning" else 52
+        style = STATUS_POINT_STYLES.get(status, STATUS_POINT_STYLES["pending"])
+        marker = "D" if is_preview else style["marker"]
+        size = 74 if is_preview else style["size"]
+        point_y = point["display_value"]
+
+        if status == PHASE_TARGET_BUILDING:
+            axis.scatter(
+                [point["run_index"]],
+                [point_y],
+                s=size,
+                marker=marker,
+                facecolors=level_color,
+                edgecolors="#ffffff",
+                linewidths=1.0,
+                zorder=4,
+                alpha=0.92 if is_preview else 0.78,
+            )
+            continue
+
+        scatter_kwargs = {
+            "s": size,
+            "marker": marker,
+            "color": style["color"],
+            "linewidths": 2.0 if status in {"warning", "reject"} else 0.9,
+            "zorder": 4,
+            "alpha": 0.98 if is_preview else 0.92,
+        }
+        if marker != "x":
+            scatter_kwargs["edgecolors"] = "#ffffff"
         axis.scatter(
             [point["run_index"]],
-            [point["zscore"]],
-            s=size,
-            marker=marker,
-            facecolors=level_color,
-            edgecolors=edge_color,
-            linewidths=2.0 if status in {"warning", "reject"} else 1.0,
-            zorder=4,
-            alpha=0.98 if is_preview else 0.74 if phase == PHASE_TARGET_BUILDING else 0.92,
+            [point_y],
+            **scatter_kwargs,
         )
 
 
@@ -266,8 +397,279 @@ def _configure_x_axis(axis, plot_df: pd.DataFrame) -> None:
     axis.set_xticklabels(tick_labels)
 
 
+def _get_value_y_limits(
+    plot_df: pd.DataFrame,
+    y_axis_mode: str,
+    standard_sd_limit: float,
+) -> tuple[float, float] | None:
+    if plot_df.empty or y_axis_mode == "全范围视图":
+        return None
+
+    reference_bounds: list[float] = []
+    for _, point in plot_df.iterrows():
+        mean_value = point.get("reference_mean")
+        sd_value = point.get("reference_sd")
+        if mean_value is None or pd.isna(mean_value):
+            continue
+        mean_value = float(mean_value)
+        if sd_value is None or pd.isna(sd_value) or math.isclose(float(sd_value), 0.0, abs_tol=1e-12):
+            reference_bounds.append(mean_value)
+            continue
+        sd_value = float(sd_value)
+        reference_bounds.extend(
+            [
+                mean_value - standard_sd_limit * sd_value,
+                mean_value + standard_sd_limit * sd_value,
+            ]
+        )
+
+    if reference_bounds:
+        lower = min(reference_bounds)
+        upper = max(reference_bounds)
+    else:
+        raw_values = plot_df["raw_value"].dropna().astype(float).tolist()
+        if not raw_values:
+            return None
+        lower = min(raw_values)
+        upper = max(raw_values)
+
+    padding = max((upper - lower) * 0.08, abs((upper + lower) / 2.0) * 0.01, 1e-6)
+    return lower - padding, upper + padding
+
+
+def _build_display_dataframe(plot_df: pd.DataFrame, y_limits: tuple[float, float] | None) -> pd.DataFrame:
+    display_df = plot_df.copy()
+    if display_df.empty:
+        return display_df
+    if y_limits is None:
+        display_df["display_value"] = display_df["raw_value"]
+        display_df["is_above_limit"] = False
+        display_df["is_below_limit"] = False
+        return display_df
+
+    lower, upper = y_limits
+    display_df["is_above_limit"] = display_df["raw_value"] > upper
+    display_df["is_below_limit"] = display_df["raw_value"] < lower
+    display_df["display_value"] = display_df["raw_value"].clip(lower=lower, upper=upper)
+    return display_df
+
+
+def _plot_out_of_range_markers(axis, display_df: pd.DataFrame, y_limits: tuple[float, float]) -> None:
+    if display_df.empty:
+        return
+
+    lower, upper = y_limits
+    above_df = display_df[display_df["is_above_limit"]]
+    below_df = display_df[display_df["is_below_limit"]]
+
+    if not above_df.empty:
+        axis.scatter(
+            above_df["run_index"],
+            [upper] * len(above_df),
+            marker="^",
+            s=90,
+            color="#c23b3d",
+            zorder=5,
+        )
+        for _, point in above_df.iterrows():
+            axis.annotate(
+                f"{float(point['raw_value']):.2f}",
+                xy=(point["run_index"], upper),
+                xytext=(0, -18),
+                textcoords="offset points",
+                ha="center",
+                va="top",
+                fontsize=8,
+                color="#7a1f26",
+            )
+
+    if not below_df.empty:
+        axis.scatter(
+            below_df["run_index"],
+            [lower] * len(below_df),
+            marker="v",
+            s=90,
+            color="#c23b3d",
+            zorder=5,
+        )
+        for _, point in below_df.iterrows():
+            axis.annotate(
+                f"{float(point['raw_value']):.2f}",
+                xy=(point["run_index"], lower),
+                xytext=(0, 8),
+                textcoords="offset points",
+                ha="center",
+                fontsize=8,
+                color="#7a1f26",
+            )
+
+
+def _add_manual_legends(
+    axis,
+    display_df: pd.DataFrame,
+    level_ids: list[str] | None = None,
+) -> None:
+    has_out_of_range_points = _has_out_of_range_points(display_df)
+    status_legend = axis.legend(
+        handles=_build_status_legend_handles(has_out_of_range_points),
+        title="状态",
+        loc="upper left",
+        frameon=True,
+        framealpha=0.94,
+        borderpad=0.7,
+        handlelength=1.2,
+    )
+    axis.add_artist(status_legend)
+
+    phase_legend = axis.legend(
+        handles=_build_phase_legend_handles(),
+        title="阶段 / 样式",
+        loc="upper right",
+        frameon=True,
+        framealpha=0.94,
+        borderpad=0.7,
+        handlelength=2.0,
+    )
+    axis.add_artist(phase_legend)
+
+    resolved_level_ids = [level_id for level_id in (level_ids or []) if level_id]
+    if len(resolved_level_ids) > 1:
+        level_legend = axis.legend(
+            handles=_build_level_legend_handles(resolved_level_ids),
+            title="水平",
+            loc="lower left",
+            frameon=True,
+            framealpha=0.94,
+            borderpad=0.7,
+            ncol=min(3, len(resolved_level_ids)),
+            handlelength=2.0,
+        )
+        axis.add_artist(level_legend)
+
+
+def _build_status_legend_handles(has_out_of_range_points: bool) -> list[Line2D]:
+    handles = [
+        Line2D(
+            [0],
+            [0],
+            marker=STATUS_POINT_STYLES["accept"]["marker"],
+            color="none",
+            markerfacecolor=STATUS_POINT_STYLES["accept"]["color"],
+            markeredgecolor="#ffffff",
+            markeredgewidth=0.9,
+            markersize=8,
+            linestyle="None",
+            label="正常",
+        ),
+        Line2D(
+            [0],
+            [0],
+            marker=STATUS_POINT_STYLES["warning"]["marker"],
+            color="none",
+            markerfacecolor=STATUS_POINT_STYLES["warning"]["color"],
+            markeredgecolor="#ffffff",
+            markeredgewidth=0.9,
+            markersize=8,
+            linestyle="None",
+            label="警告",
+        ),
+        Line2D(
+            [0],
+            [0],
+            marker=STATUS_POINT_STYLES["reject"]["marker"],
+            color=STATUS_POINT_STYLES["reject"]["color"],
+            markersize=8,
+            linestyle="None",
+            markeredgewidth=2.0,
+            label="失控",
+        ),
+    ]
+    if has_out_of_range_points:
+        handles.append(
+            Line2D(
+                [0],
+                [0],
+                marker="^",
+                color="#c23b3d",
+                markersize=8,
+                linestyle="None",
+                label="超界裁切点",
+            )
+        )
+    return handles
+
+
+def _build_phase_legend_handles() -> list[Line2D]:
+    neutral_color = "#404040"
+    return [
+        Line2D(
+            [0],
+            [0],
+            color=neutral_color,
+            linestyle="--",
+            linewidth=1.4,
+            marker="s",
+            markerfacecolor="#4e79a7",
+            markeredgecolor="#ffffff",
+            markeredgewidth=0.9,
+            markersize=7,
+            label="建靶期（虚线 / 方形点）",
+        ),
+        Line2D(
+            [0],
+            [0],
+            color=neutral_color,
+            linestyle="-",
+            linewidth=1.4,
+            marker="o",
+            markerfacecolor="#808080",
+            markeredgecolor="#ffffff",
+            markeredgewidth=0.9,
+            markersize=7,
+            label="正式期（实线 / 圆形点）",
+        ),
+        Line2D(
+            [0],
+            [0],
+            color=REFERENCE_LINE_COLORS[0],
+            linestyle="-",
+            linewidth=1.2,
+            label="均值 / ±SD 控制线",
+        ),
+    ]
+
+
+def _build_level_legend_handles(level_ids: list[str]) -> list[Line2D]:
+    handles: list[Line2D] = []
+    for level_id in level_ids:
+        handles.append(
+            Line2D(
+                [0],
+                [0],
+                color=LEVEL_COLORS.get(level_id, "#4e79a7"),
+                linestyle="-",
+                linewidth=1.6,
+                marker="o",
+                markerfacecolor=LEVEL_COLORS.get(level_id, "#4e79a7"),
+                markeredgecolor="#ffffff",
+                markeredgewidth=0.8,
+                markersize=6,
+                label=format_level_id_display(level_id),
+            )
+        )
+    return handles
+
+
+def _has_out_of_range_points(display_df: pd.DataFrame) -> bool:
+    if display_df.empty:
+        return False
+    if "is_above_limit" not in display_df.columns or "is_below_limit" not in display_df.columns:
+        return False
+    return bool(display_df["is_above_limit"].any() or display_df["is_below_limit"].any())
+
+
 def _can_plot_zscore_frame(plot_df: pd.DataFrame | None) -> bool:
-    required_columns = {"level_id", "run_index", "zscore"}
+    required_columns = {"level_id", "run_index", "raw_value"}
     return plot_df is not None and not plot_df.empty and required_columns.issubset(plot_df.columns)
 
 
@@ -295,6 +697,10 @@ def _normalize_phase_scope(phase_scope: str) -> str:
     if phase_scope in {"building", "formal", "all"}:
         return phase_scope
     return "all"
+
+
+def _normalize_y_axis_mode(y_axis_mode: str) -> str:
+    return "全范围视图" if y_axis_mode == "全范围视图" else "标准视图"
 
 
 def _resolve_plot_phase(plot_df: pd.DataFrame) -> str:

@@ -11,10 +11,17 @@ import pandas as pd
 from database import (
     add_zscore_level_results as db_add_zscore_level_results,
     add_zscore_run as db_add_zscore_run,
+    delete_zscore_level_results_by_run as db_delete_zscore_level_results_by_run,
+    delete_zscore_run as db_delete_zscore_run,
+    delete_zscore_targets_by_batch as db_delete_zscore_targets_by_batch,
     get_zscore_batch,
     get_zscore_level_results_df,
     get_zscore_level_targets_df,
+    get_zscore_run_with_levels as db_get_zscore_run_with_levels,
     get_zscore_runs_df,
+    get_zscore_runs_with_levels_for_batch as db_get_zscore_runs_with_levels_for_batch,
+    update_zscore_level_results as db_update_zscore_level_results,
+    update_zscore_run as db_update_zscore_run,
     upsert_zscore_level_target as db_upsert_zscore_level_target,
 )
 
@@ -174,14 +181,14 @@ def build_zscore_rule_templates() -> dict[str, dict[str, Any]]:
             "level_ids": ["Level 1", "Level 2"],
             "rule_ids": ["1_2s", "1_3s", "2_2s", "R_4s", "4_1s", "10_x"],
             "required_n": 5,
-            "note": "两水平模板使用 classic multirule 组合，正式规则只在正式质控期启用。",
+            "note": "两水平流程采用经典多规则组合，适用于双水平室内质控；正式规则仅在正式质控期启用。",
         },
         "3_level_threes": {
             "label": "3-level threes",
             "level_ids": ["Level 1", "Level 2", "Level 3"],
             "rule_ids": ["1_2s", "1_3s", "2of3_2s", "R_4s", "3_1s", "12_x"],
             "required_n": 5,
-            "note": "三水平模板采用 3-level 规则骨架，避免直接套用 2-level classic 组合。",
+            "note": "三水平流程采用面向三水平 IQC 的规则组合，用于多水平联合观察与判读。",
         },
     }
 
@@ -215,12 +222,21 @@ def get_template_id_for_level_count(level_count: int) -> str:
         return "2_level_classic"
     if normalized_level_count == 3:
         return "3_level_threes"
-    raise ValueError("Z-score level_count 只能是 2 或 3")
+    raise ValueError("Z-score 水平数只能是 2 或 3。")
 
 
 def get_level_ids_for_level_count(level_count: int) -> list[str]:
     template_id = get_template_id_for_level_count(level_count)
     return list(build_zscore_rule_templates()[template_id]["level_ids"])
+
+
+def format_level_id_display(level_id: str) -> str:
+    normalized_level_id = str(level_id or "").strip()
+    if normalized_level_id.startswith("Level "):
+        suffix = normalized_level_id.removeprefix("Level ").strip()
+        if suffix:
+            return f"水平 {suffix}"
+    return normalized_level_id or "水平"
 
 
 def get_zscore_level_label_map(batch: Any, level_ids: list[str] | None = None) -> dict[str, str]:
@@ -237,8 +253,11 @@ def format_zscore_level_label_summary(batch: Any, level_ids: list[str] | None = 
     label_map = get_zscore_level_label_map(batch, level_ids)
     segments = []
     for level_id, level_label in label_map.items():
-        level_short = level_id.replace("Level ", "L")
-        segments.append(f"{level_short}: {level_label}")
+        display_level = format_level_id_display(level_id)
+        if level_label == level_id:
+            segments.append(display_level)
+        else:
+            segments.append(f"{display_level}：{level_label}")
     return " | ".join(segments)
 
 
@@ -252,7 +271,7 @@ def build_zscore_batch_summary_items(
     resolved_level_ids = list(level_ids or get_level_ids_for_level_count(int(_mapping_get(batch, "level_count") or 2)))
     return [
         ("当前阶段", str(phase_label)),
-        ("全部 Level 已完成", "是" if formal_rules_enabled else "否"),
+        ("全部水平已完成建靶", "是" if formal_rules_enabled else "否"),
         ("正式规则已启用", "是" if formal_rules_enabled else "否"),
         ("项目名称", str(_mapping_get(batch, "project_name") or "-")),
         ("批次编号", str(_mapping_get(batch, "id") or "-")),
@@ -262,8 +281,8 @@ def build_zscore_batch_summary_items(
         ("浓度", str(_mapping_get(batch, "concentration") or "-")),
         ("水平说明", format_zscore_level_label_summary(batch, resolved_level_ids)),
         ("质控品批号", str(_mapping_get(batch, "lot_no") or "-")),
-        ("Level 数", f"{int(_mapping_get(batch, 'level_count') or 0)}-level"),
-        ("规则模板", str(template_label or "-")),
+        ("水平数", f"{int(_mapping_get(batch, 'level_count') or 0)} 水平"),
+        ("规则组合", str(template_label or "-")),
     ]
 
 
@@ -272,7 +291,12 @@ def get_building_stat_run_ids(history_runs: list[dict[str, Any]]) -> set[int]:
     for index, run in enumerate(history_runs, start=1):
         run_id = int(run.get("run_id") or index)
         ordered_runs.append((run_id, run))
-    ordered_runs.sort(key=lambda item: item[0])
+    ordered_runs.sort(
+        key=lambda item: (
+            pd.Timestamp(item[1].get("test_time")),
+            item[0],
+        )
+    )
 
     building_run_ids: set[int] = set()
     saw_building_prefix = False
@@ -291,6 +315,53 @@ def get_building_stat_run_ids(history_runs: list[dict[str, Any]]) -> set[int]:
     return building_run_ids
 
 
+def get_zscore_display_sequence(run: dict[str, Any]) -> int:
+    return int(run.get("test_sequence") or run.get("run_id") or run.get("id") or 0)
+
+
+def sort_zscore_runs_for_maintenance(
+    saved_runs: list[dict[str, Any]],
+    *,
+    reverse: bool = True,
+) -> list[dict[str, Any]]:
+    return sorted(
+        deepcopy(saved_runs),
+        key=lambda run: (
+            get_zscore_display_sequence(run),
+            int(run.get("run_id") or run.get("id") or 0),
+        ),
+        reverse=reverse,
+    )
+
+
+def build_zscore_maintenance_dialog_state(
+    action: str,
+    available_runs: list[dict[str, Any]],
+    preferred_run_id: int | None = None,
+) -> dict[str, Any]:
+    normalized_action = str(action or "").strip().lower()
+    notice_map = {
+        "update": "Z-score 检测记录已更新，并已完成整批次重算。",
+        "delete": "Z-score 检测记录已删除，并已完成整批次重算。",
+    }
+    if normalized_action not in notice_map:
+        raise ValueError(f"不支持的维护动作：{action}")
+
+    ordered_runs = sort_zscore_runs_for_maintenance(available_runs)
+    valid_run_ids = {int(run.get("run_id") or run.get("id") or 0) for run in ordered_runs}
+    selected_run_id: int | None = None
+    if preferred_run_id is not None and int(preferred_run_id) in valid_run_ids:
+        selected_run_id = int(preferred_run_id)
+    elif ordered_runs:
+        selected_run_id = int(ordered_runs[0].get("run_id") or ordered_runs[0].get("id") or 0)
+
+    return {
+        "keep_dialog_open": True,
+        "selected_run_id": selected_run_id,
+        "dialog_notice": notice_map[normalized_action],
+    }
+
+
 def build_zscore_plot_dataframe(
     saved_runs: list[dict[str, Any]],
     draft_run: dict[str, Any] | None = None,
@@ -298,6 +369,7 @@ def build_zscore_plot_dataframe(
 ) -> pd.DataFrame:
     expected_columns = [
         "run_id",
+        "test_sequence",
         "run_index",
         "test_time",
         "level_id",
@@ -306,16 +378,21 @@ def build_zscore_plot_dataframe(
         "rule_hits",
         "raw_value",
         "log_value",
+        "building_reference_mean",
+        "building_reference_sd",
+        "formal_reference_mean",
+        "formal_reference_sd",
         "phase",
         "plot_phase",
         "is_building_stat_point",
         "is_preview",
     ]
     building_run_ids = get_building_stat_run_ids(saved_runs)
-    building_display_zscores = _build_building_display_zscores(saved_runs, building_run_ids)
+    reference_map = _build_plot_reference_map(saved_runs, building_run_ids)
     rows: list[dict[str, Any]] = []
     for index, run in enumerate(saved_runs, start=1):
         run_id = int(run.get("run_id") or index)
+        test_sequence = get_zscore_display_sequence(run)
         run_phase = _normalize_run_phase(run.get("phase"))
         is_building_stat_point = run_id in building_run_ids
         if display_phase == PHASE_TARGET_BUILDING and not is_building_stat_point:
@@ -324,22 +401,26 @@ def build_zscore_plot_dataframe(
             continue
         for level_result in run.get("level_results", []):
             level_id = str(level_result.get("level_id"))
-            zscore = level_result.get("zscore")
-            if zscore is None and is_building_stat_point:
-                zscore = building_display_zscores.get((run_id, level_id))
-            if zscore is None:
+            raw_value = level_result.get("raw_value")
+            if raw_value is None:
                 continue
+            reference_profile = reference_map.get((run_id, level_id), {})
             rows.append(
                 {
                     "run_id": run_id,
-                    "run_index": run_id,
+                    "test_sequence": test_sequence,
+                    "run_index": test_sequence,
                     "test_time": run.get("test_time"),
                     "level_id": level_id,
-                    "zscore": zscore,
+                    "zscore": level_result.get("zscore"),
                     "status": level_result.get("status", run.get("run_status", "accept")),
                     "rule_hits": ",".join(level_result.get("rule_hits_local", [])),
-                    "raw_value": level_result.get("raw_value"),
+                    "raw_value": raw_value,
                     "log_value": level_result.get("log_value"),
+                    "building_reference_mean": reference_profile.get("building_reference_mean"),
+                    "building_reference_sd": reference_profile.get("building_reference_sd"),
+                    "formal_reference_mean": reference_profile.get("formal_reference_mean"),
+                    "formal_reference_sd": reference_profile.get("formal_reference_sd"),
                     "phase": run_phase,
                     "plot_phase": run_phase,
                     "is_building_stat_point": is_building_stat_point,
@@ -354,22 +435,27 @@ def build_zscore_plot_dataframe(
             display_phase == PHASE_TARGET_BUILDING and not draft_is_building_stat_point
             or display_phase == PHASE_FORMAL_QC and draft_phase != PHASE_FORMAL_QC
         ):
-            preview_run_index = len(saved_runs) + 1
+            preview_sequence = max((int(run.get("test_sequence") or 0) for run in saved_runs), default=0) + 1
             for level_result in draft_run.get("level_results", []):
-                zscore = level_result.get("zscore")
-                if zscore is None:
+                raw_value = level_result.get("raw_value")
+                if raw_value is None:
                     continue
                 rows.append(
                     {
-                        "run_id": preview_run_index,
-                        "run_index": preview_run_index,
+                        "run_id": preview_sequence,
+                        "test_sequence": preview_sequence,
+                        "run_index": preview_sequence,
                         "test_time": draft_run.get("test_time"),
                         "level_id": level_result.get("level_id"),
-                        "zscore": zscore,
+                        "zscore": level_result.get("zscore"),
                         "status": level_result.get("status", draft_run.get("run_status", "accept")),
                         "rule_hits": ",".join(level_result.get("rule_hits_local", [])),
-                        "raw_value": level_result.get("raw_value"),
+                        "raw_value": raw_value,
                         "log_value": level_result.get("log_value"),
+                        "building_reference_mean": level_result.get("target_mean") if draft_phase == PHASE_TARGET_BUILDING else None,
+                        "building_reference_sd": level_result.get("target_sd") if draft_phase == PHASE_TARGET_BUILDING else None,
+                        "formal_reference_mean": level_result.get("target_mean") if draft_phase == PHASE_FORMAL_QC else None,
+                        "formal_reference_sd": level_result.get("target_sd") if draft_phase == PHASE_FORMAL_QC else None,
                         "phase": draft_phase,
                         "plot_phase": draft_phase,
                         "is_building_stat_point": draft_is_building_stat_point,
@@ -378,6 +464,54 @@ def build_zscore_plot_dataframe(
                 )
 
     return pd.DataFrame(rows, columns=expected_columns)
+
+
+def _build_plot_reference_map(
+    saved_runs: list[dict[str, Any]],
+    building_run_ids: set[int],
+) -> dict[tuple[int, str], dict[str, float | None]]:
+    reference_map: dict[tuple[int, str], dict[str, float | None]] = {}
+    if not saved_runs:
+        return reference_map
+
+    ordered_runs = sorted(
+        saved_runs,
+        key=lambda run: (pd.Timestamp(run.get("test_time")), int(run.get("run_id") or 0)),
+    )
+    level_ids = sorted(
+        {
+            str(level_result.get("level_id"))
+            for run in ordered_runs
+            for level_result in run.get("level_results", [])
+            if level_result.get("level_id")
+        }
+    )
+
+    for level_id in level_ids:
+        building_values: list[float] = []
+        ordered_building_runs = [
+            run
+            for run in ordered_runs
+            if int(run.get("run_id") or 0) in building_run_ids
+        ]
+        for run in ordered_building_runs:
+            run_id = int(run.get("run_id") or 0)
+            raw_value = _get_level_raw_value(run, level_id)
+            if raw_value is None:
+                continue
+            building_values.append(float(raw_value))
+            stats = calculate_level_target_stats(building_values)
+            reference_map.setdefault((run_id, level_id), {})
+            reference_map[(run_id, level_id)]["building_reference_mean"] = stats["target_mean"]
+            reference_map[(run_id, level_id)]["building_reference_sd"] = stats["target_sd"]
+
+        final_stats = calculate_level_target_stats(building_values)
+        for run in ordered_runs:
+            run_id = int(run.get("run_id") or 0)
+            reference_map.setdefault((run_id, level_id), {})
+            reference_map[(run_id, level_id)]["formal_reference_mean"] = final_stats["target_mean"]
+            reference_map[(run_id, level_id)]["formal_reference_sd"] = final_stats["target_sd"]
+    return reference_map
 
 
 def _build_building_display_zscores(
@@ -482,6 +616,7 @@ def get_zscore_runs(batch_id: int, template_id: str | None = None) -> list[dict[
             {
                 "run_id": run_id,
                 "id": run_id,
+                "test_sequence": int(record["test_sequence"]) if pd.notna(record.get("test_sequence")) else run_id,
                 "batch_id": int(record["batch_id"]),
                 "project_id": int(record["project_id"]),
                 "project_name": record.get("project_name"),
@@ -502,6 +637,11 @@ def get_zscore_runs(batch_id: int, template_id: str | None = None) -> list[dict[
                     key=lambda item: item["level_id"],
                 ),
             }
+        )
+    formal_started = any(str(run.get("phase")) == PHASE_FORMAL_QC for run in runs)
+    for run in runs:
+        run["is_locked_for_maintenance"] = bool(
+            formal_started and str(run.get("phase")) == PHASE_TARGET_BUILDING
         )
     return runs
 
@@ -681,7 +821,7 @@ def create_zscore_run(
     batch = batch_context["batch"]
     expected_template_id = str(batch_context["template_id"])
     if template_id != expected_template_id:
-        raise ValueError("当前 Z-score 批次的规则模板必须与批次 level_count 一致")
+        raise ValueError("当前 Z-score 批次的规则组合必须与项目的水平数配置一致。")
 
     template = deepcopy(batch_context["template"])
     target_n = int(required_n or batch_context["required_n"])
@@ -692,6 +832,7 @@ def create_zscore_run(
             raise ValueError(f"{level_result['level_id']} 检测值不能为空")
 
     history_runs = get_zscore_runs(batch_id, template_id)
+    next_test_sequence = max((int(run.get("test_sequence") or 0) for run in history_runs), default=0) + 1
     target_profiles = get_zscore_level_targets(batch_id, template_id, required_n=target_n)
     updated_profiles = deepcopy(target_profiles)
 
@@ -715,6 +856,7 @@ def create_zscore_run(
     )
     current_run["test_time"] = pd.Timestamp(test_time)
     current_run["operator"] = str(operator or "").strip()
+    current_run["test_sequence"] = next_test_sequence
     current_run["template_id"] = template_id
     current_run["template_label"] = template["label"]
 
@@ -730,6 +872,7 @@ def create_zscore_run(
     run_id = db_add_zscore_run(
         batch_id=batch_id,
         project_id=int(batch["project_id"]),
+        test_sequence=next_test_sequence,
         test_time=_format_test_time(current_run["test_time"]),
         operator=current_run["operator"],
         level_count=len(template["level_ids"]),
@@ -758,6 +901,201 @@ def create_zscore_run(
 
 def add_zscore_level_results(run_id: int, level_results: list[dict[str, Any]]) -> None:
     db_add_zscore_level_results(run_id, level_results)
+
+
+def rebuild_zscore_batch_state(batch_id: int) -> dict[str, Any]:
+    batch_context = resolve_zscore_batch_context(batch_id)
+    batch = batch_context["batch"]
+    template_id = str(batch_context["template_id"])
+    template = deepcopy(batch_context["template"])
+    level_ids = list(template["level_ids"])
+    target_n = int(batch_context["required_n"])
+
+    raw_runs = sorted(
+        deepcopy(db_get_zscore_runs_with_levels_for_batch(batch_id)),
+        key=lambda run: (pd.Timestamp(run["test_time"]), int(run["id"])),
+    )
+    target_profiles = _build_rebuild_target_profiles(batch_id, template_id, level_ids, target_n)
+    rebuilt_runs: list[dict[str, Any]] = []
+
+    for raw_run in raw_runs:
+        normalized_level_results = _normalize_input_level_results(
+            [
+                {
+                    "id": raw_level.get("id"),
+                    "level_id": raw_level.get("level_id"),
+                    "raw_value": raw_level.get("raw_value"),
+                    "log_value": raw_level.get("log_value"),
+                }
+                for raw_level in raw_run.get("level_results", [])
+            ],
+            template,
+        )
+        for level_result in normalized_level_results:
+            if level_result.get("raw_value") is None:
+                raise ValueError(f"run #{raw_run['id']} 的 {level_result['level_id']} 原始值不能为空")
+
+        updated_profiles = deepcopy(target_profiles)
+        if determine_zscore_phase(target_profiles, level_ids) == PHASE_TARGET_BUILDING:
+            for level_result in normalized_level_results:
+                level_id = str(level_result["level_id"])
+                updated_profiles[level_id] = _advance_building_profile(
+                    updated_profiles[level_id],
+                    float(level_result["raw_value"]),
+                    target_n,
+                )
+
+        current_phase = determine_zscore_phase(updated_profiles, level_ids)
+        current_run = evaluate_zscore_run_with_phase(
+            normalized_level_results,
+            rebuilt_runs,
+            template_id,
+            required_n=target_n,
+            target_profiles=updated_profiles,
+            phase_override=current_phase,
+        )
+        current_run["run_id"] = int(raw_run["id"])
+        current_run["id"] = int(raw_run["id"])
+        current_run["test_sequence"] = (
+            int(raw_run["test_sequence"]) if raw_run.get("test_sequence") is not None else int(raw_run["id"])
+        )
+        current_run["batch_id"] = int(raw_run["batch_id"])
+        current_run["project_id"] = int(raw_run.get("project_id") or batch["project_id"])
+        current_run["test_time"] = pd.Timestamp(raw_run["test_time"])
+        current_run["operator"] = str(raw_run.get("operator", "") or "").strip()
+        current_run["rule_template_id"] = template_id
+        current_run["template_id"] = template_id
+        current_run["template_label"] = template["label"]
+        current_run["created_at"] = raw_run.get("created_at")
+
+        raw_level_map = {
+            str(raw_level.get("level_id")): raw_level
+            for raw_level in raw_run.get("level_results", [])
+        }
+        is_realtime_accepted_run = current_phase == PHASE_FORMAL_QC and current_run["run_status"] == "accept"
+        for level_result in current_run["level_results"]:
+            raw_level = raw_level_map.get(str(level_result["level_id"]), {})
+            if raw_level.get("id") is not None:
+                level_result["id"] = int(raw_level["id"])
+            level_result["run_id"] = int(raw_run["id"])
+            level_result["is_in_control_for_realtime_stats"] = bool(
+                is_realtime_accepted_run and level_result.get("status") == "accept"
+            )
+
+        target_profiles = updated_profiles
+        rebuilt_runs.append(current_run)
+
+    realtime_profiles = calculate_formal_realtime_stats(rebuilt_runs, level_ids)
+    for level_id in level_ids:
+        target_profiles[level_id]["realtime_mean"] = realtime_profiles[level_id]["realtime_mean"]
+        target_profiles[level_id]["realtime_sd"] = realtime_profiles[level_id]["realtime_sd"]
+        target_profiles[level_id]["realtime_cv"] = realtime_profiles[level_id]["realtime_cv"]
+
+    db_delete_zscore_targets_by_batch(batch_id)
+    for level_id in level_ids:
+        _persist_target_profile(batch_id, level_id, target_profiles[level_id], target_n)
+
+    for run in rebuilt_runs:
+        db_update_zscore_run(
+            int(run["id"]),
+            test_sequence=int(run["test_sequence"]) if run.get("test_sequence") is not None else None,
+            level_count=len(level_ids),
+            phase=run["phase"],
+            run_status=run["run_status"],
+            rule_template_id=template_id,
+            rule_hits_run=run["rule_hits_run"],
+            error_type_hint=run["error_type_hint"],
+            analysis_prompt=run["analysis_prompt"],
+        )
+        db_update_zscore_level_results(
+            int(run["id"]),
+            [
+                {
+                    "level_id": level_result["level_id"],
+                    "raw_value": level_result.get("raw_value"),
+                    "log_value": level_result.get("log_value"),
+                    "zscore": level_result.get("zscore"),
+                    "status": level_result.get("status"),
+                    "rule_hits_local": level_result.get("rule_hits_local", []),
+                    "is_in_control_for_realtime_stats": level_result.get("is_in_control_for_realtime_stats", False),
+                }
+                for level_result in run["level_results"]
+            ],
+        )
+
+    persisted_runs = get_zscore_runs(batch_id, template_id)
+    persisted_targets = get_zscore_level_targets(batch_id, template_id, required_n=target_n)
+    return {
+        "batch_id": batch_id,
+        "template_id": template_id,
+        "runs": persisted_runs,
+        "target_profiles": persisted_targets,
+        "overall_phase": determine_zscore_phase(persisted_targets, level_ids),
+        "latest_run": deepcopy(persisted_runs[-1]) if persisted_runs else None,
+    }
+
+
+def update_saved_zscore_run(
+    run_id: int,
+    test_time: Any,
+    operator: str,
+    level_results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    existing_run = _get_zscore_run_for_maintenance(run_id)
+    batch_id = int(existing_run["batch_id"])
+    if bool(existing_run.get("is_locked_for_maintenance")):
+        raise ValueError("建靶期数据在正式期启用后已锁定，不允许编辑。")
+    batch_context = resolve_zscore_batch_context(batch_id)
+    template = deepcopy(batch_context["template"])
+
+    cleaned_operator = str(operator or "").strip()
+    if not cleaned_operator:
+        raise ValueError("检测人不能为空")
+
+    normalized_level_results = _normalize_input_level_results(level_results, template)
+    for level_result in normalized_level_results:
+        if level_result.get("raw_value") is None:
+            raise ValueError(f"{level_result['level_id']} 原始值不能为空")
+
+    db_update_zscore_run(
+        run_id,
+        test_time=_format_test_time(test_time),
+        operator=cleaned_operator,
+    )
+    db_update_zscore_level_results(
+        run_id,
+        [
+            {
+                "level_id": level_result["level_id"],
+                "raw_value": level_result.get("raw_value"),
+                "log_value": level_result.get("log_value"),
+            }
+            for level_result in normalized_level_results
+        ],
+    )
+    return rebuild_zscore_batch_state(batch_id)
+
+
+def delete_saved_zscore_run(run_id: int) -> dict[str, Any]:
+    existing_run = _get_zscore_run_for_maintenance(run_id)
+    batch_id = int(existing_run["batch_id"])
+    if bool(existing_run.get("is_locked_for_maintenance")):
+        raise ValueError("建靶期数据在正式期启用后已锁定，不允许删除。")
+    db_delete_zscore_level_results_by_run(run_id)
+    db_delete_zscore_run(run_id)
+    return rebuild_zscore_batch_state(batch_id)
+
+
+def _get_zscore_run_for_maintenance(run_id: int) -> dict[str, Any]:
+    raw_run = db_get_zscore_run_with_levels(run_id)
+    batch_id = int(raw_run["batch_id"])
+    batch_context = resolve_zscore_batch_context(batch_id)
+    template_id = str(batch_context["template_id"])
+    saved_runs = get_zscore_runs(batch_id, template_id)
+    for saved_run in saved_runs:
+        if int(saved_run["run_id"]) == int(run_id):
+            return saved_run
+    raise ValueError(f"未找到 Z-score run {run_id}")
 
 
 def evaluate_zscore_run_with_phase(
@@ -1378,6 +1716,30 @@ def _persist_target_profile(batch_id: int, level_id: str, profile: dict[str, Any
     )
 
 
+def _build_rebuild_target_profiles(
+    batch_id: int,
+    template_id: str,
+    level_ids: list[str],
+    required_n: int,
+) -> dict[str, dict[str, Any]]:
+    existing_profiles = get_zscore_level_targets(batch_id, template_id, required_n=required_n)
+    rebuilt_profiles: dict[str, dict[str, Any]] = {}
+    for level_id in level_ids:
+        existing_profile = existing_profiles.get(level_id, {})
+        rebuilt_profiles[level_id] = _build_target_profile(
+            level_id=level_id,
+            required_n=required_n,
+            vendor_reference_mean=existing_profile.get("vendor_reference_mean"),
+            vendor_reference_sd=existing_profile.get("vendor_reference_sd"),
+            vendor_reference_cv=existing_profile.get("vendor_reference_cv"),
+            vendor_reference_source_note=existing_profile.get("vendor_reference_source_note"),
+            collected_n=0,
+            is_ready=False,
+            phase=PHASE_TARGET_BUILDING,
+        )
+    return rebuilt_profiles
+
+
 def _normalize_input_level_results(level_results: list[dict[str, Any]], template: dict[str, Any]) -> list[dict[str, Any]]:
     _validate_input_level_ids(level_results, template)
     input_map = {str(item.get("level_id")): deepcopy(item) for item in level_results}
@@ -1412,14 +1774,14 @@ def _validate_input_level_ids(level_results: list[dict[str, Any]], template: dic
 
     if unexpected_level_ids:
         level_list = ", ".join(sorted(unexpected_level_ids))
-        raise ValueError(f"当前批次固定为 {len(expected_level_ids)}-level，不接受 {level_list}。")
+        raise ValueError(f"当前批次固定为 {len(expected_level_ids)} 水平，不接受以下水平输入：{level_list}。")
 
     duplicated_level_ids = sorted(
         level_id for level_id, count in observed_level_counts.items() if count > 1 and level_id in expected_level_ids
     )
     if duplicated_level_ids:
         level_list = ", ".join(duplicated_level_ids)
-        raise ValueError(f"当前 run 存在重复 level 录入：{level_list}。")
+        raise ValueError(f"本次检测记录存在重复的水平录入：{level_list}。")
 
 
 def _mapping_get(row: Any, field_name: str, default: Any = None) -> Any:

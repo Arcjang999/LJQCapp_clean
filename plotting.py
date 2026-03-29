@@ -157,8 +157,8 @@ def _plot_status_points(axis, formal_df: pd.DataFrame) -> None:
 
 
 def _plot_control_lines(axis, mean: float, sd: float | None) -> None:
-    axis.axhline(mean, color="#222222", linewidth=1.2, linestyle="-", label="Mean")
-    axis.text(1.01, mean, "Mean", transform=axis.get_yaxis_transform(), fontsize=8, va="center")
+    axis.axhline(mean, color="#222222", linewidth=1.2, linestyle="-", label="均值")
+    axis.text(1.01, mean, "均值", transform=axis.get_yaxis_transform(), fontsize=8, va="center")
     if sd is None:
         return
 

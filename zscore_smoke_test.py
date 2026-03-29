@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
+from matplotlib.legend import Legend
 import pandas as pd
 
 import database
@@ -14,11 +15,13 @@ from database import (
     create_zscore_project,
     get_zscore_batch,
     get_zscore_project,
+    get_zscore_runs_with_levels_for_batch,
     init_db,
 )
 from zscore_logic import (
     PHASE_FORMAL_QC,
     PHASE_TARGET_BUILDING,
+    build_zscore_maintenance_dialog_state,
     build_level_target_profiles,
     build_zscore_batch_summary_items,
     build_zscore_plot_dataframe,
@@ -29,6 +32,7 @@ from zscore_logic import (
     evaluate_zscore_run_with_phase,
     format_zscore_level_label_summary,
     get_building_stat_run_ids,
+    get_zscore_display_sequence,
     get_level_ids_for_level_count,
     get_phase_label,
     get_template_id_for_level_count,
@@ -37,6 +41,9 @@ from zscore_logic import (
     get_zscore_runs,
     resolve_zscore_batch_context,
     should_enable_formal_rules,
+    delete_saved_zscore_run,
+    rebuild_zscore_batch_state,
+    update_saved_zscore_run,
     upsert_zscore_level_target,
 )
 from zscore_plotting import filter_zscore_plot_df, plot_zscore_overlay, plot_zscore_single_level
@@ -45,6 +52,7 @@ from zscore_plotting import filter_zscore_plot_df, plot_zscore_overlay, plot_zsc
 TEMPLATES = build_zscore_rule_templates()
 PLOT_COLUMNS = [
     "run_id",
+    "test_sequence",
     "run_index",
     "test_time",
     "level_id",
@@ -53,6 +61,10 @@ PLOT_COLUMNS = [
     "rule_hits",
     "raw_value",
     "log_value",
+    "building_reference_mean",
+    "building_reference_sd",
+    "formal_reference_mean",
+    "formal_reference_sd",
     "phase",
     "plot_phase",
     "is_building_stat_point",
@@ -188,6 +200,7 @@ def build_plot_df() -> pd.DataFrame:
         rows.append(
             {
                 "run_id": run_index,
+                "test_sequence": run_index,
                 "run_index": run_index,
                 "test_time": BASE_TIME + pd.Timedelta(hours=run_index),
                 "level_id": level_id,
@@ -196,6 +209,10 @@ def build_plot_df() -> pd.DataFrame:
                 "rule_hits": "",
                 "raw_value": raw_value,
                 "log_value": math.log10(raw_value),
+                "building_reference_mean": float(target_info["target_mean"]),
+                "building_reference_sd": float(target_info["target_sd"]),
+                "formal_reference_mean": float(target_info["target_mean"]),
+                "formal_reference_sd": float(target_info["target_sd"]),
                 "phase": PHASE_FORMAL_QC,
                 "plot_phase": PHASE_FORMAL_QC,
                 "is_building_stat_point": False,
@@ -206,9 +223,11 @@ def build_plot_df() -> pd.DataFrame:
 
 
 def build_mixed_phase_plot_df() -> pd.DataFrame:
+    level_1_target = TEMPLATES["2_level_classic"]["default_targets"]["Level 1"]
     rows = [
         {
             "run_id": 1,
+            "test_sequence": 1,
             "run_index": 1,
             "test_time": BASE_TIME,
             "level_id": "Level 1",
@@ -217,6 +236,10 @@ def build_mixed_phase_plot_df() -> pd.DataFrame:
             "rule_hits": "",
             "raw_value": 101.0,
             "log_value": math.log10(101.0),
+            "building_reference_mean": 101.0,
+            "building_reference_sd": None,
+            "formal_reference_mean": float(level_1_target["target_mean"]),
+            "formal_reference_sd": float(level_1_target["target_sd"]),
             "phase": PHASE_TARGET_BUILDING,
             "plot_phase": PHASE_TARGET_BUILDING,
             "is_building_stat_point": True,
@@ -224,6 +247,7 @@ def build_mixed_phase_plot_df() -> pd.DataFrame:
         },
         {
             "run_id": 2,
+            "test_sequence": 2,
             "run_index": 2,
             "test_time": BASE_TIME + pd.Timedelta(hours=1),
             "level_id": "Level 1",
@@ -232,6 +256,10 @@ def build_mixed_phase_plot_df() -> pd.DataFrame:
             "rule_hits": "",
             "raw_value": 99.0,
             "log_value": math.log10(99.0),
+            "building_reference_mean": 100.0,
+            "building_reference_sd": 1.0,
+            "formal_reference_mean": float(level_1_target["target_mean"]),
+            "formal_reference_sd": float(level_1_target["target_sd"]),
             "phase": PHASE_FORMAL_QC,
             "plot_phase": PHASE_FORMAL_QC,
             "is_building_stat_point": False,
@@ -243,6 +271,15 @@ def build_mixed_phase_plot_df() -> pd.DataFrame:
 
 def assert_is_figure(figure: object) -> None:
     assert isinstance(figure, Figure), f"Expected matplotlib Figure, got {type(figure)!r}"
+
+
+def collect_legend_texts(figure: Figure) -> dict[str, list[str]]:
+    legend_map: dict[str, list[str]] = {}
+    for axis in figure.axes:
+        legends = [artist for artist in axis.artists if isinstance(artist, Legend)]
+        for legend in legends:
+            legend_map[legend.get_title().get_text()] = [text.get_text() for text in legend.get_texts()]
+    return legend_map
 
 
 def test_template_rule_sets() -> None:
@@ -591,7 +628,7 @@ def test_zscore_level_labels_persist_and_fallback() -> None:
         batch_2 = get_zscore_batch(batch_id_2)
         label_map_2 = get_zscore_level_label_map(batch_2, ["Level 1", "Level 2"])
         assert label_map_2 == {"Level 1": "Low", "Level 2": "High"}
-        assert format_zscore_level_label_summary(batch_2, ["Level 1", "Level 2"]) == "L1: Low | L2: High"
+        assert format_zscore_level_label_summary(batch_2, ["Level 1", "Level 2"]) == "水平 1：Low | 水平 2：High"
 
         project_id_3 = create_zscore_project("Label Project 3", level_count=3)
         batch_id_3 = create_zscore_batch(
@@ -681,11 +718,11 @@ def test_zscore_summary_items_update_with_batch_context() -> None:
             )
         )
         assert summary_1["当前阶段"] == "建靶中"
-        assert summary_1["全部 Level 已完成"] == "否"
+        assert summary_1["全部水平已完成建靶"] == "否"
         assert summary_1["正式规则已启用"] == "否"
-        assert summary_1["水平说明"] == "L1: Low | L2: High"
+        assert summary_1["水平说明"] == "水平 1：Low | 水平 2：High"
         assert summary_2["当前阶段"] == "正式质控"
-        assert summary_2["全部 Level 已完成"] == "是"
+        assert summary_2["全部水平已完成建靶"] == "是"
         assert summary_2["项目名称"] == "Summary Project"
         assert summary_2["批次编号"] != summary_1["批次编号"]
 
@@ -831,6 +868,491 @@ def test_create_zscore_run_rejects_unexpected_level_for_two_level_batch() -> Non
             raise AssertionError("2-level batch should reject Level 3 input")
 
 
+def test_edit_saved_run_rebuilds_targets_realtime_and_status() -> None:
+    with TemporaryDatabaseContext():
+        project_id = create_zscore_project("Edit Rebuild Project", level_count=2)
+        batch_id = create_zscore_batch(
+            project_id=project_id,
+            instrument="Inst-E",
+            reagent="Reagent-E",
+            qc_material="QC-E",
+            concentration="Normal",
+            lot_no="LOT-E",
+            target_n=5,
+        )
+
+        for hour, values in enumerate(
+            [
+                (100.0, 150.0),
+                (101.0, 151.0),
+                (99.0, 149.0),
+                (100.0, 150.0),
+                (100.5, 150.5),
+                (99.5, 149.5),
+                (101.8, 150.0),
+            ],
+            start=0,
+        ):
+            create_zscore_run(
+                batch_id=batch_id,
+                test_time=BASE_TIME + pd.Timedelta(hours=hour),
+                operator=f"tester-{hour}",
+                level_results=[
+                    {"level_id": "Level 1", "raw_value": values[0]},
+                    {"level_id": "Level 2", "raw_value": values[1]},
+                ],
+                template_id="2_level_classic",
+                required_n=5,
+            )
+
+        initial_targets = get_zscore_level_targets(batch_id, "2_level_classic", required_n=5)
+        initial_runs = get_zscore_runs(batch_id, "2_level_classic")
+        assert initial_runs[-1]["run_status"] == "warning"
+
+        rebuild_state = update_saved_zscore_run(
+            run_id=int(initial_runs[4]["run_id"]),
+            test_time=BASE_TIME + pd.Timedelta(hours=4),
+            operator="editor-5",
+            level_results=[
+                {"level_id": "Level 1", "raw_value": 103.0},
+                {"level_id": "Level 2", "raw_value": 151.0},
+            ],
+        )
+
+        updated_targets = get_zscore_level_targets(batch_id, "2_level_classic", required_n=5)
+        updated_runs = get_zscore_runs(batch_id, "2_level_classic")
+        assert rebuild_state["overall_phase"] == PHASE_FORMAL_QC
+        assert updated_runs[4]["operator"] == "editor-5"
+        assert updated_runs[-1]["run_status"] == "accept"
+        assert not math.isclose(
+            float(initial_targets["Level 1"]["final_target_mean"]),
+            float(updated_targets["Level 1"]["final_target_mean"]),
+            rel_tol=1e-9,
+            abs_tol=1e-9,
+        )
+        assert round(updated_targets["Level 1"]["final_target_mean"], 6) == round(
+            (100.0 + 101.0 + 99.0 + 100.0 + 103.0) / 5.0,
+            6,
+        )
+        assert round(updated_targets["Level 1"]["realtime_mean"], 6) == round((103.0 + 99.5 + 101.8) / 3.0, 6)
+
+
+def test_delete_saved_run_rebuilds_batch_and_plot_points() -> None:
+    with TemporaryDatabaseContext():
+        project_id = create_zscore_project("Delete Rebuild Project", level_count=2)
+        batch_id = create_zscore_batch(
+            project_id=project_id,
+            instrument="Inst-D",
+            reagent="Reagent-D",
+            qc_material="QC-D",
+            concentration="Normal",
+            lot_no="LOT-D",
+            target_n=5,
+        )
+
+        for hour, values in enumerate(
+            [
+                (100.0, 150.0),
+                (101.0, 151.0),
+                (99.0, 149.0),
+                (100.0, 150.0),
+                (100.5, 150.5),
+                (99.0, 149.0),
+            ],
+            start=0,
+        ):
+            create_zscore_run(
+                batch_id=batch_id,
+                test_time=BASE_TIME + pd.Timedelta(hours=hour),
+                operator=f"tester-{hour}",
+                level_results=[
+                    {"level_id": "Level 1", "raw_value": values[0]},
+                    {"level_id": "Level 2", "raw_value": values[1]},
+                ],
+                template_id="2_level_classic",
+                required_n=5,
+            )
+
+        initial_runs = get_zscore_runs(batch_id, "2_level_classic")
+        delete_run_id = int(initial_runs[4]["run_id"])
+        delete_saved_zscore_run(delete_run_id)
+
+        remaining_runs = get_zscore_runs(batch_id, "2_level_classic")
+        raw_runs = get_zscore_runs_with_levels_for_batch(batch_id)
+        targets = get_zscore_level_targets(batch_id, "2_level_classic", required_n=5)
+        plot_df = build_zscore_plot_dataframe(remaining_runs)
+
+        assert len(remaining_runs) == 5
+        assert {int(run["run_id"]) for run in raw_runs} == {1, 2, 3, 4, 6}
+        assert sum(len(run["level_results"]) for run in raw_runs) == 10
+        assert len(plot_df) == 10
+        assert round(targets["Level 1"]["final_target_mean"], 6) == round(
+            (100.0 + 101.0 + 99.0 + 100.0 + 99.0) / 5.0,
+            6,
+        )
+        assert round(targets["Level 1"]["realtime_mean"], 6) == 99.0
+        assert sorted(plot_df["test_sequence"].drop_duplicates().tolist()) == [1, 2, 3, 4, 6]
+
+
+def test_saved_run_maintenance_respects_level_count_for_two_and_three_level_batches() -> None:
+    with TemporaryDatabaseContext():
+        project_id_2 = create_zscore_project("Maintain 2-Level Project", level_count=2)
+        batch_id_2 = create_zscore_batch(
+            project_id=project_id_2,
+            instrument="Inst-M2",
+            reagent="Reagent-M2",
+            qc_material="QC-M2",
+            concentration="Normal",
+            lot_no="LOT-M2",
+            target_n=5,
+        )
+        run_2 = create_zscore_run(
+            batch_id=batch_id_2,
+            test_time=BASE_TIME,
+            operator="tester-2",
+            level_results=[
+                {"level_id": "Level 1", "raw_value": 100.0},
+                {"level_id": "Level 2", "raw_value": 150.0},
+            ],
+            template_id="2_level_classic",
+            required_n=5,
+        )
+        try:
+            update_saved_zscore_run(
+                run_id=int(run_2["run_id"]),
+                test_time=BASE_TIME,
+                operator="tester-2-edit",
+                level_results=[
+                    {"level_id": "Level 1", "raw_value": 100.0},
+                    {"level_id": "Level 2", "raw_value": 150.0},
+                    {"level_id": "Level 3", "raw_value": 200.0},
+                ],
+            )
+        except ValueError as exc:
+            assert "Level 3" in str(exc)
+        else:
+            raise AssertionError("2-level batch should reject Level 3 when editing a saved run")
+
+        project_id_3 = create_zscore_project("Maintain 3-Level Project", level_count=3)
+        batch_id_3 = create_zscore_batch(
+            project_id=project_id_3,
+            instrument="Inst-M3",
+            reagent="Reagent-M3",
+            qc_material="QC-M3",
+            concentration="High",
+            lot_no="LOT-M3",
+            target_n=5,
+        )
+        for hour, values in enumerate(
+            [
+                (100.0, 150.0, 200.0),
+                (101.0, 151.0, 201.0),
+                (99.0, 149.0, 199.0),
+                (100.0, 150.0, 200.0),
+                (100.5, 150.5, 200.5),
+                (99.5, 149.5, 199.5),
+            ],
+            start=0,
+        ):
+            create_zscore_run(
+                batch_id=batch_id_3,
+                test_time=BASE_TIME + pd.Timedelta(hours=hour),
+                operator=f"tester-3-{hour}",
+                level_results=[
+                    {"level_id": "Level 1", "raw_value": values[0]},
+                    {"level_id": "Level 2", "raw_value": values[1]},
+                    {"level_id": "Level 3", "raw_value": values[2]},
+                ],
+                template_id="3_level_threes",
+                required_n=5,
+            )
+
+        runs_before_delete = get_zscore_runs(batch_id_3, "3_level_threes")
+        update_saved_zscore_run(
+            run_id=int(runs_before_delete[4]["run_id"]),
+            test_time=BASE_TIME + pd.Timedelta(hours=4),
+            operator="editor-3",
+            level_results=[
+                {"level_id": "Level 1", "raw_value": 102.0},
+                {"level_id": "Level 2", "raw_value": 151.0},
+                {"level_id": "Level 3", "raw_value": 202.0},
+            ],
+        )
+        rebuild_state = delete_saved_zscore_run(int(runs_before_delete[5]["run_id"]))
+        saved_runs = get_zscore_runs(batch_id_3, "3_level_threes")
+
+        assert rebuild_state["overall_phase"] == PHASE_FORMAL_QC
+        assert set(rebuild_state["target_profiles"].keys()) == {"Level 1", "Level 2", "Level 3"}
+        assert rebuild_state["target_profiles"]["Level 3"]["collected_n"] == 5
+        assert all(len(run["level_results"]) == 3 for run in saved_runs)
+        assert all(
+            {level_result["level_id"] for level_result in run["level_results"]} == {"Level 1", "Level 2", "Level 3"}
+            for run in saved_runs
+        )
+
+
+def test_building_runs_lock_after_batch_enters_formal() -> None:
+    with TemporaryDatabaseContext():
+        project_id = create_zscore_project("Locking Project", level_count=2)
+        batch_id = create_zscore_batch(
+            project_id=project_id,
+            instrument="Inst-L",
+            reagent="Reagent-L",
+            qc_material="QC-L",
+            concentration="Normal",
+            lot_no="LOT-L",
+            target_n=5,
+        )
+
+        for hour, values in enumerate(
+            [
+                (100.0, 150.0),
+                (101.0, 151.0),
+                (99.0, 149.0),
+                (100.5, 150.5),
+            ],
+            start=0,
+        ):
+            create_zscore_run(
+                batch_id=batch_id,
+                test_time=BASE_TIME + pd.Timedelta(hours=hour),
+                operator=f"tester-{hour}",
+                level_results=[
+                    {"level_id": "Level 1", "raw_value": values[0]},
+                    {"level_id": "Level 2", "raw_value": values[1]},
+                ],
+                template_id="2_level_classic",
+                required_n=5,
+            )
+
+        pre_formal_runs = get_zscore_runs(batch_id, "2_level_classic")
+        assert all(not bool(run["is_locked_for_maintenance"]) for run in pre_formal_runs)
+
+        create_zscore_run(
+            batch_id=batch_id,
+            test_time=BASE_TIME + pd.Timedelta(hours=4),
+            operator="tester-4",
+            level_results=[
+                {"level_id": "Level 1", "raw_value": 99.5},
+                {"level_id": "Level 2", "raw_value": 149.5},
+            ],
+            template_id="2_level_classic",
+            required_n=5,
+        )
+        create_zscore_run(
+            batch_id=batch_id,
+            test_time=BASE_TIME + pd.Timedelta(hours=5),
+            operator="tester-5",
+            level_results=[
+                {"level_id": "Level 1", "raw_value": 99.2},
+                {"level_id": "Level 2", "raw_value": 149.2},
+            ],
+            template_id="2_level_classic",
+            required_n=5,
+        )
+
+        post_formal_runs = get_zscore_runs(batch_id, "2_level_classic")
+        locked_runs = [run for run in post_formal_runs if run["phase"] == PHASE_TARGET_BUILDING]
+        formal_runs = [run for run in post_formal_runs if run["phase"] == PHASE_FORMAL_QC]
+
+        assert locked_runs
+        assert formal_runs
+        assert all(bool(run["is_locked_for_maintenance"]) for run in locked_runs)
+        assert all(not bool(run["is_locked_for_maintenance"]) for run in formal_runs)
+
+        locked_run_id = int(locked_runs[0]["run_id"])
+        try:
+            update_saved_zscore_run(
+                run_id=locked_run_id,
+                test_time=BASE_TIME,
+                operator="editor",
+                level_results=[
+                    {"level_id": "Level 1", "raw_value": 100.0},
+                    {"level_id": "Level 2", "raw_value": 150.0},
+                ],
+            )
+        except ValueError as exc:
+            assert "已锁定" in str(exc)
+        else:
+            raise AssertionError("Locked building run should not be editable")
+
+        try:
+            delete_saved_zscore_run(locked_run_id)
+        except ValueError as exc:
+            assert "已锁定" in str(exc)
+        else:
+            raise AssertionError("Locked building run should not be deletable")
+
+
+def test_test_sequence_keeps_incrementing_and_feeds_plot_axis() -> None:
+    with TemporaryDatabaseContext():
+        project_id = create_zscore_project("Sequence Project", level_count=2)
+        batch_id = create_zscore_batch(
+            project_id=project_id,
+            instrument="Inst-S",
+            reagent="Reagent-S",
+            qc_material="QC-S",
+            concentration="Normal",
+            lot_no="LOT-S",
+            target_n=5,
+        )
+
+        for hour, values in enumerate(
+            [
+                (100.0, 150.0),
+                (101.0, 151.0),
+                (99.0, 149.0),
+            ],
+            start=0,
+        ):
+            create_zscore_run(
+                batch_id=batch_id,
+                test_time=BASE_TIME + pd.Timedelta(hours=hour),
+                operator=f"tester-{hour}",
+                level_results=[
+                    {"level_id": "Level 1", "raw_value": values[0]},
+                    {"level_id": "Level 2", "raw_value": values[1]},
+                ],
+                template_id="2_level_classic",
+                required_n=5,
+            )
+
+        initial_runs = get_zscore_runs(batch_id, "2_level_classic")
+        assert [get_zscore_display_sequence(run) for run in initial_runs] == [1, 2, 3]
+
+        delete_saved_zscore_run(int(initial_runs[1]["run_id"]))
+        create_zscore_run(
+            batch_id=batch_id,
+            test_time=BASE_TIME + pd.Timedelta(hours=3),
+            operator="tester-3",
+            level_results=[
+                {"level_id": "Level 1", "raw_value": 102.0},
+                {"level_id": "Level 2", "raw_value": 152.0},
+            ],
+            template_id="2_level_classic",
+            required_n=5,
+        )
+
+        final_runs = get_zscore_runs(batch_id, "2_level_classic")
+        assert [get_zscore_display_sequence(run) for run in final_runs] == [1, 3, 4]
+
+        plot_df = build_zscore_plot_dataframe(final_runs)
+        assert sorted(plot_df["test_sequence"].drop_duplicates().tolist()) == [1, 3, 4]
+        assert sorted(plot_df["run_index"].drop_duplicates().tolist()) == [1, 3, 4]
+
+
+def test_plotting_uses_raw_value_axis_and_mean_sd_reference_lines() -> None:
+    figure = plot_zscore_single_level(build_plot_df(), "Level 1", "单水平图")
+    assert_is_figure(figure)
+    axis = figure.axes[0]
+    assert axis.get_xlabel() == "检测序号"
+    assert axis.get_ylabel() == "检测值"
+
+    constant_line_values = sorted(
+        {
+            round(float(line.get_ydata()[0]), 2)
+            for line in axis.lines
+            if len(line.get_ydata()) > 0 and len({round(float(value), 6) for value in line.get_ydata()}) == 1
+        }
+    )
+    assert 100.0 in constant_line_values
+    assert 105.0 in constant_line_values
+    assert 95.0 in constant_line_values
+    assert 110.0 in constant_line_values
+    assert 90.0 in constant_line_values
+    plt.close(figure)
+
+
+def test_plotting_supports_standard_and_full_range_views() -> None:
+    extreme_df = build_plot_df().copy()
+    extreme_df.loc[
+        (extreme_df["level_id"] == "Level 1") & (extreme_df["run_index"] == 2),
+        "raw_value",
+    ] = 120.0
+
+    standard_figure = plot_zscore_single_level(
+        extreme_df,
+        "Level 1",
+        "标准视图",
+        y_axis_mode="标准视图",
+        standard_sd_limit=3.0,
+    )
+    full_figure = plot_zscore_single_level(
+        extreme_df,
+        "Level 1",
+        "全范围视图",
+        y_axis_mode="全范围视图",
+        standard_sd_limit=3.0,
+    )
+
+    standard_ylim = standard_figure.axes[0].get_ylim()
+    full_ylim = full_figure.axes[0].get_ylim()
+    assert standard_ylim[1] < 120.0
+    assert full_ylim[1] >= 120.0
+    plt.close(standard_figure)
+    plt.close(full_figure)
+
+
+def test_single_level_manual_legend_covers_status_phase_and_clip_marker() -> None:
+    extreme_df = build_plot_df().copy()
+    extreme_df.loc[
+        (extreme_df["level_id"] == "Level 1") & (extreme_df["run_index"] == 2),
+        "raw_value",
+    ] = 140.0
+
+    figure = plot_zscore_single_level(
+        extreme_df,
+        "Level 1",
+        "Legend Single",
+        y_axis_mode="标准视图",
+        standard_sd_limit=3.0,
+    )
+    legend_map = collect_legend_texts(figure)
+
+    assert legend_map["状态"] == ["正常", "警告", "失控", "超界裁切点"]
+    assert legend_map["阶段 / 样式"] == [
+        "建靶期（虚线 / 方形点）",
+        "正式期（实线 / 圆形点）",
+        "均值 / ±SD 控制线",
+    ]
+    plt.close(figure)
+
+
+def test_overlay_manual_legend_keeps_status_phase_and_level_keys() -> None:
+    figure = plot_zscore_overlay(
+        build_plot_df(),
+        "Legend Overlay",
+        y_axis_mode="标准视图",
+        standard_sd_limit=3.0,
+    )
+    legend_map = collect_legend_texts(figure)
+
+    assert legend_map["状态"] == ["正常", "警告", "失控"]
+    assert legend_map["阶段 / 样式"] == [
+        "建靶期（虚线 / 方形点）",
+        "正式期（实线 / 圆形点）",
+        "均值 / ±SD 控制线",
+    ]
+    assert legend_map["水平"] == ["水平 1", "水平 2"]
+    plt.close(figure)
+
+
+def test_delete_feedback_keeps_maintenance_dialog_context() -> None:
+    remaining_runs = [
+        {"run_id": 3, "test_sequence": 4},
+        {"run_id": 1, "test_sequence": 1},
+    ]
+    dialog_state = build_zscore_maintenance_dialog_state(
+        action="delete",
+        available_runs=remaining_runs,
+        preferred_run_id=2,
+    )
+
+    assert dialog_state["keep_dialog_open"] is True
+    assert dialog_state["dialog_notice"] == "Z-score 检测记录已删除，并已完成整批次重算。"
+    assert dialog_state["selected_run_id"] == 3
+
+
 def test_plotting_all_view_visually_splits_building_and_formal_phases() -> None:
     figure = plot_zscore_single_level(
         build_mixed_phase_plot_df(),
@@ -840,8 +1362,8 @@ def test_plotting_all_view_visually_splits_building_and_formal_phases() -> None:
     )
     assert_is_figure(figure)
     _, labels = figure.axes[0].get_legend_handles_labels()
-    assert "Level 1 | 建靶期" in labels
-    assert "Level 1 | 正式期" in labels
+    assert "水平 1 | 建靶期" in labels
+    assert "水平 1 | 正式期" in labels
     plt.close(figure)
 
 
@@ -899,6 +1421,16 @@ def run_all_tests() -> None:
         test_plot_phase_filtering_views,
         test_collected_n_matches_building_plot_points,
         test_create_zscore_run_rejects_unexpected_level_for_two_level_batch,
+        test_edit_saved_run_rebuilds_targets_realtime_and_status,
+        test_delete_saved_run_rebuilds_batch_and_plot_points,
+        test_saved_run_maintenance_respects_level_count_for_two_and_three_level_batches,
+        test_building_runs_lock_after_batch_enters_formal,
+        test_test_sequence_keeps_incrementing_and_feeds_plot_axis,
+        test_plotting_uses_raw_value_axis_and_mean_sd_reference_lines,
+        test_plotting_supports_standard_and_full_range_views,
+        test_single_level_manual_legend_covers_status_phase_and_clip_marker,
+        test_overlay_manual_legend_keeps_status_phase_and_level_keys,
+        test_delete_feedback_keeps_maintenance_dialog_context,
         test_plotting_all_view_visually_splits_building_and_formal_phases,
         test_plotting_handles_empty_frames,
         test_plotting_single_level_returns_figure,
