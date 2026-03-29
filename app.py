@@ -517,8 +517,39 @@ def build_safe_export_name(text: str | None, fallback: str) -> str:
 
 
 def switch_top_level_method(target_method: str) -> None:
-    st.session_state["top_level_method_selector"] = target_method
+    normalized_target = LEGACY_METHOD_ENTRY_MAP.get(str(target_method or "").strip(), str(target_method or "").strip())
+    if normalized_target in METHOD_ENTRY_OPTIONS:
+        st.session_state["pending_top_level_method"] = normalized_target
     st.rerun()
+
+
+METHOD_ENTRY_OPTIONS = [
+    "主页",
+    "单水平（LJ法）",
+    "多水平（Z-score法）",
+    "即刻法",
+]
+
+LEGACY_METHOD_ENTRY_MAP = {
+    "首页": "主页",
+    "Main": "主页",
+    "LJ": "单水平（LJ法）",
+    "Z-score": "多水平（Z-score法）",
+    "Instant": "即刻法",
+}
+
+
+def normalize_top_level_method_selection() -> None:
+    pending_value = str(st.session_state.pop("pending_top_level_method", "") or "").strip()
+    current_value = str(st.session_state.get("top_level_method_selector", "") or "").strip()
+    candidate_value = pending_value or current_value
+    normalized_value = LEGACY_METHOD_ENTRY_MAP.get(candidate_value, candidate_value)
+
+    if normalized_value in METHOD_ENTRY_OPTIONS:
+        st.session_state["top_level_method_selector"] = normalized_value
+        return
+
+    st.session_state["top_level_method_selector"] = METHOD_ENTRY_OPTIONS[0]
 
 
 def prepare_display_records(qc_df: pd.DataFrame) -> pd.DataFrame:
@@ -3065,8 +3096,8 @@ def render_main_entry_page() -> None:
                 "支持标准视图 / 全范围视图、规则汇总、最新结果分析与记录维护。",
                 "适合常规单水平室内质控流程。",
             ],
-            "进入 LJ 页面",
-            "LJ",
+            "进入单水平页面",
+            "单水平（LJ法）",
         ),
         (
             "Z-score",
@@ -3076,19 +3107,19 @@ def render_main_entry_page() -> None:
                 "支持建靶期 / 正式质控期、多水平检测记录录入、图表与结果分析。",
                 "支持正式期记录维护，以及删除或编辑后的整批次重算。",
             ],
-            "进入 Z-score 页面",
-            "Z-score",
+            "进入多水平页面",
+            "多水平（Z-score法）",
         ),
         (
             "Instant",
             "当前为预留页面。",
             [
                 "本版本尚未接入正式业务逻辑。",
-                "页面仅保留模块定位说明，不参与当前 LJ 与 Z-score 主流程。",
-                "如需可用功能，请优先进入 LJ 或 Z-score 页面。",
+                "页面仅保留模块定位说明，不参与当前单水平与多水平主流程。",
+                "如需可用功能，请优先进入“单水平（LJ法）”或“多水平（Z-score法）”页面。",
             ],
-            "查看 Instant 说明",
-            "Instant",
+            "查看即刻法说明",
+            "即刻法",
         ),
     ]
     method_cols = st.columns(3, gap="large")
@@ -3122,7 +3153,7 @@ def render_main_entry_page() -> None:
             "5. 在图表区查看趋势、规则汇总与最新结果分析；如需修正历史数据，可进入记录维护。"
         )
         if st.button("从 LJ 开始", key="main_quickstart_lj", width="stretch"):
-            switch_top_level_method("LJ")
+            switch_top_level_method("单水平（LJ法）")
     with quick_start_col2:
         st.markdown("**Z-score 快速开始**")
         st.markdown(
@@ -3133,7 +3164,7 @@ def render_main_entry_page() -> None:
             "5. 如需修正正式期检测记录，可通过记录维护入口编辑或删除，系统会自动整批次重算。"
         )
         if st.button("从 Z-score 开始", key="main_quickstart_zscore", width="stretch"):
-            switch_top_level_method("Z-score")
+            switch_top_level_method("多水平（Z-score法）")
 
     st.divider()
     st.markdown("**使用说明与版本边界**")
@@ -3190,7 +3221,7 @@ def render_main_entry_page() -> None:
                 "- Instant 正式业务功能"
             )
 
-    st.info("可直接点击上方按钮进入 LJ、Z-score 或 Instant 页面；也可以使用顶部“功能入口”切换。")
+    st.info("可直接点击上方按钮进入对应页面；也可以使用顶部“功能入口”在“主页 / 单水平（LJ法） / 多水平（Z-score法） / 即刻法”之间切换。")
 
 
 def render_zscore_placeholder_page() -> None:
@@ -3486,12 +3517,12 @@ def render_instant_placeholder_page() -> None:
     with guide_col:
         st.markdown("**建议使用路径**")
         st.markdown(
-            "- 如需立即开展单水平室内质控，请进入 LJ 页面。\n"
-            "- 如需开展双水平 / 三水平多水平 IQC，请进入 Z-score 页面。\n"
+            "- 如需立即开展单水平室内质控，请进入“单水平（LJ法）”页面。\n"
+            "- 如需开展双水平 / 三水平多水平 IQC，请进入“多水平（Z-score法）”页面。\n"
             "- Instant 后续若接入正式功能，会在此页面补充明确说明。"
         )
 
-    st.info("当前可用的质控流程请从顶部“功能入口”进入 LJ 或 Z-score 页面。")
+    st.info("当前可用的质控流程请从顶部“功能入口”进入“单水平（LJ法）”或“多水平（Z-score法）”页面。")
 
 
 def render_lj_mode() -> None:
@@ -3530,19 +3561,20 @@ def render_page_chrome() -> None:
     st.caption("当前版本适用于内部试用、演示与小范围部署；如需反馈问题，可使用右上角“问题反馈”。")
 
 
+normalize_top_level_method_selection()
 render_page_chrome()
 selected_method = st.radio(
     "功能入口",
-    options=["首页", "LJ", "Z-score", "Instant"],
+    options=METHOD_ENTRY_OPTIONS,
     horizontal=True,
     key="top_level_method_selector",
 )
 
-if selected_method in {"首页", "Main"}:
+if selected_method == "主页":
     render_main_entry_page()
-elif selected_method == "LJ":
+elif selected_method == "单水平（LJ法）":
     render_lj_mode()
-elif selected_method == "Z-score":
+elif selected_method == "多水平（Z-score法）":
     render_zscore_placeholder_page()
 else:
     render_instant_placeholder_page()

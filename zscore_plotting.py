@@ -132,21 +132,28 @@ def plot_zscore_single_level(
         return _build_empty_zscore_figure(title, "暂无可绘制数据", "当前视图下还没有该水平的记录。")
 
     prepared_df = _prepare_plot_dataframe(level_df)
-    y_limits = _get_value_y_limits(prepared_df, normalized_y_axis_mode, float(standard_sd_limit))
+    reference_mode = _resolve_reference_mode(prepared_df, normalized_scope)
+    show_reference_lines = reference_mode != "none"
+    y_limits = _get_value_y_limits(
+        prepared_df,
+        normalized_y_axis_mode,
+        float(standard_sd_limit),
+        reference_mode,
+    )
     display_df = _build_display_dataframe(prepared_df, y_limits)
     level_color = LEVEL_COLORS.get(level_id, "#4e79a7")
     display_level = format_level_id_display(level_id)
 
     if normalized_scope == "all":
+        _plot_reference_lines(axis, display_df, reference_mode)
         for phase in [PHASE_TARGET_BUILDING, PHASE_FORMAL_QC]:
             phase_df = display_df[display_df["phase"] == phase].sort_values("run_index").copy()
             if phase_df.empty:
                 continue
-            _plot_reference_lines(axis, phase_df)
             _plot_phase_line(axis, phase_df, level_color, f"{display_level} | {_phase_label(phase)}")
             _plot_status_points(axis, phase_df, level_color)
     else:
-        _plot_reference_lines(axis, display_df)
+        _plot_reference_lines(axis, display_df, reference_mode)
         _plot_phase_line(axis, display_df, level_color, display_level)
         _plot_status_points(axis, display_df, level_color)
 
@@ -158,7 +165,7 @@ def plot_zscore_single_level(
     axis.set_xlabel("检测序号")
     axis.set_ylabel("检测值")
     axis.grid(True, linestyle=":", alpha=0.3)
-    _add_manual_legends(axis, display_df)
+    _add_manual_legends(axis, display_df, show_reference_lines=show_reference_lines)
     figure.tight_layout(pad=0.7)
     return figure
 
@@ -186,23 +193,29 @@ def plot_zscore_overlay(
         return _build_empty_zscore_figure(title, "暂无可绘制数据", "当前视图下还没有可叠加的水平数据。")
 
     prepared_df = _prepare_plot_dataframe(overlay_df)
-    y_limits = _get_value_y_limits(prepared_df, normalized_y_axis_mode, float(standard_sd_limit))
+    reference_mode = _resolve_reference_mode(prepared_df, normalized_scope)
+    show_reference_lines = reference_mode != "none"
+    y_limits = _get_value_y_limits(
+        prepared_df,
+        normalized_y_axis_mode,
+        float(standard_sd_limit),
+        reference_mode,
+    )
     display_df = _build_display_dataframe(prepared_df, y_limits)
 
     for current_level_id in display_df["level_id"].drop_duplicates().tolist():
         level_df = display_df[display_df["level_id"] == current_level_id].sort_values("run_index").copy()
         level_color = LEVEL_COLORS.get(current_level_id, "#4e79a7")
         display_level = format_level_id_display(current_level_id)
+        _plot_reference_lines(axis, level_df, reference_mode)
         if normalized_scope == "all":
             for phase in [PHASE_TARGET_BUILDING, PHASE_FORMAL_QC]:
                 phase_df = level_df[level_df["phase"] == phase].sort_values("run_index").copy()
                 if phase_df.empty:
                     continue
-                _plot_reference_lines(axis, phase_df)
                 _plot_phase_line(axis, phase_df, level_color, f"{display_level} | {_phase_label(phase)}")
                 _plot_status_points(axis, phase_df, level_color)
         else:
-            _plot_reference_lines(axis, level_df)
             _plot_phase_line(axis, level_df, level_color, display_level)
             _plot_status_points(axis, level_df, level_color)
 
@@ -218,6 +231,7 @@ def plot_zscore_overlay(
         axis,
         display_df,
         level_ids=display_df["level_id"].drop_duplicates().tolist(),
+        show_reference_lines=show_reference_lines,
     )
     figure.tight_layout(pad=0.7)
     return figure
@@ -271,31 +285,35 @@ def _ensure_plot_columns(plot_df: pd.DataFrame) -> pd.DataFrame:
     return prepared_df
 
 
-def _plot_reference_lines(axis, plot_df: pd.DataFrame) -> None:
-    if plot_df.empty or "reference_mean" not in plot_df.columns:
+def _plot_reference_lines(axis, plot_df: pd.DataFrame, reference_mode: str) -> None:
+    reference_profile = _resolve_reference_profile(plot_df, reference_mode)
+    if plot_df.empty or reference_profile is None:
         return
-    if plot_df["reference_mean"].isna().all():
+    if "run_index" not in plot_df.columns:
         return
 
-    x_values = plot_df["run_index"]
+    x_min = float(plot_df["run_index"].min())
+    x_max = float(plot_df["run_index"].max())
+    mean_value = float(reference_profile["mean"])
     axis.plot(
-        x_values,
-        plot_df["reference_mean"],
+        [x_min, x_max],
+        [mean_value, mean_value],
         color=REFERENCE_LINE_COLORS[0],
         linewidth=1.1,
         linestyle="-",
         alpha=0.8,
         zorder=1,
     )
+    sd_value = reference_profile.get("sd")
+    if sd_value is None or math.isclose(float(sd_value), 0.0, abs_tol=1e-12):
+        return
+
     for multiplier in (1, 2, 3):
-        valid_mask = plot_df["reference_sd"].notna()
-        if not valid_mask.any():
-            continue
-        upper = plot_df["reference_mean"] + multiplier * plot_df["reference_sd"]
-        lower = plot_df["reference_mean"] - multiplier * plot_df["reference_sd"]
+        upper = mean_value + multiplier * float(sd_value)
+        lower = mean_value - multiplier * float(sd_value)
         axis.plot(
-            x_values,
-            upper,
+            [x_min, x_max],
+            [upper, upper],
             color=REFERENCE_LINE_COLORS[multiplier],
             linewidth=0.95,
             linestyle="--",
@@ -303,8 +321,8 @@ def _plot_reference_lines(axis, plot_df: pd.DataFrame) -> None:
             zorder=1,
         )
         axis.plot(
-            x_values,
-            lower,
+            [x_min, x_max],
+            [lower, lower],
             color=REFERENCE_LINE_COLORS[multiplier],
             linewidth=0.95,
             linestyle="--",
@@ -401,27 +419,24 @@ def _get_value_y_limits(
     plot_df: pd.DataFrame,
     y_axis_mode: str,
     standard_sd_limit: float,
+    reference_mode: str,
 ) -> tuple[float, float] | None:
     if plot_df.empty or y_axis_mode == "全范围视图":
         return None
 
     reference_bounds: list[float] = []
-    for _, point in plot_df.iterrows():
-        mean_value = point.get("reference_mean")
-        sd_value = point.get("reference_sd")
-        if mean_value is None or pd.isna(mean_value):
-            continue
-        mean_value = float(mean_value)
-        if sd_value is None or pd.isna(sd_value) or math.isclose(float(sd_value), 0.0, abs_tol=1e-12):
+    for reference_profile in _collect_reference_profiles(plot_df, reference_mode):
+        mean_value = float(reference_profile["mean"])
+        sd_value = reference_profile.get("sd")
+        if sd_value is None or math.isclose(float(sd_value), 0.0, abs_tol=1e-12):
             reference_bounds.append(mean_value)
-            continue
-        sd_value = float(sd_value)
-        reference_bounds.extend(
-            [
-                mean_value - standard_sd_limit * sd_value,
-                mean_value + standard_sd_limit * sd_value,
-            ]
-        )
+        else:
+            reference_bounds.extend(
+                [
+                    mean_value - standard_sd_limit * float(sd_value),
+                    mean_value + standard_sd_limit * float(sd_value),
+                ]
+            )
 
     if reference_bounds:
         lower = min(reference_bounds)
@@ -508,21 +523,23 @@ def _add_manual_legends(
     axis,
     display_df: pd.DataFrame,
     level_ids: list[str] | None = None,
+    show_reference_lines: bool = True,
 ) -> None:
-    has_out_of_range_points = _has_out_of_range_points(display_df)
-    status_legend = axis.legend(
-        handles=_build_status_legend_handles(has_out_of_range_points),
-        title="状态",
-        loc="upper left",
-        frameon=True,
-        framealpha=0.94,
-        borderpad=0.7,
-        handlelength=1.2,
-    )
-    axis.add_artist(status_legend)
+    status_handles = _build_status_legend_handles(display_df, _has_out_of_range_points(display_df))
+    if status_handles:
+        status_legend = axis.legend(
+            handles=status_handles,
+            title="状态",
+            loc="upper left",
+            frameon=True,
+            framealpha=0.94,
+            borderpad=0.7,
+            handlelength=1.2,
+        )
+        axis.add_artist(status_legend)
 
     phase_legend = axis.legend(
-        handles=_build_phase_legend_handles(),
+        handles=_build_phase_legend_handles(show_reference_lines=show_reference_lines),
         title="阶段 / 样式",
         loc="upper right",
         frameon=True,
@@ -547,7 +564,18 @@ def _add_manual_legends(
         axis.add_artist(level_legend)
 
 
-def _build_status_legend_handles(has_out_of_range_points: bool) -> list[Line2D]:
+def _build_status_legend_handles(display_df: pd.DataFrame, has_out_of_range_points: bool) -> list[Line2D]:
+    if display_df.empty or "plot_status" not in display_df.columns:
+        return []
+
+    visible_statuses = set(
+        str(status)
+        for status in display_df["plot_status"].dropna().astype(str).tolist()
+        if status in {"accept", "warning", "reject"}
+    )
+    if not visible_statuses:
+        return []
+
     handles = [
         Line2D(
             [0],
@@ -584,6 +612,7 @@ def _build_status_legend_handles(has_out_of_range_points: bool) -> list[Line2D]:
             label="失控",
         ),
     ]
+
     if has_out_of_range_points:
         handles.append(
             Line2D(
@@ -599,9 +628,9 @@ def _build_status_legend_handles(has_out_of_range_points: bool) -> list[Line2D]:
     return handles
 
 
-def _build_phase_legend_handles() -> list[Line2D]:
+def _build_phase_legend_handles(*, show_reference_lines: bool) -> list[Line2D]:
     neutral_color = "#404040"
-    return [
+    handles = [
         Line2D(
             [0],
             [0],
@@ -628,15 +657,19 @@ def _build_phase_legend_handles() -> list[Line2D]:
             markersize=7,
             label="正式期（实线 / 圆形点）",
         ),
-        Line2D(
-            [0],
-            [0],
-            color=REFERENCE_LINE_COLORS[0],
-            linestyle="-",
-            linewidth=1.2,
-            label="均值 / ±SD 控制线",
-        ),
     ]
+    if show_reference_lines:
+        handles.append(
+            Line2D(
+                [0],
+                [0],
+                color=REFERENCE_LINE_COLORS[0],
+                linestyle="-",
+                linewidth=1.2,
+                label="均值 / ±SD 控制线",
+            )
+        )
+    return handles
 
 
 def _build_level_legend_handles(level_ids: list[str]) -> list[Line2D]:
@@ -701,6 +734,51 @@ def _normalize_phase_scope(phase_scope: str) -> str:
 
 def _normalize_y_axis_mode(y_axis_mode: str) -> str:
     return "全范围视图" if y_axis_mode == "全范围视图" else "标准视图"
+
+
+def _resolve_reference_mode(plot_df: pd.DataFrame, phase_scope: str) -> str:
+    normalized_scope = _normalize_phase_scope(phase_scope)
+    if normalized_scope == "building":
+        return "none"
+    if normalized_scope == "formal":
+        return "formal_full"
+    visible_phases = set(
+        str(phase)
+        for phase in (
+            plot_df["plot_phase"] if "plot_phase" in plot_df.columns else plot_df.get("phase", pd.Series(dtype=str))
+        ).dropna().astype(str).tolist()
+    )
+    return "formal_full" if PHASE_FORMAL_QC in visible_phases else "none"
+
+
+def _resolve_reference_profile(plot_df: pd.DataFrame, reference_mode: str) -> dict[str, float | None] | None:
+    if plot_df.empty or reference_mode == "none":
+        return None
+    if reference_mode == "formal_full":
+        mean_series = plot_df["formal_reference_mean"].dropna() if "formal_reference_mean" in plot_df.columns else pd.Series(dtype=float)
+        if mean_series.empty:
+            return None
+        sd_series = plot_df["formal_reference_sd"].dropna() if "formal_reference_sd" in plot_df.columns else pd.Series(dtype=float)
+        return {
+            "mean": float(mean_series.iloc[-1]),
+            "sd": None if sd_series.empty else float(sd_series.iloc[-1]),
+        }
+    raise ValueError(f"Unsupported reference mode: {reference_mode}")
+
+
+def _collect_reference_profiles(plot_df: pd.DataFrame, reference_mode: str) -> list[dict[str, float | None]]:
+    if plot_df.empty or reference_mode == "none":
+        return []
+    if "level_id" not in plot_df.columns:
+        reference_profile = _resolve_reference_profile(plot_df, reference_mode)
+        return [] if reference_profile is None else [reference_profile]
+
+    profiles: list[dict[str, float | None]] = []
+    for _, level_df in plot_df.groupby("level_id", sort=False):
+        reference_profile = _resolve_reference_profile(level_df, reference_mode)
+        if reference_profile is not None:
+            profiles.append(reference_profile)
+    return profiles
 
 
 def _resolve_plot_phase(plot_df: pd.DataFrame) -> str:
