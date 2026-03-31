@@ -69,6 +69,7 @@ def get_connection() -> sqlite3.Connection:
     _migrate_legacy_db_file()
     connection = sqlite3.connect(DB_PATH, check_same_thread=False)
     connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
     return connection
 
 
@@ -134,10 +135,18 @@ def _ensure_projects_table(connection: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS projects (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
+            is_disabled INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
+    existing_columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(projects)").fetchall()
+    }
+    if "is_disabled" not in existing_columns:
+        connection.execute(
+            "ALTER TABLE projects ADD COLUMN is_disabled INTEGER NOT NULL DEFAULT 0"
+        )
 
 
 def _get_or_create_migration_project(connection: sqlite3.Connection) -> int:
@@ -176,6 +185,8 @@ def _ensure_batches_table(connection: sqlite3.Connection) -> None:
         "concentration",
         "lot_no",
         "target_n",
+        "cv_limit",
+        "is_disabled",
         "created_at",
     }
     if existing_columns == expected_columns:
@@ -196,6 +207,9 @@ def _ensure_batches_table(connection: sqlite3.Connection) -> None:
         concentration = row["concentration"] if "concentration" in legacy_columns else ""
         lot_no = _legacy_value(row, legacy_columns, "lot_no", "lot_number", default="")
         target_n = int(_legacy_value(row, legacy_columns, "target_n", "target_count", default=10))
+        cv_limit_raw = _legacy_value(row, legacy_columns, "cv_limit", default=None)
+        cv_limit = None if cv_limit_raw in (None, "") else float(cv_limit_raw)
+        is_disabled = int(_legacy_value(row, legacy_columns, "is_disabled", default=0) or 0)
         project_id = int(_legacy_value(row, legacy_columns, "project_id", default=migration_project_id))
         created_at = row["created_at"] if "created_at" in legacy_columns else None
 
@@ -203,9 +217,9 @@ def _ensure_batches_table(connection: sqlite3.Connection) -> None:
             """
             INSERT INTO batches (
                 id, project_id, instrument, reagent,
-                qc_material, concentration, lot_no, target_n, created_at
+                qc_material, concentration, lot_no, target_n, cv_limit, is_disabled, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
             """,
             (
                 row["id"],
@@ -216,6 +230,8 @@ def _ensure_batches_table(connection: sqlite3.Connection) -> None:
                 concentration,
                 lot_no,
                 target_n,
+                cv_limit,
+                is_disabled,
                 created_at,
             ),
         )
@@ -243,6 +259,7 @@ def _ensure_results_table(connection: sqlite3.Connection) -> None:
         "value",
         "log_value",
         "reagent_lot_changed",
+        "manual_note",
         "created_at",
     }
     if existing_columns == expected_columns:
@@ -265,14 +282,16 @@ def _ensure_results_table(connection: sqlite3.Connection) -> None:
             default=_safe_log10(value),
         )
         reagent_lot_changed = int(_legacy_value(row, legacy_columns, "reagent_lot_changed", default=0))
+        manual_note = str(_legacy_value(row, legacy_columns, "manual_note", default="") or "")
         created_at = row["created_at"] if "created_at" in legacy_columns else None
 
         connection.execute(
             """
             INSERT INTO results (
-                id, batch_id, test_time, operator, value, log_value, reagent_lot_changed, created_at
+                id, batch_id, test_time, operator, value, log_value, reagent_lot_changed,
+                manual_note, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
             """,
             (
                 row["id"],
@@ -282,6 +301,7 @@ def _ensure_results_table(connection: sqlite3.Connection) -> None:
                 value,
                 log_value,
                 reagent_lot_changed,
+                manual_note,
                 created_at,
             ),
         )
@@ -301,6 +321,8 @@ def _create_batches_table(connection: sqlite3.Connection) -> None:
             concentration TEXT NOT NULL,
             lot_no TEXT NOT NULL,
             target_n INTEGER NOT NULL CHECK (target_n BETWEEN 5 AND 20),
+            cv_limit REAL,
+            is_disabled INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
         )
@@ -319,6 +341,7 @@ def _create_results_table(connection: sqlite3.Connection) -> None:
             value REAL NOT NULL,
             log_value REAL,
             reagent_lot_changed INTEGER NOT NULL DEFAULT 0,
+            manual_note TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (batch_id) REFERENCES batches (id) ON DELETE CASCADE
         )
@@ -386,6 +409,7 @@ def _ensure_zscore_runs_table(connection: sqlite3.Connection) -> None:
             rule_hits_run TEXT NOT NULL DEFAULT '[]',
             error_type_hint TEXT NOT NULL DEFAULT 'unknown',
             analysis_prompt TEXT NOT NULL DEFAULT '',
+            manual_note TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (batch_id) REFERENCES batches (id) ON DELETE CASCADE,
             FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
@@ -395,8 +419,14 @@ def _ensure_zscore_runs_table(connection: sqlite3.Connection) -> None:
     existing_columns = {
         row["name"] for row in connection.execute("PRAGMA table_info(zscore_runs)").fetchall()
     }
-    if "test_sequence" not in existing_columns:
-        connection.execute("ALTER TABLE zscore_runs ADD COLUMN test_sequence INTEGER")
+    missing_columns = {
+        "test_sequence": "INTEGER",
+        "manual_note": "TEXT NOT NULL DEFAULT ''",
+    }
+    for column_name, column_type in missing_columns.items():
+        if column_name in existing_columns:
+            continue
+        connection.execute(f"ALTER TABLE zscore_runs ADD COLUMN {column_name} {column_type}")
     _backfill_missing_zscore_test_sequences(connection)
 
 
@@ -544,16 +574,29 @@ def update_project(project_id: int, name: str) -> None:
             raise ValueError("\u9879\u76ee\u540d\u79f0\u5df2\u5b58\u5728") from exc
 
 
-def list_projects() -> pd.DataFrame:
+def set_project_disabled(project_id: int, is_disabled: int) -> None:
+    with get_connection() as connection:
+        connection.execute(
+            "UPDATE projects SET is_disabled = ? WHERE id = ?",
+            (int(is_disabled), project_id),
+        )
+
+
+def list_projects(include_management_fields: bool = False) -> pd.DataFrame:
+    select_columns = "id, name, created_at"
+    if include_management_fields:
+        select_columns += ", is_disabled"
     with get_connection() as connection:
         dataframe = pd.read_sql_query(
             """
-            SELECT id, name, created_at
+            SELECT {}
             FROM projects
             ORDER BY id DESC
-            """,
+            """.format(select_columns),
             connection,
         )
+    if include_management_fields and not dataframe.empty:
+        dataframe["is_disabled"] = dataframe["is_disabled"].fillna(0).astype(int)
     return dataframe
 
 
@@ -580,19 +623,30 @@ def create_batch(
     level_1_label: str | None = None,
     level_2_label: str | None = None,
     level_3_label: str | None = None,
+    cv_limit: float | None = None,
 ) -> int:
     if project_id is None:
         raise ValueError("\u8bf7\u5148\u9009\u62e9\u9879\u76ee")
 
+    normalized_cv_limit = None if cv_limit in (None, "") else float(cv_limit)
     with get_connection() as connection:
         cursor = connection.execute(
             """
             INSERT INTO batches (
-                project_id, instrument, reagent, qc_material, concentration, lot_no, target_n
+                project_id, instrument, reagent, qc_material, concentration, lot_no, target_n, cv_limit
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (project_id, instrument, reagent, qc_material, concentration, lot_no, target_n),
+            (
+                project_id,
+                instrument,
+                reagent,
+                qc_material,
+                concentration,
+                lot_no,
+                target_n,
+                normalized_cv_limit,
+            ),
         )
         return int(cursor.lastrowid)
 
@@ -605,12 +659,19 @@ def update_batch(batch_id: int, lot_no: str) -> None:
         )
 
 
-def list_batches(project_id: int | None = None) -> pd.DataFrame:
+def set_batch_disabled(batch_id: int, is_disabled: int) -> None:
     with get_connection() as connection:
-        if project_id is None:
-            dataframe = pd.read_sql_query(
-                """
-                SELECT
+        connection.execute(
+            "UPDATE batches SET is_disabled = ? WHERE id = ?",
+            (int(is_disabled), batch_id),
+        )
+
+
+def list_batches(
+    project_id: int | None = None,
+    include_management_fields: bool = False,
+) -> pd.DataFrame:
+    select_columns = """
                     batches.id,
                     batches.project_id,
                     projects.name AS project_name,
@@ -621,34 +682,36 @@ def list_batches(project_id: int | None = None) -> pd.DataFrame:
                     batches.lot_no,
                     batches.target_n,
                     batches.created_at
+    """
+    if include_management_fields:
+        select_columns += ",\n                    batches.cv_limit,\n                    batches.is_disabled"
+    with get_connection() as connection:
+        if project_id is None:
+            dataframe = pd.read_sql_query(
+                """
+                SELECT
+                    {}
                 FROM batches
                 LEFT JOIN projects ON projects.id = batches.project_id
                 ORDER BY batches.id DESC
-                """,
+                """.format(select_columns),
                 connection,
             )
         else:
             dataframe = pd.read_sql_query(
                 """
                 SELECT
-                    batches.id,
-                    batches.project_id,
-                    projects.name AS project_name,
-                    batches.instrument,
-                    batches.reagent,
-                    batches.qc_material,
-                    batches.concentration,
-                    batches.lot_no,
-                    batches.target_n,
-                    batches.created_at
+                    {}
                 FROM batches
                 LEFT JOIN projects ON projects.id = batches.project_id
                 WHERE batches.project_id = ?
                 ORDER BY batches.id DESC
-                """,
+                """.format(select_columns),
                 connection,
                 params=(project_id,),
             )
+    if include_management_fields and not dataframe.empty:
+        dataframe["is_disabled"] = dataframe["is_disabled"].fillna(0).astype(int)
     return dataframe
 
 
@@ -694,25 +757,32 @@ def create_zscore_project(name: str, level_count: int) -> int:
     return project_id
 
 
-def list_zscore_projects() -> pd.DataFrame:
-    with get_connection() as connection:
-        dataframe = pd.read_sql_query(
-            """
-            SELECT
+def list_zscore_projects(include_management_fields: bool = False) -> pd.DataFrame:
+    select_columns = """
                 projects.id,
                 projects.name,
                 projects.created_at,
                 config.level_count
+    """
+    if include_management_fields:
+        select_columns += ",\n                projects.is_disabled"
+    with get_connection() as connection:
+        dataframe = pd.read_sql_query(
+            """
+            SELECT
+                {}
             FROM projects
             INNER JOIN zscore_project_config AS config
                 ON config.project_id = projects.id
             ORDER BY projects.id DESC
-            """,
+            """.format(select_columns),
             connection,
         )
 
     if not dataframe.empty:
         dataframe["level_count"] = dataframe["level_count"].astype(int)
+        if include_management_fields:
+            dataframe["is_disabled"] = dataframe["is_disabled"].fillna(0).astype(int)
     return dataframe
 
 
@@ -783,12 +853,11 @@ def create_zscore_batch(
     return batch_id
 
 
-def list_zscore_batches(project_id: int | None = None) -> pd.DataFrame:
-    with get_connection() as connection:
-        if project_id is None:
-            dataframe = pd.read_sql_query(
-                """
-                SELECT
+def list_zscore_batches(
+    project_id: int | None = None,
+    include_management_fields: bool = False,
+) -> pd.DataFrame:
+    select_columns = """
                     batches.id,
                     batches.project_id,
                     projects.name AS project_name,
@@ -803,43 +872,41 @@ def list_zscore_batches(project_id: int | None = None) -> pd.DataFrame:
                     config.level_1_label,
                     config.level_2_label,
                     config.level_3_label
+    """
+    if include_management_fields:
+        select_columns += ",\n                    batches.cv_limit,\n                    batches.is_disabled"
+    with get_connection() as connection:
+        if project_id is None:
+            dataframe = pd.read_sql_query(
+                """
+                SELECT
+                    {}
                 FROM batches
                 INNER JOIN zscore_batch_config AS config ON config.batch_id = batches.id
                 LEFT JOIN projects ON projects.id = batches.project_id
                 ORDER BY batches.id DESC
-                """,
+                """.format(select_columns),
                 connection,
             )
         else:
             dataframe = pd.read_sql_query(
                 """
                 SELECT
-                    batches.id,
-                    batches.project_id,
-                    projects.name AS project_name,
-                    batches.instrument,
-                    batches.reagent,
-                    batches.qc_material,
-                    batches.concentration,
-                    batches.lot_no,
-                    batches.target_n,
-                    batches.created_at,
-                    config.level_count,
-                    config.level_1_label,
-                    config.level_2_label,
-                    config.level_3_label
+                    {}
                 FROM batches
                 INNER JOIN zscore_batch_config AS config ON config.batch_id = batches.id
                 LEFT JOIN projects ON projects.id = batches.project_id
                 WHERE batches.project_id = ?
                 ORDER BY batches.id DESC
-                """,
+                """.format(select_columns),
                 connection,
                 params=(project_id,),
             )
 
     if not dataframe.empty:
         dataframe["level_count"] = dataframe["level_count"].astype(int)
+        if include_management_fields:
+            dataframe["is_disabled"] = dataframe["is_disabled"].fillna(0).astype(int)
     return dataframe
 
 
@@ -874,16 +941,27 @@ def add_result(
     operator: str = "",
     log_value: float | None = None,
     reagent_lot_changed: int = 0,
+    manual_note: str = "",
 ) -> None:
     with get_connection() as connection:
         if log_value is None:
             log_value = _safe_log10(value)
         connection.execute(
             """
-            INSERT INTO results (batch_id, test_time, operator, value, log_value, reagent_lot_changed)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO results (
+                batch_id, test_time, operator, value, log_value, reagent_lot_changed, manual_note
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (batch_id, test_time, operator, value, log_value, int(reagent_lot_changed)),
+            (
+                batch_id,
+                test_time,
+                operator,
+                value,
+                log_value,
+                int(reagent_lot_changed),
+                str(manual_note or ""),
+            ),
         )
 
 
@@ -894,17 +972,36 @@ def update_result(
     operator: str = "",
     log_value: float | None = None,
     reagent_lot_changed: int = 0,
+    manual_note: str | None = None,
 ) -> None:
     with get_connection() as connection:
         if log_value is None:
             log_value = _safe_log10(value)
+        assignments = [
+            "test_time = ?",
+            "operator = ?",
+            "value = ?",
+            "log_value = ?",
+            "reagent_lot_changed = ?",
+        ]
+        values: list[object] = [
+            test_time,
+            operator,
+            value,
+            log_value,
+            int(reagent_lot_changed),
+        ]
+        if manual_note is not None:
+            assignments.append("manual_note = ?")
+            values.append(str(manual_note or ""))
+        values.append(result_id)
         cursor = connection.execute(
-            """
+            f"""
             UPDATE results
-            SET test_time = ?, operator = ?, value = ?, log_value = ?, reagent_lot_changed = ?
+            SET {", ".join(assignments)}
             WHERE id = ?
             """,
-            (test_time, operator, value, log_value, int(reagent_lot_changed), result_id),
+            tuple(values),
         )
         if cursor.rowcount == 0:
             raise ValueError(f"未找到检测记录 {result_id}")
@@ -920,11 +1017,8 @@ def delete_result(result_id: int) -> None:
             raise ValueError(f"未找到检测记录 {result_id}")
 
 
-def get_results(batch_id: int) -> pd.DataFrame:
-    with get_connection() as connection:
-        dataframe = pd.read_sql_query(
-            """
-            SELECT
+def get_results(batch_id: int, include_manual_note: bool = False) -> pd.DataFrame:
+    select_columns = """
                 id,
                 batch_id,
                 test_time,
@@ -933,10 +1027,18 @@ def get_results(batch_id: int) -> pd.DataFrame:
                 log_value,
                 reagent_lot_changed,
                 created_at
+    """
+    if include_manual_note:
+        select_columns += ",\n                manual_note"
+    with get_connection() as connection:
+        dataframe = pd.read_sql_query(
+            """
+            SELECT
+                {}
             FROM results
             WHERE batch_id = ?
             ORDER BY datetime(test_time) ASC, id ASC
-            """,
+            """.format(select_columns),
             connection,
             params=(batch_id,),
         )
@@ -945,6 +1047,8 @@ def get_results(batch_id: int) -> pd.DataFrame:
         dataframe["test_time"] = pd.to_datetime(dataframe["test_time"])
         dataframe["created_at"] = pd.to_datetime(dataframe["created_at"])
         dataframe["reagent_lot_changed"] = dataframe["reagent_lot_changed"].fillna(0).astype(int)
+        if include_manual_note:
+            dataframe["manual_note"] = dataframe["manual_note"].fillna("")
     return dataframe
 
 
@@ -1080,6 +1184,7 @@ def update_zscore_run(
     rule_hits_run=None,
     error_type_hint: str | None = None,
     analysis_prompt: str | None = None,
+    manual_note: str | None = None,
 ) -> None:
     assignments: list[str] = []
     values: list[object] = []
@@ -1117,6 +1222,9 @@ def update_zscore_run(
     if analysis_prompt is not None:
         assignments.append("analysis_prompt = ?")
         values.append(str(analysis_prompt))
+    if manual_note is not None:
+        assignments.append("manual_note = ?")
+        values.append(str(manual_note or ""))
 
     if not assignments:
         return
@@ -1341,6 +1449,7 @@ def _build_zscore_run_record(row: sqlite3.Row) -> dict:
         "rule_hits_run": _deserialize_json_list(row["rule_hits_run"]),
         "error_type_hint": str(row["error_type_hint"] or "unknown"),
         "analysis_prompt": str(row["analysis_prompt"] or ""),
+        "manual_note": str(row["manual_note"] or ""),
         "created_at": row["created_at"],
         "level_results": [],
     }
@@ -1441,19 +1550,41 @@ def add_zscore_level_results(run_id: int, level_results: list[dict]) -> None:
         )
 
 
-def get_zscore_runs_df(batch_id: int, rule_template_id: str | None = None) -> pd.DataFrame:
+def get_zscore_runs_df(
+    batch_id: int,
+    rule_template_id: str | None = None,
+    include_manual_note: bool = False,
+) -> pd.DataFrame:
+    select_columns = """
+                    runs.id,
+                    runs.batch_id,
+                    runs.project_id,
+                    runs.test_sequence,
+                    runs.test_time,
+                    runs.operator,
+                    runs.level_count,
+                    runs.phase,
+                    runs.run_status,
+                    runs.rule_template_id,
+                    runs.rule_hits_run,
+                    runs.error_type_hint,
+                    runs.analysis_prompt,
+                    runs.created_at,
+                    projects.name AS project_name
+    """
+    if include_manual_note:
+        select_columns += ",\n                    runs.manual_note"
     with get_connection() as connection:
         if rule_template_id:
             dataframe = pd.read_sql_query(
                 """
                 SELECT
-                    runs.*,
-                    projects.name AS project_name
+                    {}
                 FROM zscore_runs AS runs
                 LEFT JOIN projects ON projects.id = runs.project_id
                 WHERE runs.batch_id = ? AND runs.rule_template_id = ?
                 ORDER BY datetime(runs.test_time) ASC, runs.id ASC
-                """,
+                """.format(select_columns),
                 connection,
                 params=(batch_id, rule_template_id),
             )
@@ -1461,13 +1592,12 @@ def get_zscore_runs_df(batch_id: int, rule_template_id: str | None = None) -> pd
             dataframe = pd.read_sql_query(
                 """
                 SELECT
-                    runs.*,
-                    projects.name AS project_name
+                    {}
                 FROM zscore_runs AS runs
                 LEFT JOIN projects ON projects.id = runs.project_id
                 WHERE runs.batch_id = ?
                 ORDER BY datetime(runs.test_time) ASC, runs.id ASC
-                """,
+                """.format(select_columns),
                 connection,
                 params=(batch_id,),
             )
@@ -1475,6 +1605,8 @@ def get_zscore_runs_df(batch_id: int, rule_template_id: str | None = None) -> pd
     if not dataframe.empty:
         dataframe["test_time"] = pd.to_datetime(dataframe["test_time"])
         dataframe["created_at"] = pd.to_datetime(dataframe["created_at"])
+        if include_manual_note:
+            dataframe["manual_note"] = dataframe["manual_note"].fillna("")
     return dataframe
 
 
@@ -1671,6 +1803,7 @@ def create_zscore_batch(
     level_1_label: str | None = None,
     level_2_label: str | None = None,
     level_3_label: str | None = None,
+    cv_limit: float | None = None,
 ) -> int:
     if project_id is None:
         raise ValueError("请先选择项目")
@@ -1681,15 +1814,25 @@ def create_zscore_batch(
         str(level_2_label or "").strip() or None,
         str(level_3_label or "").strip() or None,
     ]
+    normalized_cv_limit = None if cv_limit in (None, "") else float(cv_limit)
     with get_connection() as connection:
         cursor = connection.execute(
             """
             INSERT INTO batches (
-                project_id, instrument, reagent, qc_material, concentration, lot_no, target_n
+                project_id, instrument, reagent, qc_material, concentration, lot_no, target_n, cv_limit
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (project_id, instrument, reagent, qc_material, concentration, lot_no, target_n),
+            (
+                project_id,
+                instrument,
+                reagent,
+                qc_material,
+                concentration,
+                lot_no,
+                target_n,
+                normalized_cv_limit,
+            ),
         )
         batch_id = int(cursor.lastrowid)
         connection.execute(
@@ -1722,6 +1865,7 @@ def add_zscore_run(
     rule_hits_run,
     error_type_hint: str,
     analysis_prompt: str,
+    manual_note: str = "",
 ) -> int:
     normalized_level_count = int(level_count)
     if normalized_level_count not in {2, 3}:
@@ -1743,9 +1887,10 @@ def add_zscore_run(
                 rule_template_id,
                 rule_hits_run,
                 error_type_hint,
-                analysis_prompt
+                analysis_prompt,
+                manual_note
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 batch_id,
@@ -1760,6 +1905,7 @@ def add_zscore_run(
                 serialized_rule_hits,
                 error_type_hint,
                 analysis_prompt,
+                str(manual_note or ""),
             ),
         )
         return int(cursor.lastrowid)
