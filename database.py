@@ -15,6 +15,7 @@ PROJECT_DATA_DIR = BASE_DIR / "data"
 PROJECT_DB_PATH = PROJECT_DATA_DIR / "qc_lj_app.db"
 PROJECT_LEGACY_DB_PATH = BASE_DIR / "lj_qc.db"
 MIGRATION_PROJECT_NAME = "\u5386\u53f2\u6570\u636e\u8fc1\u79fb\u9879\u76ee"
+_UNSET = object()
 
 
 def _get_persistent_data_dir() -> Path:
@@ -651,11 +652,18 @@ def create_batch(
         return int(cursor.lastrowid)
 
 
-def update_batch(batch_id: int, lot_no: str) -> None:
+def update_batch(batch_id: int, lot_no: str, cv_limit=_UNSET) -> None:
     with get_connection() as connection:
+        assignments = ["lot_no = ?"]
+        values: list[object] = [lot_no]
+        if cv_limit is not _UNSET:
+            normalized_cv_limit = None if cv_limit in (None, "") else float(cv_limit)
+            assignments.append("cv_limit = ?")
+            values.append(normalized_cv_limit)
+        values.append(batch_id)
         connection.execute(
-            "UPDATE batches SET lot_no = ? WHERE id = ?",
-            (lot_no, batch_id),
+            f"UPDATE batches SET {', '.join(assignments)} WHERE id = ?",
+            tuple(values),
         )
 
 

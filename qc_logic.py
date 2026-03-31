@@ -157,6 +157,48 @@ def calculate_qc_results(results_df: pd.DataFrame, target_count: int) -> tuple[p
     return dataframe, stats
 
 
+def calculate_target_building_cv_hint(results_df: pd.DataFrame, target_count: int) -> dict:
+    # This helper is only for build-stage CV reminders and must not affect existing判读逻辑.
+    empty_hint = {
+        "collected_n": 0,
+        "evaluated_n": 0,
+        "mean": None,
+        "sd": None,
+        "cv": None,
+        "can_evaluate": False,
+        "target_ready": False,
+    }
+    if results_df.empty:
+        return empty_hint
+
+    dataframe = results_df.copy().sort_values(["test_time", "id"]).reset_index(drop=True)
+    evaluated_n = min(len(dataframe), int(target_count))
+    if evaluated_n <= 0:
+        return empty_hint
+
+    building_df = dataframe.iloc[:evaluated_n].copy()
+    mean = float(building_df["value"].mean()) if not building_df.empty else None
+    if len(building_df) < 2:
+        return {
+            **empty_hint,
+            "collected_n": len(building_df),
+            "evaluated_n": evaluated_n,
+            "mean": mean,
+        }
+
+    sd = float(building_df["value"].std(ddof=1))
+    cv = None if mean is None or math.isclose(mean, 0.0, abs_tol=1e-12) else float(sd / mean * 100)
+    return {
+        "collected_n": len(building_df),
+        "evaluated_n": evaluated_n,
+        "mean": mean,
+        "sd": sd,
+        "cv": cv,
+        "can_evaluate": cv is not None,
+        "target_ready": len(building_df) >= int(target_count) and cv is not None,
+    }
+
+
 def format_stats_message(stats: dict) -> str:
     message = stats.get("message", "")
     if not stats.get("target_ready"):

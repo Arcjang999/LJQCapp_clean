@@ -37,7 +37,12 @@ from database import (
     update_project,
 )
 from plotting import figure_to_png_bytes, plot_lj_chart
-from qc_logic import calculate_qc_results, calculate_realtime_stats, format_stats_message
+from qc_logic import (
+    calculate_qc_results,
+    calculate_realtime_stats,
+    calculate_target_building_cv_hint,
+    format_stats_message,
+)
 from zscore_logic import (
     PHASE_FORMAL_QC,
     PHASE_TARGET_BUILDING,
@@ -89,6 +94,7 @@ DISPLAY_COLUMN_LABELS = {
     "concentration": "\u6d53\u5ea6",
     "lot_no": "\u8d28\u63a7\u54c1\u6279\u53f7",
     "target_n": "\u5efa\u9776\u6240\u9700\u6b21\u6570",
+    "cv_limit": "CV 要求（%）",
     "level_1_label": "水平 1 说明",
     "level_2_label": "水平 2 说明",
     "level_3_label": "水平 3 说明",
@@ -797,12 +803,22 @@ def render_project_batch_management(
                         options=list(range(5, 21)),
                         index=15,
                     )
+                    cv_limit_text = st.text_input(
+                        "CV 要求（%）（可选）",
+                        placeholder="例如：5.00",
+                    )
                     create_submitted = st.form_submit_button("创建批次", width="stretch")
 
                     if create_submitted:
                         fields = [instrument, reagent, qc_material, concentration, lot_no]
+                        validation_errors: list[str] = []
+                        cv_limit, cv_limit_error = parse_optional_cv_limit_input(cv_limit_text)
                         if any(not field.strip() for field in fields):
-                            st.error(TEXT["fill_batch"])
+                            validation_errors.append(TEXT["fill_batch"])
+                        if cv_limit_error:
+                            validation_errors.append(cv_limit_error)
+                        if validation_errors:
+                            st.error("\n".join(dict.fromkeys(validation_errors)))
                         else:
                             try:
                                 batch_id = create_batch(
@@ -813,6 +829,7 @@ def render_project_batch_management(
                                     concentration=concentration.strip(),
                                     lot_no=lot_no.strip(),
                                     target_n=int(target_n),
+                                    cv_limit=cv_limit,
                                 )
                             except ValueError as exc:
                                 st.error(str(exc))
@@ -856,21 +873,41 @@ def render_project_batch_management(
                         st.text(f"质控品：{current_batch['qc_material']}")
                         st.text(f"浓度：{current_batch['concentration']}")
                         st.text(f"建靶所需次数：{current_batch['target_n']}")
+                        st.text(
+                            f"CV 要求：{format_optional_float(get_saved_batch_cv_limit(current_batch), digits=2, suffix='%')}"
+                        )
                         st.markdown("**可编辑信息**")
                         with st.form("edit_batch_form"):
                             edit_lot_no = st.text_input(
                                 "质控品批号",
                                 value=current_batch["lot_no"],
                             )
+                            edit_cv_limit_text = st.text_input(
+                                "CV 要求（%）（可选）",
+                                value=format_optional_input_value(
+                                    get_saved_batch_cv_limit(current_batch),
+                                    digits=2,
+                                ),
+                            )
                             edit_batch_submitted = st.form_submit_button(
                                 "保存批次修改",
                                 width="stretch",
                             )
                             if edit_batch_submitted:
+                                validation_errors: list[str] = []
+                                edit_cv_limit, edit_cv_limit_error = parse_optional_cv_limit_input(edit_cv_limit_text)
                                 if not edit_lot_no.strip():
-                                    st.error("请填写质控品批号。")
+                                    validation_errors.append("请填写质控品批号。")
+                                if edit_cv_limit_error:
+                                    validation_errors.append(edit_cv_limit_error)
+                                if validation_errors:
+                                    st.error("\n".join(dict.fromkeys(validation_errors)))
                                 else:
-                                    update_batch(selected_batch_id, edit_lot_no.strip())
+                                    update_batch(
+                                        selected_batch_id,
+                                        edit_lot_no.strip(),
+                                        cv_limit=edit_cv_limit,
+                                    )
                                     st.success("批次质控品批号已更新。")
                                     st.rerun()
 
@@ -987,12 +1024,22 @@ def render_zscore_project_batch_management(
                         options=list(range(5, 21)),
                         index=15,
                     )
+                    cv_limit_text = st.text_input(
+                        "CV 要求（%）（可选）",
+                        placeholder="例如：5.00",
+                    )
                     create_submitted = st.form_submit_button("创建 Z-score 批次", width="stretch")
 
                     if create_submitted:
                         fields = [instrument, reagent, qc_material, concentration, lot_no]
+                        validation_errors: list[str] = []
+                        cv_limit, cv_limit_error = parse_optional_cv_limit_input(cv_limit_text)
                         if any(not field.strip() for field in fields):
-                            st.error(TEXT["fill_batch"])
+                            validation_errors.append(TEXT["fill_batch"])
+                        if cv_limit_error:
+                            validation_errors.append(cv_limit_error)
+                        if validation_errors:
+                            st.error("\n".join(dict.fromkeys(validation_errors)))
                         else:
                             try:
                                 batch_id = create_zscore_batch(
@@ -1006,6 +1053,7 @@ def render_zscore_project_batch_management(
                                     level_1_label=level_1_label,
                                     level_2_label=level_2_label,
                                     level_3_label=level_3_label,
+                                    cv_limit=cv_limit,
                                 )
                             except ValueError as exc:
                                 st.error(str(exc))
@@ -1049,17 +1097,37 @@ def render_zscore_project_batch_management(
                         st.text(f"水平数：{int(current_batch['level_count'])} 水平")
                         st.text(f"水平说明：{format_zscore_level_label_summary(current_batch, current_level_ids)}")
                         st.text(f"建靶所需次数：{current_batch['target_n']}")
+                        st.text(
+                            f"CV 要求：{format_optional_float(get_saved_batch_cv_limit(current_batch), digits=2, suffix='%')}"
+                        )
                         with st.form("edit_zscore_batch_form"):
                             edit_lot_no = st.text_input(
                                 "质控品批号",
                                 value=current_batch["lot_no"],
                             )
+                            edit_cv_limit_text = st.text_input(
+                                "CV 要求（%）（可选）",
+                                value=format_optional_input_value(
+                                    get_saved_batch_cv_limit(current_batch),
+                                    digits=2,
+                                ),
+                            )
                             edit_batch_submitted = st.form_submit_button("保存批次修改", width="stretch")
                             if edit_batch_submitted:
+                                validation_errors: list[str] = []
+                                edit_cv_limit, edit_cv_limit_error = parse_optional_cv_limit_input(edit_cv_limit_text)
                                 if not edit_lot_no.strip():
-                                    st.error("请填写质控品批号。")
+                                    validation_errors.append("请填写质控品批号。")
+                                if edit_cv_limit_error:
+                                    validation_errors.append(edit_cv_limit_error)
+                                if validation_errors:
+                                    st.error("\n".join(dict.fromkeys(validation_errors)))
                                 else:
-                                    update_batch(selected_batch_id, edit_lot_no.strip())
+                                    update_batch(
+                                        selected_batch_id,
+                                        edit_lot_no.strip(),
+                                        cv_limit=edit_cv_limit,
+                                    )
                                     st.success("批次质控品批号已更新，水平数保持不变。")
                                     st.rerun()
 
@@ -1151,6 +1219,64 @@ def format_optional_input_value(value: Any, digits: int = 4) -> str:
     if not math.isfinite(numeric):
         return ""
     return f"{numeric:.{digits}f}"
+
+
+def parse_optional_cv_limit_input(raw_value: str | None) -> tuple[float | None, str | None]:
+    text = str(raw_value or "").strip()
+    if not text:
+        return None, None
+
+    try:
+        numeric = float(text)
+    except ValueError:
+        return None, "CV 要求（%）必须为有效数字。"
+
+    if not math.isfinite(numeric) or numeric <= 0:
+        return None, "CV 要求（%）必须大于 0。"
+    return float(numeric), None
+
+
+def get_saved_batch_cv_limit(batch: Any) -> float | None:
+    raw_value = None
+    if isinstance(batch, dict):
+        raw_value = batch.get("cv_limit")
+    elif hasattr(batch, "keys") and "cv_limit" in batch.keys():
+        raw_value = batch["cv_limit"]
+    else:
+        raw_value = getattr(batch, "cv_limit", None)
+
+    try:
+        if raw_value is None or (isinstance(raw_value, float) and math.isnan(raw_value)):
+            return None
+        numeric = float(raw_value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(numeric) or numeric <= 0:
+        return None
+    return numeric
+
+
+def render_cv_limit_hint(current_cv: Any, cv_limit: float | None, subject: str) -> None:
+    if cv_limit is None:
+        return
+
+    try:
+        if current_cv is None or (isinstance(current_cv, float) and math.isnan(current_cv)):
+            return
+        resolved_current_cv = float(current_cv)
+    except (TypeError, ValueError):
+        return
+    if not math.isfinite(resolved_current_cv):
+        return
+
+    message = (
+        f"{subject} CV%：{resolved_current_cv:.2f}% | "
+        f"批次要求：≤ {cv_limit:.2f}%"
+    )
+    if resolved_current_cv <= cv_limit:
+        st.success(f"{message}，已满足要求。")
+    else:
+        st.warning(f"{message}，已超出要求。")
 
 
 def get_latest_status_context(qc_df: pd.DataFrame) -> tuple[str, str]:
@@ -2637,8 +2763,10 @@ def render_lj_page(
     selected_batch_id: int,
 ) -> None:
     batch = get_batch(selected_batch_id)
+    cv_limit = get_saved_batch_cv_limit(batch)
     results_df = get_results(selected_batch_id)
     qc_df, stats = calculate_qc_results(results_df, int(batch["target_n"]))
+    building_cv_hint = calculate_target_building_cv_hint(results_df, int(batch["target_n"]))
     latest_status, latest_status_message = get_latest_status_context(qc_df)
     latest_rule_hits, latest_compact_message = get_latest_result_panel_content(qc_df, latest_status_message)
     operator_options = build_operator_options(results_df)
@@ -2767,6 +2895,13 @@ def render_lj_page(
                     else f"\u5c1a\u9700\u7ee7\u7eed\u5f55\u5165\u81f3\u5c11 {int(batch['target_n'])} \u6b21\u7ed3\u679c\u3002"
                 )
             )
+            if cv_limit is not None:
+                st.caption(f"当前批次已保存 CV 要求：≤ {cv_limit:.2f}%")
+                render_cv_limit_hint(
+                    building_cv_hint.get("cv"),
+                    cv_limit,
+                    "当前累计建靶",
+                )
 
             st.divider()
             st.markdown("**\u5b9e\u65f6\u7edf\u8ba1**")
@@ -3188,6 +3323,32 @@ def render_main_entry_page() -> None:
             "- 正式期实时统计：只基于正式期在控数据计算，警告和失控结果不纳入统计。"
         )
 
+    with st.expander("测试版更新：批次级 CV 要求（%）", expanded=False):
+        st.markdown(
+            "**更新内容**\n"
+            "- LJ 与 Z-score 的新建批次均支持可选填写“CV 要求（%）”。\n"
+            "- 当前已有的编辑批次入口支持回显和修改“CV 要求（%）”。\n"
+            "- 该值保存为批次属性，工作区只读取已保存值做提醒，不提供第二套临时输入入口。\n"
+            "- LJ：建靶过程中一旦已有足够数据可计算 SD/CV，就开始显示“当前累计 CV%”与“批次要求”的对照提醒。\n"
+            "- Z-score：建靶过程中按各水平分别显示 provisional CV% 与“批次要求”的对照提醒。\n"
+            "- 提醒只作提示，不阻断保存，不改变现有判读逻辑与建靶/正式期切换逻辑。\n\n"
+            "**使用方法**\n"
+            "1. 在“项目与批次管理”中先选择项目，再新建批次。\n"
+            "2. 新建批次时可选填写“CV 要求（%）”；留空则表示该批次不启用此提醒。\n"
+            "3. 如需调整，可在当前已有的“编辑当前批次 / 当前 Z-score 批次配置”入口修改并保存。\n"
+            "4. 进入工作区后，系统只读取该批次已保存的 CV 要求并显示提醒，不需要也不能在工作区再次录入。\n"
+            "5. 当批次未设置 CV 要求时，系统保持兼容，不报错，也不强制显示空提示。\n\n"
+            "**手工测试步骤**\n"
+            "1. LJ：新建批次时填写 CV 要求，例如 5.00，保存后进入当前批次页。\n"
+            "2. LJ：连续录入至少 2 条建靶结果，确认开始显示“当前累计建靶 CV% / 批次要求 / 是否满足要求”。\n"
+            "3. LJ：新建批次时不填写 CV 要求，进入工作区确认不报错、无空提示。\n"
+            "4. LJ：通过编辑批次修改 CV 要求后再次进入工作区，确认提醒读取的是修改后的已保存值。\n"
+            "5. Z-score：新建批次时填写 CV 要求，录入多水平建靶 run，确认各 level 分别显示 provisional CV% 对照提醒。\n"
+            "6. Z-score：旧批次或未设置 CV 要求的批次进入工作区，确认不报错。\n"
+            "7. 回归一遍现有 LJ 主流程。\n"
+            "8. 回归一遍现有实际生效的 Z-score 主流程。"
+        )
+
     with st.expander("常见说明 / 注意事项", expanded=False):
         st.markdown(
             "- 建靶期不启用正式规则判读。\n"
@@ -3207,6 +3368,7 @@ def render_main_entry_page() -> None:
                 "- Z-score 双水平 / 三水平主流程\n"
                 "- 多水平检测记录持久化\n"
                 "- 建靶 / 正式质控\n"
+                "- 批次级 CV 要求（%）保存与建靶提醒\n"
                 "- 图表查看、结果分析与记录维护\n"
                 "- LJ 导出与月度质控图导出"
             )
@@ -3241,6 +3403,7 @@ def render_zscore_placeholder_page() -> None:
 
     batch_context = resolve_zscore_batch_context(selected_batch_id)
     batch = batch_context["batch"]
+    cv_limit = get_saved_batch_cv_limit(batch)
     if "zscore_entry_test_time" not in st.session_state:
         st.session_state["zscore_entry_test_time"] = datetime.now()
     if "zscore_entry_operator" not in st.session_state:
@@ -3322,6 +3485,8 @@ def render_zscore_placeholder_page() -> None:
                 f"当前项目固定为 {level_count} 水平｜当前采用 {format_zscore_template_display_name(template)}｜"
                 f"各水平累计达到 {required_n} 次且形成有效 SD 后，系统才进入正式质控。"
             )
+            if cv_limit is not None:
+                st.caption(f"当前批次已保存 CV 要求：≤ {cv_limit:.2f}%")
 
             st.markdown("**本次数据录入**")
             st.datetime_input("检测时间", key="zscore_entry_test_time")
@@ -3414,6 +3579,11 @@ def render_zscore_placeholder_page() -> None:
                         profile.get("provisional_mean"),
                         profile.get("provisional_sd"),
                         profile.get("provisional_cv"),
+                    )
+                    render_cv_limit_hint(
+                        profile.get("provisional_cv"),
+                        cv_limit,
+                        f"{display_label} 建靶",
                     )
                     render_zscore_profile_stat_line(
                         "正式靶值",
