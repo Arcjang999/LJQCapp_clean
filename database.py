@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import shutil
 import sqlite3
 from pathlib import Path
@@ -86,6 +87,7 @@ def init_db() -> None:
         _ensure_zscore_runs_table(connection)
         _ensure_zscore_level_results_table(connection)
         _ensure_zscore_level_targets_table(connection)
+        _rebind_legacy_batches_foreign_keys(connection)
         connection.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_results_batch_time
@@ -128,6 +130,121 @@ def init_db() -> None:
             ON zscore_level_targets (batch_id, level_id)
             """
         )
+
+
+def _quote_identifier(identifier: str) -> str:
+    return '"' + str(identifier).replace('"', '""') + '"'
+
+
+def _find_tables_referencing_legacy_batches(connection: sqlite3.Connection) -> list[str]:
+    rows = connection.execute(
+        """
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name NOT LIKE 'sqlite_%'
+          AND sql LIKE '%batches_legacy%'
+        ORDER BY name ASC
+        """
+    ).fetchall()
+    return [str(row["name"]) for row in rows]
+
+
+def _rebind_legacy_batches_foreign_keys(connection: sqlite3.Connection) -> None:
+    target_tables = _find_tables_referencing_legacy_batches(connection)
+    if not target_tables:
+        return
+
+    connection.commit()
+    connection.execute("PRAGMA foreign_keys = OFF")
+    try:
+        for table_name in target_tables:
+            _rebuild_table_rebinding_legacy_batches(connection, table_name)
+        connection.commit()
+    finally:
+        connection.execute("PRAGMA foreign_keys = ON")
+
+    remaining_tables = _find_tables_referencing_legacy_batches(connection)
+    if remaining_tables:
+        raise RuntimeError(
+            "batches 外键修复未完成，以下表仍引用 batches_legacy："
+            + ", ".join(remaining_tables)
+        )
+
+    foreign_key_issues = connection.execute("PRAGMA foreign_key_check").fetchall()
+    if foreign_key_issues:
+        raise RuntimeError(
+            "batches 外键修复后仍存在外键检查错误："
+            + "; ".join(str(tuple(issue)) for issue in foreign_key_issues[:10])
+        )
+
+
+def _rebuild_table_rebinding_legacy_batches(
+    connection: sqlite3.Connection,
+    table_name: str,
+) -> None:
+    table_row = connection.execute(
+        """
+        SELECT sql
+        FROM sqlite_master
+        WHERE type = 'table' AND name = ?
+        """,
+        (table_name,),
+    ).fetchone()
+    if table_row is None or not table_row["sql"]:
+        return
+
+    temp_table_name = f"__rebinding_{table_name}"
+    connection.execute(f"DROP TABLE IF EXISTS {_quote_identifier(temp_table_name)}")
+
+    table_sql = str(table_row["sql"])
+    rebuilt_sql = _build_rebound_table_sql(table_sql, temp_table_name)
+    preserved_indexes = connection.execute(
+        """
+        SELECT sql
+        FROM sqlite_master
+        WHERE type = 'index'
+          AND tbl_name = ?
+          AND sql IS NOT NULL
+        ORDER BY name ASC
+        """,
+        (table_name,),
+    ).fetchall()
+
+    connection.execute(rebuilt_sql)
+    column_rows = connection.execute(f"PRAGMA table_info({_quote_identifier(table_name)})").fetchall()
+    column_names = [str(row["name"]) for row in column_rows]
+    if column_names:
+        quoted_columns = ", ".join(_quote_identifier(column_name) for column_name in column_names)
+        connection.execute(
+            f"""
+            INSERT INTO {_quote_identifier(temp_table_name)} ({quoted_columns})
+            SELECT {quoted_columns}
+            FROM {_quote_identifier(table_name)}
+            """
+        )
+
+    connection.execute(f"DROP TABLE {_quote_identifier(table_name)}")
+    connection.execute(
+        f"ALTER TABLE {_quote_identifier(temp_table_name)} RENAME TO {_quote_identifier(table_name)}"
+    )
+    for index_row in preserved_indexes:
+        index_sql = index_row["sql"]
+        if index_sql:
+            connection.execute(str(index_sql))
+
+
+def _build_rebound_table_sql(table_sql: str, temp_table_name: str) -> str:
+    rebuilt_sql = re.sub(
+        r'^(CREATE TABLE\s+(?:IF NOT EXISTS\s+)?)("?[^\s(]+"?)',
+        lambda match: f'{match.group(1)}{_quote_identifier(temp_table_name)}',
+        table_sql,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    if rebuilt_sql == table_sql:
+        raise RuntimeError(f"无法重建表定义：{table_sql}")
+    return rebuilt_sql.replace('"batches_legacy"', "batches").replace("batches_legacy", "batches")
 
 
 def _ensure_projects_table(connection: sqlite3.Connection) -> None:

@@ -386,6 +386,7 @@ def build_zscore_plot_dataframe(
         "plot_phase",
         "is_building_stat_point",
         "is_preview",
+        "manual_note",
     ]
     building_run_ids = get_building_stat_run_ids(saved_runs)
     reference_map = _build_plot_reference_map(saved_runs, building_run_ids)
@@ -425,6 +426,7 @@ def build_zscore_plot_dataframe(
                     "plot_phase": run_phase,
                     "is_building_stat_point": is_building_stat_point,
                     "is_preview": False,
+                    "manual_note": str(run.get("manual_note", "") or ""),
                 }
             )
 
@@ -460,6 +462,7 @@ def build_zscore_plot_dataframe(
                         "plot_phase": draft_phase,
                         "is_building_stat_point": draft_is_building_stat_point,
                         "is_preview": True,
+                        "manual_note": str(draft_run.get("manual_note", "") or ""),
                     }
                 )
 
@@ -599,7 +602,7 @@ def get_zscore_level_results(
 
 
 def get_zscore_runs(batch_id: int, template_id: str | None = None) -> list[dict[str, Any]]:
-    runs_df = get_zscore_runs_df(batch_id, rule_template_id=template_id)
+    runs_df = get_zscore_runs_df(batch_id, rule_template_id=template_id, include_manual_note=True)
     if runs_df.empty:
         return []
 
@@ -630,6 +633,7 @@ def get_zscore_runs(batch_id: int, template_id: str | None = None) -> list[dict[
                 "rule_hits_run": _parse_json_list(record.get("rule_hits_run")),
                 "error_type_hint": str(record.get("error_type_hint", "unknown")),
                 "analysis_prompt": str(record.get("analysis_prompt", "") or ""),
+                "manual_note": str(record.get("manual_note", "") or ""),
                 "created_at": record.get("created_at"),
                 "formal_rules_enabled": phase == PHASE_FORMAL_QC,
                 "level_results": sorted(
@@ -816,6 +820,7 @@ def create_zscore_run(
     level_results: list[dict[str, Any]],
     template_id: str,
     required_n: int | None = None,
+    manual_note: str = "",
 ) -> dict[str, Any]:
     batch_context = resolve_zscore_batch_context(batch_id)
     batch = batch_context["batch"]
@@ -859,6 +864,7 @@ def create_zscore_run(
     current_run["test_sequence"] = next_test_sequence
     current_run["template_id"] = template_id
     current_run["template_label"] = template["label"]
+    current_run["manual_note"] = str(manual_note or "")
 
     is_realtime_accepted_run = current_phase == PHASE_FORMAL_QC and current_run["run_status"] == "accept"
     for level_result in current_run["level_results"]:
@@ -882,6 +888,7 @@ def create_zscore_run(
         rule_hits_run=current_run["rule_hits_run"],
         error_type_hint=current_run["error_type_hint"],
         analysis_prompt=current_run["analysis_prompt"],
+        manual_note=current_run["manual_note"],
     )
     db_add_zscore_level_results(run_id, current_run["level_results"])
 
@@ -966,6 +973,7 @@ def rebuild_zscore_batch_state(batch_id: int) -> dict[str, Any]:
         current_run["rule_template_id"] = template_id
         current_run["template_id"] = template_id
         current_run["template_label"] = template["label"]
+        current_run["manual_note"] = str(raw_run.get("manual_note", "") or "")
         current_run["created_at"] = raw_run.get("created_at")
 
         raw_level_map = {
@@ -1040,6 +1048,7 @@ def update_saved_zscore_run(
     test_time: Any,
     operator: str,
     level_results: list[dict[str, Any]],
+    manual_note: str | None = None,
 ) -> dict[str, Any]:
     existing_run = _get_zscore_run_for_maintenance(run_id)
     batch_id = int(existing_run["batch_id"])
@@ -1061,6 +1070,7 @@ def update_saved_zscore_run(
         run_id,
         test_time=_format_test_time(test_time),
         operator=cleaned_operator,
+        manual_note=manual_note,
     )
     db_update_zscore_level_results(
         run_id,
@@ -1074,6 +1084,24 @@ def update_saved_zscore_run(
         ],
     )
     return rebuild_zscore_batch_state(batch_id)
+
+
+def update_saved_zscore_run_manual_note(run_id: int, manual_note: str) -> dict[str, Any]:
+    existing_run = _get_zscore_run_for_maintenance(run_id)
+    batch_id = int(existing_run["batch_id"])
+    template_id = str(existing_run["rule_template_id"])
+    db_update_zscore_run(run_id, manual_note=str(manual_note or ""))
+    refreshed_runs = get_zscore_runs(batch_id, template_id)
+    updated_run = next(
+        (run for run in refreshed_runs if int(run.get("run_id") or 0) == int(run_id)),
+        None,
+    )
+    return {
+        "batch_id": batch_id,
+        "template_id": template_id,
+        "runs": refreshed_runs,
+        "updated_run": deepcopy(updated_run) if updated_run is not None else None,
+    }
 
 
 def delete_saved_zscore_run(run_id: int) -> dict[str, Any]:

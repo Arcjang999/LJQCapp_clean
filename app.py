@@ -64,6 +64,7 @@ from zscore_logic import (
     sort_zscore_runs_for_maintenance,
     should_enable_formal_rules,
     update_saved_zscore_run,
+    update_saved_zscore_run_manual_note,
     upsert_zscore_level_target,
 )
 from zscore_plotting import plot_zscore_overlay, plot_zscore_single_level
@@ -558,6 +559,16 @@ def normalize_top_level_method_selection() -> None:
     st.session_state["top_level_method_selector"] = METHOD_ENTRY_OPTIONS[0]
 
 
+def summarize_note_for_table(note: Any, max_length: int = 24) -> str:
+    text = str(note or "")
+    if not text:
+        return ""
+    compact_text = " ".join(segment.strip() for segment in text.replace("\r", "\n").splitlines() if segment.strip())
+    if len(compact_text) <= max_length:
+        return compact_text
+    return compact_text[:max_length].rstrip() + "..."
+
+
 def prepare_display_records(qc_df: pd.DataFrame) -> pd.DataFrame:
     display_df = qc_df.copy()
     if display_df.empty:
@@ -580,6 +591,8 @@ def prepare_display_records(qc_df: pd.DataFrame) -> pd.DataFrame:
         display_df["reagent_lot_changed"] = display_df["reagent_lot_changed"].map(
             lambda flag: "\u662f" if int(flag) == 1 else "\u5426"
         )
+    if "manual_note" in display_df.columns:
+        display_df["manual_note"] = display_df["manual_note"].fillna("").map(summarize_note_for_table)
 
     preferred_columns = [
         "sequence",
@@ -594,6 +607,7 @@ def prepare_display_records(qc_df: pd.DataFrame) -> pd.DataFrame:
         "error_type",
         "analysis_prompt",
         "phase",
+        "manual_note",
     ]
     column_mapping = {
         "sequence": "\u68c0\u6d4b\u5e8f\u53f7",
@@ -601,6 +615,7 @@ def prepare_display_records(qc_df: pd.DataFrame) -> pd.DataFrame:
         "operator": "\u68c0\u6d4b\u4eba",
         "value": "\u68c0\u6d4b\u503c",
         "log_value": "log\u503c",
+        "manual_note": "\u5907\u6ce8",
         "reagent_lot_changed": "\u8bd5\u5242\u6279\u53f7\u53d8\u66f4",
         "z": "Z\u503c",
         "status": "\u5224\u5b9a\u7ed3\u679c",
@@ -1298,6 +1313,28 @@ def get_latest_result_panel_content(qc_df: pd.DataFrame, fallback_message: str) 
     return rule_hits, compact_prompt
 
 
+def get_latest_qc_row(qc_df: pd.DataFrame) -> pd.Series | None:
+    if qc_df.empty:
+        return None
+    latest_df = qc_df.sort_values(["test_time", "id"])
+    if latest_df.empty:
+        return None
+    return latest_df.iloc[-1]
+
+
+def get_latest_zscore_run_for_display(runs: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not runs:
+        return None
+    return max(
+        runs,
+        key=lambda run: (
+            int(run.get("test_sequence") or run.get("run_id") or 0),
+            pd.Timestamp(run.get("test_time")),
+            int(run.get("run_id") or 0),
+        ),
+    )
+
+
 def render_status_panel(status: str, message: str, rule_hits: str = "\u65e0") -> None:
     palette = {
         "\u7b26\u5408\u8d28\u63a7": {
@@ -1761,6 +1798,63 @@ def render_zscore_latest_analysis_panel(
     render_html_block(html)
 
 
+def render_lj_abnormal_note_quick_entry(latest_row: pd.Series | None) -> None:
+    if latest_row is None:
+        return
+    if str(latest_row.get("status", "") or "") not in {"\u8b66\u544a", "\u5931\u63a7"}:
+        return
+
+    result_id = int(latest_row["id"])
+    current_note = str(latest_row.get("manual_note", "") or "")
+    st.caption("\u5f53\u524d\u5f02\u5e38\u8bb0\u5f55\u53ef\u76f4\u63a5\u8865\u5145\u5f02\u5e38\u5907\u6ce8\uff0c\u5199\u56de\u540c\u4e00\u6761\u68c0\u6d4b\u8bb0\u5f55\u3002")
+    with st.form(f"lj_abnormal_note_form_{result_id}"):
+        manual_note = st.text_area(
+            "\u5f02\u5e38\u5907\u6ce8\uff08\u53ef\u9009\uff09",
+            value=current_note,
+            height=88,
+            key=f"lj_abnormal_note_{result_id}",
+        )
+        submitted = st.form_submit_button("\u4fdd\u5b58\u5f53\u524d\u5f02\u5e38\u5907\u6ce8", width="stretch")
+
+        if submitted:
+            update_result(
+                result_id=result_id,
+                test_time=pd.Timestamp(latest_row["test_time"]).strftime("%Y-%m-%d %H:%M:%S"),
+                operator=str(latest_row.get("operator", "") or ""),
+                value=float(latest_row["value"]),
+                log_value=None if pd.isna(latest_row.get("log_value")) else float(latest_row["log_value"]),
+                reagent_lot_changed=int(latest_row.get("reagent_lot_changed", 0) or 0),
+                manual_note=str(manual_note or "").strip(),
+            )
+            st.rerun()
+
+
+def render_zscore_abnormal_note_quick_entry(latest_run: dict[str, Any] | None) -> None:
+    if latest_run is None or latest_run.get("is_preview"):
+        return
+    if str(latest_run.get("phase")) != PHASE_FORMAL_QC:
+        return
+    if str(latest_run.get("run_status", "") or "") not in {"warning", "reject"}:
+        return
+
+    run_id = int(latest_run["run_id"])
+    current_note = str(latest_run.get("manual_note", "") or "")
+    st.caption("\u5f53\u524d\u5f02\u5e38 run \u53ef\u76f4\u63a5\u8865\u5145\u5f02\u5e38\u5907\u6ce8\uff0c\u5199\u56de\u540c\u4e00\u6761 run \u8bb0\u5f55\u3002")
+    with st.form(f"zscore_abnormal_note_form_{run_id}"):
+        manual_note = st.text_area(
+            "\u5f02\u5e38\u5907\u6ce8\uff08\u53ef\u9009\uff09",
+            value=current_note,
+            height=88,
+            key=f"zscore_abnormal_note_{run_id}",
+        )
+        submitted = st.form_submit_button("\u4fdd\u5b58\u5f53\u524d\u5f02\u5e38\u5907\u6ce8", width="stretch")
+
+        if submitted:
+            update_saved_zscore_run_manual_note(run_id, str(manual_note or "").strip())
+            st.session_state["zscore_notice"] = "Z-score \u624b\u52a8\u5907\u6ce8\u5df2\u4fdd\u5b58\u3002"
+            st.rerun()
+
+
 def render_zscore_rules_config_expander(
     template: dict[str, Any],
     overall_phase: str,
@@ -2139,6 +2233,11 @@ def render_record_maintenance_dialog(qc_df: pd.DataFrame) -> None:
                         "\u672c\u6b21\u4e3a\u8bd5\u5242\u6279\u53f7\u53d8\u66f4\u70b9",
                         value=bool(int(selected_result["reagent_lot_changed"])),
                     )
+                    edit_manual_note = st.text_area(
+                        "\u624b\u52a8\u5907\u6ce8\uff08\u53ef\u9009\uff09",
+                        value=str(selected_result.get("manual_note", "") or ""),
+                        height=88,
+                    )
                     edit_submitted = st.form_submit_button(
                         "\u4fdd\u5b58\u8bb0\u5f55\u4fee\u6539",
                         width="stretch",
@@ -2169,6 +2268,7 @@ def render_record_maintenance_dialog(qc_df: pd.DataFrame) -> None:
                                 value=float(edit_value),
                                 log_value=edit_log_value,
                                 reagent_lot_changed=int(edit_reagent_changed),
+                                manual_note=str(edit_manual_note or "").strip(),
                             )
                             close_record_maintenance_dialog()
                             st.success("\u68c0\u6d4b\u8bb0\u5f55\u5df2\u66f4\u65b0\u3002")
@@ -2282,6 +2382,7 @@ def render_zscore_record_maintenance_dialog(
                     f"触发规则 {format_zscore_rule_hits(selected_run.get('rule_hits_run', []))}"
                 )
                 if is_locked_for_maintenance:
+                    st.caption("已锁定 run 仍可补充或修改手动备注，原始值不会被改动。")
                     st.info("建靶期数据在正式期启用后已锁定，只可查看，不可编辑或删除。")
 
                 with st.form(f"edit_zscore_run_form_{dialog_nonce}_{int(selected_run_id)}"):
@@ -2294,6 +2395,11 @@ def render_zscore_record_maintenance_dialog(
                         "检测人",
                         value=str(selected_run.get("operator", "") or ""),
                         disabled=is_locked_for_maintenance,
+                    )
+                    edit_manual_note = st.text_area(
+                        "手动备注（可选）",
+                        value=str(selected_run.get("manual_note", "") or ""),
+                        height=88,
                     )
                     st.markdown("**多水平原始值**")
                     edited_level_values: dict[str, float] = {}
@@ -2316,13 +2422,29 @@ def render_zscore_record_maintenance_dialog(
                     edit_submitted = st.form_submit_button(
                         "保存记录修改",
                         width="stretch",
-                        disabled=is_locked_for_maintenance,
                     )
 
                     if edit_submitted:
                         validation_errors: list[str] = []
                         cleaned_operator = edit_operator.strip()
                         updated_level_results: list[dict[str, Any]] = []
+                        cleaned_manual_note = str(edit_manual_note or "").strip()
+
+                        if is_locked_for_maintenance:
+                            try:
+                                update_saved_zscore_run_manual_note(
+                                    run_id=int(selected_run_id),
+                                    manual_note=cleaned_manual_note,
+                                )
+                            except ValueError as exc:
+                                st.error(str(exc))
+                            else:
+                                st.session_state["show_zscore_record_maintenance_dialog"] = True
+                                st.session_state["selected_zscore_run_id"] = int(selected_run_id)
+                                st.session_state["zscore_record_maintenance_notice"] = "手动备注已保存。"
+                                bump_zscore_record_maintenance_dialog_nonce()
+                                st.rerun()
+                            return
 
                         if edit_test_time is None:
                             validation_errors.append("请填写检测时间。")
@@ -2354,6 +2476,7 @@ def render_zscore_record_maintenance_dialog(
                                     test_time=edit_test_time,
                                     operator=cleaned_operator,
                                     level_results=updated_level_results,
+                                    manual_note=cleaned_manual_note,
                                 )
                             except ValueError as exc:
                                 st.error(str(exc))
@@ -2694,6 +2817,27 @@ def build_zscore_record_maintenance_dataframe(
     return pd.DataFrame(rows)
 
 
+def build_zscore_record_maintenance_dataframe(
+    saved_runs: list[dict[str, Any]],
+    level_label_map: dict[str, str],
+) -> pd.DataFrame:
+    rows = []
+    for run in saved_runs:
+        rows.append(
+            {
+                "检测序号": get_zscore_display_sequence(run),
+                "检测时间": pd.Timestamp(run["test_time"]).strftime("%Y-%m-%d %H:%M:%S"),
+                "检测人": str(run.get("operator", "") or ""),
+                "阶段": str(run.get("phase_label") or get_phase_label(run.get("phase"))),
+                "判定": format_zscore_status_label(run.get("run_status", "pending")),
+                "维护状态": "已锁定" if bool(run.get("is_locked_for_maintenance")) else "可维护",
+                "水平摘要": build_zscore_run_level_summary(run.get("level_results", []), level_label_map),
+                "备注": summarize_note_for_table(run.get("manual_note", "")),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def build_monthly_export_dataframe(
     qc_df: pd.DataFrame,
     start_date,
@@ -2764,11 +2908,12 @@ def render_lj_page(
 ) -> None:
     batch = get_batch(selected_batch_id)
     cv_limit = get_saved_batch_cv_limit(batch)
-    results_df = get_results(selected_batch_id)
+    results_df = get_results(selected_batch_id, include_manual_note=True)
     qc_df, stats = calculate_qc_results(results_df, int(batch["target_n"]))
     building_cv_hint = calculate_target_building_cv_hint(results_df, int(batch["target_n"]))
     latest_status, latest_status_message = get_latest_status_context(qc_df)
     latest_rule_hits, latest_compact_message = get_latest_result_panel_content(qc_df, latest_status_message)
+    latest_row = get_latest_qc_row(qc_df)
     operator_options = build_operator_options(results_df)
 
     view_mode = st.session_state.get("chart_view_mode", "\u5168\u90e8\u6570\u636e\u56fe")
@@ -2805,6 +2950,7 @@ def render_lj_page(
                 st.session_state["entry_operator"] = operator_options[0] if operator_options else ""
                 st.session_state["entry_value"] = ""
                 st.session_state["entry_reagent_changed"] = False
+                st.session_state["entry_manual_note"] = ""
                 st.session_state["entry_test_time"] = datetime.now()
             if "entry_test_time" not in st.session_state:
                 st.session_state["entry_test_time"] = datetime.now()
@@ -2814,12 +2960,15 @@ def render_lj_page(
                 st.session_state["entry_value"] = ""
             if "entry_reagent_changed" not in st.session_state:
                 st.session_state["entry_reagent_changed"] = False
+            if "entry_manual_note" not in st.session_state:
+                st.session_state["entry_manual_note"] = ""
 
             if st.session_state.get("reset_entry_form", False):
                 last_operator = st.session_state.get("entry_operator", "")
                 st.session_state["entry_operator"] = last_operator.strip()
                 st.session_state["entry_value"] = ""
                 st.session_state["entry_reagent_changed"] = False
+                st.session_state["entry_manual_note"] = ""
                 st.session_state["entry_test_time"] = datetime.now()
                 st.session_state["reset_entry_form"] = False
 
@@ -2851,6 +3000,12 @@ def render_lj_page(
                 "\u672c\u6b21\u4e3a\u8bd5\u5242\u6279\u53f7\u53d8\u66f4\u70b9",
                 key="entry_reagent_changed",
             )
+            manual_note = st.text_area(
+                "\u624b\u52a8\u5907\u6ce8\uff08\u53ef\u9009\uff09",
+                key="entry_manual_note",
+                height=1,
+                placeholder="\u4f8b\u5982\uff1a\u6362\u8bd5\u5242\u89c2\u5bdf\u3001\u590d\u6d4b\u8bf4\u660e\u3001\u5f53\u73ed\u5907\u6ce8",
+            )
 
             if st.button("\u4fdd\u5b58\u68c0\u6d4b\u7ed3\u679c", type="primary", width="stretch"):
                 validation_errors: list[str] = []
@@ -2873,6 +3028,7 @@ def render_lj_page(
                         value=float(parsed_value),
                         log_value=log_value,
                         reagent_lot_changed=int(reagent_lot_changed),
+                        manual_note=str(manual_note or "").strip(),
                     )
                     st.success("\u68c0\u6d4b\u7ed3\u679c\u5df2\u4fdd\u5b58\u3002")
                     st.session_state["reset_entry_form"] = True
@@ -2903,6 +3059,14 @@ def render_lj_page(
                     "当前累计建靶",
                 )
 
+            st.text_area(
+                "手动备注（可选）",
+                key="lj_unused_note_helper",
+                height=1,
+                disabled=True,
+                label_visibility="collapsed",
+                placeholder="例如：复测说明、批内观察、当班备注",
+            )
             st.divider()
             st.markdown("**\u5b9e\u65f6\u7edf\u8ba1**")
             sorted_results = results_df.sort_values(["test_time", "id"]).reset_index(drop=True)
@@ -3010,6 +3174,7 @@ def render_lj_page(
                 latest_compact_message,
                 latest_rule_hits,
             )
+            render_lj_abnormal_note_quick_entry(latest_row)
 
         st.divider()
         st.markdown("**\u672c\u6279\u6b21\u89c4\u5219\u6c47\u603b**")
@@ -3323,7 +3488,7 @@ def render_main_entry_page() -> None:
             "- 正式期实时统计：只基于正式期在控数据计算，警告和失控结果不纳入统计。"
         )
 
-    with st.expander("测试版更新：批次级 CV 要求（%）", expanded=False):
+    with st.expander("2026-03-31 更新：批次级 CV 要求（%）", expanded=False):
         st.markdown(
             "**更新内容**\n"
             "- LJ 与 Z-score 的新建批次均支持可选填写“CV 要求（%）”。\n"
@@ -3347,6 +3512,29 @@ def render_main_entry_page() -> None:
             "6. Z-score：旧批次或未设置 CV 要求的批次进入工作区，确认不报错。\n"
             "7. 回归一遍现有 LJ 主流程。\n"
             "8. 回归一遍现有实际生效的 Z-score 主流程。"
+        )
+
+    with st.expander("2026-04-01 更新：备注、检测人记忆与 Z-score 一致性修复", expanded=False):
+        st.markdown(
+            "**更新内容**\n"
+            "- LJ 与 Z-score 已接入手动备注字段：维护区可查看和编辑，图上对含备注的点增加描边提示。\n"
+            "- LJ 新增结果录入支持备注；Z-score 备注入口统一为“最新结果分析”下快捷补备注 + 维护区编辑，录入区不再保留常驻备注输入框。\n"
+            "- Z-score 最新结果分析改为按检测序号取最新 run，修复“图上已判异常，但卡片显示无规则触发”的不一致。\n"
+            "- Z-score 检测人输入改为与 LJ 一致的最近使用记忆模式，支持下拉选择最近姓名，也支持手动输入新姓名。\n"
+            "- 修复旧库升级后 batches 子表仍引用 batches_legacy 的问题，create_zscore_batch 不再因外键残留报错。\n\n"
+            "**手工测试**\n"
+            "- LJ：新增一条结果并填写备注，保存后检查维护区显示与图上描边；新增一条不填备注的结果，确认不报错且图上不加描边。\n"
+            "- LJ：在维护区修改已有备注，确认刷新后仍存在；若最新结果为警告或失控，从“最新结果分析”下快捷补备注，确认维护区和图上同步。\n"
+            "- Z-score：录入区不再显示常驻备注输入框；检测人支持从最近使用列表下拉选择，也支持直接输入新名字，保存后新名字会进入最近使用列表。\n"
+            "- Z-score：新增一条 run 并保存，确认不依赖录入区备注也能正常保存；在维护区查看和编辑备注，确认刷新后仍存在，图上描边状态同步。\n"
+            "- Z-score：当最新 formal run 为 warning 或 reject 时，从“最新结果分析”下快捷补备注，确认维护区和图上同步，不再保留第三个分散入口。\n"
+            "- Z-score：选取一个最新异常 run，确认图上最后一个 run 的状态样式与“最新结果分析”卡片中的规则判定一致，不再出现“图上像失控，但卡片显示无规则触发”。\n"
+            "- 旧库升级：使用旧库副本执行数据库初始化后，新建 Z-score 批次，确认不再出现 main.batches_legacy 相关报错。\n"
+            "- 回归一遍现有 LJ 主流程与当前实际生效的 Z-score 主流程。\n\n"
+            "**已知问题 / 暂未处理**\n"
+            "- 本轮未新增图上点选交互，备注全文仍只通过维护入口或异常快捷入口查看与修改。\n"
+            "- Z-score 录入区检测人新交互已完成代码接入，但尚未单独做一次完整浏览器手点回归。\n"
+            "- database.py 前半段旧 Z-score 重复定义仍保留，继续以后半段实际生效定义为准。"
         )
 
     with st.expander("常见说明 / 注意事项", expanded=False):
@@ -3490,13 +3678,14 @@ def render_zscore_placeholder_page() -> None:
 
             st.markdown("**本次数据录入**")
             st.datetime_input("检测时间", key="zscore_entry_test_time")
-            st.text_input(
+            st.selectbox(
                 "检测人",
+                options=operator_options,
+                index=None,
                 key="zscore_entry_operator",
-                placeholder="请输入本次检测人",
+                accept_new_options=True,
+                placeholder="可选择历史姓名，也可直接输入新姓名",
             )
-            if operator_options:
-                st.caption(f"最近使用的检测人：{', '.join(operator_options[:5])}")
 
             st.divider()
             st.markdown("**多水平结果录入**")
@@ -3540,6 +3729,7 @@ def render_zscore_placeholder_page() -> None:
                             level_results=current_level_results,
                             template_id=template_id,
                             required_n=required_n,
+                            manual_note="",
                         )
                     except ValueError as exc:
                         st.error(str(exc))
@@ -3613,11 +3803,11 @@ def render_zscore_placeholder_page() -> None:
         ]
         formal_history_runs = [run for run in history_runs if str(run.get("phase")) == PHASE_FORMAL_QC]
         if phase_scope == "building":
-            latest_run = building_history_runs[-1] if building_history_runs else None
+            latest_run = get_latest_zscore_run_for_display(building_history_runs)
         elif phase_scope == "formal":
-            latest_run = formal_history_runs[-1] if formal_history_runs else None
+            latest_run = get_latest_zscore_run_for_display(formal_history_runs)
         else:
-            latest_run = history_runs[-1] if history_runs else None
+            latest_run = get_latest_zscore_run_for_display(history_runs)
         if phase_scope == "building" and latest_run is not None:
             latest_run = dict(latest_run)
             latest_run["phase"] = PHASE_TARGET_BUILDING
@@ -3653,6 +3843,7 @@ def render_zscore_placeholder_page() -> None:
                 )
             st.pyplot(figure, clear_figure=False, width="stretch")
             render_zscore_latest_analysis_panel(latest_run, overall_phase, formal_rules_enabled)
+            render_zscore_abnormal_note_quick_entry(latest_run)
             render_zscore_rules_config_expander(template, overall_phase, formal_rules_enabled)
 
         st.divider()

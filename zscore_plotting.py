@@ -57,6 +57,8 @@ REFERENCE_LINE_COLORS = {
     3: "#ff9da7",
 }
 
+MANUAL_NOTE_EDGE_COLOR = "#2f4858"
+
 
 def _get_available_font_fallbacks() -> list[str]:
     available_fonts: dict[str, str] = {}
@@ -160,6 +162,7 @@ def plot_zscore_single_level(
     if y_limits is not None:
         axis.set_ylim(y_limits)
         _plot_out_of_range_markers(axis, display_df, y_limits)
+    _plot_manual_note_highlights(axis, display_df)
     _configure_x_axis(axis, display_df)
     axis.set_title(title, pad=10)
     axis.set_xlabel("检测序号")
@@ -222,6 +225,7 @@ def plot_zscore_overlay(
     if y_limits is not None:
         axis.set_ylim(y_limits)
         _plot_out_of_range_markers(axis, display_df, y_limits)
+    _plot_manual_note_highlights(axis, display_df)
     _configure_x_axis(axis, display_df)
     axis.set_title(title, pad=10)
     axis.set_xlabel("检测序号")
@@ -273,6 +277,7 @@ def _ensure_plot_columns(plot_df: pd.DataFrame) -> pd.DataFrame:
         "formal_reference_mean": None,
         "formal_reference_sd": None,
         "is_preview": False,
+        "manual_note": "",
     }
     for column_name, default_value in default_columns.items():
         if column_name not in prepared_df.columns:
@@ -519,6 +524,27 @@ def _plot_out_of_range_markers(axis, display_df: pd.DataFrame, y_limits: tuple[f
             )
 
 
+def _plot_manual_note_highlights(axis, display_df: pd.DataFrame) -> None:
+    if display_df.empty or "manual_note" not in display_df.columns:
+        return
+
+    note_mask = display_df["manual_note"].fillna("").astype(str).str.strip() != ""
+    note_df = display_df[note_mask]
+    if note_df.empty:
+        return
+
+    axis.scatter(
+        note_df["run_index"],
+        note_df["display_value"],
+        s=118,
+        marker="o",
+        facecolors="none",
+        edgecolors=MANUAL_NOTE_EDGE_COLOR,
+        linewidths=1.35,
+        zorder=6,
+    )
+
+
 def _add_manual_legends(
     axis,
     display_df: pd.DataFrame,
@@ -669,6 +695,63 @@ def _build_phase_legend_handles(*, show_reference_lines: bool) -> list[Line2D]:
                 label="均值 / ±SD 控制线",
             )
         )
+    return handles
+
+
+def _build_phase_legend_handles(*, show_reference_lines: bool) -> list[Line2D]:
+    neutral_color = "#404040"
+    handles = [
+        Line2D(
+            [0],
+            [0],
+            color=neutral_color,
+            linestyle="--",
+            linewidth=1.4,
+            marker="s",
+            markerfacecolor="#4e79a7",
+            markeredgecolor="#ffffff",
+            markeredgewidth=0.9,
+            markersize=7,
+            label="建靶期（虚线 / 方形点）",
+        ),
+        Line2D(
+            [0],
+            [0],
+            color=neutral_color,
+            linestyle="-",
+            linewidth=1.4,
+            marker="o",
+            markerfacecolor="#808080",
+            markeredgecolor="#ffffff",
+            markeredgewidth=0.9,
+            markersize=7,
+            label="正式期（实线 / 圆形点）",
+        ),
+    ]
+    if show_reference_lines:
+        handles.append(
+            Line2D(
+                [0],
+                [0],
+                color=REFERENCE_LINE_COLORS[0],
+                linestyle="-",
+                linewidth=1.2,
+                label="均值 / ±SD 控制线",
+            )
+        )
+    handles.append(
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            markerfacecolor="none",
+            markeredgecolor=MANUAL_NOTE_EDGE_COLOR,
+            markeredgewidth=1.35,
+            markersize=8,
+            linestyle="None",
+            label="描边点=含手动备注",
+        )
+    )
     return handles
 
 

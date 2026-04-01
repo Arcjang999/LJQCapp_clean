@@ -5,6 +5,7 @@ import math
 
 import matplotlib
 from matplotlib import font_manager
+from matplotlib.lines import Line2D
 from matplotlib.ticker import FixedLocator
 import pandas as pd
 
@@ -61,6 +62,8 @@ def configure_matplotlib_fonts() -> list[str]:
 CONFIGURED_FONT_FALLBACKS = configure_matplotlib_fonts()
 print(f"[plotting] CONFIGURED_FONT_FALLBACKS={CONFIGURED_FONT_FALLBACKS}")
 
+MANUAL_NOTE_EDGE_COLOR = "#2f4858"
+
 
 def plot_lj_chart(
     qc_df: pd.DataFrame,
@@ -113,13 +116,14 @@ def plot_lj_chart(
     if y_limits is not None:
         axis.set_ylim(y_limits)
         _plot_out_of_range_markers(axis, display_df, y_limits)
+    _plot_manual_note_highlights(axis, display_df)
 
     axis.set_title(title, pad=10)
     axis.set_xlabel("\u68c0\u6d4b\u5e8f\u53f7")
     axis.set_ylabel("\u68c0\u6d4b\u503c")
     _configure_x_axis(axis, display_df)
     axis.grid(True, linestyle=":", alpha=0.35)
-    axis.legend(loc="best")
+    _add_lj_legend(axis)
     figure.tight_layout(pad=0.7)
     return figure
 
@@ -323,6 +327,54 @@ def _plot_out_of_range_markers(axis, display_df: pd.DataFrame, y_limits: tuple[f
                 fontsize=8,
                 color="#7a1f26",
             )
+
+
+def _plot_manual_note_highlights(axis, display_df: pd.DataFrame) -> None:
+    if display_df.empty or "manual_note" not in display_df.columns:
+        return
+
+    note_mask = display_df["manual_note"].fillna("").astype(str).str.strip() != ""
+    note_df = display_df[note_mask]
+    if note_df.empty:
+        return
+
+    axis.scatter(
+        note_df["sequence"],
+        note_df["display_value"],
+        s=118,
+        marker="o",
+        facecolors="none",
+        edgecolors=MANUAL_NOTE_EDGE_COLOR,
+        linewidths=1.35,
+        zorder=6,
+    )
+
+
+def _add_lj_legend(axis) -> None:
+    handles, labels = axis.get_legend_handles_labels()
+    handles.append(
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            markerfacecolor="none",
+            markeredgecolor=MANUAL_NOTE_EDGE_COLOR,
+            markeredgewidth=1.35,
+            linestyle="None",
+            markersize=8,
+            label="描边点=含手动备注",
+        )
+    )
+    labels.append("描边点=含手动备注")
+
+    unique_handles: list[object] = []
+    unique_labels: list[str] = []
+    for handle, label in zip(handles, labels):
+        if not label or label.startswith("_") or label in unique_labels:
+            continue
+        unique_handles.append(handle)
+        unique_labels.append(label)
+    axis.legend(unique_handles, unique_labels, loc="best")
 
 
 def figure_to_png_bytes(figure) -> bytes:
