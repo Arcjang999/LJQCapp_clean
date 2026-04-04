@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime
+import hashlib
 from html import escape as html_escape
 from io import BytesIO
 import math
@@ -21,7 +22,7 @@ from database import (
     create_zscore_batch,
     create_zscore_project,
     delete_result,
-    export_batch_results,
+    export_batch_results_for_phase,
     get_batch,
     get_project,
     get_results,
@@ -35,6 +36,15 @@ from database import (
     update_result,
     update_batch,
     update_project,
+)
+from import_review import (
+    build_lj_building_template_dataframe,
+    build_review_issues_dataframe,
+    build_zscore_building_template_dataframe,
+    review_lj_building_import_csv,
+    review_lj_formal_import_csv,
+    review_zscore_building_import_csv,
+    review_zscore_formal_import_csv,
 )
 from plotting import figure_to_png_bytes, plot_lj_chart
 from qc_logic import (
@@ -54,7 +64,6 @@ from zscore_logic import (
     determine_zscore_phase,
     format_level_id_display,
     format_zscore_level_label_summary,
-    get_building_stat_run_ids,
     get_zscore_display_sequence,
     get_zscore_level_label_map,
     get_zscore_level_targets,
@@ -1590,6 +1599,32 @@ def render_compact_stat_metrics(metrics: list[tuple[str, str]]) -> None:
     render_html_block(stats_html)
 
 
+def render_import_review_summary(review_summary: dict[str, Any]) -> None:
+    render_compact_stat_metrics(
+        [
+            ("总行数", str(review_summary["total_rows"])),
+            ("可导入行数", str(review_summary["importable_rows"])),
+            ("错误行数", str(review_summary["error_rows"])),
+            ("警告行数", str(review_summary["warning_rows"])),
+        ]
+    )
+    file_error_count = int(review_summary.get("file_error_count", 0) or 0)
+    file_warning_count = int(review_summary.get("file_warning_count", 0) or 0)
+    if file_error_count > 0 or file_warning_count > 0:
+        parts: list[str] = []
+        if file_error_count > 0:
+            parts.append(f"文件级阻断：{file_error_count} 条")
+        if file_warning_count > 0:
+            parts.append(f"文件级提醒：{file_warning_count} 条")
+        st.caption("；".join(parts))
+
+    row_warning_groups = list(review_summary.get("row_warning_groups") or [])
+    if row_warning_groups:
+        st.caption("行级警告汇总：")
+        for group in row_warning_groups:
+            st.markdown(f"- {group['label']}：{group['row_count']} 行")
+
+
 def render_zscore_level_input_block(
     level_label: str,
     value_key: str,
@@ -2871,6 +2906,149 @@ def build_monthly_chart_title(batch, start_date, end_date) -> str:
     )
 
 
+def build_zscore_monthly_export_plot_dataframe(
+    plot_df: pd.DataFrame,
+    start_date,
+    end_date,
+) -> pd.DataFrame:
+    if plot_df.empty:
+        return plot_df.copy()
+    if "phase" not in plot_df.columns or "test_time" not in plot_df.columns:
+        return pd.DataFrame(columns=plot_df.columns)
+
+    formal_df = plot_df[plot_df["phase"] == PHASE_FORMAL_QC].copy()
+    if formal_df.empty:
+        return formal_df
+
+    start_timestamp = pd.Timestamp(start_date)
+    end_timestamp = pd.Timestamp(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+    filtered_df = formal_df[
+        (formal_df["test_time"] >= start_timestamp) & (formal_df["test_time"] <= end_timestamp)
+    ].copy()
+    if filtered_df.empty:
+        return filtered_df
+
+    run_axis_df = (
+        filtered_df[["run_id", "run_index", "test_sequence", "test_time"]]
+        .drop_duplicates()
+        .sort_values(["test_time", "run_index", "run_id"])
+        .reset_index(drop=True)
+    )
+    run_axis_df["monthly_run_index"] = run_axis_df.index + 1
+    run_index_map = run_axis_df.set_index("run_id")["monthly_run_index"].to_dict()
+    filtered_df["run_index"] = filtered_df["run_id"].map(run_index_map).astype(int)
+    filtered_df["test_sequence"] = filtered_df["run_index"]
+    filtered_df["plot_phase"] = PHASE_FORMAL_QC
+    return filtered_df.sort_values(["run_index", "level_id"]).reset_index(drop=True)
+
+
+def _format_zscore_export_datetime(value: Any) -> str:
+    timestamp = pd.to_datetime(value, errors="coerce")
+    if pd.isna(timestamp):
+        return ""
+    return pd.Timestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _format_zscore_export_numeric(value: Any, digits: int = 4) -> float | None:
+    if value is None or pd.isna(value):
+        return None
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(numeric_value):
+        return None
+    return round(numeric_value, digits)
+
+
+def _build_zscore_export_level_prefix(level_id: str) -> str:
+    normalized_level_id = str(level_id or "").strip()
+    if normalized_level_id.startswith("Level "):
+        suffix = normalized_level_id.removeprefix("Level ").strip()
+        return f"Level {suffix}" if suffix else "Level"
+    if normalized_level_id.startswith("Level"):
+        suffix = normalized_level_id.removeprefix("Level").strip()
+        return f"Level {suffix}" if suffix else "Level"
+    return normalized_level_id or "Level"
+
+
+def build_zscore_phase_export_dataframe(
+    saved_runs: list[dict[str, Any]],
+    required_level_ids: list[str],
+    phase_scope: str,
+) -> pd.DataFrame:
+    if phase_scope not in {"building", "formal"}:
+        raise ValueError(f"Unsupported Z-score export phase: {phase_scope}")
+
+    if phase_scope == "building":
+        export_runs = [
+            run
+            for run in saved_runs
+            if str(run.get("phase") or "") == PHASE_TARGET_BUILDING
+        ]
+        export_columns = ["检测序号", "检测时间", "检测人"]
+        for level_id in required_level_ids:
+            export_columns.append(f"{_build_zscore_export_level_prefix(level_id)} 值")
+        export_columns.extend(["备注", "阶段"])
+    else:
+        export_runs = [
+            run for run in saved_runs if str(run.get("phase") or "") == PHASE_FORMAL_QC
+        ]
+        export_columns = ["检测序号", "检测时间", "检测人"]
+        for level_id in required_level_ids:
+            level_prefix = _build_zscore_export_level_prefix(level_id)
+            export_columns.extend(
+                [
+                    f"{level_prefix} 值",
+                    f"{level_prefix} Z值",
+                    f"{level_prefix} 状态",
+                ]
+            )
+        export_columns.extend(
+            [
+                "run-level 判定结果",
+                "触发规则",
+                "误差类型",
+                "分析提示",
+                "备注",
+                "阶段",
+            ]
+        )
+
+    rows: list[dict[str, Any]] = []
+    for run in export_runs:
+        level_results_by_id = {
+            str(level_result.get("level_id")): level_result
+            for level_result in run.get("level_results", [])
+        }
+        row: dict[str, Any] = {
+            "检测序号": get_zscore_display_sequence(run),
+            "检测时间": _format_zscore_export_datetime(run.get("test_time")),
+            "检测人": str(run.get("operator", "") or ""),
+        }
+        for level_id in required_level_ids:
+            level_prefix = _build_zscore_export_level_prefix(level_id)
+            level_result = level_results_by_id.get(level_id, {})
+            row[f"{level_prefix} 值"] = _format_zscore_export_numeric(level_result.get("raw_value"))
+            if phase_scope == "formal":
+                row[f"{level_prefix} Z值"] = _format_zscore_export_numeric(level_result.get("zscore"))
+                row[f"{level_prefix} 状态"] = (
+                    format_zscore_status_label(level_result.get("status", "pending"))
+                    if level_result
+                    else ""
+                )
+        if phase_scope == "formal":
+            row["run-level 判定结果"] = format_zscore_status_label(run.get("run_status", "pending"))
+            row["触发规则"] = format_zscore_rule_hits(run.get("rule_hits_run", []))
+            row["误差类型"] = format_error_type_label(run.get("error_type_hint", "unknown"))
+            row["分析提示"] = str(run.get("analysis_prompt", "") or "")
+        row["备注"] = str(run.get("manual_note", "") or "")
+        row["阶段"] = str(run.get("phase_label") or get_phase_label(run.get("phase")))
+        rows.append(row)
+
+    return pd.DataFrame(rows, columns=export_columns)
+
+
 def sync_selector_state(
     selector_key: str,
     selected_id_key: str,
@@ -3215,9 +3393,12 @@ def render_lj_page(
 
         with export_col:
             st.subheader("\u5bfc\u51fa")
-            export_df = export_batch_results(batch, qc_df)
-            csv_bytes = export_df.to_csv(index=False).encode("utf-8-sig")
-            xlsx_bytes = dataframe_to_xlsx_bytes(export_df)
+            building_export_df = export_batch_results_for_phase(batch, qc_df, "building")
+            formal_export_df = export_batch_results_for_phase(batch, qc_df, "formal")
+            building_csv_bytes = building_export_df.to_csv(index=False).encode("utf-8-sig")
+            building_xlsx_bytes = dataframe_to_xlsx_bytes(building_export_df)
+            formal_csv_bytes = formal_export_df.to_csv(index=False).encode("utf-8-sig")
+            formal_xlsx_bytes = dataframe_to_xlsx_bytes(formal_export_df)
             png_bytes = figure_to_png_bytes(figure)
             project_name_fragment = build_safe_export_name(
                 batch["project_name"] if "project_name" in batch.keys() else None,
@@ -3227,22 +3408,45 @@ def render_lj_page(
                 batch["lot_no"] if "lot_no" in batch.keys() else None,
                 f"batch_{batch['id']}",
             )
+            lj_building_template_df = build_lj_building_template_dataframe()
+            lj_building_template_csv_bytes = lj_building_template_df.to_csv(index=False).encode("utf-8-sig")
+            lj_import_scope = f"lj_building_import_{selected_batch_id}"
+            lj_import_review_state_key = f"{lj_import_scope}_review"
+            lj_import_success_key = f"{lj_import_scope}_success"
+            lj_import_uploader_nonce_key = f"{lj_import_scope}_uploader_nonce"
+            lj_import_uploader_nonce = int(st.session_state.get(lj_import_uploader_nonce_key, 0))
+            lj_import_uploader_key = f"{lj_import_scope}_file_{lj_import_uploader_nonce}"
+            lj_building_import_disabled = bool(stats.get("target_ready"))
+            lj_import_success_message = str(st.session_state.pop(lj_import_success_key, "") or "")
+            if lj_import_success_message:
+                st.success(lj_import_success_message)
+            lj_formal_import_scope = f"lj_formal_import_{selected_batch_id}"
+            lj_formal_import_review_state_key = f"{lj_formal_import_scope}_review"
+            lj_formal_import_success_key = f"{lj_formal_import_scope}_success"
+            lj_formal_import_uploader_nonce_key = f"{lj_formal_import_scope}_uploader_nonce"
+            lj_formal_import_uploader_nonce = int(st.session_state.get(lj_formal_import_uploader_nonce_key, 0))
+            lj_formal_import_uploader_key = f"{lj_formal_import_scope}_file_{lj_formal_import_uploader_nonce}"
+            lj_target_ready = bool(stats.get("target_ready"))
+            lj_formal_import_success_message = str(st.session_state.pop(lj_formal_import_success_key, "") or "")
+            if lj_formal_import_success_message:
+                st.success(lj_formal_import_success_message)
 
-            st.markdown("**\u5f53\u524d\u6279\u6b21\u5bfc\u51fa**")
+            st.markdown("**\u5206\u9636\u6bb5\u6570\u636e\u5bfc\u51fa**")
+            st.caption("\u6309\u6309\u94ae\u8bed\u4e49\u5206\u5f00\u5bfc\u51fa\u5f53\u524d\u6279\u6b21\u7684\u5efa\u9776\u671f\u6216\u6b63\u5f0f\u671f\u6570\u636e\u3002")
             export_format = st.radio(
                 "\u5bfc\u51fa\u6570\u636e\u683c\u5f0f",
                 options=["Excel (.xlsx)", "CSV (.csv)"],
                 horizontal=True,
                 key="export_format",
             )
-            export_button_cols = st.columns(2)
-            export_button_cols[0].download_button(
-                label="\u5bfc\u51fa\u5f53\u524d\u6279\u6b21\u6570\u636e",
-                data=xlsx_bytes if export_format == "Excel (.xlsx)" else csv_bytes,
+            phase_export_cols = st.columns(2)
+            phase_export_cols[0].download_button(
+                label="\u5bfc\u51fa\u5efa\u9776\u671f\u6570\u636e",
+                data=building_xlsx_bytes if export_format == "Excel (.xlsx)" else building_csv_bytes,
                 file_name=(
-                    f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_results.xlsx"
+                    f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_target_building_results.xlsx"
                     if export_format == "Excel (.xlsx)"
-                    else f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_results.csv"
+                    else f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_target_building_results.csv"
                 ),
                 mime=(
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -3250,8 +3454,25 @@ def render_lj_page(
                     else "text/csv"
                 ),
                 width="stretch",
+                disabled=building_export_df.empty,
             )
-            export_button_cols[1].download_button(
+            phase_export_cols[1].download_button(
+                label="\u5bfc\u51fa\u6b63\u5f0f\u671f\u6570\u636e",
+                data=formal_xlsx_bytes if export_format == "Excel (.xlsx)" else formal_csv_bytes,
+                file_name=(
+                    f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_formal_qc_results.xlsx"
+                    if export_format == "Excel (.xlsx)"
+                    else f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_formal_qc_results.csv"
+                ),
+                mime=(
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    if export_format == "Excel (.xlsx)"
+                    else "text/csv"
+                ),
+                width="stretch",
+                disabled=formal_export_df.empty,
+            )
+            st.download_button(
                 label="\u5bfc\u51fa\u5f53\u524d LJ \u56fe PNG",
                 data=png_bytes,
                 file_name=(
@@ -3333,6 +3554,223 @@ def render_lj_page(
                     width="stretch",
                     disabled=monthly_png_bytes is None,
                 )
+
+            st.divider()
+            st.markdown("**LJ 建靶期 CSV 导入**")
+            st.caption("先下载标准模板，再上传 CSV 审查；只有无阻断错误时，才允许确认导入当前批次建靶期数据。")
+            st.markdown("- `试剂批号变更（可选）` 在建靶期一般不填。")
+            st.markdown("- 正式期仅在“更换试剂批号后的第一条记录”填写“是”。")
+            st.markdown("- 其余记录填“否”或留空。")
+            st.markdown("- 该字段表示“变更点”，不是持续状态。")
+            st.download_button(
+                label="下载建靶期 CSV 模板",
+                data=lj_building_template_csv_bytes,
+                file_name=(
+                    f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_target_building_import_template.csv"
+                ),
+                mime="text/csv",
+                width="stretch",
+            )
+            if lj_building_import_disabled:
+                st.info("当前批次建靶已完成。V1 的 LJ 建靶期导入仅支持未完成建靶的当前批次。")
+                st.session_state.pop(lj_import_review_state_key, None)
+
+            uploaded_lj_building_csv = st.file_uploader(
+                "上传建靶期 CSV",
+                type=["csv"],
+                key=lj_import_uploader_key,
+                disabled=lj_building_import_disabled,
+                help="请优先使用上方标准模板，当前版本仅支持 CSV。",
+            )
+            uploaded_lj_building_bytes = (
+                uploaded_lj_building_csv.getvalue() if uploaded_lj_building_csv is not None else b""
+            )
+            current_lj_import_signature = (
+                hashlib.sha256(uploaded_lj_building_bytes).hexdigest()
+                if uploaded_lj_building_bytes
+                else ""
+            )
+
+            lj_import_review_state = st.session_state.get(lj_import_review_state_key)
+            if not current_lj_import_signature:
+                st.session_state.pop(lj_import_review_state_key, None)
+                lj_import_review_state = None
+            elif (
+                lj_import_review_state is not None
+                and lj_import_review_state.get("file_signature") != current_lj_import_signature
+            ):
+                st.session_state.pop(lj_import_review_state_key, None)
+                lj_import_review_state = None
+
+            import_action_cols = st.columns(2)
+            review_lj_building_clicked = import_action_cols[0].button(
+                "审查 CSV",
+                key=f"{lj_import_scope}_review_button",
+                width="stretch",
+                disabled=lj_building_import_disabled or uploaded_lj_building_csv is None,
+            )
+            if review_lj_building_clicked:
+                lj_import_review_state = review_lj_building_import_csv(
+                    file_bytes=uploaded_lj_building_bytes,
+                    existing_results_df=results_df,
+                    target_n=int(batch["target_n"]),
+                )
+                lj_import_review_state["file_signature"] = current_lj_import_signature
+                st.session_state[lj_import_review_state_key] = lj_import_review_state
+
+            confirm_lj_import_disabled = True
+            if lj_import_review_state is not None:
+                review_summary = lj_import_review_state["summary"]
+                review_issues_df = build_review_issues_dataframe(lj_import_review_state["issues"])
+                render_import_review_summary(review_summary)
+                if review_summary["has_blocking_errors"]:
+                    st.error("审查未通过：存在阻断错误，当前整批不会导入。")
+                else:
+                    st.success("审查通过：当前没有阻断错误，可以确认导入。")
+
+                if review_issues_df.empty:
+                    st.info("本次审查未发现错误或警告。")
+                else:
+                    st.dataframe(review_issues_df, hide_index=True, width="stretch")
+
+                confirm_lj_import_disabled = (
+                    lj_building_import_disabled
+                    or review_summary["has_blocking_errors"]
+                    or not lj_import_review_state["normalized_rows"]
+                )
+
+            confirm_lj_import_clicked = import_action_cols[1].button(
+                "确认导入建靶期数据",
+                key=f"{lj_import_scope}_confirm_button",
+                width="stretch",
+                disabled=confirm_lj_import_disabled,
+            )
+            if confirm_lj_import_clicked and lj_import_review_state is not None:
+                for row in lj_import_review_state["normalized_rows"]:
+                    add_result(
+                        batch_id=selected_batch_id,
+                        test_time=row["test_time"],
+                        operator=row["operator"],
+                        value=float(row["value"]),
+                        reagent_lot_changed=int(row["reagent_lot_changed"]),
+                        manual_note=row["manual_note"],
+                    )
+                imported_row_count = len(lj_import_review_state["normalized_rows"])
+                st.session_state.pop(lj_import_review_state_key, None)
+                st.session_state[lj_import_uploader_nonce_key] = lj_import_uploader_nonce + 1
+                st.session_state[lj_import_success_key] = (
+                    f"已追加导入 {imported_row_count} 条建靶期记录，并自动重算当前建靶统计。"
+                )
+                st.rerun()
+
+            st.divider()
+            st.markdown("**LJ 正式期 CSV 导入**")
+            st.caption("先下载标准模板，再上传 CSV 审查；导入目标为当前批次正式期，只有无阻断错误时才允许确认导入。")
+            st.markdown("- `试剂批号变更（可选）` 在建靶期一般不填。")
+            st.markdown("- 正式期仅在“更换试剂批号后的第一条记录”填写“是”。")
+            st.markdown("- 其余记录填“否”或留空。")
+            st.markdown("- 该字段表示“变更点”，不是持续状态。")
+            st.download_button(
+                label="下载正式期 CSV 模板",
+                data=lj_building_template_csv_bytes,
+                file_name=(
+                    f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_formal_qc_import_template.csv"
+                ),
+                mime="text/csv",
+                width="stretch",
+            )
+            if not lj_target_ready:
+                st.info("当前批次尚未完成建靶，不能导入正式期数据。你仍可先上传 CSV 做审查。")
+
+            uploaded_lj_formal_csv = st.file_uploader(
+                "上传正式期 CSV",
+                type=["csv"],
+                key=lj_formal_import_uploader_key,
+                help="请优先使用上方标准模板，当前版本仅支持 CSV。",
+            )
+            uploaded_lj_formal_bytes = (
+                uploaded_lj_formal_csv.getvalue() if uploaded_lj_formal_csv is not None else b""
+            )
+            current_lj_formal_signature = (
+                f"{hashlib.sha256(uploaded_lj_formal_bytes).hexdigest()}:{int(lj_target_ready)}:{len(results_df)}"
+                if uploaded_lj_formal_bytes
+                else ""
+            )
+
+            lj_formal_import_review_state = st.session_state.get(lj_formal_import_review_state_key)
+            if not current_lj_formal_signature:
+                st.session_state.pop(lj_formal_import_review_state_key, None)
+                lj_formal_import_review_state = None
+            elif (
+                lj_formal_import_review_state is not None
+                and lj_formal_import_review_state.get("file_signature") != current_lj_formal_signature
+            ):
+                st.session_state.pop(lj_formal_import_review_state_key, None)
+                lj_formal_import_review_state = None
+
+            formal_import_action_cols = st.columns(2)
+            review_lj_formal_clicked = formal_import_action_cols[0].button(
+                "审查正式期 CSV",
+                key=f"{lj_formal_import_scope}_review_button",
+                width="stretch",
+                disabled=uploaded_lj_formal_csv is None,
+            )
+            if review_lj_formal_clicked:
+                lj_formal_import_review_state = review_lj_formal_import_csv(
+                    file_bytes=uploaded_lj_formal_bytes,
+                    existing_results_df=results_df,
+                    target_n=int(batch["target_n"]),
+                    target_ready=lj_target_ready,
+                )
+                lj_formal_import_review_state["file_signature"] = current_lj_formal_signature
+                st.session_state[lj_formal_import_review_state_key] = lj_formal_import_review_state
+
+            confirm_lj_formal_import_disabled = True
+            if lj_formal_import_review_state is not None:
+                formal_review_summary = lj_formal_import_review_state["summary"]
+                formal_review_issues_df = build_review_issues_dataframe(
+                    lj_formal_import_review_state["issues"]
+                )
+                render_import_review_summary(formal_review_summary)
+                if formal_review_summary["has_blocking_errors"]:
+                    st.error("正式期审查未通过：存在阻断错误，当前整批不会导入。")
+                else:
+                    st.success("正式期审查通过：当前没有阻断错误，可以确认导入。")
+
+                if formal_review_issues_df.empty:
+                    st.info("本次正式期审查未发现错误或警告。")
+                else:
+                    st.dataframe(formal_review_issues_df, hide_index=True, width="stretch")
+
+                confirm_lj_formal_import_disabled = (
+                    (not lj_target_ready)
+                    or formal_review_summary["has_blocking_errors"]
+                    or not lj_formal_import_review_state["normalized_rows"]
+                )
+
+            confirm_lj_formal_import_clicked = formal_import_action_cols[1].button(
+                "确认导入正式期数据",
+                key=f"{lj_formal_import_scope}_confirm_button",
+                width="stretch",
+                disabled=confirm_lj_formal_import_disabled,
+            )
+            if confirm_lj_formal_import_clicked and lj_formal_import_review_state is not None:
+                for row in lj_formal_import_review_state["normalized_rows"]:
+                    add_result(
+                        batch_id=selected_batch_id,
+                        test_time=row["test_time"],
+                        operator=row["operator"],
+                        value=float(row["value"]),
+                        reagent_lot_changed=int(row["reagent_lot_changed"]),
+                        manual_note=row["manual_note"],
+                    )
+                imported_formal_row_count = len(lj_formal_import_review_state["normalized_rows"])
+                st.session_state.pop(lj_formal_import_review_state_key, None)
+                st.session_state[lj_formal_import_uploader_nonce_key] = lj_formal_import_uploader_nonce + 1
+                st.session_state[lj_formal_import_success_key] = (
+                    f"已追加导入 {imported_formal_row_count} 条正式期记录，并自动刷新 LJ 图、最新结果分析和规则统计。"
+                )
+                st.rerun()
 
 
 def render_main_entry_page() -> None:
@@ -3797,25 +4235,7 @@ def render_zscore_placeholder_page() -> None:
                     )
 
         plot_df = build_zscore_plot_dataframe(history_runs, None, display_phase=None)
-        building_run_ids = get_building_stat_run_ids(history_runs)
-        building_history_runs = [
-            run for run in history_runs if int(run.get("run_id") or 0) in building_run_ids
-        ]
-        formal_history_runs = [run for run in history_runs if str(run.get("phase")) == PHASE_FORMAL_QC]
-        if phase_scope == "building":
-            latest_run = get_latest_zscore_run_for_display(building_history_runs)
-        elif phase_scope == "formal":
-            latest_run = get_latest_zscore_run_for_display(formal_history_runs)
-        else:
-            latest_run = get_latest_zscore_run_for_display(history_runs)
-        if phase_scope == "building" and latest_run is not None:
-            latest_run = dict(latest_run)
-            latest_run["phase"] = PHASE_TARGET_BUILDING
-            latest_run["phase_label"] = get_phase_label(PHASE_TARGET_BUILDING)
-            latest_run["run_status"] = PHASE_TARGET_BUILDING
-            latest_run["rule_hits_run"] = []
-            latest_run["error_type_hint"] = "not_applicable"
-            latest_run["analysis_prompt"] = "当前视图仅显示纳入建靶统计的观察点，不输出正式质控结论。"
+        latest_run = get_latest_zscore_run_for_display(history_runs)
 
         with chart_col:
             phase_title = {
@@ -3845,6 +4265,487 @@ def render_zscore_placeholder_page() -> None:
             render_zscore_latest_analysis_panel(latest_run, overall_phase, formal_rules_enabled)
             render_zscore_abnormal_note_quick_entry(latest_run)
             render_zscore_rules_config_expander(template, overall_phase, formal_rules_enabled)
+            current_png_bytes = figure_to_png_bytes(figure)
+            project_name_fragment = build_safe_export_name(
+                batch["project_name"] if "project_name" in batch.keys() else None,
+                "project",
+            )
+            lot_no_fragment = build_safe_export_name(
+                batch["lot_no"] if "lot_no" in batch.keys() else None,
+                f"batch_{batch['id']}",
+            )
+            phase_scope_fragment = build_safe_export_name(
+                ZSCORE_PHASE_VIEW_OPTIONS.get(phase_scope, phase_scope),
+                "all",
+            )
+            template_display_name = format_zscore_template_display_name(template)
+            selected_level_display, _ = format_zscore_level_display(selected_level, level_label_map)
+            current_view_label = selected_level_display if view_mode == "单水平视图" else template_display_name
+            current_view_fragment = build_safe_export_name(current_view_label, "chart")
+            zscore_building_template_df = build_zscore_building_template_dataframe(level_count)
+            zscore_building_template_csv_bytes = zscore_building_template_df.to_csv(index=False).encode("utf-8-sig")
+            zscore_building_import_scope = f"zscore_building_import_{selected_batch_id}"
+            zscore_building_import_review_state_key = f"{zscore_building_import_scope}_review"
+            zscore_building_import_success_key = f"{zscore_building_import_scope}_success"
+            zscore_building_import_uploader_nonce_key = f"{zscore_building_import_scope}_uploader_nonce"
+            zscore_building_import_uploader_nonce = int(
+                st.session_state.get(zscore_building_import_uploader_nonce_key, 0)
+            )
+            zscore_building_import_uploader_key = (
+                f"{zscore_building_import_scope}_file_{zscore_building_import_uploader_nonce}"
+            )
+            zscore_building_import_disabled = overall_phase != PHASE_TARGET_BUILDING
+            existing_building_runs = [
+                run
+                for run in history_runs
+                if str(run.get("phase") or "") == PHASE_TARGET_BUILDING
+            ]
+            existing_all_runs_df = pd.DataFrame(
+                {
+                    "test_time": [run.get("test_time") for run in history_runs],
+                }
+            )
+            existing_building_runs_df = pd.DataFrame(
+                {
+                    "test_time": [run.get("test_time") for run in existing_building_runs],
+                }
+            )
+            existing_formal_runs = [
+                run
+                for run in history_runs
+                if str(run.get("phase") or "") == PHASE_FORMAL_QC
+            ]
+            zscore_target_ready = bool(formal_rules_enabled)
+            zscore_building_import_success_message = str(
+                st.session_state.pop(zscore_building_import_success_key, "") or ""
+            )
+            if zscore_building_import_success_message:
+                st.success(zscore_building_import_success_message)
+            zscore_formal_import_scope = f"zscore_formal_import_{selected_batch_id}"
+            zscore_formal_import_review_state_key = f"{zscore_formal_import_scope}_review"
+            zscore_formal_import_success_key = f"{zscore_formal_import_scope}_success"
+            zscore_formal_import_uploader_nonce_key = f"{zscore_formal_import_scope}_uploader_nonce"
+            zscore_formal_import_uploader_nonce = int(
+                st.session_state.get(zscore_formal_import_uploader_nonce_key, 0)
+            )
+            zscore_formal_import_uploader_key = (
+                f"{zscore_formal_import_scope}_file_{zscore_formal_import_uploader_nonce}"
+            )
+            zscore_formal_import_success_message = str(
+                st.session_state.pop(zscore_formal_import_success_key, "") or ""
+            )
+            if zscore_formal_import_success_message:
+                st.success(zscore_formal_import_success_message)
+            building_export_df = build_zscore_phase_export_dataframe(
+                history_runs,
+                required_level_ids,
+                "building",
+            )
+            formal_export_df = build_zscore_phase_export_dataframe(
+                history_runs,
+                required_level_ids,
+                "formal",
+            )
+            building_csv_bytes = building_export_df.to_csv(index=False).encode("utf-8-sig")
+            building_xlsx_bytes = dataframe_to_xlsx_bytes(building_export_df)
+            formal_csv_bytes = formal_export_df.to_csv(index=False).encode("utf-8-sig")
+            formal_xlsx_bytes = dataframe_to_xlsx_bytes(formal_export_df)
+
+            st.divider()
+            st.markdown("**数据导出**")
+            st.caption("当前批次数据按 run 展开为宽表，建靶期与正式期分别导出。")
+            zscore_export_format = st.radio(
+                "导出数据格式",
+                options=["Excel (.xlsx)", "CSV (.csv)"],
+                horizontal=True,
+                key="zscore_export_format",
+            )
+            zscore_data_export_cols = st.columns(2)
+            zscore_data_export_cols[0].download_button(
+                label="导出建靶期数据",
+                data=(
+                    building_xlsx_bytes
+                    if zscore_export_format == "Excel (.xlsx)"
+                    else building_csv_bytes
+                ),
+                file_name=(
+                    f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_zscore_building_runs.xlsx"
+                    if zscore_export_format == "Excel (.xlsx)"
+                    else f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_zscore_building_runs.csv"
+                ),
+                mime=(
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    if zscore_export_format == "Excel (.xlsx)"
+                    else "text/csv"
+                ),
+                width="stretch",
+                disabled=building_export_df.empty,
+            )
+            zscore_data_export_cols[1].download_button(
+                label="导出正式期数据",
+                data=(
+                    formal_xlsx_bytes
+                    if zscore_export_format == "Excel (.xlsx)"
+                    else formal_csv_bytes
+                ),
+                file_name=(
+                    f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_zscore_formal_runs.xlsx"
+                    if zscore_export_format == "Excel (.xlsx)"
+                    else f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_zscore_formal_runs.csv"
+                ),
+                mime=(
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    if zscore_export_format == "Excel (.xlsx)"
+                    else "text/csv"
+                ),
+                width="stretch",
+                disabled=formal_export_df.empty,
+            )
+
+            st.divider()
+            st.markdown("**Z-score 建靶期 CSV 导入**")
+            st.caption("先下载当前批次标准模板，再上传 CSV 审查；只有无阻断错误时，才允许确认导入当前批次建靶期 run。")
+            st.download_button(
+                label="下载建靶期 CSV 模板",
+                data=zscore_building_template_csv_bytes,
+                file_name=(
+                    f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_zscore_building_import_template.csv"
+                ),
+                mime="text/csv",
+                width="stretch",
+            )
+            if zscore_building_import_disabled:
+                st.info("当前批次已完成建靶。V1 仅支持当前批次建靶期 CSV 导入，不支持在此入口继续追加正式期 run。")
+                st.session_state.pop(zscore_building_import_review_state_key, None)
+
+            uploaded_zscore_building_csv = st.file_uploader(
+                "上传建靶期 CSV",
+                type=["csv"],
+                key=zscore_building_import_uploader_key,
+                disabled=zscore_building_import_disabled,
+                help="模板会按当前批次的 2 水平 / 3 水平自动生成，当前版本仅支持 CSV。",
+            )
+            uploaded_zscore_building_bytes = (
+                uploaded_zscore_building_csv.getvalue() if uploaded_zscore_building_csv is not None else b""
+            )
+            current_zscore_building_signature = (
+                (
+                    f"{hashlib.sha256(uploaded_zscore_building_bytes).hexdigest()}:"
+                    f"{overall_phase}:{len(existing_building_runs)}:{required_n}:{level_count}"
+                )
+                if uploaded_zscore_building_bytes
+                else ""
+            )
+
+            zscore_building_import_review_state = st.session_state.get(
+                zscore_building_import_review_state_key
+            )
+            if not current_zscore_building_signature:
+                st.session_state.pop(zscore_building_import_review_state_key, None)
+                zscore_building_import_review_state = None
+            elif (
+                zscore_building_import_review_state is not None
+                and zscore_building_import_review_state.get("file_signature")
+                != current_zscore_building_signature
+            ):
+                st.session_state.pop(zscore_building_import_review_state_key, None)
+                zscore_building_import_review_state = None
+
+            zscore_import_action_cols = st.columns(2)
+            review_zscore_building_clicked = zscore_import_action_cols[0].button(
+                "审查 CSV",
+                key=f"{zscore_building_import_scope}_review_button",
+                width="stretch",
+                disabled=zscore_building_import_disabled or uploaded_zscore_building_csv is None,
+            )
+            if review_zscore_building_clicked:
+                zscore_building_import_review_state = review_zscore_building_import_csv(
+                    file_bytes=uploaded_zscore_building_bytes,
+                    existing_results_df=existing_building_runs_df,
+                    level_count=level_count,
+                    target_n=required_n,
+                )
+                zscore_building_import_review_state["file_signature"] = current_zscore_building_signature
+                st.session_state[zscore_building_import_review_state_key] = (
+                    zscore_building_import_review_state
+                )
+
+            confirm_zscore_building_import_disabled = True
+            if zscore_building_import_review_state is not None:
+                zscore_review_summary = zscore_building_import_review_state["summary"]
+                zscore_review_issues_df = build_review_issues_dataframe(
+                    zscore_building_import_review_state["issues"]
+                )
+                render_import_review_summary(zscore_review_summary)
+                if zscore_review_summary["has_blocking_errors"]:
+                    st.error("审查未通过：存在阻断错误，当前整批不会导入。")
+                else:
+                    st.success("审查通过：当前没有阻断错误，可以确认导入。")
+
+                if zscore_review_issues_df.empty:
+                    st.info("本次审查未发现错误或警告。")
+                else:
+                    st.dataframe(zscore_review_issues_df, hide_index=True, width="stretch")
+
+                confirm_zscore_building_import_disabled = (
+                    zscore_building_import_disabled
+                    or zscore_review_summary["has_blocking_errors"]
+                    or not zscore_building_import_review_state["normalized_rows"]
+                )
+
+            confirm_zscore_building_import_clicked = zscore_import_action_cols[1].button(
+                "确认导入建靶期数据",
+                key=f"{zscore_building_import_scope}_confirm_button",
+                width="stretch",
+                disabled=confirm_zscore_building_import_disabled,
+            )
+            if (
+                confirm_zscore_building_import_clicked
+                and zscore_building_import_review_state is not None
+            ):
+                imported_row_count = 0
+                try:
+                    for row in zscore_building_import_review_state["normalized_rows"]:
+                        create_zscore_run(
+                            batch_id=selected_batch_id,
+                            test_time=row["test_time"],
+                            operator=row["operator"],
+                            level_results=deepcopy(row["level_results"]),
+                            template_id=template_id,
+                            required_n=required_n,
+                            manual_note=row["manual_note"],
+                        )
+                        imported_row_count += 1
+                except ValueError as exc:
+                    st.error(f"导入中断：{exc}。请重新审查当前文件后再试。")
+                else:
+                    st.session_state.pop(zscore_building_import_review_state_key, None)
+                    st.session_state[zscore_building_import_uploader_nonce_key] = (
+                        zscore_building_import_uploader_nonce + 1
+                    )
+                    st.session_state[zscore_building_import_success_key] = (
+                        f"已追加导入 {imported_row_count} 条建靶期 run，并自动更新当前建靶统计与建靶进度。"
+                    )
+                    st.rerun()
+
+            st.divider()
+            st.markdown("**Z-score 正式期 CSV 导入**")
+            st.caption("先下载当前批次标准模板，再上传 CSV 审查；导入目标为当前批次正式期，只有无阻断错误时才允许确认导入。")
+            st.download_button(
+                label="下载正式期 CSV 模板",
+                data=zscore_building_template_csv_bytes,
+                file_name=(
+                    f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_zscore_formal_import_template.csv"
+                ),
+                mime="text/csv",
+                width="stretch",
+            )
+            if not zscore_target_ready:
+                st.info("当前批次尚未完成建靶，不能导入正式期数据。你仍可先上传 CSV 做审查。")
+
+            uploaded_zscore_formal_csv = st.file_uploader(
+                "上传正式期 CSV",
+                type=["csv"],
+                key=zscore_formal_import_uploader_key,
+                help="模板会按当前批次的 2 水平 / 3 水平自动生成，当前版本仅支持 CSV。",
+            )
+            uploaded_zscore_formal_bytes = (
+                uploaded_zscore_formal_csv.getvalue() if uploaded_zscore_formal_csv is not None else b""
+            )
+            current_zscore_formal_signature = (
+                (
+                    f"{hashlib.sha256(uploaded_zscore_formal_bytes).hexdigest()}:"
+                    f"{int(zscore_target_ready)}:{overall_phase}:{len(history_runs)}:{len(existing_formal_runs)}:{required_n}:{level_count}"
+                )
+                if uploaded_zscore_formal_bytes
+                else ""
+            )
+
+            zscore_formal_import_review_state = st.session_state.get(
+                zscore_formal_import_review_state_key
+            )
+            if not current_zscore_formal_signature:
+                st.session_state.pop(zscore_formal_import_review_state_key, None)
+                zscore_formal_import_review_state = None
+            elif (
+                zscore_formal_import_review_state is not None
+                and zscore_formal_import_review_state.get("file_signature")
+                != current_zscore_formal_signature
+            ):
+                st.session_state.pop(zscore_formal_import_review_state_key, None)
+                zscore_formal_import_review_state = None
+
+            zscore_formal_import_action_cols = st.columns(2)
+            review_zscore_formal_clicked = zscore_formal_import_action_cols[0].button(
+                "审查正式期 CSV",
+                key=f"{zscore_formal_import_scope}_review_button",
+                width="stretch",
+                disabled=uploaded_zscore_formal_csv is None,
+            )
+            if review_zscore_formal_clicked:
+                zscore_formal_import_review_state = review_zscore_formal_import_csv(
+                    file_bytes=uploaded_zscore_formal_bytes,
+                    existing_results_df=existing_all_runs_df,
+                    level_count=level_count,
+                    target_ready=zscore_target_ready,
+                    existing_formal_count=len(existing_formal_runs),
+                )
+                zscore_formal_import_review_state["file_signature"] = current_zscore_formal_signature
+                st.session_state[zscore_formal_import_review_state_key] = (
+                    zscore_formal_import_review_state
+                )
+
+            confirm_zscore_formal_import_disabled = True
+            if zscore_formal_import_review_state is not None:
+                zscore_formal_review_summary = zscore_formal_import_review_state["summary"]
+                zscore_formal_review_issues_df = build_review_issues_dataframe(
+                    zscore_formal_import_review_state["issues"]
+                )
+                render_import_review_summary(zscore_formal_review_summary)
+                if zscore_formal_review_summary["has_blocking_errors"]:
+                    st.error("正式期审查未通过：存在阻断错误，当前整批不会导入。")
+                else:
+                    st.success("正式期审查通过：当前没有阻断错误，可以确认导入。")
+
+                if zscore_formal_review_issues_df.empty:
+                    st.info("本次正式期审查未发现错误或警告。")
+                else:
+                    st.dataframe(zscore_formal_review_issues_df, hide_index=True, width="stretch")
+
+                confirm_zscore_formal_import_disabled = (
+                    (not zscore_target_ready)
+                    or zscore_formal_review_summary["has_blocking_errors"]
+                    or not zscore_formal_import_review_state["normalized_rows"]
+                )
+
+            confirm_zscore_formal_import_clicked = zscore_formal_import_action_cols[1].button(
+                "确认导入正式期数据",
+                key=f"{zscore_formal_import_scope}_confirm_button",
+                width="stretch",
+                disabled=confirm_zscore_formal_import_disabled,
+            )
+            if (
+                confirm_zscore_formal_import_clicked
+                and zscore_formal_import_review_state is not None
+            ):
+                imported_formal_row_count = 0
+                try:
+                    for row in zscore_formal_import_review_state["normalized_rows"]:
+                        create_zscore_run(
+                            batch_id=selected_batch_id,
+                            test_time=row["test_time"],
+                            operator=row["operator"],
+                            level_results=deepcopy(row["level_results"]),
+                            template_id=template_id,
+                            required_n=required_n,
+                            manual_note=row["manual_note"],
+                        )
+                        imported_formal_row_count += 1
+                except ValueError as exc:
+                    st.error(f"正式期导入中断：{exc}。请重新审查当前文件后再试。")
+                else:
+                    st.session_state.pop(zscore_formal_import_review_state_key, None)
+                    st.session_state[zscore_formal_import_uploader_nonce_key] = (
+                        zscore_formal_import_uploader_nonce + 1
+                    )
+                    st.session_state[zscore_formal_import_success_key] = (
+                        f"已追加导入 {imported_formal_row_count} 条正式期 run，并自动刷新各 level Z-score、run-level 判定、图表与最新结果分析。"
+                    )
+                    st.rerun()
+
+            st.divider()
+            st.markdown("**图导出**")
+            st.download_button(
+                label="导出当前图 PNG",
+                data=current_png_bytes,
+                file_name=(
+                    f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_"
+                    f"zscore_current_{phase_scope_fragment}_{current_view_fragment}.png"
+                ),
+                mime="image/png",
+                width="stretch",
+            )
+            st.caption("月度图固定只导正式期，日期范围最长 30 天；单水平视图导出单水平月度图，合并视图导出合并月度图。")
+            formal_plot_df = plot_df[plot_df["phase"] == PHASE_FORMAL_QC].copy() if "phase" in plot_df.columns else pd.DataFrame()
+            if formal_plot_df.empty:
+                st.info("当前批次还没有正式质控数据。")
+            else:
+                default_monthly_start = formal_plot_df["test_time"].min().date()
+                default_monthly_end = formal_plot_df["test_time"].max().date()
+                monthly_col_start, monthly_col_end = st.columns(2)
+                monthly_start = monthly_col_start.date_input(
+                    "开始日期",
+                    value=default_monthly_start,
+                    key="zscore_monthly_export_start",
+                )
+                monthly_end = monthly_col_end.date_input(
+                    "结束日期",
+                    value=default_monthly_end,
+                    key="zscore_monthly_export_end",
+                )
+
+                monthly_error = ""
+                day_span = (pd.Timestamp(monthly_end).date() - pd.Timestamp(monthly_start).date()).days + 1
+                if monthly_end < monthly_start:
+                    monthly_error = "结束日期不能早于开始日期。"
+                elif day_span > 30:
+                    monthly_error = "月度质控图导出范围最长为 30 天，请重新选择日期范围。"
+
+                monthly_png_bytes = None
+                monthly_file_name = None
+                if monthly_error:
+                    st.warning(monthly_error)
+                else:
+                    monthly_plot_df = build_zscore_monthly_export_plot_dataframe(
+                        plot_df=plot_df,
+                        start_date=monthly_start,
+                        end_date=monthly_end,
+                    )
+                    if monthly_plot_df.empty:
+                        st.info("所选日期范围内没有正式质控数据，无法导出月度图。")
+                    else:
+                        monthly_title = (
+                            f"月度质控图 - 批次 {batch['id']} - {batch['instrument']} - {batch['reagent']} - "
+                            f"{batch['qc_material']} - {batch['concentration']}\n"
+                            f"正式期｜{current_view_label}｜{monthly_start.strftime('%Y-%m-%d')} 至 {monthly_end.strftime('%Y-%m-%d')}"
+                        )
+                        if view_mode == "单水平视图":
+                            monthly_figure = plot_zscore_single_level(
+                                plot_df=monthly_plot_df,
+                                level_id=selected_level,
+                                title=monthly_title,
+                                phase_scope="formal",
+                                y_axis_mode=y_axis_mode,
+                                standard_sd_limit=standard_sd_limit,
+                            )
+                        else:
+                            monthly_figure = plot_zscore_overlay(
+                                plot_df=monthly_plot_df,
+                                title=monthly_title,
+                                active_levels=required_level_ids,
+                                phase_scope="formal",
+                                y_axis_mode=y_axis_mode,
+                                standard_sd_limit=standard_sd_limit,
+                            )
+                        monthly_png_bytes = figure_to_png_bytes(monthly_figure)
+                        monthly_file_name = (
+                            f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_"
+                            f"zscore_monthly_formal_{current_view_fragment}_"
+                            f"{monthly_start.strftime('%Y-%m-%d')}_to_{monthly_end.strftime('%Y-%m-%d')}.png"
+                        )
+
+                st.download_button(
+                    label="导出月度图 PNG",
+                    data=monthly_png_bytes if monthly_png_bytes is not None else b"",
+                    file_name=(
+                        monthly_file_name
+                        or f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_zscore_monthly_formal.png"
+                    ),
+                    mime="image/png",
+                    width="stretch",
+                    disabled=monthly_png_bytes is None,
+                )
+
 
         st.divider()
         st.subheader("记录维护")

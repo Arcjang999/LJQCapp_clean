@@ -490,6 +490,7 @@ def _ensure_zscore_batch_config_table(connection: sqlite3.Connection) -> None:
             level_1_label TEXT,
             level_2_label TEXT,
             level_3_label TEXT,
+            effective_building_count INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (batch_id) REFERENCES batches (id) ON DELETE CASCADE,
             FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
@@ -503,6 +504,7 @@ def _ensure_zscore_batch_config_table(connection: sqlite3.Connection) -> None:
         "level_1_label": "TEXT",
         "level_2_label": "TEXT",
         "level_3_label": "TEXT",
+        "effective_building_count": "INTEGER NOT NULL DEFAULT 0",
     }
     for column_name, column_type in missing_columns.items():
         if column_name in existing_columns:
@@ -1045,7 +1047,8 @@ def get_zscore_batch(batch_id: int) -> sqlite3.Row:
                 config.level_count,
                 config.level_1_label,
                 config.level_2_label,
-                config.level_3_label
+                config.level_3_label,
+                config.effective_building_count
             FROM batches
             INNER JOIN zscore_batch_config AS config ON config.batch_id = batches.id
             LEFT JOIN projects ON projects.id = batches.project_id
@@ -1176,8 +1179,50 @@ def get_results(batch_id: int, include_manual_note: bool = False) -> pd.DataFram
             dataframe["manual_note"] = dataframe["manual_note"].fillna("")
     return dataframe
 
+LJ_BUILDING_PHASE_LABEL = "建靶数据"
+LJ_FORMAL_PHASE_LABEL = "正式数据"
+LJ_EXPORT_METADATA_COLUMNS = [
+    "batch_id",
+    "project_id",
+    "project_name",
+    "instrument",
+    "reagent",
+    "qc_material",
+    "concentration",
+    "lot_no",
+    "target_n",
+]
+LJ_BUILDING_EXPORT_COLUMNS = LJ_EXPORT_METADATA_COLUMNS + [
+    "sequence",
+    "test_time",
+    "operator",
+    "value",
+    "log_value",
+    "reagent_lot_changed",
+    "manual_note",
+    "phase",
+]
+LJ_FORMAL_EXPORT_COLUMNS = LJ_EXPORT_METADATA_COLUMNS + [
+    "sequence",
+    "test_time",
+    "operator",
+    "value",
+    "log_value",
+    "z",
+    "status",
+    "rule_hits",
+    "error_type",
+    "analysis_prompt",
+    "manual_note",
+    "phase",
+]
 
-def export_batch_results(batch: sqlite3.Row, qc_df: pd.DataFrame) -> pd.DataFrame:
+
+def export_batch_results(
+    batch: sqlite3.Row,
+    qc_df: pd.DataFrame,
+    included_columns: list[str] | None = None,
+) -> pd.DataFrame:
     export_df = qc_df.copy()
     if export_df.empty:
         export_df = pd.DataFrame(
@@ -1194,6 +1239,7 @@ def export_batch_results(batch: sqlite3.Row, qc_df: pd.DataFrame) -> pd.DataFram
                 "rule_hits",
                 "error_type",
                 "analysis_prompt",
+                "manual_note",
             ]
         )
 
@@ -1220,7 +1266,11 @@ def export_batch_results(batch: sqlite3.Row, qc_df: pd.DataFrame) -> pd.DataFram
     ordered_prefix = list(metadata_columns.keys())
     remaining_columns = [column for column in export_df.columns if column not in ordered_prefix]
     ordered_df = export_df[ordered_prefix + remaining_columns]
+    if included_columns is not None:
+        selected_columns = [column for column in included_columns if column in ordered_df.columns]
+        ordered_df = ordered_df[selected_columns]
     column_mapping = {
+        "manual_note": "备注",
         "project_id": "项目ID",
         "project_name": "项目名称",
         "batch_id": "批次ID",
@@ -1246,6 +1296,26 @@ def export_batch_results(batch: sqlite3.Row, qc_df: pd.DataFrame) -> pd.DataFram
         "id": "记录ID",
     }
     return ordered_df.rename(columns=column_mapping)
+
+
+def export_batch_results_for_phase(
+    batch: sqlite3.Row,
+    qc_df: pd.DataFrame,
+    phase_scope: str,
+) -> pd.DataFrame:
+    phase_config = {
+        "building": (LJ_BUILDING_PHASE_LABEL, LJ_BUILDING_EXPORT_COLUMNS),
+        "formal": (LJ_FORMAL_PHASE_LABEL, LJ_FORMAL_EXPORT_COLUMNS),
+    }
+    if phase_scope not in phase_config:
+        raise ValueError(f"不支持的 LJ 导出阶段：{phase_scope}")
+
+    phase_label, included_columns = phase_config[phase_scope]
+    if qc_df.empty or "phase" not in qc_df.columns:
+        phase_df = pd.DataFrame()
+    else:
+        phase_df = qc_df[qc_df["phase"] == phase_label].copy()
+    return export_batch_results(batch, phase_df, included_columns=included_columns)
 
 
 def add_zscore_run(
@@ -1968,13 +2038,26 @@ def create_zscore_batch(
                 level_count,
                 level_1_label,
                 level_2_label,
-                level_3_label
+                level_3_label,
+                effective_building_count
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (batch_id, project_id, project_level_count, *cleaned_level_labels),
+            (batch_id, project_id, project_level_count, *cleaned_level_labels, 0),
         )
     return batch_id
+
+
+def update_zscore_batch_effective_building_count(batch_id: int, effective_building_count: int) -> None:
+    with get_connection() as connection:
+        connection.execute(
+            """
+            UPDATE zscore_batch_config
+            SET effective_building_count = ?
+            WHERE batch_id = ?
+            """,
+            (int(effective_building_count), batch_id),
+        )
 
 
 def add_zscore_run(

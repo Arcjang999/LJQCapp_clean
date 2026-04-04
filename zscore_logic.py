@@ -20,6 +20,7 @@ from database import (
     get_zscore_run_with_levels as db_get_zscore_run_with_levels,
     get_zscore_runs_df,
     get_zscore_runs_with_levels_for_batch as db_get_zscore_runs_with_levels_for_batch,
+    update_zscore_batch_effective_building_count as db_update_zscore_batch_effective_building_count,
     update_zscore_level_results as db_update_zscore_level_results,
     update_zscore_run as db_update_zscore_run,
     upsert_zscore_level_target as db_upsert_zscore_level_target,
@@ -293,7 +294,7 @@ def get_building_stat_run_ids(history_runs: list[dict[str, Any]]) -> set[int]:
         ordered_runs.append((run_id, run))
     ordered_runs.sort(
         key=lambda item: (
-            pd.Timestamp(item[1].get("test_time")),
+            get_zscore_display_sequence(item[1]),
             item[0],
         )
     )
@@ -479,7 +480,10 @@ def _build_plot_reference_map(
 
     ordered_runs = sorted(
         saved_runs,
-        key=lambda run: (pd.Timestamp(run.get("test_time")), int(run.get("run_id") or 0)),
+        key=lambda run: (
+            get_zscore_display_sequence(run),
+            int(run.get("run_id") or run.get("id") or 0),
+        ),
     )
     level_ids = sorted(
         {
@@ -536,7 +540,15 @@ def _build_building_display_zscores(
     for level_id in level_ids:
         raw_values: list[float] = []
         ordered_building_runs = [
-            run for run in sorted(saved_runs, key=lambda item: int(item.get("run_id") or 0)) if int(run.get("run_id") or 0) in building_run_ids
+            run
+            for run in sorted(
+                saved_runs,
+                key=lambda item: (
+                    get_zscore_display_sequence(item),
+                    int(item.get("run_id") or item.get("id") or 0),
+                ),
+            )
+            if int(run.get("run_id") or 0) in building_run_ids
         ]
         for run in ordered_building_runs:
             run_id = int(run.get("run_id") or 0)
@@ -647,7 +659,13 @@ def get_zscore_runs(batch_id: int, template_id: str | None = None) -> list[dict[
         run["is_locked_for_maintenance"] = bool(
             formal_started and str(run.get("phase")) == PHASE_TARGET_BUILDING
         )
-    return runs
+    return sorted(
+        runs,
+        key=lambda run: (
+            get_zscore_display_sequence(run),
+            int(run.get("run_id") or run.get("id") or 0),
+        ),
+    )
 
 
 def get_zscore_level_targets(
@@ -757,6 +775,19 @@ def build_level_target_profiles(
     return target_profiles
 
 
+def get_effective_building_run_count(
+    target_profiles: dict[str, dict[str, Any]],
+    required_level_ids: list[str] | None = None,
+) -> int:
+    level_ids = required_level_ids or list(target_profiles.keys())
+    if not level_ids:
+        return 0
+    return min(
+        int(target_profiles.get(level_id, {}).get("collected_n", 0) or 0)
+        for level_id in level_ids
+    )
+
+
 def should_enable_formal_rules(
     target_profiles: dict[str, dict[str, Any]],
     required_level_ids: list[str] | None = None,
@@ -764,7 +795,21 @@ def should_enable_formal_rules(
     level_ids = required_level_ids or list(target_profiles.keys())
     if not level_ids:
         return False
-    return all(bool(target_profiles.get(level_id, {}).get("is_ready")) for level_id in level_ids)
+    if not all(bool(target_profiles.get(level_id, {}).get("is_ready")) for level_id in level_ids):
+        return False
+
+    required_counts = [
+        int(target_profiles.get(level_id, {}).get("required_n", 0) or 0)
+        for level_id in level_ids
+    ]
+    if not required_counts:
+        return False
+
+    effective_building_count = get_effective_building_run_count(target_profiles, level_ids)
+    required_count = max(required_counts)
+    if required_count <= 0:
+        return False
+    return effective_building_count >= required_count
 
 
 def determine_zscore_phase(
@@ -839,9 +884,10 @@ def create_zscore_run(
     history_runs = get_zscore_runs(batch_id, template_id)
     next_test_sequence = max((int(run.get("test_sequence") or 0) for run in history_runs), default=0) + 1
     target_profiles = get_zscore_level_targets(batch_id, template_id, required_n=target_n)
+    current_phase = determine_zscore_phase(target_profiles, template["level_ids"])
     updated_profiles = deepcopy(target_profiles)
 
-    if determine_zscore_phase(target_profiles, template["level_ids"]) == PHASE_TARGET_BUILDING:
+    if current_phase == PHASE_TARGET_BUILDING:
         for level_result in normalized_level_results:
             level_id = str(level_result["level_id"])
             updated_profiles[level_id] = _advance_building_profile(
@@ -850,7 +896,6 @@ def create_zscore_run(
                 target_n,
             )
 
-    current_phase = determine_zscore_phase(updated_profiles, template["level_ids"])
     current_run = evaluate_zscore_run_with_phase(
         normalized_level_results,
         history_runs,
@@ -899,6 +944,10 @@ def create_zscore_run(
         updated_profiles[level_id]["realtime_sd"] = realtime_profiles[level_id]["realtime_sd"]
         updated_profiles[level_id]["realtime_cv"] = realtime_profiles[level_id]["realtime_cv"]
         _persist_target_profile(batch_id, level_id, updated_profiles[level_id], target_n)
+    db_update_zscore_batch_effective_building_count(
+        batch_id,
+        get_effective_building_run_count(updated_profiles, template["level_ids"]),
+    )
 
     final_runs = get_zscore_runs(batch_id, template_id)
     latest_run = deepcopy(final_runs[-1])
@@ -920,7 +969,10 @@ def rebuild_zscore_batch_state(batch_id: int) -> dict[str, Any]:
 
     raw_runs = sorted(
         deepcopy(db_get_zscore_runs_with_levels_for_batch(batch_id)),
-        key=lambda run: (pd.Timestamp(run["test_time"]), int(run["id"])),
+        key=lambda run: (
+            int(run.get("test_sequence")) if run.get("test_sequence") is not None else int(run["id"]),
+            int(run["id"]),
+        ),
     )
     target_profiles = _build_rebuild_target_profiles(batch_id, template_id, level_ids, target_n)
     rebuilt_runs: list[dict[str, Any]] = []
@@ -942,8 +994,9 @@ def rebuild_zscore_batch_state(batch_id: int) -> dict[str, Any]:
             if level_result.get("raw_value") is None:
                 raise ValueError(f"run #{raw_run['id']} 的 {level_result['level_id']} 原始值不能为空")
 
+        current_phase = determine_zscore_phase(target_profiles, level_ids)
         updated_profiles = deepcopy(target_profiles)
-        if determine_zscore_phase(target_profiles, level_ids) == PHASE_TARGET_BUILDING:
+        if current_phase == PHASE_TARGET_BUILDING:
             for level_result in normalized_level_results:
                 level_id = str(level_result["level_id"])
                 updated_profiles[level_id] = _advance_building_profile(
@@ -952,7 +1005,6 @@ def rebuild_zscore_batch_state(batch_id: int) -> dict[str, Any]:
                     target_n,
                 )
 
-        current_phase = determine_zscore_phase(updated_profiles, level_ids)
         current_run = evaluate_zscore_run_with_phase(
             normalized_level_results,
             rebuilt_runs,
@@ -1002,6 +1054,10 @@ def rebuild_zscore_batch_state(batch_id: int) -> dict[str, Any]:
     db_delete_zscore_targets_by_batch(batch_id)
     for level_id in level_ids:
         _persist_target_profile(batch_id, level_id, target_profiles[level_id], target_n)
+    db_update_zscore_batch_effective_building_count(
+        batch_id,
+        get_effective_building_run_count(target_profiles, level_ids),
+    )
 
     for run in rebuilt_runs:
         db_update_zscore_run(
@@ -1141,8 +1197,14 @@ def evaluate_zscore_run_with_phase(
         template_id=template_id,
         required_n=required_n,
     )
-    current_phase = phase_override or determine_zscore_phase(profiles, template["level_ids"])
-    formal_rules_enabled = should_enable_formal_rules(profiles, template["level_ids"])
+    current_phase = _normalize_run_phase(phase_override) if phase_override is not None else determine_zscore_phase(
+        profiles,
+        template["level_ids"],
+    )
+    formal_rules_enabled = (
+        current_phase == PHASE_FORMAL_QC
+        and should_enable_formal_rules(profiles, template["level_ids"])
+    )
     formal_history_runs = [
         deepcopy(run) for run in history_runs if _normalize_run_phase(run.get("phase")) == PHASE_FORMAL_QC
     ]
