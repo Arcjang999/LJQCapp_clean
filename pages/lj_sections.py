@@ -35,12 +35,12 @@ from ui.common import (
     get_saved_batch_cv_limit,
     parse_numeric_input,
     prepare_display_records,
-    render_batch_summary_row,
     render_compact_stat_metrics,
     render_cv_limit_hint,
     render_import_review_summary,
     render_live_log10_panel,
     render_rule_summary_metrics,
+    render_section_intro,
     render_standard_view_help,
     render_status_panel,
 )
@@ -322,9 +322,8 @@ def render_lj_entry_and_stats_section(
     cv_limit = context["cv_limit"]
     results_df = context["results_df"]
 
-    st.subheader("录入与统计")
-    st.caption("左侧专注数据录入和关键统计，减少首屏信息拥挤。")
-    st.markdown("**批次数据录入**")
+    st.subheader("结果录入")
+    st.caption("左侧优先服务录入动作，再补充建靶统计与实时统计。")
     if st.session_state.get("entry_batch_id") != selected_batch_id:
         st.session_state["entry_batch_id"] = selected_batch_id
         st.session_state["entry_operator"] = operator_options[0] if operator_options else ""
@@ -352,146 +351,141 @@ def render_lj_entry_and_stats_section(
         st.session_state["entry_test_time"] = datetime.now()
         st.session_state["reset_entry_form"] = False
 
-    test_time = st.datetime_input(
-        "检测时间",
-        key="entry_test_time",
-    )
-    operator = st.selectbox(
-        "检测人",
-        options=operator_options,
-        index=None,
-        key="entry_operator",
-        accept_new_options=True,
-        placeholder="可选择历史姓名，也可直接输入新姓名",
-    )
-    value_text = st.text_input(
-        "检测值（支持实时 log10）",
-        key="entry_value",
-        placeholder="例如：123.4567",
-    )
-    parsed_value, _, log_value = parse_numeric_input(value_text)
-    render_live_log10_panel(
-        value_text=value_text,
-        field_label="检测值（支持实时 log10）",
-        value_element_id="entry-log10-value",
-        hint_element_id="entry-log10-hint",
-    )
-    reagent_lot_changed = st.checkbox(
-        "本次为试剂批号变更点",
-        key="entry_reagent_changed",
-    )
-    manual_note = st.text_area(
-        "手动备注（可选）",
-        key="entry_manual_note",
-        height=1,
-        placeholder="例如：换试剂观察、复测说明、当班备注",
-    )
+    with st.container(border=True):
+        st.markdown("**本次结果录入**")
+        st.caption("检测时间、检测人、检测值、log10、变更点与备注收拢到同一操作卡。")
+        test_time = st.datetime_input(
+            "检测时间",
+            key="entry_test_time",
+        )
+        operator = st.selectbox(
+            "检测人",
+            options=operator_options,
+            index=None,
+            key="entry_operator",
+            accept_new_options=True,
+            placeholder="可选择历史姓名，也可直接输入新姓名",
+        )
+        value_text = st.text_input(
+            "检测值（支持实时 log10）",
+            key="entry_value",
+            placeholder="例如：123.4567",
+        )
+        parsed_value, _, log_value = parse_numeric_input(value_text)
+        render_live_log10_panel(
+            value_text=value_text,
+            field_label="检测值（支持实时 log10）",
+            value_element_id="entry-log10-value",
+            hint_element_id="entry-log10-hint",
+        )
+        reagent_lot_changed = st.checkbox(
+            "本次为试剂批号变更点",
+            key="entry_reagent_changed",
+        )
+        manual_note = st.text_area(
+            "手动备注（可选）",
+            key="entry_manual_note",
+            height=88,
+            placeholder="例如：换试剂观察、复测说明、当班备注",
+        )
 
-    if st.button("保存检测结果", type="primary", width="stretch"):
-        validation_errors: list[str] = []
-        cleaned_operator = (operator or "").strip()
+        if st.button("保存检测结果", type="primary", width="stretch"):
+            validation_errors: list[str] = []
+            cleaned_operator = (operator or "").strip()
 
-        if test_time is None:
-            validation_errors.append("请填写检测时间。")
-        if not cleaned_operator:
-            validation_errors.append("请填写检测人，不能为空。")
-        if parsed_value is None:
-            validation_errors.append("检测值必须为有效数字。")
+            if test_time is None:
+                validation_errors.append("请填写检测时间。")
+            if not cleaned_operator:
+                validation_errors.append("请填写检测人，不能为空。")
+            if parsed_value is None:
+                validation_errors.append("检测值必须为有效数字。")
 
-        if validation_errors:
-            st.error("\n".join(validation_errors))
-        else:
-            add_result(
-                batch_id=selected_batch_id,
-                test_time=test_time.strftime("%Y-%m-%d %H:%M:%S"),
-                operator=cleaned_operator,
-                value=float(parsed_value),
-                log_value=log_value,
-                reagent_lot_changed=int(reagent_lot_changed),
-                manual_note=str(manual_note or "").strip(),
+            if validation_errors:
+                st.error("\n".join(validation_errors))
+            else:
+                add_result(
+                    batch_id=selected_batch_id,
+                    test_time=test_time.strftime("%Y-%m-%d %H:%M:%S"),
+                    operator=cleaned_operator,
+                    value=float(parsed_value),
+                    log_value=log_value,
+                    reagent_lot_changed=int(reagent_lot_changed),
+                    manual_note=str(manual_note or "").strip(),
+                )
+                st.success("检测结果已保存。")
+                st.session_state["reset_entry_form"] = True
+                st.rerun()
+
+    with st.container(border=True):
+        st.markdown("**建靶统计**")
+        render_compact_stat_metrics(
+            [
+                ("均值", "-" if stats["mean"] is None else f"{stats['mean']:.4f}"),
+                ("SD", "-" if stats["sd"] is None else f"{stats['sd']:.4f}"),
+                ("CV%", "-" if stats["cv"] is None else f"{stats['cv']:.2f}%"),
+            ]
+        )
+        st.caption(
+            "建靶进度："
+            + (
+                "已完成，后续结果自动进行 Westgard 判定。"
+                if stats.get("target_ready")
+                else f"尚需继续录入至少 {int(batch['target_n'])} 次结果。"
             )
-            st.success("检测结果已保存。")
-            st.session_state["reset_entry_form"] = True
-            st.rerun()
-
-    st.divider()
-    st.markdown("**建靶统计**")
-    render_compact_stat_metrics(
-        [
-            ("均值", "-" if stats["mean"] is None else f"{stats['mean']:.4f}"),
-            ("SD", "-" if stats["sd"] is None else f"{stats['sd']:.4f}"),
-            ("CV%", "-" if stats["cv"] is None else f"{stats['cv']:.2f}%"),
-        ]
-    )
-    st.caption(
-        "建靶进度："
-        + (
-            "已完成，后续结果自动进行 Westgard 判定。"
-            if stats.get("target_ready")
-            else f"尚需继续录入至少 {int(batch['target_n'])} 次结果。"
         )
-    )
-    if cv_limit is not None:
-        st.caption(f"当前批次已保存 CV 要求：≤ {cv_limit:.2f}%")
-        render_cv_limit_hint(
-            building_cv_hint.get("cv"),
-            cv_limit,
-            "当前累计建靶",
+        if cv_limit is not None:
+            st.caption(f"当前批次已保存 CV 要求：≤ {cv_limit:.2f}%")
+            render_cv_limit_hint(
+                building_cv_hint.get("cv"),
+                cv_limit,
+                "当前累计建靶",
+            )
+
+    with st.container(border=True):
+        st.markdown("**实时统计**")
+        sorted_results = results_df.sort_values(["test_time", "id"]).reset_index(drop=True)
+        if sorted_results.empty:
+            st.info("暂无数据，无法计算实时统计。")
+            return
+
+        sorted_results["sequence"] = sorted_results.index + 1
+        formal_results = sorted_results[sorted_results["sequence"] > int(batch["target_n"])].copy()
+        default_start = formal_results["test_time"].min() if not formal_results.empty else sorted_results["test_time"].min()
+        default_end = sorted_results["test_time"].max()
+
+        date_cols = st.columns(2)
+        realtime_start = date_cols[0].date_input(
+            "开始日期",
+            value=default_start.date(),
+            key="realtime_start",
         )
-
-    st.text_area(
-        "手动备注（可选）",
-        key="lj_unused_note_helper",
-        height=1,
-        disabled=True,
-        label_visibility="collapsed",
-        placeholder="例如：复测说明、批内观察、当班备注",
-    )
-    st.divider()
-    st.markdown("**实时统计**")
-    sorted_results = results_df.sort_values(["test_time", "id"]).reset_index(drop=True)
-    if sorted_results.empty:
-        st.info("暂无数据，无法计算实时统计。")
-        return
-
-    sorted_results["sequence"] = sorted_results.index + 1
-    formal_results = sorted_results[sorted_results["sequence"] > int(batch["target_n"])].copy()
-    default_start = formal_results["test_time"].min() if not formal_results.empty else sorted_results["test_time"].min()
-    default_end = sorted_results["test_time"].max()
-
-    date_cols = st.columns(2)
-    realtime_start = date_cols[0].date_input(
-        "开始日期",
-        value=default_start.date(),
-        key="realtime_start",
-    )
-    realtime_end = date_cols[1].date_input(
-        "结束日期",
-        value=default_end.date(),
-        key="realtime_end",
-    )
-    st.caption("按日期统计，结束日期包含当日全部记录。")
-    end_timestamp = pd.Timestamp(realtime_end) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-    realtime_stats, realtime_message = calculate_realtime_stats(
-        results_df=results_df,
-        target_n=int(batch["target_n"]),
-        start_time=pd.Timestamp(realtime_start),
-        end_time=end_timestamp,
-    )
-    render_compact_stat_metrics(
-        [
-            ("实时均值", "-" if realtime_stats["mean"] is None else f"{realtime_stats['mean']:.4f}"),
-            ("实时 SD", "-" if realtime_stats["sd"] is None else f"{realtime_stats['sd']:.4f}"),
-            ("实时 CV%", "-" if realtime_stats["cv"] is None else f"{realtime_stats['cv']:.2f}%"),
-        ]
-    )
-    if realtime_message:
-        st.info(realtime_message)
-    st.caption(
-        "统计口径：实时统计仅基于当前批次中判定为“在控”的正式数据计算，"
-        "已自动排除警告和失控结果；"
-        "当检测记录被修改或删除后，实时均值 / SD / CV% 会随之自动变化。"
-    )
+        realtime_end = date_cols[1].date_input(
+            "结束日期",
+            value=default_end.date(),
+            key="realtime_end",
+        )
+        st.caption("按日期统计，结束日期包含当日全部记录。")
+        end_timestamp = pd.Timestamp(realtime_end) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+        realtime_stats, realtime_message = calculate_realtime_stats(
+            results_df=results_df,
+            target_n=int(batch["target_n"]),
+            start_time=pd.Timestamp(realtime_start),
+            end_time=end_timestamp,
+        )
+        render_compact_stat_metrics(
+            [
+                ("实时均值", "-" if realtime_stats["mean"] is None else f"{realtime_stats['mean']:.4f}"),
+                ("实时 SD", "-" if realtime_stats["sd"] is None else f"{realtime_stats['sd']:.4f}"),
+                ("实时 CV%", "-" if realtime_stats["cv"] is None else f"{realtime_stats['cv']:.2f}%"),
+            ]
+        )
+        if realtime_message:
+            st.info(realtime_message)
+        st.caption(
+            "统计口径：实时统计仅基于当前批次中判定为“在控”的正式数据计算，"
+            "已自动排除警告和失控结果；"
+            "当检测记录被修改或删除后，实时均值 / SD / CV% 会随之自动变化。"
+        )
 
 
 def render_lj_chart_and_analysis_section(
@@ -509,68 +503,80 @@ def render_lj_chart_and_analysis_section(
     view_mode = chart_state["view_mode"]
     y_axis_mode = chart_state["y_axis_mode"]
     standard_sd_limit = chart_state["standard_sd_limit"]
+    phase_label = "正式质控" if stats.get("target_ready") else "建靶期"
+    latest_source_text = (
+        f"最近已保存检测序号 #{int(latest_row['sequence'])}"
+        if latest_row is not None and "sequence" in latest_row
+        else "当前批次最近结果"
+    )
 
     st.subheader("图表与判读")
     chart_view_mode = view_mode
     chart_y_axis_mode = y_axis_mode
     chart_standard_sd_limit = float(st.session_state.get("chart_standard_sd_limit", standard_sd_limit))
-    with st.expander(
-        build_chart_control_title(chart_view_mode, chart_y_axis_mode, chart_standard_sd_limit),
-        expanded=False,
-    ):
-        view_selector_col, y_axis_selector_col = st.columns([1.2, 1.1])
-        chart_view_mode = view_selector_col.radio(
-            "图形视图",
-            options=chart_state["view_options"],
-            horizontal=True,
-            index=chart_state["view_options"].index(view_mode),
-        )
-        chart_y_axis_mode = y_axis_selector_col.radio(
-            "Y 轴范围",
-            options=chart_state["y_axis_options"],
-            horizontal=True,
-            index=chart_state["y_axis_options"].index(y_axis_mode),
-        )
-        st.session_state["chart_view_mode"] = chart_view_mode
-        st.session_state["chart_y_axis_mode"] = chart_y_axis_mode
-        if chart_y_axis_mode == "标准视图":
-            chart_standard_sd_limit = st.slider(
-                "标准视图范围（均值 ± nSD）",
-                min_value=3.0,
-                max_value=6.0,
-                value=float(standard_sd_limit),
-                step=0.5,
+    with st.container(border=True):
+        with st.expander(
+            build_chart_control_title(chart_view_mode, chart_y_axis_mode, chart_standard_sd_limit),
+            expanded=False,
+        ):
+            view_selector_col, y_axis_selector_col = st.columns([1.2, 1.1])
+            chart_view_mode = view_selector_col.radio(
+                "图形视图",
+                options=chart_state["view_options"],
+                horizontal=True,
+                index=chart_state["view_options"].index(view_mode),
             )
-            st.session_state["chart_standard_sd_limit"] = chart_standard_sd_limit
-            render_standard_view_help(chart_standard_sd_limit)
-        else:
-            chart_standard_sd_limit = float(st.session_state.get("chart_standard_sd_limit", standard_sd_limit))
+            chart_y_axis_mode = y_axis_selector_col.radio(
+                "Y 轴范围",
+                options=chart_state["y_axis_options"],
+                horizontal=True,
+                index=chart_state["y_axis_options"].index(y_axis_mode),
+            )
+            st.session_state["chart_view_mode"] = chart_view_mode
+            st.session_state["chart_y_axis_mode"] = chart_y_axis_mode
+            if chart_y_axis_mode == "标准视图":
+                chart_standard_sd_limit = st.slider(
+                    "标准视图范围（均值 ± nSD）",
+                    min_value=3.0,
+                    max_value=6.0,
+                    value=float(standard_sd_limit),
+                    step=0.5,
+                )
+                st.session_state["chart_standard_sd_limit"] = chart_standard_sd_limit
+                render_standard_view_help(chart_standard_sd_limit)
+            else:
+                chart_standard_sd_limit = float(st.session_state.get("chart_standard_sd_limit", standard_sd_limit))
 
-        if chart_view_mode != view_mode or chart_y_axis_mode != y_axis_mode:
-            st.rerun()
+            if chart_view_mode != view_mode or chart_y_axis_mode != y_axis_mode:
+                st.rerun()
 
     chart_view_mode = st.session_state.get("chart_view_mode", view_mode)
     chart_y_axis_mode = st.session_state.get("chart_y_axis_mode", y_axis_mode)
     chart_standard_sd_limit = float(st.session_state.get("chart_standard_sd_limit", standard_sd_limit))
-    st.markdown("**LJ图**")
-    figure = plot_lj_chart(
-        qc_df=qc_df,
-        stats=stats,
-        title=(
-            f"{chart_view_mode} - 批次 {batch['id']} - {batch['instrument']} - "
-            f"{batch['reagent']} - {batch['qc_material']} - {batch['concentration']}"
-        ),
-        view_mode=chart_view_mode,
-        y_axis_mode=chart_y_axis_mode,
-        standard_sd_limit=chart_standard_sd_limit,
-    )
-    st.pyplot(figure, clear_figure=False, width="stretch")
-    st.markdown("**最新结果分析**")
-    render_status_panel(
-        latest_status,
-        latest_compact_message,
-        latest_rule_hits,
-    )
+    with st.container(border=True):
+        st.markdown("**LJ 图**")
+        figure = plot_lj_chart(
+            qc_df=qc_df,
+            stats=stats,
+            title=(
+                f"{chart_view_mode} - 批次 {batch['id']} - {batch['instrument']} - "
+                f"{batch['reagent']} - {batch['qc_material']} - {batch['concentration']}"
+            ),
+            view_mode=chart_view_mode,
+            y_axis_mode=chart_y_axis_mode,
+            standard_sd_limit=chart_standard_sd_limit,
+        )
+        st.pyplot(figure, clear_figure=False, width="stretch")
+
+    with st.container(border=True):
+        st.markdown("**最新结果分析**")
+        render_status_panel(
+            latest_status,
+            latest_compact_message,
+            latest_rule_hits,
+            source_text=latest_source_text,
+            phase_text=phase_label,
+        )
     render_lj_abnormal_note_quick_entry(latest_row)
     return figure, {
         "view_mode": chart_view_mode,
@@ -601,18 +607,19 @@ def render_lj_records_section(qc_df: pd.DataFrame) -> None:
 
 def render_lj_maintenance_section(qc_df: pd.DataFrame) -> None:
     st.subheader("检测记录维护")
-    st.caption("主页只保留维护入口，点击后在弹窗中修改或删除检测记录。")
+    st.caption("记录维护后置为单独整块，主工作区优先保留录入、图表和结论。")
     open_maintenance_disabled = qc_df.empty
-    if st.button(
-        "打开检测记录维护",
-        key="open_record_maintenance_dialog",
-        width="stretch",
-        disabled=open_maintenance_disabled,
-    ):
-        bump_record_maintenance_dialog_nonce_impl()
-        st.session_state["show_record_maintenance_dialog"] = True
-    if open_maintenance_disabled:
-        st.info("当前批次暂无检测记录可维护。")
+    with st.container(border=True):
+        if st.button(
+            "打开检测记录维护",
+            key="open_record_maintenance_dialog",
+            width="stretch",
+            disabled=open_maintenance_disabled,
+        ):
+            bump_record_maintenance_dialog_nonce_impl()
+            st.session_state["show_record_maintenance_dialog"] = True
+        if open_maintenance_disabled:
+            st.info("当前批次暂无检测记录可维护。")
     if st.session_state.get("show_record_maintenance_dialog", False):
         render_record_maintenance_dialog_impl(qc_df)
 
@@ -628,7 +635,8 @@ def render_lj_export_import_section(
     stats = context["stats"]
     results_df = context["results_df"]
 
-    st.subheader("导出")
+    st.subheader("导出与导入")
+    st.caption("导出与 CSV 导入后置展示，导出和导入分组排列，避免抢占首屏。")
     building_export_df = export_batch_results_for_phase(batch, qc_df, "building")
     formal_export_df = export_batch_results_for_phase(batch, qc_df, "formal")
     building_csv_bytes = building_export_df.to_csv(index=False).encode("utf-8-sig")
@@ -667,6 +675,8 @@ def render_lj_export_import_section(
     if lj_formal_import_success_message:
         st.success(lj_formal_import_success_message)
 
+    st.markdown("**导出**")
+    st.caption("导出当前批次数据与图表；导出能力放在一组，避免与保存动作抢首屏注意力。")
     st.markdown("**分阶段数据导出**")
     st.caption("按按钮语义分开导出当前批次的建靶期或正式期数据。")
     export_format = st.radio(
@@ -792,7 +802,9 @@ def render_lj_export_import_section(
         )
 
     st.divider()
-    st.markdown("**LJ 建靶期 CSV 导入**")
+    st.markdown("**CSV 导入**")
+    st.caption("建靶期与正式期模板、上传、审查、确认导入分开展示。")
+    st.markdown("**建靶期 CSV 导入**")
     st.caption("先下载标准模板，再上传 CSV 审查；只有无阻断错误时，才允许确认导入当前批次建靶期数据。")
     st.markdown("- `试剂批号变更（可选）` 在建靶期一般不填。")
     st.markdown("- 正式期仅在“更换试剂批号后的第一条记录”填写“是”。")

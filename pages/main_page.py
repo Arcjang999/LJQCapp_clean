@@ -45,109 +45,91 @@ def normalize_top_level_method_selection() -> None:
 
 
 def render_main_entry_page() -> None:
-    chips = "".join(
-        f'<div class="welcome-chip">{html_escape(label)}</div>'
-        for label in [
-            "LJ 曲线",
-            "多水平 Z-score",
-            "项目与批次管理",
-            "建靶与正式质控",
-            "图表分析与记录维护",
-        ]
-    )
+    def render_entry_card(
+        title: str,
+        caption: str,
+        tags: list[str],
+        *,
+        eyebrow: str,
+        muted: bool = False,
+    ) -> None:
+        tags_html = "".join(
+            f'<span class="main-entry-card-tag">{html_escape(tag)}</span>'
+            for tag in tags
+        )
+        muted_class = " main-entry-card-muted" if muted else ""
+        render_html_block(
+            dedent(
+                f"""
+                <div class="main-entry-card{muted_class}">
+                    <div class="main-entry-card-eyebrow">{html_escape(eyebrow)}</div>
+                    <div class="main-entry-card-title">{html_escape(title)}</div>
+                    <div class="main-entry-card-caption">{html_escape(caption)}</div>
+                    <div class="main-entry-card-tags">{tags_html}</div>
+                </div>
+                """
+            ).strip()
+        )
+
     hero_html = dedent(
-        f"""
-        <div style="
-            border:1px solid #d9e2ee;
-            border-radius:18px;
-            padding:20px 22px;
-            background:linear-gradient(135deg, #f7fbff 0%, #eef5fb 55%, #f9fbfd 100%);
-            margin:4px 0 14px 0;
-        ">
-            <div style="font-size:28px;font-weight:800;color:#1c3553;line-height:1.2;">
-                实验室室内质控管理工具
+        """
+        <div class="home-hero">
+            <div class="home-hero-title">实验室室内质控管理工具</div>
+            <div class="home-hero-caption">
+                用于实验室室内质控的 LJ 与多水平 Z-score 管理与判读。
+                首页优先保留导航与高频入口，详细说明后移到下半区。
             </div>
-            <div style="margin-top:8px;font-size:14px;font-weight:600;color:#36587f;">
-                用于实验室室内质控的 LJ 与多水平 Z-score 管理与判读工具
-            </div>
-            <div style="margin-top:10px;font-size:14px;line-height:1.7;color:#4e6076;">
-                当前版本支持 LJ 曲线、多水平 Z-score、项目与批次管理、建靶与正式质控、
-                图表查看、结果分析和记录维护，可作为内部试用、演示与小范围部署的交付基线。
-            </div>
-            <div class="welcome-chip-row">{chips}</div>
         </div>
         """
     ).strip()
     render_html_block(hero_html)
 
-    render_html_block(
-        dedent(
-            """
-            <div class="main-highlight-box">
-                <div class="main-highlight-title">从哪里开始</div>
-                <div class="main-highlight-body">
-                    首次使用建议先选择 <strong>LJ</strong> 或 <strong>Z-score</strong> 页面，按“先建项目、再建批次、再录入结果”的顺序开始。
-                    如果只是想了解方法差异和当前版本边界，可先阅读下方方法说明与使用教程。
-                </div>
-            </div>
-            """
-        ).strip()
-    )
+    hero_action_cols = st.columns([1, 1, 1.4], gap="medium")
+    with hero_action_cols[0]:
+        if st.button("进入 LJ", key="hero_jump_lj", type="primary", width="stretch"):
+            switch_top_level_method("单水平（LJ法）")
+    with hero_action_cols[1]:
+        if st.button("进入 Z-score", key="hero_jump_zscore", type="primary", width="stretch"):
+            switch_top_level_method("多水平（Z-score法）")
+    with hero_action_cols[2]:
+        st.caption("Instant 当前仅作预留入口，不参与首屏主操作。")
 
     st.divider()
-    st.markdown("**功能入口与方法说明**")
-    method_cards = [
-        (
+    st.markdown("**主入口**")
+    entry_col1, entry_col2 = st.columns(2, gap="large")
+    with entry_col1:
+        render_entry_card(
             "LJ",
-            "适用于单水平 LJ 曲线质控。",
-            [
-                "支持项目与批次管理、建靶、正式质控与 Westgard 判读。",
-                "支持标准视图 / 全范围视图、规则汇总、最新结果分析与记录维护。",
-                "适合常规单水平室内质控流程。",
-            ],
-            "进入单水平页面",
-            "单水平（LJ法）",
-        ),
-        (
+            "单水平质控工作页，适合日常结果录入、图表查看与 Westgard 判读。",
+            ["单水平", "保存结果", "latest analysis"],
+            eyebrow="主入口",
+        )
+        if st.button("进入 LJ 工作页", key="main_jump_lj_primary", type="primary", width="stretch"):
+            switch_top_level_method("单水平（LJ法）")
+    with entry_col2:
+        render_entry_card(
             "Z-score",
-            "适用于双水平 / 三水平多水平 IQC。",
-            [
-                "支持项目级水平数配置与批次级水平说明。",
-                "支持建靶期 / 正式质控期、多水平检测记录录入、图表与结果分析。",
-                "支持正式期记录维护，以及删除或编辑后的整批次重算。",
-            ],
-            "进入多水平页面",
-            "多水平（Z-score法）",
-        ),
-        (
-            "Instant",
-            "当前为预留页面。",
-            [
-                "本版本尚未接入正式业务逻辑。",
-                "页面仅保留模块定位说明，不参与当前单水平与多水平主流程。",
-                "如需可用功能，请优先进入“单水平（LJ法）”或“多水平（Z-score法）”页面。",
-            ],
-            "查看即刻法说明",
-            "即刻法",
-        ),
-    ]
-    method_cols = st.columns(3, gap="large")
-    for column, (title, caption, bullets, button_label, target_method) in zip(method_cols, method_cards):
-        with column:
-            bullet_html = "".join(f"<li>{html_escape(item)}</li>" for item in bullets)
-            render_html_block(
-                dedent(
-                    f"""
-                    <div class="main-entry-card">
-                        <div class="main-entry-card-title">{html_escape(title)}</div>
-                        <div class="main-entry-card-caption">{html_escape(caption)}</div>
-                        <ul class="main-entry-card-list">{bullet_html}</ul>
-                    </div>
-                    """
-                ).strip()
-            )
-            if st.button(button_label, key=f"main_jump_{target_method}", width="stretch"):
-                switch_top_level_method(target_method)
+            "多水平质控工作页，保留与 LJ 接近的阅读节奏，只增加 level 维度。",
+            ["2/3 水平", "保存 run", "图表判读"],
+            eyebrow="主入口",
+        )
+        if st.button("进入 Z-score 工作页", key="main_jump_zscore_primary", type="primary", width="stretch"):
+            switch_top_level_method("多水平（Z-score法）")
+
+    st.markdown("**预留模块**")
+    render_entry_card(
+        "Instant",
+        "当前仅作预留模块展示，不影响 LJ 与 Z-score 现有主流程。",
+        ["预留", "暂未接入", "后续扩展"],
+        eyebrow="预留模块",
+        muted=True,
+    )
+    instant_col1, instant_col2 = st.columns([1, 2.2], gap="medium")
+    with instant_col1:
+        if st.button("查看 Instant", key="main_jump_instant_reserved", width="stretch"):
+            switch_top_level_method("即刻法")
+    with instant_col2:
+        st.caption("如需立即开展质控，请优先从上方 LJ 或 Z-score 入口进入。")
 
     st.divider()
     st.markdown("**快速开始**")
@@ -155,28 +137,23 @@ def render_main_entry_page() -> None:
     with quick_start_col1:
         st.markdown("**LJ 快速开始**")
         st.markdown(
-            "1. 新建 LJ 项目。\n"
-            "2. 新建批次，并确认建靶所需次数。\n"
-            "3. 录入检测结果，累计建靶数据。\n"
-            "4. 建靶完成后自动进入正式质控，并开始 Westgard 判读。\n"
-            "5. 在图表区查看趋势、规则汇总与最新结果分析；如需修正历史数据，可进入记录维护。"
+            "1. 新建 LJ 项目与批次。\n"
+            "2. 确认建靶所需次数。\n"
+            "3. 录入检测结果并保存。\n"
+            "4. 在图表与 latest analysis 中查看当前判读。"
         )
-        if st.button("从 LJ 开始", key="main_quickstart_lj", width="stretch"):
-            switch_top_level_method("单水平（LJ法）")
     with quick_start_col2:
         st.markdown("**Z-score 快速开始**")
         st.markdown(
-            "1. 新建 Z-score 项目，并选择双水平或三水平。\n"
-            "2. 新建批次并配置各水平名称或说明。\n"
-            "3. 录入多水平检测记录，完成建靶。\n"
-            "4. 建靶完成后进入正式质控，查看单水平图、合并图和最新结果分析。\n"
-            "5. 如需修正正式期检测记录，可通过记录维护入口编辑或删除，系统会自动整批次重算。"
+            "1. 新建 Z-score 项目并确定水平数。\n"
+            "2. 新建批次并配置水平说明。\n"
+            "3. 录入本次 run 的各 level 结果。\n"
+            "4. 在图表与 latest analysis 中查看当前判读。"
         )
-        if st.button("从 Z-score 开始", key="main_quickstart_zscore", width="stretch"):
-            switch_top_level_method("多水平（Z-score法）")
 
     st.divider()
-    st.markdown("**使用说明与版本边界**")
+    st.markdown("**说明与版本信息**")
+    st.caption("使用说明、更新记录和版本边界后置在此，避免首屏被说明文字占满。")
     with st.expander("LJ 使用说明", expanded=False):
         st.markdown(
             "- 适用场景：单水平室内质控、LJ 曲线查看与 Westgard 规则判读。\n"
@@ -195,6 +172,21 @@ def render_main_entry_page() -> None:
             "- 图表理解：单水平图用于查看单个水平趋势；合并图用于对比多个水平；数据范围可切换为建靶期图、正式质控图或全图。\n"
             "- 厂家参考值：仅供参考，不直接替代实验室正式靶值；当前版本仅支持手工录入。\n"
             "- 正式期实时统计：只基于正式期在控数据计算，警告和失控结果不纳入统计。"
+        )
+
+    with st.expander("2026-04-05 更新：数据的导入导出", expanded=False):
+        st.markdown(
+            "**更新内容**\n"
+            "- LJ：当前批次已支持按阶段导出建靶期 / 正式期数据，格式可选 Excel / CSV；已支持当前 LJ 图 PNG 导出，以及仅基于正式数据的月度质控图 PNG 导出。\n"
+            "- LJ：已提供建靶期 / 正式期 CSV 模板下载、CSV 审查与确认导入；审查结果会返回总行数、可导入行数、错误行数、警告行数，并展示逐行问题。\n"
+            "- Z-score：当前批次已支持按阶段导出建靶期 / 正式期 run 宽表，格式可选 Excel / CSV；已支持当前图 PNG 导出，以及正式期月度图 PNG 导出。\n"
+            "- Z-score：已提供建靶期 / 正式期 CSV 模板下载、CSV 审查与确认导入；模板会按当前批次 2 水平 / 3 水平自动生成，审查结果同样返回摘要与逐行问题。\n"
+            "- 导入审查：阻断错误会禁止确认导入；非阻断项保留为提醒，覆盖模板不匹配、缺少必填列、模板外列、检测时间重复、备注为空等常见情况。\n\n"
+            "**当前限制 / 已知边界**\n"
+            "- 导入入口当前仅支持标准 CSV 模板，不支持 Excel 导入，也不支持跨批次批量导入。\n"
+            "- LJ 月度质控图与 Z-score 月度图当前都只导正式期数据，日期范围最长 30 天。\n"
+            "- Z-score 建靶期导入仅在当前批次未完成建靶时开放；正式期导入需建靶完成后再执行，建靶期文件不能跨阶段直接导入到正式期。\n"
+            "- 导入为追加写入当前批次；确认导入后会按现有业务口径刷新统计、判定、图表与最新结果分析。"
         )
 
     with st.expander("2026-03-31 更新：批次级 CV 要求（%）", expanded=False):
@@ -267,20 +259,20 @@ def render_main_entry_page() -> None:
                 "- 建靶 / 正式质控\n"
                 "- 批次级 CV 要求（%）保存与建靶提醒\n"
                 "- 图表查看、结果分析与记录维护\n"
-                "- LJ 导出与月度质控图导出"
+                "- LJ / Z-score 分阶段数据导出、CSV 导入与图表 PNG 导出"
             )
         with limit_col:
             st.markdown("**暂未支持**")
             st.markdown(
-                "- 批量导入\n"
-                "- Z-score 导出\n"
+                "- 跨批次批量导入\n"
+                "- Excel 导入\n"
                 "- COA 解析\n"
                 "- peer-group 数据\n"
                 "- target freeze / re-establish 等高级流程\n"
                 "- Instant 正式业务功能"
             )
 
-    st.info("可直接点击上方按钮进入对应页面；也可以使用顶部“功能入口”在“主页 / 单水平（LJ法） / 多水平（Z-score法） / 即刻法”之间切换。")
+    st.caption("当前版本保持可继续试用的稳定基线；首页建议直接从 LJ 或 Z-score 主入口进入。")
 
 
 def render_instant_placeholder_page() -> None:

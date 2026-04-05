@@ -274,6 +274,55 @@ def inject_global_styles() -> None:
             .zscore-summary-grid {
                 grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
             }
+            .level-summary-grid {
+                grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            }
+        }
+        @media (max-width: 960px) {
+            .workbench-context-chip-row,
+            .section-chip-row {
+                justify-content: flex-start;
+            }
+            .zscore-batch-header-side-chip-row {
+                justify-content: flex-start;
+            }
+            .zscore-batch-header-side-note {
+                text-align: left;
+            }
+            .level-summary-stat-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+        @media (max-width: 640px) {
+            .workbench-context-grid,
+            .level-summary-grid {
+                grid-template-columns: 1fr;
+            }
+            .level-summary-stat-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        .home-hero {
+            border: 1px solid #d8e4ef;
+            border-radius: 22px;
+            padding: 24px 24px 20px 24px;
+            background:
+                radial-gradient(circle at top right, rgba(24, 77, 141, 0.10), transparent 30%),
+                linear-gradient(135deg, #f8fbff 0%, #eef4fb 55%, #f9fbfd 100%);
+            margin: 4px 0 12px 0;
+        }
+        .home-hero-title {
+            font-size: 30px;
+            font-weight: 800;
+            color: #193553;
+            line-height: 1.18;
+        }
+        .home-hero-caption {
+            margin-top: 10px;
+            max-width: 780px;
+            font-size: 14px;
+            color: #3f5e7b;
+            line-height: 1.7;
         }
         .welcome-chip-row {
             display: flex;
@@ -292,14 +341,34 @@ def inject_global_styles() -> None:
             line-height: 1.2;
         }
         .main-entry-card {
-            border: 1px solid #dce5ef;
-            border-radius: 16px;
+            border: 1px solid #d7e4ef;
+            border-radius: 18px;
             background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
-            padding: 16px 16px 14px 16px;
-            min-height: 236px;
-            box-shadow: 0 4px 14px rgba(26, 59, 96, 0.05);
+            padding: 20px 18px 16px 18px;
+            min-height: 214px;
+            box-shadow: 0 8px 26px rgba(26, 59, 96, 0.06);
+        }
+        .main-entry-card.main-entry-card-muted {
+            background: linear-gradient(180deg, #fbfcfe 0%, #f6f8fb 100%);
+            border-color: #e1e7ef;
+            box-shadow: none;
+            min-height: 152px;
+        }
+        .main-entry-card-eyebrow {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 28px;
+            padding: 0 10px;
+            border-radius: 999px;
+            background: #eaf2fb;
+            color: #1e4f84;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
         }
         .main-entry-card-title {
+            margin-top: 14px;
             font-size: 22px;
             font-weight: 800;
             color: #1b3553;
@@ -318,6 +387,23 @@ def inject_global_styles() -> None:
             font-size: 13px;
             line-height: 1.7;
         }
+        .main-entry-card-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .main-entry-card-tag {
+            display: inline-flex;
+            align-items: center;
+            min-height: 28px;
+            padding: 0 10px;
+            border-radius: 999px;
+            background: #eef4fb;
+            color: #355777;
+            font-size: 12px;
+            font-weight: 600;
+        }
         .main-highlight-box {
             border: 1px solid #dbe4ef;
             border-radius: 14px;
@@ -335,6 +421,391 @@ def inject_global_styles() -> None:
             font-size: 13px;
             line-height: 1.7;
             color: #44586d;
+        }
+        .workbench-context-shell {
+            border: 1px solid #cfddeb;
+            border-radius: 22px;
+            background:
+                radial-gradient(circle at top right, rgba(24, 77, 141, 0.16), transparent 28%),
+                linear-gradient(135deg, #fdfefe 0%, #f1f6fc 56%, #f7fafd 100%);
+            padding: 20px 20px 18px 20px;
+            margin: 4px 0 4px 0;
+            box-shadow: 0 12px 30px rgba(24, 52, 86, 0.08);
+        }
+        .workbench-context-lead {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .workbench-context-eyebrow {
+            display: inline-flex;
+            align-items: center;
+            min-height: 28px;
+            padding: 0 10px;
+            border-radius: 999px;
+            background: rgba(24, 77, 141, 0.10);
+            color: #1e4f84;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+        }
+        .workbench-context-title {
+            margin-top: 10px;
+            font-size: 26px;
+            font-weight: 800;
+            color: #193553;
+            line-height: 1.2;
+        }
+        .workbench-context-chip-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+        .workbench-context-chip {
+            display: inline-flex;
+            align-items: center;
+            min-height: 30px;
+            padding: 0 12px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.92);
+            border: 1px solid #d5e0ec;
+            color: #355675;
+            font-size: 12px;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+        .workbench-context-caption {
+            margin-top: 10px;
+            font-size: 13px;
+            color: #48627d;
+            line-height: 1.6;
+        }
+        .workbench-context-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
+            gap: 12px;
+            margin-top: 16px;
+        }
+        .workbench-context-item {
+            border: 1px solid #d8e3ee;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.92);
+            padding: 10px 12px 11px 12px;
+        }
+        .workbench-context-label {
+            font-size: 11px;
+            color: #6a788b;
+            line-height: 1.25;
+        }
+        .workbench-context-value {
+            margin-top: 4px;
+            font-size: 15px;
+            font-weight: 700;
+            color: #203247;
+            line-height: 1.25;
+            word-break: break-word;
+        }
+        .zscore-batch-header-shell {
+            margin-bottom: 4px;
+        }
+        .zscore-batch-header-top {
+            display: flex;
+            justify-content: space-between;
+            gap: 18px;
+            flex-wrap: wrap;
+            align-items: flex-start;
+        }
+        .zscore-batch-header-left {
+            min-width: 280px;
+            flex: 1 1 380px;
+        }
+        .zscore-batch-header-right {
+            min-width: 260px;
+            flex: 1 1 320px;
+        }
+        .zscore-batch-header-primary-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 12px;
+        }
+        .zscore-batch-header-phase-chip,
+        .zscore-batch-header-batch-chip {
+            display: inline-flex;
+            align-items: center;
+            min-height: 34px;
+            padding: 0 14px;
+            border-radius: 999px;
+            font-size: 13px;
+            font-weight: 800;
+            line-height: 1.2;
+        }
+        .zscore-batch-header-phase-chip {
+            background: #184d8d;
+            color: #ffffff;
+            border: 1px solid #184d8d;
+        }
+        .zscore-batch-header-batch-chip {
+            background: rgba(255, 255, 255, 0.94);
+            color: #294867;
+            border: 1px solid #d3ddea;
+        }
+        .zscore-batch-header-project {
+            margin-top: 12px;
+            font-size: 14px;
+            font-weight: 700;
+            color: #254363;
+            line-height: 1.45;
+        }
+        .zscore-batch-header-side-title {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            color: #6a788b;
+            text-transform: uppercase;
+        }
+        .zscore-batch-header-side-chip-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 8px;
+            justify-content: flex-end;
+        }
+        .zscore-batch-header-side-chip {
+            display: inline-flex;
+            align-items: center;
+            min-height: 30px;
+            padding: 0 12px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.94);
+            border: 1px solid #d5e0ec;
+            color: #355675;
+            font-size: 12px;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+        .zscore-batch-header-side-note {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #52667c;
+            line-height: 1.6;
+            text-align: right;
+        }
+        .section-shell {
+            border: 1px solid #d8e4ef;
+            border-radius: 18px;
+            background: linear-gradient(180deg, #fbfdff 0%, #f5f9fd 100%);
+            padding: 14px 16px 12px 16px;
+            margin: 0 0 12px 0;
+        }
+        .section-shell.section-shell-accent {
+            border-color: #cfe0f1;
+            background:
+                radial-gradient(circle at top right, rgba(24, 77, 141, 0.12), transparent 26%),
+                linear-gradient(135deg, #fbfdff 0%, #eff5fb 100%);
+        }
+        .section-shell.section-shell-muted {
+            background: linear-gradient(180deg, #f9fbfd 0%, #f4f7fb 100%);
+            border-color: #e0e7ef;
+        }
+        .section-shell-top {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: flex-start;
+        }
+        .section-eyebrow {
+            display: inline-flex;
+            align-items: center;
+            min-height: 26px;
+            padding: 0 10px;
+            border-radius: 999px;
+            background: #eaf2fb;
+            color: #1e4f84;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+        }
+        .section-title {
+            margin-top: 8px;
+            font-size: 22px;
+            font-weight: 800;
+            line-height: 1.2;
+            color: #1b3553;
+        }
+        .section-caption {
+            margin-top: 8px;
+            font-size: 13px;
+            line-height: 1.6;
+            color: #48627d;
+        }
+        .section-chip-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: flex-end;
+        }
+        .section-chip {
+            display: inline-flex;
+            align-items: center;
+            min-height: 28px;
+            padding: 0 10px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.92);
+            border: 1px solid #d6e1ec;
+            color: #355675;
+            font-size: 12px;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+        .level-summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 14px;
+            margin: 10px 0 4px 0;
+        }
+        .level-summary-card {
+            border: 1px solid #d7e4ef;
+            border-radius: 18px;
+            background:
+                radial-gradient(circle at top right, rgba(24, 77, 141, 0.10), transparent 30%),
+                linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+            padding: 16px 16px 14px 16px;
+            box-shadow: 0 10px 28px rgba(24, 52, 86, 0.06);
+        }
+        .level-summary-title {
+            font-size: 19px;
+            font-weight: 800;
+            color: #1b3553;
+            line-height: 1.2;
+        }
+        .level-summary-subtitle {
+            margin-top: 5px;
+            font-size: 12px;
+            color: #5b6f84;
+            line-height: 1.45;
+        }
+        .level-summary-chip-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .level-summary-chip {
+            display: inline-flex;
+            align-items: center;
+            min-height: 30px;
+            padding: 0 10px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.94);
+            border: 1px solid #d7e3ee;
+            color: #355675;
+            font-size: 12px;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+        .level-summary-section {
+            margin-top: 14px;
+            padding-top: 14px;
+            border-top: 1px solid #e6edf5;
+        }
+        .level-summary-section-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: #24476d;
+            margin-bottom: 8px;
+        }
+        .level-summary-stat-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 8px;
+        }
+        .level-summary-stat {
+            border: 1px solid #dfe8f1;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.88);
+            padding: 8px 10px;
+        }
+        .level-summary-stat-label {
+            font-size: 11px;
+            color: #6a788b;
+            line-height: 1.25;
+        }
+        .level-summary-stat-value {
+            margin-top: 4px;
+            font-size: 15px;
+            font-weight: 700;
+            color: #233246;
+            line-height: 1.25;
+        }
+        .level-summary-note {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #5b6f84;
+            line-height: 1.55;
+        }
+        .analysis-card {
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(248, 251, 255, 0.92) 100%);
+            border-radius: 14px;
+            padding: 14px 14px 12px 14px;
+            border: 1px solid #dbe4ef;
+            box-shadow: 0 8px 22px rgba(24, 52, 86, 0.05);
+        }
+        .analysis-card-top {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+        }
+        .analysis-card-badge {
+            display: inline-flex;
+            align-items: center;
+            min-height: 28px;
+            padding: 0 10px;
+            border-radius: 999px;
+            color: #ffffff;
+            font-size: 12px;
+            font-weight: 700;
+        }
+        .analysis-card-source {
+            font-size: 12px;
+            font-weight: 600;
+            line-height: 1.4;
+        }
+        .analysis-card-summary {
+            font-size: 17px;
+            font-weight: 700;
+            line-height: 1.5;
+            margin-bottom: 12px;
+            word-break: break-word;
+        }
+        .analysis-card-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+            gap: 8px;
+        }
+        .analysis-card-item {
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.58);
+            padding: 8px 9px;
+        }
+        .analysis-card-label {
+            font-size: 11px;
+            color: inherit;
+            opacity: 0.74;
+            line-height: 1.25;
+        }
+        .analysis-card-value {
+            margin-top: 4px;
+            font-size: 13px;
+            font-weight: 700;
+            line-height: 1.45;
+            word-break: break-word;
         }
         </style>
         """,
@@ -360,6 +831,262 @@ def render_page_chrome() -> None:
     )
     st.title(APP_TITLE)
     st.caption("当前版本适用于内部试用、演示与小范围部署；如需反馈问题，可使用右上角“问题反馈”。")
+
+def _stringify_display_value(value: Any, fallback: str = "-") -> str:
+    if value is None:
+        return fallback
+    if isinstance(value, float):
+        if math.isnan(value):
+            return fallback
+        return f"{value:g}"
+    text = str(value).strip()
+    return text or fallback
+
+def render_workbench_context_bar(
+    title: str,
+    caption: str | None,
+    items: list[tuple[str, Any]],
+    badges: list[str] | None = None,
+) -> None:
+    cards = []
+    for label, value in items:
+        cards.append(
+            dedent(
+                f"""
+                <div class="workbench-context-item">
+                    <div class="workbench-context-label">{html_escape(str(label))}</div>
+                    <div class="workbench-context-value">{html_escape(_stringify_display_value(value))}</div>
+                </div>
+                """
+            ).strip()
+        )
+
+    badge_html = ""
+    if badges:
+        badge_html = (
+            '<div class="workbench-context-chip-row">'
+            + "".join(
+                f'<div class="workbench-context-chip">{html_escape(str(badge))}</div>'
+                for badge in badges
+                if str(badge).strip()
+            )
+            + "</div>"
+        )
+
+    html = dedent(
+        f"""
+        <div class="workbench-context-shell">
+            <div class="workbench-context-lead">
+                <div>
+                    <div class="workbench-context-eyebrow">当前工作批次</div>
+                    <div class="workbench-context-title">{html_escape(title)}</div>
+                </div>
+                {badge_html}
+            </div>
+            {
+                f'<div class="workbench-context-caption">{html_escape(caption)}</div>'
+                if caption
+                else ''
+            }
+            <div class="workbench-context-grid">
+                {''.join(cards)}
+            </div>
+        </div>
+        """
+    ).strip()
+    render_html_block(html)
+
+def render_zscore_batch_header(
+    *,
+    project_name: Any,
+    batch_id: Any,
+    phase_label: str,
+    level_count: int,
+    required_n: int,
+    template_label: str,
+    instrument: Any,
+    reagent: Any,
+    qc_material: Any,
+    concentration: Any,
+    level_summary: str,
+    lot_no: Any,
+    cv_limit: float | None,
+) -> None:
+    detail_items = [
+        ("项目名称", project_name),
+        ("批次编号", batch_id),
+        ("当前阶段", phase_label),
+        ("水平数", f"{int(level_count)} 水平"),
+        ("建靶要求次数", f"{int(required_n)} 次"),
+        ("规则组合", template_label),
+        ("仪器", instrument),
+        ("试剂", reagent),
+        ("质控品", qc_material),
+        ("浓度", concentration),
+        ("水平说明", level_summary),
+        ("质控品批号", lot_no),
+        ("CV 要求", "-" if cv_limit is None else f"≤ {float(cv_limit):.2f}%"),
+    ]
+    cards = []
+    for label, value in detail_items:
+        cards.append(
+            dedent(
+                f"""
+                <div class="workbench-context-item">
+                    <div class="workbench-context-label">{html_escape(str(label))}</div>
+                    <div class="workbench-context-value">{html_escape(_stringify_display_value(value))}</div>
+                </div>
+                """
+            ).strip()
+        )
+
+    side_chips = [
+        f"{int(level_count)} 水平",
+        _stringify_display_value(reagent),
+        _stringify_display_value(qc_material),
+    ]
+    side_chip_html = "".join(
+        f'<div class="zscore-batch-header-side-chip">{html_escape(chip)}</div>'
+        for chip in side_chips
+        if str(chip).strip() and chip != "-"
+    )
+    html = dedent(
+        f"""
+        <div class="workbench-context-shell zscore-batch-header-shell">
+            <div class="zscore-batch-header-top">
+                <div class="zscore-batch-header-left">
+                    <div class="workbench-context-eyebrow">当前工作批次</div>
+                    <div class="workbench-context-title">Z-score 当前批次</div>
+                    <div class="zscore-batch-header-primary-row">
+                        <div class="zscore-batch-header-phase-chip">{html_escape(_stringify_display_value(phase_label))}</div>
+                        <div class="zscore-batch-header-batch-chip">批次 #{html_escape(_stringify_display_value(batch_id))}</div>
+                    </div>
+                    <div class="zscore-batch-header-project">项目：{html_escape(_stringify_display_value(project_name))}</div>
+                </div>
+                <div class="zscore-batch-header-right">
+                    <div class="zscore-batch-header-side-title">Z-score 工作上下文</div>
+                    <div class="zscore-batch-header-side-chip-row">
+                        {side_chip_html}
+                    </div>
+                    <div class="zscore-batch-header-side-note">
+                        建靶要求 {html_escape(str(int(required_n)))} 次
+                        {' | CV 要求 ' + html_escape(f'≤ {float(cv_limit):.2f}%') if cv_limit is not None else ''}
+                        <br />
+                        仪器：{html_escape(_stringify_display_value(instrument))} | 浓度：{html_escape(_stringify_display_value(concentration))}
+                    </div>
+                </div>
+            </div>
+            <div class="workbench-context-caption">
+                先确认当前阶段、批次和水平信息，再录入本次 run，并在右侧查看图表与 latest analysis。
+            </div>
+            <div class="workbench-context-grid">
+                {''.join(cards)}
+            </div>
+        </div>
+        """
+    ).strip()
+    render_html_block(html)
+
+def render_section_intro(
+    title: str,
+    caption: str | None = None,
+    *,
+    eyebrow: str | None = None,
+    badges: list[str] | None = None,
+    tone: str = "default",
+) -> None:
+    tone_class = {
+        "default": "section-shell",
+        "accent": "section-shell section-shell-accent",
+        "muted": "section-shell section-shell-muted",
+    }.get(tone, "section-shell")
+    badge_html = ""
+    if badges:
+        badge_html = (
+            '<div class="section-chip-row">'
+            + "".join(
+                f'<div class="section-chip">{html_escape(str(badge))}</div>'
+                for badge in badges
+                if str(badge).strip()
+            )
+            + "</div>"
+        )
+
+    html = dedent(
+        f"""
+        <div class="{tone_class}">
+            <div class="section-shell-top">
+                <div>
+                    {f'<div class="section-eyebrow">{html_escape(eyebrow)}</div>' if eyebrow else ''}
+                    <div class="section-title">{html_escape(title)}</div>
+                </div>
+                {badge_html}
+            </div>
+            {f'<div class="section-caption">{html_escape(caption)}</div>' if caption else ''}
+        </div>
+        """
+    ).strip()
+    render_html_block(html)
+
+def render_level_summary_cards(cards: list[dict[str, Any]]) -> None:
+    rendered_cards: list[str] = []
+    for card in cards:
+        chip_html = "".join(
+            f'<div class="level-summary-chip">{html_escape(str(chip))}</div>'
+            for chip in (card.get("chips") or [])
+            if str(chip).strip()
+        )
+        section_html = ""
+        for section in card.get("sections") or []:
+            stats_html = "".join(
+                dedent(
+                    f"""
+                    <div class="level-summary-stat">
+                        <div class="level-summary-stat-label">{html_escape(str(label))}</div>
+                        <div class="level-summary-stat-value">{html_escape(_stringify_display_value(value))}</div>
+                    </div>
+                    """
+                ).strip()
+                for label, value in (section.get("stats") or [])
+            )
+            section_html += dedent(
+                f"""
+                <div class="level-summary-section">
+                    <div class="level-summary-section-title">{html_escape(str(section.get('title') or ''))}</div>
+                    <div class="level-summary-stat-grid">
+                        {stats_html}
+                    </div>
+                </div>
+                """
+            ).strip()
+
+        footer_html = (
+            f'<div class="level-summary-note">{html_escape(str(card.get("footer") or ""))}</div>'
+            if str(card.get("footer") or "").strip()
+            else ""
+        )
+        rendered_cards.append(
+            dedent(
+                f"""
+                <div class="level-summary-card">
+                    <div class="level-summary-title">{html_escape(str(card.get("title") or ""))}</div>
+                    {f'<div class="level-summary-subtitle">{html_escape(str(card.get("subtitle") or ""))}</div>' if str(card.get("subtitle") or "").strip() else ''}
+                    {f'<div class="level-summary-chip-row">{chip_html}</div>' if chip_html else ''}
+                    {section_html}
+                    {footer_html}
+                </div>
+                """
+            ).strip()
+        )
+
+    html = dedent(
+        f"""
+        <div class="level-summary-grid">
+            {''.join(rendered_cards)}
+        </div>
+        """
+    ).strip()
+    render_html_block(html)
 
 def format_zscore_template_display_name(template_or_label: Any) -> str:
     if isinstance(template_or_label, dict):
@@ -401,6 +1128,75 @@ def render_html_block(html: str) -> None:
         st.html(html_content)
     else:
         st.markdown(html_content, unsafe_allow_html=True)
+
+def render_latest_analysis_card(
+    status_label: str,
+    summary_text: str,
+    meta_items: list[tuple[str, Any]],
+    *,
+    source_text: str | None = None,
+    tone_key: str | None = None,
+) -> None:
+    palette = {
+        "符合质控": {"background": "#edf8ef", "border": "#59a14f", "text": "#1d5f2a", "badge": "#59a14f"},
+        "在控": {"background": "#edf8ef", "border": "#59a14f", "text": "#1d5f2a", "badge": "#59a14f"},
+        "accept": {"background": "#edf8ef", "border": "#59a14f", "text": "#1d5f2a", "badge": "#59a14f"},
+        "警告": {"background": "#fff6db", "border": "#edc948", "text": "#785b00", "badge": "#c89b00"},
+        "warning": {"background": "#fff6db", "border": "#edc948", "text": "#785b00", "badge": "#c89b00"},
+        "失控": {"background": "#fdeaea", "border": "#e15759", "text": "#8f1f28", "badge": "#c23b3d"},
+        "reject": {"background": "#fdeaea", "border": "#e15759", "text": "#8f1f28", "badge": "#c23b3d"},
+        PHASE_TARGET_BUILDING: {"background": "#eef4fb", "border": "#4e79a7", "text": "#24476d", "badge": "#4e79a7"},
+        "建靶中": {"background": "#eef4fb", "border": "#4e79a7", "text": "#24476d", "badge": "#4e79a7"},
+        "建靶期": {"background": "#eef4fb", "border": "#4e79a7", "text": "#24476d", "badge": "#4e79a7"},
+        "建靶期观察": {"background": "#eef4fb", "border": "#4e79a7", "text": "#24476d", "badge": "#4e79a7"},
+    }
+    style = palette.get(
+        tone_key or status_label,
+        {"background": "#f3f6fb", "border": "#7a8ca5", "text": "#31445a", "badge": "#58708f"},
+    )
+    safe_summary = (summary_text or "暂无分析提示。").strip()
+    cards = []
+    for label, value in meta_items:
+        cards.append(
+            dedent(
+                f"""
+                <div class="analysis-card-item">
+                    <div class="analysis-card-label">{html_escape(str(label))}</div>
+                    <div class="analysis-card-value">{html_escape(_stringify_display_value(value))}</div>
+                </div>
+                """
+            ).strip()
+        )
+
+    html = dedent(
+        f"""
+        <div
+            class="analysis-card"
+            style="
+                background:{style['background']};
+                border-color:{style['border']};
+                color:{style['text']};
+                border-left:5px solid {style['border']};
+            "
+        >
+            <div class="analysis-card-top">
+                <span class="analysis-card-badge" style="background:{style['badge']};">
+                    {html_escape(status_label or '状态未知')}
+                </span>
+                {
+                    f'<span class="analysis-card-source" style="color:{style["text"]};">{html_escape(source_text)}</span>'
+                    if source_text
+                    else ''
+                }
+            </div>
+            <div class="analysis-card-summary" style="color:{style['text']};">{html_escape(safe_summary)}</div>
+            <div class="analysis-card-grid">
+                {''.join(cards)}
+            </div>
+        </div>
+        """
+    ).strip()
+    render_html_block(html)
 
 def render_table_html(html: str, row_count: int) -> None:
     html_content = dedent(html).strip()
@@ -632,70 +1428,26 @@ def render_cv_limit_hint(current_cv: Any, cv_limit: float | None, subject: str) 
     else:
         st.warning(f"{message}，已超出要求。")
 
-def render_status_panel(status: str, message: str, rule_hits: str = "\u65e0") -> None:
-    palette = {
-        "\u7b26\u5408\u8d28\u63a7": {
-            "background": "#edf8ef",
-            "border": "#59a14f",
-            "text": "#1d5f2a",
-            "badge": "#59a14f",
-        },
-        "\u8b66\u544a": {
-            "background": "#fff6db",
-            "border": "#edc948",
-            "text": "#785b00",
-            "badge": "#c89b00",
-        },
-        "\u5931\u63a7": {
-            "background": "#fdeaea",
-            "border": "#e15759",
-            "text": "#8f1f28",
-            "badge": "#c23b3d",
-        },
-    }
-    style = palette.get(
-        status,
-        {
-            "background": "#f3f6fb",
-            "border": "#7a8ca5",
-            "text": "#31445a",
-            "badge": "#58708f",
-        },
-    )
+def render_status_panel(
+    status: str,
+    message: str,
+    rule_hits: str = "\u65e0",
+    *,
+    source_text: str | None = None,
+    phase_text: str | None = None,
+) -> None:
     compact_message = (message or "\u6682\u65e0\u5206\u6790\u63d0\u793a\u3002").splitlines()[0].strip()
-    html = dedent(
-        f"""
-        <div style="
-            background:{style['background']};
-            border:1px solid {style['border']};
-            border-left:5px solid {style['border']};
-            border-radius:10px;
-            padding:10px 12px;
-            margin:2px 0 6px 0;
-        ">
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
-                <span style="
-                    background:{style['badge']};
-                    color:#ffffff;
-                    font-size:12px;
-                    font-weight:700;
-                    border-radius:999px;
-                    padding:3px 9px;
-                ">{html_escape(status or '状态未知')}</span>
-                <span style="color:{style['text']};font-size:12px;font-weight:600;">
-                    触发规则：{html_escape(rule_hits or '无')}
-                </span>
-            </div>
-            <div style="
-                color:{style['text']};
-                line-height:1.45;
-                word-break:break-word;
-                font-size:13px;
-            ">{html_escape(compact_message)}</div>
-        </div>
-        """
-    ).strip()
-    render_html_block(html)
+    meta_items: list[tuple[str, Any]] = []
+    if phase_text:
+        meta_items.append(("当前阶段", phase_text))
+    meta_items.append(("触发规则", rule_hits or "无"))
+    render_latest_analysis_card(
+        status_label=status or "状态未知",
+        summary_text=compact_message,
+        meta_items=meta_items,
+        source_text=source_text,
+        tone_key=status,
+    )
 
 def render_standard_view_help(standard_sd_limit: float) -> None:
     st.caption(

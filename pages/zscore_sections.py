@@ -45,9 +45,9 @@ from ui.common import (
     render_cv_limit_hint,
     render_html_block,
     render_import_review_summary,
+    render_latest_analysis_card,
     render_live_log10_panel,
     render_standard_view_help,
-    render_zscore_batch_summary_row,
 )
 from ui.dialogs import (
     bump_zscore_record_maintenance_dialog_nonce as bump_zscore_record_maintenance_dialog_nonce_impl,
@@ -166,21 +166,8 @@ def render_zscore_latest_analysis_panel(
             st.info("当前处于建靶期，请先录入检测记录，用于累计实验室靶值并观察多水平趋势。")
         return
 
-    palette = {
-        "accept": {"background": "#edf8ef", "border": "#59a14f", "text": "#1d5f2a", "badge": "#59a14f"},
-        "warning": {"background": "#fff6db", "border": "#edc948", "text": "#785b00", "badge": "#c89b00"},
-        "reject": {"background": "#fdeaea", "border": "#e15759", "text": "#8f1f28", "badge": "#c23b3d"},
-        "pending": {"background": "#f3f6fb", "border": "#7a8ca5", "text": "#31445a", "badge": "#58708f"},
-        PHASE_TARGET_BUILDING: {
-            "background": "#eef4fb",
-            "border": "#4e79a7",
-            "text": "#24476d",
-            "badge": "#4e79a7",
-        },
-    }
     is_building_phase = (not formal_rules_enabled) or latest_run.get("phase") != PHASE_FORMAL_QC
     status = PHASE_TARGET_BUILDING if is_building_phase else str(latest_run.get("run_status", "pending"))
-    style = palette.get(status, palette["pending"])
     source_text = (
         "当前输入预览"
         if latest_run.get("is_preview")
@@ -188,44 +175,27 @@ def render_zscore_latest_analysis_panel(
     )
     phase_label = str(latest_run.get("phase_label") or get_phase_label(latest_run.get("phase", overall_phase)))
     badge_text = phase_label if is_building_phase else format_zscore_status_label(status)
-    html = dedent(
-        f"""
-        <div style="
-            background:{style['background']};
-            border:1px solid {style['border']};
-            border-left:5px solid {style['border']};
-            border-radius:10px;
-            padding:10px 12px;
-            margin:2px 0 6px 0;
-        ">
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
-                <span style="
-                    background:{style['badge']};
-                    color:#ffffff;
-                    font-size:12px;
-                    font-weight:700;
-                    border-radius:999px;
-                    padding:3px 9px;
-                ">{html_escape(badge_text)}</span>
-                <span style="color:{style['text']};font-size:12px;font-weight:600;">
-                    {html_escape(source_text)}
-                </span>
-            </div>
-            <div style="color:{style['text']};font-size:13px;line-height:1.55;">
-                <div><strong>当前阶段：</strong>{html_escape(phase_label)}</div>
-                {
-                    '<div><strong>正式规则判读：</strong>当前仅用于累计靶值与观察趋势，暂不输出正式警告或失控结论。</div>'
-                    '<div style="margin-top:6px;">本次结果纳入建靶观察，不作为正式质控结论。</div>'
-                    if is_building_phase
-                    else f"<div><strong>触发规则：</strong>{html_escape(format_zscore_rule_hits(latest_run.get('rule_hits_run', [])))}</div>"
-                    f"<div><strong>误差类型提示：</strong>{html_escape(format_error_type_label(latest_run.get('error_type_hint', 'unknown')))}</div>"
-                    f"<div style=\"margin-top:6px;\">{html_escape(str(latest_run.get('analysis_prompt', '暂无分析提示。')))}</div>"
-                }
-            </div>
-        </div>
-        """
-    ).strip()
-    render_html_block(html)
+    trigger_rule_text = (
+        "建靶期不启用正式规则"
+        if is_building_phase
+        else format_zscore_rule_hits(latest_run.get("rule_hits_run", []))
+    )
+    summary_text = (
+        "本次结果纳入建靶观察，不作为正式质控结论。"
+        if is_building_phase
+        else str(latest_run.get("analysis_prompt", "") or "暂无分析提示。").splitlines()[0].strip()
+    )
+    render_latest_analysis_card(
+        status_label=badge_text,
+        summary_text=summary_text,
+        meta_items=[
+            ("当前阶段", phase_label),
+            ("触发规则", trigger_rule_text),
+            ("误差类型", format_error_type_label(latest_run.get("error_type_hint", "unknown"))),
+        ],
+        source_text=source_text,
+        tone_key=status,
+    )
 
 def render_zscore_abnormal_note_quick_entry(latest_run: dict[str, Any] | None) -> None:
     if latest_run is None or latest_run.get("is_preview"):
@@ -276,6 +246,52 @@ def render_zscore_profile_stat_line(label: str, mean_value: Any, sd_value: Any, 
         f"CV% {format_optional_float(cv_value, digits=2, suffix='%')}"
     )
 
+def render_zscore_vendor_reference_editor_body(
+    batch_id: int,
+    template_id: str,
+    level_id: str,
+    level_display_name: str,
+    required_n: int,
+    profile: dict[str, Any],
+) -> None:
+    mean_default = format_optional_input_value(profile.get("vendor_reference_mean"))
+    sd_default = format_optional_input_value(profile.get("vendor_reference_sd"))
+    source_default = str(profile.get("vendor_reference_source_note", "") or "")
+    state_prefix = f"zscore_vendor_{batch_id}_{template_id}_{level_id.replace(' ', '_')}"
+    form_key = f"{state_prefix}_form"
+    with st.form(form_key):
+        mean_text = st.text_input("参考均值", value=mean_default, key=f"{state_prefix}_mean")
+        sd_text = st.text_input("参考标准差", value=sd_default, key=f"{state_prefix}_sd")
+        source_note = st.text_input("来源备注（可选）", value=source_default, key=f"{state_prefix}_source")
+        vendor_mean, _, _ = parse_numeric_input(mean_text)
+        vendor_sd, _, _ = parse_numeric_input(sd_text)
+        vendor_cv = None
+        if vendor_mean is not None and vendor_sd is not None and not math.isclose(vendor_mean, 0.0, abs_tol=1e-12):
+            vendor_cv = vendor_sd / vendor_mean * 100
+        st.caption(f"参考 CV%：{format_optional_float(vendor_cv, digits=2, suffix='%')}")
+        submitted = st.form_submit_button("保存厂家参考值", width="stretch")
+
+        if submitted:
+            validation_errors: list[str] = []
+            if mean_text.strip() and vendor_mean is None:
+                validation_errors.append("厂家参考均值必须为有效正数。")
+            if sd_text.strip() and vendor_sd is None:
+                validation_errors.append("厂家参考标准差必须为有效正数。")
+
+            if validation_errors:
+                st.error("\n".join(validation_errors))
+            else:
+                upsert_zscore_level_target(
+                    batch_id=batch_id,
+                    level_id=level_id,
+                    vendor_reference_mean=vendor_mean,
+                    vendor_reference_sd=vendor_sd,
+                    vendor_reference_source_note=source_note.strip() or None,
+                    required_n=int(required_n),
+                )
+                st.session_state["zscore_notice"] = f"{level_display_name}的厂家参考值已保存。"
+                st.rerun()
+
 def render_zscore_vendor_reference_editor(
     batch_id: int,
     template_id: str,
@@ -285,43 +301,14 @@ def render_zscore_vendor_reference_editor(
     profile: dict[str, Any],
 ) -> None:
     with st.expander("厂家参考值（仅作参考）", expanded=False):
-        mean_default = format_optional_input_value(profile.get("vendor_reference_mean"))
-        sd_default = format_optional_input_value(profile.get("vendor_reference_sd"))
-        source_default = str(profile.get("vendor_reference_source_note", "") or "")
-        state_prefix = f"zscore_vendor_{batch_id}_{template_id}_{level_id.replace(' ', '_')}"
-        form_key = f"{state_prefix}_form"
-        with st.form(form_key):
-            mean_text = st.text_input("参考均值", value=mean_default, key=f"{state_prefix}_mean")
-            sd_text = st.text_input("参考标准差", value=sd_default, key=f"{state_prefix}_sd")
-            source_note = st.text_input("来源备注（可选）", value=source_default, key=f"{state_prefix}_source")
-            vendor_mean, _, _ = parse_numeric_input(mean_text)
-            vendor_sd, _, _ = parse_numeric_input(sd_text)
-            vendor_cv = None
-            if vendor_mean is not None and vendor_sd is not None and not math.isclose(vendor_mean, 0.0, abs_tol=1e-12):
-                vendor_cv = vendor_sd / vendor_mean * 100
-            st.caption(f"参考 CV%：{format_optional_float(vendor_cv, digits=2, suffix='%')}")
-            submitted = st.form_submit_button("保存厂家参考值", width="stretch")
-
-            if submitted:
-                validation_errors: list[str] = []
-                if mean_text.strip() and vendor_mean is None:
-                    validation_errors.append("厂家参考均值必须为有效正数。")
-                if sd_text.strip() and vendor_sd is None:
-                    validation_errors.append("厂家参考标准差必须为有效正数。")
-
-                if validation_errors:
-                    st.error("\n".join(validation_errors))
-                else:
-                    upsert_zscore_level_target(
-                        batch_id=batch_id,
-                        level_id=level_id,
-                        vendor_reference_mean=vendor_mean,
-                        vendor_reference_sd=vendor_sd,
-                        vendor_reference_source_note=source_note.strip() or None,
-                        required_n=int(required_n),
-                    )
-                    st.session_state["zscore_notice"] = f"{level_display_name}的厂家参考值已保存。"
-                    st.rerun()
+        render_zscore_vendor_reference_editor_body(
+            batch_id=batch_id,
+            template_id=template_id,
+            level_id=level_id,
+            level_display_name=level_display_name,
+            required_n=required_n,
+            profile=profile,
+        )
 
 def format_zscore_rule_hits(rule_hits: list[dict[str, Any]]) -> str:
     if not rule_hits:
@@ -377,21 +364,12 @@ def render_zscore_chart_controls(
         selected_level = template["level_ids"][0]
         st.session_state["zscore_selected_level"] = selected_level
 
-    with st.expander(
-        build_zscore_chart_control_title(
-            template,
-            phase_scope,
-            view_mode,
-            selected_level,
-            level_label_map,
-            y_axis_mode,
-            standard_sd_limit,
-        ),
-        expanded=False,
-    ):
+    with st.container(border=True):
+        st.markdown("**图表控制**")
+        st.caption("高频项放外层，低频项收进高级设置，避免首屏像配置面板。")
         control_col1, control_col2 = st.columns([1.05, 1.15], gap="large")
         phase_scope = control_col1.radio(
-            "数据范围视图",
+            "数据范围",
             options=list(ZSCORE_PHASE_VIEW_OPTIONS.keys()),
             index=list(ZSCORE_PHASE_VIEW_OPTIONS.keys()).index(phase_scope),
             format_func=lambda option: ZSCORE_PHASE_VIEW_OPTIONS[option],
@@ -399,36 +377,16 @@ def render_zscore_chart_controls(
             key="zscore_phase_scope",
         )
         view_mode = control_col2.radio(
-            "图形呈现方式",
+            "视图模式",
             options=["单水平视图", "合并视图"],
             horizontal=True,
             key="zscore_view_mode",
         )
-        y_axis_mode = st.radio(
-            "Y 轴范围",
-            options=ZSCORE_Y_AXIS_OPTIONS,
-            horizontal=True,
-            key="zscore_y_axis_mode",
-        )
-        if y_axis_mode == "标准视图":
-            standard_sd_limit = float(
-                st.slider(
-                    "标准视图范围（均值 ± nSD）",
-                    min_value=2.0,
-                    max_value=6.0,
-                    value=float(st.session_state.get("zscore_standard_sd_limit", standard_sd_limit)),
-                    step=1.0,
-                    key="zscore_standard_sd_limit",
-                )
-            )
-            render_standard_view_help(standard_sd_limit)
-        else:
-            standard_sd_limit = float(st.session_state.get("zscore_standard_sd_limit", standard_sd_limit))
         if st.session_state.get("zscore_selected_level") not in template["level_ids"]:
             st.session_state["zscore_selected_level"] = template["level_ids"][0]
         if view_mode == "单水平视图":
             selected_level = st.radio(
-                "选择显示水平",
+                "当前水平",
                 options=template["level_ids"],
                 horizontal=True,
                 key="zscore_selected_level",
@@ -436,6 +394,39 @@ def render_zscore_chart_controls(
             )
         else:
             selected_level = st.session_state.get("zscore_selected_level", template["level_ids"][0])
+
+        with st.expander(
+            build_zscore_chart_control_title(
+                template,
+                phase_scope,
+                view_mode,
+                selected_level,
+                level_label_map,
+                y_axis_mode,
+                standard_sd_limit,
+            ),
+            expanded=False,
+        ):
+            y_axis_mode = st.radio(
+                "Y 轴范围",
+                options=ZSCORE_Y_AXIS_OPTIONS,
+                horizontal=True,
+                key="zscore_y_axis_mode",
+            )
+            if y_axis_mode == "标准视图":
+                standard_sd_limit = float(
+                    st.slider(
+                        "标准视图范围（均值 ± nSD）",
+                        min_value=2.0,
+                        max_value=6.0,
+                        value=float(st.session_state.get("zscore_standard_sd_limit", standard_sd_limit)),
+                        step=1.0,
+                        key="zscore_standard_sd_limit",
+                    )
+                )
+                render_standard_view_help(standard_sd_limit)
+            else:
+                standard_sd_limit = float(st.session_state.get("zscore_standard_sd_limit", standard_sd_limit))
     return phase_scope, view_mode, selected_level, y_axis_mode, standard_sd_limit
 
 def sync_zscore_workbench_state(
@@ -825,135 +816,169 @@ def render_zscore_entry_section(
     current_level_results, input_errors, _ = build_zscore_current_level_results(template)
     notice_message = str(st.session_state.pop("zscore_notice", "") or "")
 
-    st.subheader("录入与统计")
+    st.subheader("Run 录入")
     if notice_message:
         st.success(notice_message)
     st.caption(
         f"当前项目固定为 {level_count} 水平，当前采用 {format_zscore_template_display_name(template)}；"
-        f"各水平累计达到 {required_n} 次且形成有效 SD 后，系统才进入正式质控。"
+        "首屏先完成本次 run 录入，再看图表与 latest analysis。"
     )
     if cv_limit is not None:
         st.caption(f"当前批次已保存 CV 要求：≤ {cv_limit:.2f}%")
 
-    st.markdown("**本次数据录入**")
-    st.datetime_input("检测时间", key="zscore_entry_test_time")
-    st.selectbox(
-        "检测人",
-        options=operator_options,
-        index=None,
-        key="zscore_entry_operator",
-        accept_new_options=True,
-        placeholder="可选择历史姓名，也可直接输入新姓名",
-    )
-
-    st.divider()
-    st.markdown("**多水平结果录入**")
-    level_render_config = {
-        "Level 1": ("zscore_level1_value", "zscore-level1-log10-value", "zscore-level1-log10-hint"),
-        "Level 2": ("zscore_level2_value", "zscore-level2-log10-value", "zscore-level2-log10-hint"),
-        "Level 3": ("zscore_level3_value", "zscore-level3-log10-value", "zscore-level3-log10-hint"),
-    }
-    for level_id in template["level_ids"]:
-        display_label, level_caption = format_zscore_level_display(level_id, level_label_map)
-        value_key, value_element_id, hint_element_id = level_render_config[level_id]
-        render_zscore_level_input_block(
-            level_label=display_label,
-            value_key=value_key,
-            value_element_id=value_element_id,
-            hint_element_id=hint_element_id,
-            level_caption=level_caption,
+    with st.container(border=True):
+        st.markdown("**本次 run 录入**")
+        st.caption("先填写检测时间、检测人与各水平结果，再保存当前 run。")
+        st.datetime_input("检测时间", key="zscore_entry_test_time")
+        st.selectbox(
+            "检测人",
+            options=operator_options,
+            index=None,
+            key="zscore_entry_operator",
+            accept_new_options=True,
+            placeholder="可选择历史姓名，也可直接输入新姓名",
         )
 
-    if st.button("保存本次检测结果", type="primary", width="stretch"):
-        validation_errors = list(input_errors)
-        cleaned_operator = str(st.session_state.get("zscore_entry_operator", "") or "").strip()
-        if st.session_state.get("zscore_entry_test_time") is None:
-            validation_errors.append("请填写检测时间。")
-        if not cleaned_operator:
-            validation_errors.append("请填写检测人。")
-        for level_result in current_level_results:
-            if level_result["raw_value"] is None:
-                validation_errors.append(
-                    f"{format_level_id_display(level_result['level_id'])}的检测值必须为有效正数。"
-                )
+        level_render_config = {
+            "Level 1": ("zscore_level1_value", "zscore-level1-log10-value", "zscore-level1-log10-hint"),
+            "Level 2": ("zscore_level2_value", "zscore-level2-log10-value", "zscore-level2-log10-hint"),
+            "Level 3": ("zscore_level3_value", "zscore-level3-log10-value", "zscore-level3-log10-hint"),
+        }
+        for level_id in template["level_ids"]:
+            display_label, level_caption = format_zscore_level_display(level_id, level_label_map)
+            value_key, value_element_id, hint_element_id = level_render_config[level_id]
+            render_zscore_level_input_block(
+                level_label=display_label,
+                value_key=value_key,
+                value_element_id=value_element_id,
+                hint_element_id=hint_element_id,
+                level_caption=level_caption,
+            )
 
-        if validation_errors:
-            st.error("\n".join(dict.fromkeys(validation_errors)))
-        else:
-            try:
-                create_zscore_run(
-                    batch_id=selected_batch_id,
-                    test_time=st.session_state["zscore_entry_test_time"],
-                    operator=cleaned_operator,
-                    level_results=current_level_results,
-                    template_id=template_id,
-                    required_n=required_n,
-                    manual_note="",
-                )
-            except ValueError as exc:
-                st.error(str(exc))
+        if st.button("保存本次 run", type="primary", width="stretch"):
+            validation_errors = list(input_errors)
+            cleaned_operator = str(st.session_state.get("zscore_entry_operator", "") or "").strip()
+            if st.session_state.get("zscore_entry_test_time") is None:
+                validation_errors.append("请填写检测时间。")
+            if not cleaned_operator:
+                validation_errors.append("请填写检测人。")
+            for level_result in current_level_results:
+                if level_result["raw_value"] is None:
+                    validation_errors.append(
+                        f"{format_level_id_display(level_result['level_id'])}的检测值必须为有效正数。"
+                    )
+
+            if validation_errors:
+                st.error("\n".join(dict.fromkeys(validation_errors)))
             else:
-                st.session_state["zscore_notice"] = "Z-score 检测记录已保存。"
-                st.session_state["zscore_reset_entry_form"] = True
-                st.rerun()
+                try:
+                    create_zscore_run(
+                        batch_id=selected_batch_id,
+                        test_time=st.session_state["zscore_entry_test_time"],
+                        operator=cleaned_operator,
+                        level_results=current_level_results,
+                        template_id=template_id,
+                        required_n=required_n,
+                        manual_note="",
+                    )
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    st.session_state["zscore_notice"] = "Z-score 检测记录已保存。"
+                    st.session_state["zscore_reset_entry_form"] = True
+                    st.rerun()
 
-    st.divider()
-    st.markdown("**各水平建靶与正式统计**")
+def render_zscore_level_summary_section(
+    context: dict[str, object],
+    selected_batch_id: int,
+) -> None:
+    del selected_batch_id
+    level_label_map = context["level_label_map"]
+    level_target_profiles = context["level_target_profiles"]
+    required_level_ids = context["required_level_ids"]
+    cv_limit = context["cv_limit"]
+
+    st.subheader("各水平统计摘要")
+    st.caption("各 level 的建靶进度、正式靶值与实时统计下移为摘要区，避免首屏右上角过重。")
     stat_cols = st.columns(len(required_level_ids), gap="large")
     for stat_col, level_id in zip(stat_cols, required_level_ids):
         profile = level_target_profiles[level_id]
         display_label, level_caption = format_zscore_level_display(level_id, level_label_map)
         with stat_col:
-            st.markdown(f"**{display_label}**")
-            if level_caption:
-                st.caption(level_caption)
-            render_compact_stat_metrics(
-                [
-                    ("已收集", f"{profile['collected_n']}"),
-                    ("建靶要求", f"{profile['required_n']} 次"),
-                    ("已达建靶条件", "是" if profile["is_ready"] else "否"),
-                    ("阶段", profile["phase_label"]),
-                ]
-            )
-            render_zscore_profile_stat_line(
-                "厂家参考（仅参考）",
-                profile.get("vendor_reference_mean"),
-                profile.get("vendor_reference_sd"),
-                profile.get("vendor_reference_cv"),
-            )
-            if profile.get("vendor_reference_source_note"):
-                st.caption(f"来源备注：{profile['vendor_reference_source_note']}")
-            render_zscore_profile_stat_line(
-                "建靶统计",
-                profile.get("provisional_mean"),
-                profile.get("provisional_sd"),
-                profile.get("provisional_cv"),
-            )
-            render_cv_limit_hint(
-                profile.get("provisional_cv"),
-                cv_limit,
-                f"{display_label} 建靶",
-            )
-            render_zscore_profile_stat_line(
-                "正式靶值",
-                profile.get("final_target_mean"),
-                profile.get("final_target_sd"),
-                profile.get("final_target_cv"),
-            )
-            render_zscore_profile_stat_line(
-                "正式期实时统计",
-                profile.get("realtime_mean"),
-                profile.get("realtime_sd"),
-                profile.get("realtime_cv"),
-            )
-            render_zscore_vendor_reference_editor(
-                batch_id=selected_batch_id,
-                template_id=template_id,
-                level_id=level_id,
-                level_display_name=display_label,
-                required_n=required_n,
-                profile=profile,
-            )
+            with st.container(border=True):
+                st.markdown(f"**{display_label}**")
+                if level_caption:
+                    st.caption(level_caption)
+                render_compact_stat_metrics(
+                    [
+                        ("已收集", f"{profile['collected_n']}"),
+                        ("建靶要求", f"{profile['required_n']} 次"),
+                        ("已达建靶条件", "是" if profile["is_ready"] else "否"),
+                        ("当前阶段", profile["phase_label"]),
+                    ]
+                )
+                render_zscore_profile_stat_line(
+                    "建靶统计",
+                    profile.get("provisional_mean"),
+                    profile.get("provisional_sd"),
+                    profile.get("provisional_cv"),
+                )
+                render_cv_limit_hint(
+                    profile.get("provisional_cv"),
+                    cv_limit,
+                    f"{display_label} 建靶",
+                )
+                render_zscore_profile_stat_line(
+                    "正式靶值",
+                    profile.get("final_target_mean"),
+                    profile.get("final_target_sd"),
+                    profile.get("final_target_cv"),
+                )
+                render_zscore_profile_stat_line(
+                    "实时统计",
+                    profile.get("realtime_mean"),
+                    profile.get("realtime_sd"),
+                    profile.get("realtime_cv"),
+                )
+
+def render_zscore_vendor_reference_section(
+    context: dict[str, object],
+    selected_batch_id: int,
+) -> None:
+    template_id = context["template_id"]
+    required_n = context["required_n"]
+    level_label_map = context["level_label_map"]
+    level_target_profiles = context["level_target_profiles"]
+    required_level_ids = context["required_level_ids"]
+
+    st.subheader("厂家参考值")
+    st.caption("厂家参考值作为辅助信息后置并折叠展示，不与录入、图表、latest analysis 同级竞争。")
+    with st.expander("查看各水平厂家参考值与来源备注", expanded=False):
+        vendor_cols = st.columns(len(required_level_ids), gap="large")
+        for vendor_col, level_id in zip(vendor_cols, required_level_ids):
+            profile = level_target_profiles[level_id]
+            display_label, level_caption = format_zscore_level_display(level_id, level_label_map)
+            with vendor_col:
+                with st.container(border=True):
+                    st.markdown(f"**{display_label}**")
+                    if level_caption:
+                        st.caption(level_caption)
+                    render_zscore_profile_stat_line(
+                        "当前厂家参考",
+                        profile.get("vendor_reference_mean"),
+                        profile.get("vendor_reference_sd"),
+                        profile.get("vendor_reference_cv"),
+                    )
+                    if profile.get("vendor_reference_source_note"):
+                        st.caption(f"来源备注：{profile['vendor_reference_source_note']}")
+                    render_zscore_vendor_reference_editor_body(
+                        batch_id=selected_batch_id,
+                        template_id=template_id,
+                        level_id=level_id,
+                        level_display_name=display_label,
+                        required_n=required_n,
+                        profile=profile,
+                    )
 
 
 def render_zscore_chart_analysis_section(
@@ -996,8 +1021,11 @@ def render_zscore_chart_analysis_section(
             y_axis_mode=y_axis_mode,
             standard_sd_limit=standard_sd_limit,
         )
-    st.pyplot(figure, clear_figure=False, width="stretch")
-    render_zscore_latest_analysis_panel(latest_run, overall_phase, formal_rules_enabled)
+    with st.container(border=True):
+        st.markdown("**Z-score 图**")
+        st.pyplot(figure, clear_figure=False, width="stretch")
+    with st.container(border=True):
+        render_zscore_latest_analysis_panel(latest_run, overall_phase, formal_rules_enabled)
     render_zscore_abnormal_note_quick_entry(latest_run)
     render_zscore_rules_config_expander(template, overall_phase, formal_rules_enabled)
 
@@ -1038,18 +1066,19 @@ def render_zscore_maintenance_section(context: dict[str, object]) -> None:
     batch_context = context["batch_context"]
 
     st.subheader("记录维护")
-    st.caption("主工作区保持录入与判读；如需修正历史检测记录，请在弹窗中编辑或删除，系统会按当前批次全量重算。")
+    st.caption("维护区与导出区分离，避免和录入、图表混在一起。")
     open_zscore_maintenance_disabled = not history_runs
-    if st.button(
-        "打开 Z-score 记录维护",
-        key="open_zscore_record_maintenance_dialog",
-        width="stretch",
-        disabled=open_zscore_maintenance_disabled,
-    ):
-        bump_zscore_record_maintenance_dialog_nonce_impl()
-        st.session_state["show_zscore_record_maintenance_dialog"] = True
-    if open_zscore_maintenance_disabled:
-        st.info("当前批次暂无已保存的检测记录可维护。")
+    with st.container(border=True):
+        if st.button(
+            "打开 Z-score 记录维护",
+            key="open_zscore_record_maintenance_dialog",
+            width="stretch",
+            disabled=open_zscore_maintenance_disabled,
+        ):
+            bump_zscore_record_maintenance_dialog_nonce_impl()
+            st.session_state["show_zscore_record_maintenance_dialog"] = True
+        if open_zscore_maintenance_disabled:
+            st.info("当前批次暂无已保存的检测记录可维护。")
     if st.session_state.get("show_zscore_record_maintenance_dialog", False):
         render_zscore_record_maintenance_dialog_impl(history_runs, batch_context)
 
@@ -1151,8 +1180,9 @@ def render_zscore_export_import_section(
     formal_csv_bytes = formal_export_df.to_csv(index=False).encode("utf-8-sig")
     formal_xlsx_bytes = dataframe_to_xlsx_bytes(formal_export_df)
 
-    st.divider()
-    st.markdown("**数据导出**")
+    st.subheader("导出与导入")
+    st.caption("导出与 CSV 导入后置分组展示，结构尽量与 LJ 工作页保持一致。")
+    st.markdown("**导出**")
     st.caption("当前批次数据按 run 展开为宽表，建靶期与正式期分别导出。")
     zscore_export_format = st.radio(
         "导出数据格式",
@@ -1194,8 +1224,9 @@ def render_zscore_export_import_section(
         disabled=formal_export_df.empty,
     )
 
-    st.divider()
-    st.markdown("**Z-score 建靶期 CSV 导入**")
+    st.markdown("**CSV 导入**")
+    st.caption("建靶期与正式期模板、上传、审查、确认导入分开展示。")
+    st.markdown("**建靶期 CSV 导入**")
     st.caption("先下载当前批次标准模板，再上传 CSV 审查；只有无阻断错误时，才允许确认导入当前批次建靶期 run。")
     st.download_button(
         label="下载建靶期 CSV 模板",
@@ -1320,8 +1351,7 @@ def render_zscore_export_import_section(
             )
             st.rerun()
 
-    st.divider()
-    st.markdown("**Z-score 正式期 CSV 导入**")
+    st.markdown("**正式期 CSV 导入**")
     st.caption("先下载当前批次标准模板，再上传 CSV 审查；导入目标为当前批次正式期，只有无阻断错误时才允许确认导入。")
     st.download_button(
         label="下载正式期 CSV 模板",
@@ -1445,7 +1475,6 @@ def render_zscore_export_import_section(
             )
             st.rerun()
 
-    st.divider()
     st.markdown("**图导出**")
     st.download_button(
         label="导出当前图 PNG",
