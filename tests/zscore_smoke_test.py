@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -8,6 +9,10 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.legend import Legend
 import pandas as pd
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import database
 from database import (
@@ -522,10 +527,10 @@ def test_db_persistence_supports_vendor_targets_and_formal_realtime_stats() -> N
             template_id="2_level_classic",
             required_n=3,
         )
-        assert transition_run["phase"] == PHASE_FORMAL_QC
-        assert transition_run["run_status"] == "accept"
+        assert transition_run["phase"] == PHASE_TARGET_BUILDING
+        assert transition_run["run_status"] == PHASE_TARGET_BUILDING
 
-        create_zscore_run(
+        first_formal_run = create_zscore_run(
             batch_id=batch_id,
             test_time=BASE_TIME + pd.Timedelta(hours=3),
             operator="tester-4",
@@ -536,6 +541,8 @@ def test_db_persistence_supports_vendor_targets_and_formal_realtime_stats() -> N
             template_id="2_level_classic",
             required_n=3,
         )
+        assert first_formal_run["phase"] == PHASE_FORMAL_QC
+        assert first_formal_run["run_status"] == "accept"
         warning_run = create_zscore_run(
             batch_id=batch_id,
             test_time=BASE_TIME + pd.Timedelta(hours=4),
@@ -569,12 +576,12 @@ def test_db_persistence_supports_vendor_targets_and_formal_realtime_stats() -> N
         assert level_1["phase"] == PHASE_FORMAL_QC
         assert level_1["final_target_mean"] == 100.0
         assert round(level_1["final_target_sd"], 6) == 1.0
-        assert round(level_1["realtime_mean"], 6) == 99.5
-        assert round(level_1["realtime_sd"], 6) == round(math.sqrt(0.5), 6)
-        assert round(level_1["realtime_cv"], 6) == round(math.sqrt(0.5) / 99.5 * 100, 6)
+        assert round(level_1["realtime_mean"], 6) == 100.0
+        assert level_1["realtime_sd"] is None
+        assert level_1["realtime_cv"] is None
         assert level_2["vendor_reference_source_note"] == "手工录入"
-        assert round(level_2["realtime_mean"], 6) == 149.5
-        assert round(level_2["realtime_sd"], 6) == round(math.sqrt(0.5), 6)
+        assert round(level_2["realtime_mean"], 6) == 150.0
+        assert level_2["realtime_sd"] is None
 
 
 def test_zscore_project_level_count_persistence() -> None:
@@ -910,31 +917,32 @@ def test_edit_saved_run_rebuilds_targets_realtime_and_status() -> None:
         assert initial_runs[-1]["run_status"] == "warning"
 
         rebuild_state = update_saved_zscore_run(
-            run_id=int(initial_runs[4]["run_id"]),
-            test_time=BASE_TIME + pd.Timedelta(hours=4),
-            operator="editor-5",
+            run_id=int(initial_runs[6]["run_id"]),
+            test_time=BASE_TIME + pd.Timedelta(hours=6),
+            operator="editor-6",
             level_results=[
-                {"level_id": "Level 1", "raw_value": 103.0},
-                {"level_id": "Level 2", "raw_value": 151.0},
+                {"level_id": "Level 1", "raw_value": 100.2},
+                {"level_id": "Level 2", "raw_value": 150.0},
             ],
         )
 
         updated_targets = get_zscore_level_targets(batch_id, "2_level_classic", required_n=5)
         updated_runs = get_zscore_runs(batch_id, "2_level_classic")
         assert rebuild_state["overall_phase"] == PHASE_FORMAL_QC
-        assert updated_runs[4]["operator"] == "editor-5"
+        assert updated_runs[6]["operator"] == "editor-6"
         assert updated_runs[-1]["run_status"] == "accept"
-        assert not math.isclose(
+        assert math.isclose(
             float(initial_targets["Level 1"]["final_target_mean"]),
             float(updated_targets["Level 1"]["final_target_mean"]),
             rel_tol=1e-9,
             abs_tol=1e-9,
         )
         assert round(updated_targets["Level 1"]["final_target_mean"], 6) == round(
-            (100.0 + 101.0 + 99.0 + 100.0 + 103.0) / 5.0,
+            (100.0 + 101.0 + 99.0 + 100.0 + 100.5) / 5.0,
             6,
         )
-        assert round(updated_targets["Level 1"]["realtime_mean"], 6) == round((103.0 + 99.5 + 101.8) / 3.0, 6)
+        assert round(updated_targets["Level 1"]["realtime_mean"], 6) == round((99.5 + 100.2) / 2.0, 6)
+        assert round(updated_targets["Level 1"]["realtime_sd"], 6) == round(math.sqrt(0.245), 6)
 
 
 def test_delete_saved_run_rebuilds_batch_and_plot_points() -> None:
@@ -974,7 +982,7 @@ def test_delete_saved_run_rebuilds_batch_and_plot_points() -> None:
             )
 
         initial_runs = get_zscore_runs(batch_id, "2_level_classic")
-        delete_run_id = int(initial_runs[4]["run_id"])
+        delete_run_id = int(initial_runs[5]["run_id"])
         delete_saved_zscore_run(delete_run_id)
 
         remaining_runs = get_zscore_runs(batch_id, "2_level_classic")
@@ -983,15 +991,15 @@ def test_delete_saved_run_rebuilds_batch_and_plot_points() -> None:
         plot_df = build_zscore_plot_dataframe(remaining_runs)
 
         assert len(remaining_runs) == 5
-        assert {int(run["run_id"]) for run in raw_runs} == {1, 2, 3, 4, 6}
+        assert {int(run["run_id"]) for run in raw_runs} == {1, 2, 3, 4, 5}
         assert sum(len(run["level_results"]) for run in raw_runs) == 10
         assert len(plot_df) == 10
         assert round(targets["Level 1"]["final_target_mean"], 6) == round(
-            (100.0 + 101.0 + 99.0 + 100.0 + 99.0) / 5.0,
+            (100.0 + 101.0 + 99.0 + 100.0 + 100.5) / 5.0,
             6,
         )
-        assert round(targets["Level 1"]["realtime_mean"], 6) == 99.0
-        assert sorted(plot_df["test_sequence"].drop_duplicates().tolist()) == [1, 2, 3, 4, 6]
+        assert targets["Level 1"]["realtime_mean"] is None
+        assert sorted(plot_df["test_sequence"].drop_duplicates().tolist()) == [1, 2, 3, 4, 5]
 
 
 def test_saved_run_maintenance_respects_level_count_for_two_and_three_level_batches() -> None:
@@ -1051,6 +1059,7 @@ def test_saved_run_maintenance_respects_level_count_for_two_and_three_level_batc
                 (100.0, 150.0, 200.0),
                 (100.5, 150.5, 200.5),
                 (99.5, 149.5, 199.5),
+                (101.0, 150.0, 201.0),
             ],
             start=0,
         ):
@@ -1069,16 +1078,16 @@ def test_saved_run_maintenance_respects_level_count_for_two_and_three_level_batc
 
         runs_before_delete = get_zscore_runs(batch_id_3, "3_level_threes")
         update_saved_zscore_run(
-            run_id=int(runs_before_delete[4]["run_id"]),
-            test_time=BASE_TIME + pd.Timedelta(hours=4),
-            operator="editor-3",
+            run_id=int(runs_before_delete[5]["run_id"]),
+            test_time=BASE_TIME + pd.Timedelta(hours=5),
+            operator="editor-5",
             level_results=[
                 {"level_id": "Level 1", "raw_value": 102.0},
                 {"level_id": "Level 2", "raw_value": 151.0},
                 {"level_id": "Level 3", "raw_value": 202.0},
             ],
         )
-        rebuild_state = delete_saved_zscore_run(int(runs_before_delete[5]["run_id"]))
+        rebuild_state = delete_saved_zscore_run(int(runs_before_delete[6]["run_id"]))
         saved_runs = get_zscore_runs(batch_id_3, "3_level_threes")
 
         assert rebuild_state["overall_phase"] == PHASE_FORMAL_QC
@@ -1314,6 +1323,7 @@ def test_single_level_manual_legend_covers_status_phase_and_clip_marker() -> Non
         "建靶期（虚线 / 方形点）",
         "正式期（实线 / 圆形点）",
         "均值 / ±SD 控制线",
+        "描边点=含手动备注",
     ]
     plt.close(figure)
 
@@ -1332,6 +1342,7 @@ def test_overlay_manual_legend_keeps_status_phase_and_level_keys() -> None:
         "建靶期（虚线 / 方形点）",
         "正式期（实线 / 圆形点）",
         "均值 / ±SD 控制线",
+        "描边点=含手动备注",
     ]
     assert legend_map["水平"] == ["水平 1", "水平 2"]
     plt.close(figure)

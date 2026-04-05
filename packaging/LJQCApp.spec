@@ -1,7 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+from pathlib import Path
+
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 streamlit_datas = collect_data_files("streamlit")
 matplotlib_datas = collect_data_files("matplotlib")
@@ -19,17 +22,17 @@ hiddenimports = (
 
 
 a = Analysis(
-    ["run_app.py"],
-    pathex=[],
+    [str(PROJECT_ROOT / "run_app.py")],
+    pathex=[str(PROJECT_ROOT)],
     binaries=[],
     datas=streamlit_datas
     + streamlit_metadata
     + matplotlib_datas
     + [
-        ("app.py", "."),
-        ("database.py", "."),
-        ("plotting.py", "."),
-        ("qc_logic.py", "."),
+        (str(PROJECT_ROOT / "app.py"), "."),
+        (str(PROJECT_ROOT / "database.py"), "."),
+        (str(PROJECT_ROOT / "plotting.py"), "."),
+        (str(PROJECT_ROOT / "qc_logic.py"), "."),
     ],
     hiddenimports=hiddenimports,
     hookspath=[],

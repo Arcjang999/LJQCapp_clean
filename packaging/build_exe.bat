@@ -4,11 +4,12 @@ chcp 65001 >nul
 
 set "PYTHON_EXE=C:\Users\gao_h\AppData\Local\Python\bin\python.exe"
 set "SCRIPT_DIR=%~dp0"
+for %%I in ("%SCRIPT_DIR%..") do set "PROJECT_ROOT=%%~fI"
 set "SPEC_FILE=%SCRIPT_DIR%LJQCApp.spec"
 set "SAFE_BUILD_DIR=%LOCALAPPDATA%\LJQCApp\pyinstaller_build"
 set "SAFE_DIST_DIR=%LOCALAPPDATA%\LJQCApp\pyinstaller_dist"
 set "SAFE_PACKAGE_DIR=%SAFE_DIST_DIR%\LJQCApp"
-set "PROJECT_DIST_DIR=%SCRIPT_DIR%dist\LJQCApp"
+set "PROJECT_DIST_DIR=%PROJECT_ROOT%dist\LJQCApp"
 
 echo [LJQCApp] Building EXE package...
 echo.
@@ -39,10 +40,10 @@ if errorlevel 1 (
     exit /b 1
 )
 
-pushd "%SCRIPT_DIR%"
+pushd "%PROJECT_ROOT%"
 if not exist "%SAFE_BUILD_DIR%" mkdir "%SAFE_BUILD_DIR%"
 if not exist "%SAFE_DIST_DIR%" mkdir "%SAFE_DIST_DIR%"
-"%PYTHON_EXE%" -m PyInstaller --clean -y --distpath "%SAFE_DIST_DIR%" --workpath "%SAFE_BUILD_DIR%" "LJQCApp.spec"
+"%PYTHON_EXE%" -m PyInstaller --clean -y --distpath "%SAFE_DIST_DIR%" --workpath "%SAFE_BUILD_DIR%" "%SPEC_FILE%"
 set "BUILD_EXIT_CODE=%ERRORLEVEL%"
 popd
 
@@ -55,7 +56,7 @@ if not "%BUILD_EXIT_CODE%"=="0" (
 )
 
 if exist "%PROJECT_DIST_DIR%" rmdir /s /q "%PROJECT_DIST_DIR%"
-if not exist "%SCRIPT_DIR%dist" mkdir "%SCRIPT_DIR%dist"
+if not exist "%PROJECT_ROOT%dist" mkdir "%PROJECT_ROOT%dist"
 robocopy "%SAFE_PACKAGE_DIR%" "%PROJECT_DIST_DIR%" /MIR >nul
 set "COPY_EXIT_CODE=%ERRORLEVEL%"
 if %COPY_EXIT_CODE% GEQ 8 (

@@ -87,12 +87,12 @@ python -m pip install pyinstaller
 
 优先双击：
 
-- `build_exe.bat`
+- `packaging/build_exe.bat`
 
 或手动执行：
 
 ```powershell
-python -m PyInstaller --clean -y LJQCApp.spec
+python -m PyInstaller --clean -y packaging/LJQCApp.spec
 ```
 
 ### 产物说明
@@ -100,7 +100,7 @@ python -m PyInstaller --clean -y LJQCApp.spec
 - EXE：`dist/LJQCApp/LJQCApp.exe`
 - 分发方式：把整个 `dist/LJQCApp` 文件夹发给同事
 
-如果项目路径包含中文，推荐优先使用 `build_exe.bat`：
+如果项目路径包含中文，推荐优先使用 `packaging/build_exe.bat`：
 
 - 它会先在 `%LOCALAPPDATA%\LJQCApp\pyinstaller_dist` 下完成稳定构建
 - 然后再同步回项目内的 `dist/LJQCApp`

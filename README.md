@@ -191,16 +191,16 @@ python reset_db.py
 - 语法检查：
 
 ```powershell
-python -m py_compile app.py database.py zscore_logic.py zscore_plotting.py zscore_smoke_test.py qc_logic.py plotting.py
+python -m py_compile app.py database.py zscore_logic.py zscore_plotting.py tests/zscore_smoke_test.py qc_logic.py plotting.py
 ```
 
 - Z-score smoke tests：
 
 ```powershell
-python zscore_smoke_test.py
+python tests/zscore_smoke_test.py
 ```
 
-`zscore_smoke_test.py` 当前覆盖的重点包括：
+`tests/zscore_smoke_test.py` 当前覆盖的重点包括：
 
 - 双水平 / 三水平规则组合
 - 建靶期与正式质控期切换
@@ -216,7 +216,7 @@ python zscore_smoke_test.py
 
 ## 相关脚本
 
-- `build_exe.bat`：打包入口
-- `LJQCApp.spec`：PyInstaller 配置
+- `packaging/build_exe.bat`：打包入口
+- `packaging/LJQCApp.spec`：PyInstaller 配置
 - `run_app.py` / `run_app.bat`：应用启动脚本
 - `reset_db.py` / `reset_db.bat`：数据库重置脚本
