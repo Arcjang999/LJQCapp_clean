@@ -75,8 +75,8 @@ def render_lj_work_tab(
         render_workbench_context_bar(
             title="LJ 当前批次",
             caption=(
-                f"当前项目：{batch['project_name']}。先确认当前批次上下文，"
-                "再录入本次结果，并在右侧查看图表与 latest analysis。"
+                f"当前项目：{batch['project_name']}。"
+                "请确认当前批次与阶段后，再录入检测结果并查看图表与最新结果分析。"
             ),
             items=[
                 ("项目名称", batch["project_name"]),
@@ -91,10 +91,9 @@ def render_lj_work_tab(
                 ("CV 要求", "-" if cv_limit is None else f"≤ {cv_limit:.2f}%"),
             ],
             badges=[
-                f"批次 #{batch['id']}",
+                f"批次 {batch['id']}",
                 phase_label,
-                f"建靶 {target_n} 次",
-                "latest analysis 取最新保存结果",
+                f"建靶要求 {target_n} 次",
             ],
         )
 
@@ -103,20 +102,16 @@ def render_lj_work_tab(
         with entry_col:
             with st.container(border=True):
                 render_section_intro(
-                    title="批次数据录入",
-                    caption="左侧作为主操作区，录入、建靶统计与实时统计保持在同一组里。",
-                    eyebrow="主操作区",
-                    badges=[phase_label, f"建靶 {target_n} 次"],
+                    title="结果录入与统计",
+                    caption="在同一区完成结果录入、建靶统计和实时统计查看。",
                     tone="accent",
                 )
                 render_lj_entry_and_stats_section(context, selected_batch_id)
         with chart_col:
             with st.container(border=True):
                 render_section_intro(
-                    title="图表与判读",
-                    caption="右侧作为分析区，图表与 latest analysis 放在同一视觉组中。",
-                    eyebrow="分析区",
-                    badges=[phase_label, "图表 + latest analysis"],
+                    title="图表与最新结果分析",
+                    caption="在同一区查看质控图、当前判读和异常备注入口。",
                     tone="accent",
                 )
                 figure, chart_state = render_lj_chart_and_analysis_section(context)
@@ -131,9 +126,7 @@ def render_lj_work_tab(
         with st.container(border=True):
             render_section_intro(
                 title="检测记录维护",
-                caption="维护区后置为独立功能块，避免和录入、图表、结论混在一起。",
-                eyebrow="维护区",
-                badges=[f"当前记录 {len(qc_df)} 条"],
+                caption="可在此查看、编辑或删除历史检测记录。",
                 tone="muted",
             )
             _render_lj_maintenance_summary(qc_df)
@@ -143,9 +136,7 @@ def render_lj_work_tab(
         with st.container(border=True):
             render_section_intro(
                 title="导出与导入",
-                caption="上半区保留导出，下半区集中 CSV 导入，让功能边界更清楚。",
-                eyebrow="功能区",
-                badges=["导出", "CSV 导入"],
+                caption="导出当前批次数据与图表，并按模板导入 CSV。",
                 tone="muted",
             )
             render_lj_export_import_section(context, selected_batch_id, figure, chart_state)

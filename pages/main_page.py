@@ -76,8 +76,8 @@ def render_main_entry_page() -> None:
         <div class="home-hero">
             <div class="home-hero-title">实验室室内质控管理工具</div>
             <div class="home-hero-caption">
-                用于实验室室内质控的 LJ 与多水平 Z-score 管理与判读。
-                首页优先保留导航与高频入口，详细说明后移到下半区。
+                用于实验室室内质控的 LJ 与多水平 Z-score 管理与判读，
+                支持从首页快速进入当前工作流程。
             </div>
         </div>
         """
@@ -92,36 +92,36 @@ def render_main_entry_page() -> None:
         if st.button("进入 Z-score", key="hero_jump_zscore", type="primary", width="stretch"):
             switch_top_level_method("多水平（Z-score法）")
     with hero_action_cols[2]:
-        st.caption("Instant 当前仅作预留入口，不参与首屏主操作。")
+        st.caption("Instant 当前为预留模块，不影响 LJ 与 Z-score 使用。")
 
     st.divider()
-    st.markdown("**主入口**")
+    st.markdown("**选择工作流程**")
     entry_col1, entry_col2 = st.columns(2, gap="large")
     with entry_col1:
         render_entry_card(
             "LJ",
             "单水平质控工作页，适合日常结果录入、图表查看与 Westgard 判读。",
-            ["单水平", "保存结果", "latest analysis"],
-            eyebrow="主入口",
+            ["单水平质控", "结果录入", "最新结果分析"],
+            eyebrow="单水平质控",
         )
         if st.button("进入 LJ 工作页", key="main_jump_lj_primary", type="primary", width="stretch"):
             switch_top_level_method("单水平（LJ法）")
     with entry_col2:
         render_entry_card(
             "Z-score",
-            "多水平质控工作页，保留与 LJ 接近的阅读节奏，只增加 level 维度。",
-            ["2/3 水平", "保存 run", "图表判读"],
-            eyebrow="主入口",
+            "多水平质控工作页，适用于双水平或三水平结果录入、图表查看与判读。",
+            ["多水平质控", "本次检测录入", "图表判读"],
+            eyebrow="多水平质控",
         )
         if st.button("进入 Z-score 工作页", key="main_jump_zscore_primary", type="primary", width="stretch"):
             switch_top_level_method("多水平（Z-score法）")
 
-    st.markdown("**预留模块**")
+    st.markdown("**预留功能**")
     render_entry_card(
         "Instant",
-        "当前仅作预留模块展示，不影响 LJ 与 Z-score 现有主流程。",
-        ["预留", "暂未接入", "后续扩展"],
-        eyebrow="预留模块",
+        "当前仅保留入口说明，后续接入后会在此补充正式功能。",
+        ["预留功能", "暂未启用", "后续扩展"],
+        eyebrow="预留",
         muted=True,
     )
     instant_col1, instant_col2 = st.columns([1, 2.2], gap="medium")
@@ -129,7 +129,7 @@ def render_main_entry_page() -> None:
         if st.button("查看 Instant", key="main_jump_instant_reserved", width="stretch"):
             switch_top_level_method("即刻法")
     with instant_col2:
-        st.caption("如需立即开展质控，请优先从上方 LJ 或 Z-score 入口进入。")
+        st.caption("如需开始质控工作，请优先进入 LJ 或 Z-score 页面。")
 
     st.divider()
     st.markdown("**快速开始**")
@@ -140,20 +140,20 @@ def render_main_entry_page() -> None:
             "1. 新建 LJ 项目与批次。\n"
             "2. 确认建靶所需次数。\n"
             "3. 录入检测结果并保存。\n"
-            "4. 在图表与 latest analysis 中查看当前判读。"
+            "4. 在图表与最新结果分析中查看当前判读。"
         )
     with quick_start_col2:
         st.markdown("**Z-score 快速开始**")
         st.markdown(
             "1. 新建 Z-score 项目并确定水平数。\n"
             "2. 新建批次并配置水平说明。\n"
-            "3. 录入本次 run 的各 level 结果。\n"
-            "4. 在图表与 latest analysis 中查看当前判读。"
+            "3. 录入本次检测的各水平结果。\n"
+            "4. 在图表与最新结果分析中查看当前判读。"
         )
 
     st.divider()
     st.markdown("**说明与版本信息**")
-    st.caption("使用说明、更新记录和版本边界后置在此，避免首屏被说明文字占满。")
+    st.caption("使用说明、更新记录和版本边界集中在这里，便于按需查看。")
     with st.expander("LJ 使用说明", expanded=False):
         st.markdown(
             "- 适用场景：单水平室内质控、LJ 曲线查看与 Westgard 规则判读。\n"
@@ -179,7 +179,7 @@ def render_main_entry_page() -> None:
             "**更新内容**\n"
             "- LJ：当前批次已支持按阶段导出建靶期 / 正式期数据，格式可选 Excel / CSV；已支持当前 LJ 图 PNG 导出，以及仅基于正式数据的月度质控图 PNG 导出。\n"
             "- LJ：已提供建靶期 / 正式期 CSV 模板下载、CSV 审查与确认导入；审查结果会返回总行数、可导入行数、错误行数、警告行数，并展示逐行问题。\n"
-            "- Z-score：当前批次已支持按阶段导出建靶期 / 正式期 run 宽表，格式可选 Excel / CSV；已支持当前图 PNG 导出，以及正式期月度图 PNG 导出。\n"
+            "- Z-score：当前批次已支持按阶段导出建靶期 / 正式期检测记录宽表，格式可选 Excel / CSV；已支持当前图 PNG 导出，以及正式期月度图 PNG 导出。\n"
             "- Z-score：已提供建靶期 / 正式期 CSV 模板下载、CSV 审查与确认导入；模板会按当前批次 2 水平 / 3 水平自动生成，审查结果同样返回摘要与逐行问题。\n"
             "- 导入审查：阻断错误会禁止确认导入；非阻断项保留为提醒，覆盖模板不匹配、缺少必填列、模板外列、检测时间重复、备注为空等常见情况。\n\n"
             "**当前限制 / 已知边界**\n"
@@ -209,7 +209,7 @@ def render_main_entry_page() -> None:
             "2. LJ：连续录入至少 2 条建靶结果，确认开始显示“当前累计建靶 CV% / 批次要求 / 是否满足要求”。\n"
             "3. LJ：新建批次时不填写 CV 要求，进入工作区确认不报错、无空提示。\n"
             "4. LJ：通过编辑批次修改 CV 要求后再次进入工作区，确认提醒读取的是修改后的已保存值。\n"
-            "5. Z-score：新建批次时填写 CV 要求，录入多水平建靶 run，确认各 level 分别显示 provisional CV% 对照提醒。\n"
+            "5. Z-score：新建批次时填写 CV 要求，录入多水平建靶结果，确认各水平分别显示 provisional CV% 对照提醒。\n"
             "6. Z-score：旧批次或未设置 CV 要求的批次进入工作区，确认不报错。\n"
             "7. 回归一遍现有 LJ 主流程。\n"
             "8. 回归一遍现有实际生效的 Z-score 主流程。"
@@ -220,16 +220,16 @@ def render_main_entry_page() -> None:
             "**更新内容**\n"
             "- LJ 与 Z-score 已接入手动备注字段：维护区可查看和编辑，图上对含备注的点增加描边提示。\n"
             "- LJ 新增结果录入支持备注；Z-score 备注入口统一为“最新结果分析”下快捷补备注 + 维护区编辑，录入区不再保留常驻备注输入框。\n"
-            "- Z-score 最新结果分析改为按检测序号取最新 run，修复“图上已判异常，但卡片显示无规则触发”的不一致。\n"
+            "- Z-score 最新结果分析改为按最新保存检测记录取值，修复“图上已判异常，但卡片显示无规则触发”的不一致。\n"
             "- Z-score 检测人输入改为与 LJ 一致的最近使用记忆模式，支持下拉选择最近姓名，也支持手动输入新姓名。\n"
             "- 修复旧库升级后 batches 子表仍引用 batches_legacy 的问题，create_zscore_batch 不再因外键残留报错。\n\n"
             "**手工测试**\n"
             "- LJ：新增一条结果并填写备注，保存后检查维护区显示与图上描边；新增一条不填备注的结果，确认不报错且图上不加描边。\n"
             "- LJ：在维护区修改已有备注，确认刷新后仍存在；若最新结果为警告或失控，从“最新结果分析”下快捷补备注，确认维护区和图上同步。\n"
             "- Z-score：录入区不再显示常驻备注输入框；检测人支持从最近使用列表下拉选择，也支持直接输入新名字，保存后新名字会进入最近使用列表。\n"
-            "- Z-score：新增一条 run 并保存，确认不依赖录入区备注也能正常保存；在维护区查看和编辑备注，确认刷新后仍存在，图上描边状态同步。\n"
-            "- Z-score：当最新 formal run 为 warning 或 reject 时，从“最新结果分析”下快捷补备注，确认维护区和图上同步，不再保留第三个分散入口。\n"
-            "- Z-score：选取一个最新异常 run，确认图上最后一个 run 的状态样式与“最新结果分析”卡片中的规则判定一致，不再出现“图上像失控，但卡片显示无规则触发”。\n"
+            "- Z-score：新增一条检测记录并保存，确认不依赖录入区备注也能正常保存；在维护区查看和编辑备注，确认刷新后仍存在，图上描边状态同步。\n"
+            "- Z-score：当最新正式期记录为警告或失控时，从“最新结果分析”下快捷补备注，确认维护区和图上同步，不再保留第三个分散入口。\n"
+            "- Z-score：选取一条最新异常记录，确认图上最后一条记录的状态样式与“最新结果分析”卡片中的规则判定一致，不再出现“图上像失控，但卡片显示无规则触发”。\n"
             "- 旧库升级：使用旧库副本执行数据库初始化后，新建 Z-score 批次，确认不再出现 main.batches_legacy 相关报错。\n"
             "- 回归一遍现有 LJ 主流程与当前实际生效的 Z-score 主流程。\n\n"
             "**已知问题 / 暂未处理**\n"
@@ -248,7 +248,7 @@ def render_main_entry_page() -> None:
         )
 
     with st.expander("当前版本说明", expanded=False):
-        st.caption("当前版本已具备主流程使用能力，但仍以内部试用、演示和小范围部署为主要交付场景。")
+        st.caption("当前版本已支持 LJ 与 Z-score 主流程，可用于日常试用与小范围部署。")
         support_col, limit_col = st.columns(2, gap="large")
         with support_col:
             st.markdown("**已支持**")
@@ -272,7 +272,7 @@ def render_main_entry_page() -> None:
                 "- Instant 正式业务功能"
             )
 
-    st.caption("当前版本保持可继续试用的稳定基线；首页建议直接从 LJ 或 Z-score 主入口进入。")
+    st.caption("当前版本已提供稳定的 LJ 与 Z-score 工作入口，建议从上方页面直接开始使用。")
 
 
 def render_instant_placeholder_page() -> None:
@@ -283,7 +283,7 @@ def render_instant_placeholder_page() -> None:
     with status_col:
         st.markdown("**当前版本状态**")
         st.markdown(
-            "- 本页当前仅用于说明模块定位。\n"
+            "- 本页当前仅用于功能预告。\n"
             "- 暂不提供正式数据录入、规则判读、图表输出或导出能力。\n"
             "- 该页面不会影响 LJ 与 Z-score 现有主流程。"
         )
@@ -295,4 +295,4 @@ def render_instant_placeholder_page() -> None:
             "- Instant 后续若接入正式功能，会在此页面补充明确说明。"
         )
 
-    st.info("当前可用的质控流程请从顶部“功能入口”进入“单水平（LJ法）”或“多水平（Z-score法）”页面。")
+    st.info("当前可用的质控流程请从顶部入口进入“单水平（LJ法）”或“多水平（Z-score法）”页面。")

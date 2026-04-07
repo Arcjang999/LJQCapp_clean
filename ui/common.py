@@ -830,7 +830,7 @@ def render_page_chrome() -> None:
         ).strip()
     )
     st.title(APP_TITLE)
-    st.caption("当前版本适用于内部试用、演示与小范围部署；如需反馈问题，可使用右上角“问题反馈”。")
+    st.caption("当前版本已支持 LJ 与 Z-score 主流程；如需反馈问题，可使用右上角“问题反馈”。")
 
 def _stringify_display_value(value: Any, fallback: str = "-") -> str:
     if value is None:
@@ -878,7 +878,6 @@ def render_workbench_context_bar(
         <div class="workbench-context-shell">
             <div class="workbench-context-lead">
                 <div>
-                    <div class="workbench-context-eyebrow">当前工作批次</div>
                     <div class="workbench-context-title">{html_escape(title)}</div>
                 </div>
                 {badge_html}
@@ -942,9 +941,10 @@ def render_zscore_batch_header(
 
     side_chips = [
         f"{int(level_count)} 水平",
-        _stringify_display_value(reagent),
-        _stringify_display_value(qc_material),
+        f"建靶要求 {int(required_n)} 次",
     ]
+    if cv_limit is not None:
+        side_chips.append(f"CV 要求 ≤ {float(cv_limit):.2f}%")
     side_chip_html = "".join(
         f'<div class="zscore-batch-header-side-chip">{html_escape(chip)}</div>'
         for chip in side_chips
@@ -955,29 +955,21 @@ def render_zscore_batch_header(
         <div class="workbench-context-shell zscore-batch-header-shell">
             <div class="zscore-batch-header-top">
                 <div class="zscore-batch-header-left">
-                    <div class="workbench-context-eyebrow">当前工作批次</div>
                     <div class="workbench-context-title">Z-score 当前批次</div>
+                    <div class="zscore-batch-header-project">项目：{html_escape(_stringify_display_value(project_name))}</div>
                     <div class="zscore-batch-header-primary-row">
                         <div class="zscore-batch-header-phase-chip">{html_escape(_stringify_display_value(phase_label))}</div>
-                        <div class="zscore-batch-header-batch-chip">批次 #{html_escape(_stringify_display_value(batch_id))}</div>
+                        <div class="zscore-batch-header-batch-chip">批次 {html_escape(_stringify_display_value(batch_id))}</div>
                     </div>
-                    <div class="zscore-batch-header-project">项目：{html_escape(_stringify_display_value(project_name))}</div>
                 </div>
                 <div class="zscore-batch-header-right">
-                    <div class="zscore-batch-header-side-title">Z-score 工作上下文</div>
                     <div class="zscore-batch-header-side-chip-row">
                         {side_chip_html}
-                    </div>
-                    <div class="zscore-batch-header-side-note">
-                        建靶要求 {html_escape(str(int(required_n)))} 次
-                        {' | CV 要求 ' + html_escape(f'≤ {float(cv_limit):.2f}%') if cv_limit is not None else ''}
-                        <br />
-                        仪器：{html_escape(_stringify_display_value(instrument))} | 浓度：{html_escape(_stringify_display_value(concentration))}
                     </div>
                 </div>
             </div>
             <div class="workbench-context-caption">
-                先确认当前阶段、批次和水平信息，再录入本次 run，并在右侧查看图表与 latest analysis。
+                请确认当前批次与阶段后，再录入本次检测结果。
             </div>
             <div class="workbench-context-grid">
                 {''.join(cards)}

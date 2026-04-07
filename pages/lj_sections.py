@@ -322,8 +322,6 @@ def render_lj_entry_and_stats_section(
     cv_limit = context["cv_limit"]
     results_df = context["results_df"]
 
-    st.subheader("结果录入")
-    st.caption("左侧优先服务录入动作，再补充建靶统计与实时统计。")
     if st.session_state.get("entry_batch_id") != selected_batch_id:
         st.session_state["entry_batch_id"] = selected_batch_id
         st.session_state["entry_operator"] = operator_options[0] if operator_options else ""
@@ -353,7 +351,7 @@ def render_lj_entry_and_stats_section(
 
     with st.container(border=True):
         st.markdown("**本次结果录入**")
-        st.caption("检测时间、检测人、检测值、log10、变更点与备注收拢到同一操作卡。")
+        st.caption("检测时间、检测人、检测值、log10、变更点与备注集中在同一操作卡。")
         test_time = st.datetime_input(
             "检测时间",
             key="entry_test_time",
@@ -510,7 +508,6 @@ def render_lj_chart_and_analysis_section(
         else "当前批次最近结果"
     )
 
-    st.subheader("图表与判读")
     chart_view_mode = view_mode
     chart_y_axis_mode = y_axis_mode
     chart_standard_sd_limit = float(st.session_state.get("chart_standard_sd_limit", standard_sd_limit))
@@ -554,7 +551,7 @@ def render_lj_chart_and_analysis_section(
     chart_y_axis_mode = st.session_state.get("chart_y_axis_mode", y_axis_mode)
     chart_standard_sd_limit = float(st.session_state.get("chart_standard_sd_limit", standard_sd_limit))
     with st.container(border=True):
-        st.markdown("**LJ 图**")
+        st.markdown("**质控图**")
         figure = plot_lj_chart(
             qc_df=qc_df,
             stats=stats,
@@ -606,8 +603,6 @@ def render_lj_records_section(qc_df: pd.DataFrame) -> None:
 
 
 def render_lj_maintenance_section(qc_df: pd.DataFrame) -> None:
-    st.subheader("检测记录维护")
-    st.caption("记录维护后置为单独整块，主工作区优先保留录入、图表和结论。")
     open_maintenance_disabled = qc_df.empty
     with st.container(border=True):
         if st.button(
@@ -635,8 +630,6 @@ def render_lj_export_import_section(
     stats = context["stats"]
     results_df = context["results_df"]
 
-    st.subheader("导出与导入")
-    st.caption("导出与 CSV 导入后置展示，导出和导入分组排列，避免抢占首屏。")
     building_export_df = export_batch_results_for_phase(batch, qc_df, "building")
     formal_export_df = export_batch_results_for_phase(batch, qc_df, "formal")
     building_csv_bytes = building_export_df.to_csv(index=False).encode("utf-8-sig")
@@ -676,9 +669,8 @@ def render_lj_export_import_section(
         st.success(lj_formal_import_success_message)
 
     st.markdown("**导出**")
-    st.caption("导出当前批次数据与图表；导出能力放在一组，避免与保存动作抢首屏注意力。")
     st.markdown("**分阶段数据导出**")
-    st.caption("按按钮语义分开导出当前批次的建靶期或正式期数据。")
+    st.caption("可分别导出当前批次的建靶期或正式期数据。")
     export_format = st.radio(
         "导出数据格式",
         options=["Excel (.xlsx)", "CSV (.csv)"],

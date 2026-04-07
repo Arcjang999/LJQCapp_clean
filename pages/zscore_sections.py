@@ -207,7 +207,7 @@ def render_zscore_abnormal_note_quick_entry(latest_run: dict[str, Any] | None) -
 
     run_id = int(latest_run["run_id"])
     current_note = str(latest_run.get("manual_note", "") or "")
-    st.caption("\u5f53\u524d\u5f02\u5e38 run \u53ef\u76f4\u63a5\u8865\u5145\u5f02\u5e38\u5907\u6ce8\uff0c\u5199\u56de\u540c\u4e00\u6761 run \u8bb0\u5f55\u3002")
+    st.caption("当前异常记录可直接补充备注，并写回同一条检测记录。")
     with st.form(f"zscore_abnormal_note_form_{run_id}"):
         manual_note = st.text_area(
             "\u5f02\u5e38\u5907\u6ce8\uff08\u53ef\u9009\uff09",
@@ -339,39 +339,38 @@ def render_zscore_chart_controls(
     default_phase_scope: str,
     level_label_map: dict[str, str],
 ) -> tuple[str, str, str, str, float]:
-    phase_scope = st.session_state.get("zscore_phase_scope", default_phase_scope)
-    if phase_scope not in ZSCORE_PHASE_VIEW_OPTIONS:
-        phase_scope = default_phase_scope
-        st.session_state["zscore_phase_scope"] = phase_scope
+    phase_scope_options = list(ZSCORE_PHASE_VIEW_OPTIONS.keys())
+    if st.session_state.get("zscore_phase_scope") not in phase_scope_options:
+        st.session_state["zscore_phase_scope"] = default_phase_scope
+    phase_scope = str(st.session_state["zscore_phase_scope"])
 
-    view_mode = st.session_state.get("zscore_view_mode", "单水平视图")
-    if view_mode not in {"单水平视图", "合并视图"}:
-        view_mode = "单水平视图"
-        st.session_state["zscore_view_mode"] = view_mode
+    if st.session_state.get("zscore_view_mode") not in {"单水平视图", "合并视图"}:
+        st.session_state["zscore_view_mode"] = "单水平视图"
+    view_mode = str(st.session_state["zscore_view_mode"])
 
-    y_axis_mode = st.session_state.get("zscore_y_axis_mode", ZSCORE_Y_AXIS_OPTIONS[0])
-    if y_axis_mode not in ZSCORE_Y_AXIS_OPTIONS:
-        y_axis_mode = ZSCORE_Y_AXIS_OPTIONS[0]
-        st.session_state["zscore_y_axis_mode"] = y_axis_mode
+    if st.session_state.get("zscore_y_axis_mode") not in ZSCORE_Y_AXIS_OPTIONS:
+        st.session_state["zscore_y_axis_mode"] = ZSCORE_Y_AXIS_OPTIONS[0]
+    y_axis_mode = str(st.session_state["zscore_y_axis_mode"])
 
-    standard_sd_limit = float(st.session_state.get("zscore_standard_sd_limit", 4.0) or 4.0)
+    try:
+        standard_sd_limit = float(st.session_state.get("zscore_standard_sd_limit", 4.0) or 4.0)
+    except (TypeError, ValueError):
+        standard_sd_limit = 4.0
     if standard_sd_limit <= 0:
         standard_sd_limit = 4.0
-        st.session_state["zscore_standard_sd_limit"] = standard_sd_limit
+    st.session_state["zscore_standard_sd_limit"] = standard_sd_limit
 
-    selected_level = st.session_state.get("zscore_selected_level", template["level_ids"][0])
-    if selected_level not in template["level_ids"]:
-        selected_level = template["level_ids"][0]
-        st.session_state["zscore_selected_level"] = selected_level
+    if st.session_state.get("zscore_selected_level") not in template["level_ids"]:
+        st.session_state["zscore_selected_level"] = template["level_ids"][0]
+    selected_level = str(st.session_state["zscore_selected_level"])
 
     with st.container(border=True):
         st.markdown("**图表控制**")
-        st.caption("高频项放外层，低频项收进高级设置，避免首屏像配置面板。")
+        st.caption("常用选项直接显示，更多设置可在展开后调整。")
         control_col1, control_col2 = st.columns([1.05, 1.15], gap="large")
         phase_scope = control_col1.radio(
             "数据范围",
-            options=list(ZSCORE_PHASE_VIEW_OPTIONS.keys()),
-            index=list(ZSCORE_PHASE_VIEW_OPTIONS.keys()).index(phase_scope),
+            options=phase_scope_options,
             format_func=lambda option: ZSCORE_PHASE_VIEW_OPTIONS[option],
             horizontal=True,
             key="zscore_phase_scope",
@@ -419,7 +418,6 @@ def render_zscore_chart_controls(
                         "标准视图范围（均值 ± nSD）",
                         min_value=2.0,
                         max_value=6.0,
-                        value=float(st.session_state.get("zscore_standard_sd_limit", standard_sd_limit)),
                         step=1.0,
                         key="zscore_standard_sd_limit",
                     )
@@ -816,19 +814,17 @@ def render_zscore_entry_section(
     current_level_results, input_errors, _ = build_zscore_current_level_results(template)
     notice_message = str(st.session_state.pop("zscore_notice", "") or "")
 
-    st.subheader("Run 录入")
     if notice_message:
         st.success(notice_message)
     st.caption(
-        f"当前项目固定为 {level_count} 水平，当前采用 {format_zscore_template_display_name(template)}；"
-        "首屏先完成本次 run 录入，再看图表与 latest analysis。"
+        f"当前项目固定为 {level_count} 水平，规则组合为 {format_zscore_template_display_name(template)}。"
+        "完成录入后可查看图表与最新结果分析。"
     )
     if cv_limit is not None:
         st.caption(f"当前批次已保存 CV 要求：≤ {cv_limit:.2f}%")
 
     with st.container(border=True):
-        st.markdown("**本次 run 录入**")
-        st.caption("先填写检测时间、检测人与各水平结果，再保存当前 run。")
+        st.markdown("**录入信息**")
         st.datetime_input("检测时间", key="zscore_entry_test_time")
         st.selectbox(
             "检测人",
@@ -855,7 +851,7 @@ def render_zscore_entry_section(
                 level_caption=level_caption,
             )
 
-        if st.button("保存本次 run", type="primary", width="stretch"):
+        if st.button("保存本次检测", type="primary", width="stretch"):
             validation_errors = list(input_errors)
             cleaned_operator = str(st.session_state.get("zscore_entry_operator", "") or "").strip()
             if st.session_state.get("zscore_entry_test_time") is None:
@@ -884,7 +880,7 @@ def render_zscore_entry_section(
                 except ValueError as exc:
                     st.error(str(exc))
                 else:
-                    st.session_state["zscore_notice"] = "Z-score 检测记录已保存。"
+                    st.session_state["zscore_notice"] = "Z-score 检测结果已保存。"
                     st.session_state["zscore_reset_entry_form"] = True
                     st.rerun()
 
@@ -899,7 +895,7 @@ def render_zscore_level_summary_section(
     cv_limit = context["cv_limit"]
 
     st.subheader("各水平统计摘要")
-    st.caption("各 level 的建靶进度、正式靶值与实时统计下移为摘要区，避免首屏右上角过重。")
+    st.caption("各水平的建靶进度、正式靶值与实时统计集中展示在这里。")
     stat_cols = st.columns(len(required_level_ids), gap="large")
     for stat_col, level_id in zip(stat_cols, required_level_ids):
         profile = level_target_profiles[level_id]
@@ -951,9 +947,7 @@ def render_zscore_vendor_reference_section(
     level_target_profiles = context["level_target_profiles"]
     required_level_ids = context["required_level_ids"]
 
-    st.subheader("厂家参考值")
-    st.caption("厂家参考值作为辅助信息后置并折叠展示，不与录入、图表、latest analysis 同级竞争。")
-    with st.expander("查看各水平厂家参考值与来源备注", expanded=False):
+    with st.expander("查看各水平参考值与来源备注", expanded=False):
         vendor_cols = st.columns(len(required_level_ids), gap="large")
         for vendor_col, level_id in zip(vendor_cols, required_level_ids):
             profile = level_target_profiles[level_id]
@@ -1022,7 +1016,7 @@ def render_zscore_chart_analysis_section(
             standard_sd_limit=standard_sd_limit,
         )
     with st.container(border=True):
-        st.markdown("**Z-score 图**")
+        st.markdown("**质控图**")
         st.pyplot(figure, clear_figure=False, width="stretch")
     with st.container(border=True):
         render_zscore_latest_analysis_panel(latest_run, overall_phase, formal_rules_enabled)
@@ -1065,12 +1059,10 @@ def render_zscore_maintenance_section(context: dict[str, object]) -> None:
     history_runs = context["history_runs"]
     batch_context = context["batch_context"]
 
-    st.subheader("记录维护")
-    st.caption("维护区与导出区分离，避免和录入、图表混在一起。")
     open_zscore_maintenance_disabled = not history_runs
     with st.container(border=True):
         if st.button(
-            "打开 Z-score 记录维护",
+            "打开记录维护",
             key="open_zscore_record_maintenance_dialog",
             width="stretch",
             disabled=open_zscore_maintenance_disabled,
@@ -1180,10 +1172,9 @@ def render_zscore_export_import_section(
     formal_csv_bytes = formal_export_df.to_csv(index=False).encode("utf-8-sig")
     formal_xlsx_bytes = dataframe_to_xlsx_bytes(formal_export_df)
 
-    st.subheader("导出与导入")
-    st.caption("导出与 CSV 导入后置分组展示，结构尽量与 LJ 工作页保持一致。")
+    st.caption("导出当前批次数据与图表，并按模板导入 CSV。")
     st.markdown("**导出**")
-    st.caption("当前批次数据按 run 展开为宽表，建靶期与正式期分别导出。")
+    st.caption("当前批次数据按每次检测展开为宽表，建靶期与正式期可分别导出。")
     zscore_export_format = st.radio(
         "导出数据格式",
         options=["Excel (.xlsx)", "CSV (.csv)"],
@@ -1227,7 +1218,7 @@ def render_zscore_export_import_section(
     st.markdown("**CSV 导入**")
     st.caption("建靶期与正式期模板、上传、审查、确认导入分开展示。")
     st.markdown("**建靶期 CSV 导入**")
-    st.caption("先下载当前批次标准模板，再上传 CSV 审查；只有无阻断错误时，才允许确认导入当前批次建靶期 run。")
+    st.caption("先下载当前批次标准模板，再上传 CSV 审查；只有无阻断错误时，才允许确认导入当前批次建靶期检测记录。")
     st.download_button(
         label="下载建靶期 CSV 模板",
         data=zscore_building_template_csv_bytes,
@@ -1238,7 +1229,7 @@ def render_zscore_export_import_section(
         width="stretch",
     )
     if zscore_building_import_disabled:
-        st.info("当前批次已完成建靶。V1 仅支持当前批次建靶期 CSV 导入，不支持在此入口继续追加正式期 run。")
+        st.info("当前批次已完成建靶。当前入口仅支持建靶期 CSV 导入，不支持继续追加正式期检测记录。")
         st.session_state.pop(zscore_building_import_review_state_key, None)
 
     uploaded_zscore_building_csv = st.file_uploader(
@@ -1347,7 +1338,7 @@ def render_zscore_export_import_section(
                 zscore_building_import_uploader_nonce + 1
             )
             st.session_state[zscore_building_import_success_key] = (
-                f"已追加导入 {imported_row_count} 条建靶期 run，并自动更新当前建靶统计与建靶进度。"
+                f"已追加导入 {imported_row_count} 条建靶期检测记录，并自动更新当前建靶统计与建靶进度。"
             )
             st.rerun()
 
@@ -1471,7 +1462,7 @@ def render_zscore_export_import_section(
                 zscore_formal_import_uploader_nonce + 1
             )
             st.session_state[zscore_formal_import_success_key] = (
-                f"已追加导入 {imported_formal_row_count} 条正式期 run，并自动刷新各 level Z-score、run-level 判定、图表与最新结果分析。"
+                f"已追加导入 {imported_formal_row_count} 条正式期检测记录，并自动刷新各水平 Z-score、判定结果、图表与最新结果分析。"
             )
             st.rerun()
 
