@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from html import escape as html_escape
 from textwrap import dedent
 
 import streamlit as st
@@ -45,32 +44,6 @@ def normalize_top_level_method_selection() -> None:
 
 
 def render_main_entry_page() -> None:
-    def render_entry_card(
-        title: str,
-        caption: str,
-        tags: list[str],
-        *,
-        eyebrow: str,
-        muted: bool = False,
-    ) -> None:
-        tags_html = "".join(
-            f'<span class="main-entry-card-tag">{html_escape(tag)}</span>'
-            for tag in tags
-        )
-        muted_class = " main-entry-card-muted" if muted else ""
-        render_html_block(
-            dedent(
-                f"""
-                <div class="main-entry-card{muted_class}">
-                    <div class="main-entry-card-eyebrow">{html_escape(eyebrow)}</div>
-                    <div class="main-entry-card-title">{html_escape(title)}</div>
-                    <div class="main-entry-card-caption">{html_escape(caption)}</div>
-                    <div class="main-entry-card-tags">{tags_html}</div>
-                </div>
-                """
-            ).strip()
-        )
-
     hero_html = dedent(
         """
         <div class="home-hero">
@@ -84,52 +57,25 @@ def render_main_entry_page() -> None:
     ).strip()
     render_html_block(hero_html)
 
-    hero_action_cols = st.columns([1, 1, 1.4], gap="medium")
+    hero_action_cols = st.columns(2, gap="medium")
     with hero_action_cols[0]:
         if st.button("进入 LJ", key="hero_jump_lj", type="primary", width="stretch"):
             switch_top_level_method("单水平（LJ法）")
     with hero_action_cols[1]:
         if st.button("进入 Z-score", key="hero_jump_zscore", type="primary", width="stretch"):
             switch_top_level_method("多水平（Z-score法）")
-    with hero_action_cols[2]:
-        st.caption("Instant 当前为预留模块，不影响 LJ 与 Z-score 使用。")
 
     st.divider()
     st.markdown("**选择工作流程**")
+    st.caption("按当前任务选择 LJ 或 Z-score 流程；首页主入口保留在上方。")
     entry_col1, entry_col2 = st.columns(2, gap="large")
     with entry_col1:
-        render_entry_card(
-            "LJ",
-            "单水平质控工作页，适合日常结果录入、图表查看与 Westgard 判读。",
-            ["单水平质控", "结果录入", "最新结果分析"],
-            eyebrow="单水平质控",
-        )
-        if st.button("进入 LJ 工作页", key="main_jump_lj_primary", type="primary", width="stretch"):
-            switch_top_level_method("单水平（LJ法）")
+        st.markdown("**LJ**")
+        st.caption("单水平质控流程，适合日常结果录入、图表查看与 Westgard 判读。")
     with entry_col2:
-        render_entry_card(
-            "Z-score",
-            "多水平质控工作页，适用于双水平或三水平结果录入、图表查看与判读。",
-            ["多水平质控", "本次检测录入", "图表判读"],
-            eyebrow="多水平质控",
-        )
-        if st.button("进入 Z-score 工作页", key="main_jump_zscore_primary", type="primary", width="stretch"):
-            switch_top_level_method("多水平（Z-score法）")
-
-    st.markdown("**预留功能**")
-    render_entry_card(
-        "Instant",
-        "当前仅保留入口说明，后续接入后会在此补充正式功能。",
-        ["预留功能", "暂未启用", "后续扩展"],
-        eyebrow="预留",
-        muted=True,
-    )
-    instant_col1, instant_col2 = st.columns([1, 2.2], gap="medium")
-    with instant_col1:
-        if st.button("查看 Instant", key="main_jump_instant_reserved", width="stretch"):
-            switch_top_level_method("即刻法")
-    with instant_col2:
-        st.caption("如需开始质控工作，请优先进入 LJ 或 Z-score 页面。")
+        st.markdown("**Z-score**")
+        st.caption("多水平质控流程，适用于双水平或三水平结果录入、图表查看与判读。")
+    st.caption("Instant 当前仍为预留模块，后续接入时会在首页补充说明。")
 
     st.divider()
     st.markdown("**快速开始**")
@@ -153,8 +99,9 @@ def render_main_entry_page() -> None:
 
     st.divider()
     st.markdown("**说明与版本信息**")
-    st.caption("使用说明、更新记录和版本边界集中在这里，便于按需查看。")
-    with st.expander("LJ 使用说明", expanded=False):
+    st.caption("详细使用说明、更新记录和版本边界已收纳到下方，可按需展开查看。")
+    with st.expander("使用说明与更新记录", expanded=False):
+        st.markdown("### LJ 使用说明")
         st.markdown(
             "- 适用场景：单水平室内质控、LJ 曲线查看与 Westgard 规则判读。\n"
             "- 基本概念：项目用于区分分析物或方法，批次用于承载同一组质控材料、批号和建靶参数。\n"
@@ -163,7 +110,7 @@ def render_main_entry_page() -> None:
             "- 记录维护：可修改或删除历史检测记录；删除后会重算后续检测序号、阶段和判读结果。"
         )
 
-    with st.expander("Z-score 使用说明", expanded=False):
+        st.markdown("### Z-score 使用说明")
         st.markdown(
             "- 适用场景：双水平 / 三水平多水平 IQC 管理与判读。\n"
             "- 项目级水平数配置：决定该项目固定采用双水平或三水平流程；创建后批次会自动继承。\n"
@@ -174,7 +121,8 @@ def render_main_entry_page() -> None:
             "- 正式期实时统计：只基于正式期在控数据计算，警告和失控结果不纳入统计。"
         )
 
-    with st.expander("2026-04-05 更新：数据的导入导出", expanded=False):
+        st.markdown("### 更新记录")
+        st.markdown("#### 2026-04-05 更新：数据的导入导出")
         st.markdown(
             "**更新内容**\n"
             "- LJ：当前批次已支持按阶段导出建靶期 / 正式期数据，格式可选 Excel / CSV；已支持当前 LJ 图 PNG 导出，以及仅基于正式数据的月度质控图 PNG 导出。\n"
@@ -189,7 +137,7 @@ def render_main_entry_page() -> None:
             "- 导入为追加写入当前批次；确认导入后会按现有业务口径刷新统计、判定、图表与最新结果分析。"
         )
 
-    with st.expander("2026-03-31 更新：批次级 CV 要求（%）", expanded=False):
+        st.markdown("#### 2026-03-31 更新：批次级 CV 要求（%）")
         st.markdown(
             "**更新内容**\n"
             "- LJ 与 Z-score 的新建批次均支持可选填写“CV 要求（%）”。\n"
@@ -215,7 +163,7 @@ def render_main_entry_page() -> None:
             "8. 回归一遍现有实际生效的 Z-score 主流程。"
         )
 
-    with st.expander("2026-04-01 更新：备注、检测人记忆与 Z-score 一致性修复", expanded=False):
+        st.markdown("#### 2026-04-01 更新：备注、检测人记忆与 Z-score 一致性修复")
         st.markdown(
             "**更新内容**\n"
             "- LJ 与 Z-score 已接入手动备注字段：维护区可查看和编辑，图上对含备注的点增加描边提示。\n"
@@ -238,7 +186,7 @@ def render_main_entry_page() -> None:
             "- database.py 前半段旧 Z-score 重复定义仍保留，继续以后半段实际生效定义为准。"
         )
 
-    with st.expander("常见说明 / 注意事项", expanded=False):
+        st.markdown("### 常见说明 / 注意事项")
         st.markdown(
             "- 建靶期不启用正式规则判读。\n"
             "- Z-score 批次进入正式质控后，建靶期检测记录会被锁定，只可查看，不可再维护。\n"
@@ -247,7 +195,7 @@ def render_main_entry_page() -> None:
             "- 厂家参考值当前仅支持手工录入，不支持 COA 自动解析。"
         )
 
-    with st.expander("当前版本说明", expanded=False):
+        st.markdown("### 当前版本说明")
         st.caption("当前版本已支持 LJ 与 Z-score 主流程，可用于日常试用与小范围部署。")
         support_col, limit_col = st.columns(2, gap="large")
         with support_col:
@@ -271,8 +219,6 @@ def render_main_entry_page() -> None:
                 "- target freeze / re-establish 等高级流程\n"
                 "- Instant 正式业务功能"
             )
-
-    st.caption("当前版本已提供稳定的 LJ 与 Z-score 工作入口，建议从上方页面直接开始使用。")
 
 
 def render_instant_placeholder_page() -> None:
