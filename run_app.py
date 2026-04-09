@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 import traceback
 from pathlib import Path
+
+
+DEFAULT_SERVER_ADDRESS = os.environ.get("LJQCAPP_ADDRESS", "127.0.0.1")
+DEFAULT_SERVER_PORT = int(os.environ.get("LJQCAPP_PORT", "8501"))
 
 
 def _get_log_path() -> Path:
@@ -24,6 +29,9 @@ def _write_log(message: str) -> None:
 
 def _get_base_dir() -> Path:
     if getattr(sys, "frozen", False):
+        extracted_dir = getattr(sys, "_MEIPASS", "")
+        if extracted_dir:
+            return Path(str(extracted_dir)).resolve()
         return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent
 
@@ -39,7 +47,37 @@ def _resolve_app_path(base_dir: Path) -> Path:
     return candidate_paths[0].resolve()
 
 
-def main() -> int:
+def _configure_import_paths(base_dir: Path, app_path: Path) -> None:
+    import_roots = [app_path.parent, base_dir]
+    for import_root in import_roots:
+        import_root_str = str(import_root)
+        if import_root_str not in sys.path:
+            sys.path.insert(0, import_root_str)
+
+
+def _build_streamlit_argv(app_path: Path, *, port: int, address: str) -> list[str]:
+    return [
+        "streamlit",
+        "run",
+        str(app_path),
+        "--global.developmentMode=false",
+        "--browser.gatherUsageStats=false",
+        "--client.showSidebarNavigation=false",
+        "--server.fileWatcherType=none",
+        "--server.headless=true",
+        f"--server.address={address}",
+        f"--server.port={port}",
+    ]
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run the packaged LJQCApp Streamlit service.")
+    parser.add_argument("--port", type=int, default=DEFAULT_SERVER_PORT)
+    parser.add_argument("--address", default=DEFAULT_SERVER_ADDRESS)
+    return parser.parse_args(argv)
+
+
+def run_streamlit_service(*, port: int, address: str) -> int:
     base_dir = _get_base_dir()
     app_path = _resolve_app_path(base_dir)
     log_path = _get_log_path()
@@ -49,6 +87,8 @@ def main() -> int:
     _write_log(f"cwd: {Path.cwd()}")
     _write_log(f"base_dir: {base_dir}")
     _write_log(f"resolved app.py path: {app_path}")
+    _write_log(f"server.address: {address}")
+    _write_log(f"server.port: {port}")
 
     if not app_path.exists():
         message = (
@@ -61,14 +101,8 @@ def main() -> int:
         return 1
 
     os.chdir(base_dir)
-    sys.path.insert(0, str(app_path.parent))
-    sys.argv = [
-        "streamlit",
-        "run",
-        str(app_path),
-        "--global.developmentMode=false",
-        "--server.headless=true",
-    ]
+    _configure_import_paths(base_dir, app_path)
+    sys.argv = _build_streamlit_argv(app_path, port=port, address=address)
     try:
         from streamlit.web.cli import main as streamlit_main
 
@@ -79,6 +113,11 @@ def main() -> int:
         _write_log("Unhandled exception:")
         _write_log(error_trace)
         return 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    return run_streamlit_service(port=args.port, address=args.address)
 
 
 if __name__ == "__main__":
