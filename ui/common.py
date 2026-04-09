@@ -100,6 +100,16 @@ def inject_global_styles() -> None:
     st.markdown(
         """
         <style>
+        .demo-watermark-layer {
+            position: fixed;
+            inset: 0;
+            z-index: 999;
+            pointer-events: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='760' height='360' viewBox='0 0 760 360'%3E%3Cg transform='rotate(-24 380 180)'%3E%3Ctext x='44' y='188' fill='%23184d8d' fill-opacity='0.10' font-size='30' font-family='Segoe UI,%20Microsoft YaHei,sans-serif' font-weight='700'%3E%E6%AD%A4%E8%BD%AF%E4%BB%B6%E5%BD%92%E5%BC%80%E5%8F%91%E8%80%85%E6%89%80%E6%9C%89%EF%BC%8C%E4%BB%85%E4%BE%9B%E6%BC%94%E7%A4%BA%E4%BD%BF%E7%94%A8%EF%BC%8C%E4%B8%8D%E5%81%9A%E4%BB%BB%E4%BD%95%E6%AD%A3%E5%BC%8F%E4%BD%BF%E7%94%A8%3C/text%3E%3C/g%3E%3C/svg%3E");
+            background-repeat: repeat;
+            background-position: center center;
+            background-size: 680px 320px;
+        }
         div.stButton > button[kind="primary"] {
             background: #184d8d;
             border: 1px solid #184d8d;
@@ -118,7 +128,14 @@ def inject_global_styles() -> None:
             display: flex;
             justify-content: flex-end;
             align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
             margin: -0.2rem 0 0.25rem 0;
+        }
+        .top-feedback-note {
+            font-size: 12px;
+            color: #7a8595;
+            line-height: 1.4;
         }
         .top-feedback-link {
             display: inline-flex;
@@ -279,6 +296,9 @@ def inject_global_styles() -> None:
             }
         }
         @media (max-width: 960px) {
+            .demo-watermark-layer {
+                background-size: 520px 260px;
+            }
             .workbench-context-chip-row,
             .section-chip-row {
                 justify-content: flex-start;
@@ -811,12 +831,19 @@ def inject_global_styles() -> None:
         """,
         unsafe_allow_html=True,
     )
+    st.markdown(
+        '<div class="demo-watermark-layer" aria-hidden="true"></div>',
+        unsafe_allow_html=True,
+    )
 
 def render_page_chrome() -> None:
     render_html_block(
         dedent(
             """
             <div class="top-feedback-bar">
+                <span class="top-feedback-note">
+                    此软件由邦德盛开发，如有疑问，请联系我司相关人员
+                </span>
                 <a
                     class="top-feedback-link"
                     href="https://docs.qq.com/sheet/DY3V4b0FqS3psbkdK?tab=BB08J2"
