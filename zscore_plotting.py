@@ -120,6 +120,7 @@ def plot_zscore_single_level(
     phase_scope: str = "all",
     y_axis_mode: str = "标准视图",
     standard_sd_limit: float = 4.0,
+    y_axis_label: str = "检测值",
 ):
     normalized_scope = _normalize_phase_scope(phase_scope)
     normalized_y_axis_mode = _normalize_y_axis_mode(y_axis_mode)
@@ -148,6 +149,8 @@ def plot_zscore_single_level(
 
     if normalized_scope == "all":
         _plot_reference_lines(axis, display_df, reference_mode)
+        _plot_continuous_trajectory(axis, display_df, level_color)
+        _plot_phase_separator(axis, display_df)
         for phase in [PHASE_TARGET_BUILDING, PHASE_FORMAL_QC]:
             phase_df = display_df[display_df["phase"] == phase].sort_values("run_index").copy()
             if phase_df.empty:
@@ -166,7 +169,7 @@ def plot_zscore_single_level(
     _configure_x_axis(axis, display_df)
     axis.set_title(title, pad=10)
     axis.set_xlabel("检测序号")
-    axis.set_ylabel("检测值")
+    axis.set_ylabel(y_axis_label)
     axis.grid(True, linestyle=":", alpha=0.3)
     _add_manual_legends(axis, display_df, show_reference_lines=show_reference_lines)
     figure.tight_layout(pad=0.7)
@@ -180,6 +183,7 @@ def plot_zscore_overlay(
     phase_scope: str = "all",
     y_axis_mode: str = "标准视图",
     standard_sd_limit: float = 4.0,
+    y_axis_label: str = "检测值",
 ):
     normalized_scope = _normalize_phase_scope(phase_scope)
     normalized_y_axis_mode = _normalize_y_axis_mode(y_axis_mode)
@@ -212,6 +216,7 @@ def plot_zscore_overlay(
         display_level = format_level_id_display(current_level_id)
         _plot_reference_lines(axis, level_df, reference_mode)
         if normalized_scope == "all":
+            _plot_continuous_trajectory(axis, level_df, level_color)
             for phase in [PHASE_TARGET_BUILDING, PHASE_FORMAL_QC]:
                 phase_df = level_df[level_df["phase"] == phase].sort_values("run_index").copy()
                 if phase_df.empty:
@@ -222,6 +227,9 @@ def plot_zscore_overlay(
             _plot_phase_line(axis, level_df, level_color, display_level)
             _plot_status_points(axis, level_df, level_color)
 
+    if normalized_scope == "all":
+        _plot_phase_separator(axis, display_df)
+
     if y_limits is not None:
         axis.set_ylim(y_limits)
         _plot_out_of_range_markers(axis, display_df, y_limits)
@@ -229,7 +237,7 @@ def plot_zscore_overlay(
     _configure_x_axis(axis, display_df)
     axis.set_title(title, pad=10)
     axis.set_xlabel("检测序号")
-    axis.set_ylabel("检测值")
+    axis.set_ylabel(y_axis_label)
     axis.grid(True, linestyle=":", alpha=0.3)
     _add_manual_legends(
         axis,
@@ -346,6 +354,51 @@ def _plot_phase_line(axis, phase_df: pd.DataFrame, level_color: str, label: str)
         alpha=0.58 if phase == PHASE_TARGET_BUILDING else 0.88,
         linestyle=_phase_linestyle(phase),
         label=label,
+    )
+
+
+def _plot_continuous_trajectory(axis, plot_df: pd.DataFrame, level_color: str) -> None:
+    if plot_df.empty:
+        return
+    ordered_df = plot_df.sort_values("run_index").copy()
+    axis.plot(
+        ordered_df["run_index"],
+        ordered_df["display_value"],
+        color=level_color,
+        linewidth=1.2,
+        alpha=0.34,
+        linestyle="-",
+        zorder=2,
+        label="_nolegend_",
+    )
+
+
+def _get_phase_separator_position(plot_df: pd.DataFrame) -> float | None:
+    if plot_df.empty or "plot_phase" not in plot_df.columns or "run_index" not in plot_df.columns:
+        return None
+    building_runs = plot_df.loc[plot_df["plot_phase"] == PHASE_TARGET_BUILDING, "run_index"].dropna()
+    formal_runs = plot_df.loc[plot_df["plot_phase"] == PHASE_FORMAL_QC, "run_index"].dropna()
+    if building_runs.empty or formal_runs.empty:
+        return None
+
+    building_last = float(building_runs.max())
+    formal_first = float(formal_runs.min())
+    if formal_first <= building_last:
+        return None
+    return (building_last + formal_first) / 2.0
+
+
+def _plot_phase_separator(axis, plot_df: pd.DataFrame) -> None:
+    separator_x = _get_phase_separator_position(plot_df)
+    if separator_x is None:
+        return
+    axis.axvline(
+        separator_x,
+        color="#7a8ca5",
+        linewidth=1.0,
+        linestyle=":",
+        alpha=0.9,
+        zorder=1,
     )
 
 

@@ -9,6 +9,12 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
+from services.value_type_service import (
+    DEFAULT_INPUT_VALUE_TYPE,
+    get_measurement_label,
+    normalize_input_value_type,
+    should_show_auxiliary_log_column,
+)
 from zscore_logic import PHASE_TARGET_BUILDING, build_zscore_batch_summary_items
 
 TEXT = {
@@ -26,6 +32,7 @@ TEXT = {
 DISPLAY_COLUMN_LABELS = {
     "id": "\u7f16\u53f7",
     "name": "\u9879\u76ee\u540d\u79f0",
+    "input_value_type": "输入值类型",
     "created_at": "\u521b\u5efa\u65f6\u95f4",
     "project_id": "\u9879\u76ee\u7f16\u53f7",
     "project_name": "\u9879\u76ee\u540d\u79f0",
@@ -110,18 +117,36 @@ def inject_global_styles() -> None:
             background-position: center center;
             background-size: 680px 320px;
         }
-        div.stButton > button[kind="primary"] {
+        div.stButton > button[kind="primary"],
+        div.stFormSubmitButton > button[kind="primary"],
+        div[data-testid="stFormSubmitButton"] > button[kind="primary"],
+        div.stFormSubmitButton > button[kind="primaryFormSubmit"],
+        div[data-testid="stFormSubmitButton"] > button[kind="primaryFormSubmit"],
+        div.stFormSubmitButton > button[data-testid="stBaseButton-primaryFormSubmit"],
+        div[data-testid="stFormSubmitButton"] > button[data-testid="stBaseButton-primaryFormSubmit"] {
             background: #184d8d;
             border: 1px solid #184d8d;
             color: #ffffff;
             font-weight: 600;
         }
-        div.stButton > button[kind="primary"]:hover {
+        div.stButton > button[kind="primary"]:hover,
+        div.stFormSubmitButton > button[kind="primary"]:hover,
+        div[data-testid="stFormSubmitButton"] > button[kind="primary"]:hover,
+        div.stFormSubmitButton > button[kind="primaryFormSubmit"]:hover,
+        div[data-testid="stFormSubmitButton"] > button[kind="primaryFormSubmit"]:hover,
+        div.stFormSubmitButton > button[data-testid="stBaseButton-primaryFormSubmit"]:hover,
+        div[data-testid="stFormSubmitButton"] > button[data-testid="stBaseButton-primaryFormSubmit"]:hover {
             background: #123d70;
             border-color: #123d70;
             color: #ffffff;
         }
-        div.stButton > button[kind="primary"]:focus {
+        div.stButton > button[kind="primary"]:focus,
+        div.stFormSubmitButton > button[kind="primary"]:focus,
+        div[data-testid="stFormSubmitButton"] > button[kind="primary"]:focus,
+        div.stFormSubmitButton > button[kind="primaryFormSubmit"]:focus,
+        div[data-testid="stFormSubmitButton"] > button[kind="primaryFormSubmit"]:focus,
+        div.stFormSubmitButton > button[data-testid="stBaseButton-primaryFormSubmit"]:focus,
+        div[data-testid="stFormSubmitButton"] > button[data-testid="stBaseButton-primaryFormSubmit"]:focus {
             box-shadow: 0 0 0 0.2rem rgba(24, 77, 141, 0.18);
         }
         .top-feedback-bar {
@@ -929,6 +954,7 @@ def render_zscore_batch_header(
     phase_label: str,
     level_count: int,
     required_n: int,
+    input_value_type_label: str,
     template_label: str,
     instrument: Any,
     reagent: Any,
@@ -938,12 +964,18 @@ def render_zscore_batch_header(
     lot_no: Any,
     cv_limit: float | None,
 ) -> None:
+    batch_display = (
+        f"质控批号 {_stringify_display_value(lot_no)}"
+        if _stringify_display_value(lot_no) != "-"
+        else "当前批次"
+    )
     detail_items = [
         ("项目名称", project_name),
-        ("批次编号", batch_id),
+        ("批次标识", batch_display),
         ("当前阶段", phase_label),
         ("水平数", f"{int(level_count)} 水平"),
         ("建靶要求次数", f"{int(required_n)} 次"),
+        ("输入值类型", input_value_type_label),
         ("规则组合", template_label),
         ("仪器", instrument),
         ("试剂", reagent),
@@ -969,6 +1001,7 @@ def render_zscore_batch_header(
     side_chips = [
         f"{int(level_count)} 水平",
         f"建靶要求 {int(required_n)} 次",
+        input_value_type_label,
     ]
     if cv_limit is not None:
         side_chips.append(f"CV 要求 ≤ {float(cv_limit):.2f}%")
@@ -986,7 +1019,7 @@ def render_zscore_batch_header(
                     <div class="zscore-batch-header-project">项目：{html_escape(_stringify_display_value(project_name))}</div>
                     <div class="zscore-batch-header-primary-row">
                         <div class="zscore-batch-header-phase-chip">{html_escape(_stringify_display_value(phase_label))}</div>
-                        <div class="zscore-batch-header-batch-chip">批次 {html_escape(_stringify_display_value(batch_id))}</div>
+                        <div class="zscore-batch-header-batch-chip">{html_escape(batch_display)}</div>
                     </div>
                 </div>
                 <div class="zscore-batch-header-right">
@@ -996,7 +1029,7 @@ def render_zscore_batch_header(
                 </div>
             </div>
             <div class="workbench-context-caption">
-                请确认当前批次与阶段后，再录入本次检测结果。
+                请确认当前批次、输入值类型与阶段后，再录入本次检测结果。
             </div>
             <div class="workbench-context-grid">
                 {''.join(cards)}
@@ -1139,7 +1172,12 @@ def format_datetime_column(dataframe: pd.DataFrame, column_name: str) -> pd.Data
     return formatted
 
 def localize_dataframe_columns(dataframe: pd.DataFrame) -> pd.DataFrame:
-    return dataframe.rename(columns={column: DISPLAY_COLUMN_LABELS.get(column, column) for column in dataframe.columns})
+    localized = dataframe.copy()
+    if "input_value_type" in localized.columns:
+        localized["input_value_type"] = localized["input_value_type"].map(get_measurement_label)
+    return localized.rename(
+        columns={column: DISPLAY_COLUMN_LABELS.get(column, column) for column in localized.columns}
+    )
 
 def render_html_block(html: str) -> None:
     html_content = dedent(html).strip()
@@ -1252,11 +1290,16 @@ def summarize_note_for_table(note: Any, max_length: int = 24) -> str:
         return compact_text
     return compact_text[:max_length].rstrip() + "..."
 
-def prepare_display_records(qc_df: pd.DataFrame) -> pd.DataFrame:
+def prepare_display_records(
+    qc_df: pd.DataFrame,
+    input_value_type: str = DEFAULT_INPUT_VALUE_TYPE,
+) -> pd.DataFrame:
     display_df = qc_df.copy()
     if display_df.empty:
         return display_df
 
+    normalized_input_value_type = normalize_input_value_type(input_value_type)
+    measurement_label = get_measurement_label(normalized_input_value_type)
     display_df = format_datetime_column(display_df, "test_time")
     display_df["value"] = display_df["value"].map(lambda value: f"{float(value):.4f}")
     if "log_value" in display_df.columns:
@@ -1282,7 +1325,6 @@ def prepare_display_records(qc_df: pd.DataFrame) -> pd.DataFrame:
         "test_time",
         "operator",
         "value",
-        "log_value",
         "reagent_lot_changed",
         "z",
         "status",
@@ -1292,11 +1334,13 @@ def prepare_display_records(qc_df: pd.DataFrame) -> pd.DataFrame:
         "phase",
         "manual_note",
     ]
+    if should_show_auxiliary_log_column(normalized_input_value_type) and "log_value" in display_df.columns:
+        preferred_columns.insert(4, "log_value")
     column_mapping = {
         "sequence": "\u68c0\u6d4b\u5e8f\u53f7",
         "test_time": "\u68c0\u6d4b\u65f6\u95f4",
         "operator": "\u68c0\u6d4b\u4eba",
-        "value": "\u68c0\u6d4b\u503c",
+        "value": measurement_label,
         "log_value": "log\u503c",
         "manual_note": "\u5907\u6ce8",
         "reagent_lot_changed": "\u8bd5\u5242\u6279\u53f7\u53d8\u66f4",

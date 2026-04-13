@@ -11,7 +11,7 @@ METHOD_ENTRY_OPTIONS = [
     "主页",
     "单水平（LJ法）",
     "多水平（Z-score法）",
-    "即刻法",
+    "即时法",
 ]
 
 LEGACY_METHOD_ENTRY_MAP = {
@@ -19,7 +19,8 @@ LEGACY_METHOD_ENTRY_MAP = {
     "Main": "主页",
     "LJ": "单水平（LJ法）",
     "Z-score": "多水平（Z-score法）",
-    "Instant": "即刻法",
+    "Instant": "即时法",
+    "即刻法": "即时法",
 }
 
 
@@ -49,7 +50,7 @@ def render_main_entry_page() -> None:
         <div class="home-hero">
             <div class="home-hero-title">实验室室内质控管理工具</div>
             <div class="home-hero-caption">
-                用于实验室室内质控的 LJ 与多水平 Z-score 管理与判读，
+                用于实验室室内质控的 LJ、即时法与多水平 Z-score 管理与判读，
                 支持从首页快速进入当前工作流程。
             </div>
         </div>
@@ -57,29 +58,34 @@ def render_main_entry_page() -> None:
     ).strip()
     render_html_block(hero_html)
 
-    hero_action_cols = st.columns(2, gap="medium")
+    hero_action_cols = st.columns(3, gap="medium")
     with hero_action_cols[0]:
         if st.button("进入 LJ", key="hero_jump_lj", type="primary", width="stretch"):
             switch_top_level_method("单水平（LJ法）")
     with hero_action_cols[1]:
+        if st.button("进入 即时法", key="hero_jump_instant", type="primary", width="stretch"):
+            switch_top_level_method("即时法")
+    with hero_action_cols[2]:
         if st.button("进入 Z-score", key="hero_jump_zscore", type="primary", width="stretch"):
             switch_top_level_method("多水平（Z-score法）")
 
     st.divider()
     st.markdown("**选择工作流程**")
-    st.caption("按当前任务选择 LJ 或 Z-score 流程；首页主入口保留在上方。")
-    entry_col1, entry_col2 = st.columns(2, gap="large")
+    st.caption("按当前任务选择 LJ、即时法或 Z-score 流程；首页主入口保留在上方。")
+    entry_col1, entry_col2, entry_col3 = st.columns(3, gap="large")
     with entry_col1:
         st.markdown("**LJ**")
         st.caption("单水平质控流程，适合日常结果录入、图表查看与 Westgard 判读。")
     with entry_col2:
+        st.markdown("**即时法**")
+        st.caption("单水平短期累计流程，适合样本量较少、先按格拉布斯法提示疑似离群。")
+    with entry_col3:
         st.markdown("**Z-score**")
         st.caption("多水平质控流程，适用于双水平或三水平结果录入、图表查看与判读。")
-    st.caption("Instant 当前仍为预留模块，后续接入时会在首页补充说明。")
 
     st.divider()
     st.markdown("**快速开始**")
-    quick_start_col1, quick_start_col2 = st.columns(2, gap="large")
+    quick_start_col1, quick_start_col2, quick_start_col3 = st.columns(3, gap="large")
     with quick_start_col1:
         st.markdown("**LJ 快速开始**")
         st.markdown(
@@ -89,6 +95,14 @@ def render_main_entry_page() -> None:
             "4. 在图表与最新结果分析中查看当前判读。"
         )
     with quick_start_col2:
+        st.markdown("**即时法 快速开始**")
+        st.markdown(
+            "1. 新建即时法项目与批次。\n"
+            "2. 录入单水平检测结果并累计有效点。\n"
+            "3. 达到 3 个有效点后查看格拉布斯法提示。\n"
+            "4. 达到 20 个有效点后查看人工转入 LJ 提示。"
+        )
+    with quick_start_col3:
         st.markdown("**Z-score 快速开始**")
         st.markdown(
             "1. 新建 Z-score 项目并确定水平数。\n"
@@ -202,6 +216,7 @@ def render_main_entry_page() -> None:
             st.markdown("**已支持**")
             st.markdown(
                 "- LJ 主流程\n"
+                "- 即时法单水平工作台（第一阶段）\n"
                 "- Z-score 双水平 / 三水平主流程\n"
                 "- 多水平检测记录持久化\n"
                 "- 建靶 / 正式质控\n"
@@ -216,29 +231,28 @@ def render_main_entry_page() -> None:
                 "- Excel 导入\n"
                 "- COA 解析\n"
                 "- peer-group 数据\n"
-                "- target freeze / re-establish 等高级流程\n"
-                "- Instant 正式业务功能"
+                "- target freeze / re-establish 等高级流程"
             )
 
 
 def render_instant_placeholder_page() -> None:
-    st.subheader("Instant")
-    st.caption("Instant 页面目前作为预留入口保留。当前版本暂未接入正式业务流程。")
+    st.subheader("即时法")
+    st.caption("即时法入口已升级为正式工作台，请从顶部“即时法”入口进入。")
 
     status_col, guide_col = st.columns(2, gap="large")
     with status_col:
         st.markdown("**当前版本状态**")
         st.markdown(
-            "- 本页当前仅用于功能预告。\n"
-            "- 暂不提供正式数据录入、规则判读、图表输出或导出能力。\n"
-            "- 该页面不会影响 LJ 与 Z-score 现有主流程。"
+            "- 即时法第一阶段已支持项目 / 批次管理、单水平录入、格拉布斯法提示与 20 点提醒。\n"
+            "- 当前仍不执行真正的“转入 LJ”迁移动作。\n"
+            "- 即时法页面不会影响 LJ 与 Z-score 现有主流程。"
         )
     with guide_col:
         st.markdown("**建议使用路径**")
         st.markdown(
-            "- 如需立即开展单水平室内质控，请进入“单水平（LJ法）”页面。\n"
-            "- 如需开展双水平 / 三水平多水平 IQC，请进入“多水平（Z-score法）”页面。\n"
-            "- Instant 后续若接入正式功能，会在此页面补充明确说明。"
+            "- 如需进行短期单水平累计并查看格拉布斯法提示，请进入“即时法”页面。\n"
+            "- 如需开展单水平 Westgard 日常质控，请进入“单水平（LJ法）”页面。\n"
+            "- 如需开展双水平 / 三水平多水平 IQC，请进入“多水平（Z-score法）”页面。"
         )
 
-    st.info("当前可用的质控流程请从顶部入口进入“单水平（LJ法）”或“多水平（Z-score法）”页面。")
+    st.info("当前可用流程请从顶部入口进入“即时法”“单水平（LJ法）”或“多水平（Z-score法）”页面。")

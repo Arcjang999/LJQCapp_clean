@@ -235,6 +235,7 @@ def render_zscore_page() -> None:
     batch = context["batch"]
     template = context["template"]
     cv_limit = context["cv_limit"]
+    input_value_type_label = context["input_value_type_label"]
     level_count = int(context["level_count"])
     required_n = int(context["required_n"])
     template_label = format_zscore_template_display_name(template)
@@ -247,6 +248,7 @@ def render_zscore_page() -> None:
             phase_label=context["overall_phase_label"],
             level_count=level_count,
             required_n=required_n,
+            input_value_type_label=input_value_type_label,
             template_label=template_label,
             instrument=batch["instrument"],
             reagent=batch["reagent"],
@@ -260,15 +262,6 @@ def render_zscore_page() -> None:
         st.divider()
         entry_col, chart_col = st.columns([0.94, 1.24], gap="large")
 
-        with entry_col:
-            with st.container(border=True):
-                render_section_intro(
-                    title="本次检测录入",
-                    caption="请填写检测时间、检测人与各水平结果。",
-                    tone="accent",
-                )
-                render_zscore_entry_section(context, selected_batch_id)
-
         with chart_col:
             with st.container(border=True):
                 render_section_intro(
@@ -277,6 +270,7 @@ def render_zscore_page() -> None:
                     tone="accent",
                 )
                 phase_scope, view_mode, selected_level, y_axis_mode, standard_sd_limit = render_zscore_chart_controls(
+                    selected_batch_id,
                     template,
                     context["default_phase_scope"],
                     context["level_label_map"],
@@ -289,6 +283,15 @@ def render_zscore_page() -> None:
                     y_axis_mode,
                     standard_sd_limit,
                 )
+
+        with entry_col:
+            with st.container(border=True):
+                render_section_intro(
+                    title="本次检测录入",
+                    caption=f"请填写检测时间、检测人与各水平{input_value_type_label}。",
+                    tone="accent",
+                )
+                render_zscore_entry_section(context, selected_batch_id)
 
         st.divider()
         _render_zscore_level_summary_cards_section(context)

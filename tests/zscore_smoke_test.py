@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.legend import Legend
 import pandas as pd
+from streamlit.testing.v1 import AppTest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -76,6 +77,20 @@ PLOT_COLUMNS = [
     "is_preview",
 ]
 BASE_TIME = pd.Timestamp("2026-03-28 08:00:00")
+ZSCORE_PAGE_APPTEST_SCRIPT = """
+import sys
+from pathlib import Path
+
+ROOT = Path(r'D:\\Github\\LJQCapp_clean')
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from pages.zscore_page import render_zscore_page
+
+render_zscore_page()
+"""
+ZSCORE_ENTRY_SAVE_BUTTON_KEY = "FormSubmitter:zscore_entry_form-\u4fdd\u5b58\u672c\u6b21\u68c0\u6d4b"
+ZSCORE_FULL_RANGE_VIEW = "\u5168\u8303\u56f4\u89c6\u56fe"
 
 
 class TemporaryDatabaseContext:
@@ -1364,6 +1379,66 @@ def test_delete_feedback_keeps_maintenance_dialog_context() -> None:
     assert dialog_state["selected_run_id"] == 3
 
 
+def test_entry_save_preserves_chart_controls_after_rerun() -> None:
+    with TemporaryDatabaseContext():
+        project_id = create_zscore_project("AppTest Project", level_count=2, input_value_type="ct")
+        batch_id = create_zscore_batch(
+            project_id=project_id,
+            instrument="AppTest Inst",
+            reagent="AppTest Reagent",
+            qc_material="AppTest QC",
+            concentration="Normal",
+            lot_no="APPTEST-LOT",
+            target_n=5,
+            level_1_label="S1",
+            level_2_label="S2",
+        )
+        template_id = get_template_id_for_level_count(2)
+        for hour, values in enumerate(
+            [
+                (100.0, 150.0),
+                (101.0, 151.0),
+                (99.5, 149.5),
+                (100.2, 150.2),
+                (100.1, 150.1),
+                (99.9, 149.9),
+            ],
+            start=0,
+        ):
+            create_zscore_run(
+                batch_id=batch_id,
+                test_time=BASE_TIME + pd.Timedelta(hours=hour),
+                operator=f"apptest-{hour}",
+                level_results=[
+                    {"level_id": "Level 1", "raw_value": values[0]},
+                    {"level_id": "Level 2", "raw_value": values[1]},
+                ],
+                template_id=template_id,
+                required_n=5,
+            )
+
+        at = AppTest.from_string(ZSCORE_PAGE_APPTEST_SCRIPT)
+        at.session_state["zscore_selected_project_id"] = project_id
+        at.session_state["zscore_selected_batch_id"] = batch_id
+        at.run()
+
+        at.radio(key="zscore_phase_scope_widget").set_value("all").run()
+        at.radio(key="zscore_selected_level_widget").set_value("Level 2").run()
+        at.radio(key="zscore_y_axis_mode_widget").set_value(ZSCORE_FULL_RANGE_VIEW).run()
+        at.text_input(key="zscore_level1_value").set_value("100.4")
+        at.text_input(key="zscore_level2_value").set_value("150.4")
+        at.selectbox(key="zscore_entry_operator").set_value("apptest-5")
+        at.button(key=ZSCORE_ENTRY_SAVE_BUTTON_KEY).click().run()
+
+        state = at.session_state.filtered_state
+        assert state["zscore_phase_scope"] == "all"
+        assert state["zscore_view_mode"] == "单水平视图"
+        assert state["zscore_selected_level"] == "Level 2"
+        assert state["zscore_y_axis_mode"] == ZSCORE_FULL_RANGE_VIEW
+        assert len(get_zscore_runs(batch_id, template_id)) == 7
+        assert not list(at.exception)
+
+
 def test_plotting_all_view_visually_splits_building_and_formal_phases() -> None:
     figure = plot_zscore_single_level(
         build_mixed_phase_plot_df(),
@@ -1376,6 +1451,51 @@ def test_plotting_all_view_visually_splits_building_and_formal_phases() -> None:
     assert "水平 1 | 建靶期" in labels
     assert "水平 1 | 正式期" in labels
     plt.close(figure)
+
+
+def test_plotting_all_view_keeps_continuous_trajectory_and_phase_separator() -> None:
+    mixed_phase_df = build_mixed_phase_plot_df()
+    figure = plot_zscore_single_level(
+        mixed_phase_df,
+        "Level 1",
+        "鍏ㄥ浘",
+        phase_scope="all",
+    )
+    assert_is_figure(figure)
+    axis = figure.axes[0]
+
+    continuous_lines = [
+        line
+        for line in axis.lines
+        if list(map(float, line.get_xdata())) == [1.0, 2.0]
+        and len({round(float(value), 6) for value in line.get_ydata()}) > 1
+    ]
+    assert continuous_lines, "鍏ㄥ浘搴斿綋淇濈暀寤洪澏鏈熶笌姝ｅ紡鏈熶箣闂寸殑杩炵画杞ㄨ抗"
+
+    separator_lines = [
+        line
+        for line in axis.lines
+        if len(line.get_xdata()) == 2
+        and all(abs(float(value) - 1.5) < 1e-9 for value in line.get_xdata())
+    ]
+    assert separator_lines, "鍏ㄥ浘搴斿綋鍦ㄥ缓闈惰浆姝ｅ紡鏈熻竟鐣屽缁樺埗闃舵鍒嗛殧绾?"
+    plt.close(figure)
+
+    overlay_figure = plot_zscore_overlay(
+        mixed_phase_df,
+        "鍏ㄥ浘鍚堝苟",
+        phase_scope="all",
+    )
+    assert_is_figure(overlay_figure)
+    overlay_axis = overlay_figure.axes[0]
+    overlay_separator_lines = [
+        line
+        for line in overlay_axis.lines
+        if len(line.get_xdata()) == 2
+        and all(abs(float(value) - 1.5) < 1e-9 for value in line.get_xdata())
+    ]
+    assert overlay_separator_lines, "鍚堝苟瑙嗗浘鍏ㄥ浘涔熷簲鏄剧ず闃舵鍒嗛殧绾?"
+    plt.close(overlay_figure)
 
 
 def test_plotting_handles_empty_frames() -> None:
@@ -1442,7 +1562,9 @@ def run_all_tests() -> None:
         test_single_level_manual_legend_covers_status_phase_and_clip_marker,
         test_overlay_manual_legend_keeps_status_phase_and_level_keys,
         test_delete_feedback_keeps_maintenance_dialog_context,
+        test_entry_save_preserves_chart_controls_after_rerun,
         test_plotting_all_view_visually_splits_building_and_formal_phases,
+        test_plotting_all_view_keeps_continuous_trajectory_and_phase_separator,
         test_plotting_handles_empty_frames,
         test_plotting_single_level_returns_figure,
         test_plotting_overlay_returns_figure,

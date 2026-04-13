@@ -25,6 +25,12 @@ from pages.management import (
 )
 from plotting import figure_to_png_bytes, plot_lj_chart
 from qc_logic import calculate_qc_results, calculate_realtime_stats, calculate_target_building_cv_hint
+from services.value_type_service import (
+    get_input_value_type_label,
+    get_measurement_label,
+    normalize_input_value_type,
+    parse_project_input_value,
+)
 from ui.common import (
     TEXT,
     build_chart_control_title,
@@ -33,12 +39,10 @@ from ui.common import (
     format_rule_code,
     format_rule_description,
     get_saved_batch_cv_limit,
-    parse_numeric_input,
     prepare_display_records,
     render_compact_stat_metrics,
     render_cv_limit_hint,
     render_import_review_summary,
-    render_live_log10_panel,
     render_rule_summary_metrics,
     render_section_intro,
     render_standard_view_help,
@@ -271,6 +275,8 @@ def build_lj_workbench_context(selected_batch_id: int) -> dict[str, object]:
     latest_rule_hits, latest_compact_message = get_latest_result_panel_content(qc_df, latest_status_message)
     return {
         "batch": batch,
+        "input_value_type": normalize_input_value_type(batch["input_value_type"]),
+        "input_value_type_label": get_input_value_type_label(batch["input_value_type"]),
         "cv_limit": get_saved_batch_cv_limit(batch),
         "results_df": results_df,
         "qc_df": qc_df,
@@ -285,6 +291,16 @@ def build_lj_workbench_context(selected_batch_id: int) -> dict[str, object]:
     }
 
 
+def _build_lj_chart_title(batch, view_mode: str) -> str:
+    batch_dict = dict(batch)
+    lot_no = str(batch_dict.get("lot_no", "") or "").strip()
+    batch_label = f"质控批号 {lot_no}" if lot_no else "当前批次"
+    return (
+        f"{view_mode} - {batch_label} - {batch['instrument']} - "
+        f"{batch['reagent']} - {batch['qc_material']} - {batch['concentration']}"
+    )
+
+
 def _get_lj_chart_state(batch) -> dict[str, object]:
     view_options = ["建靶图", "正式质控图", "全部数据图"]
     view_mode = st.session_state.get("chart_view_mode", "全部数据图")
@@ -297,10 +313,7 @@ def _get_lj_chart_state(batch) -> dict[str, object]:
         y_axis_mode = y_axis_options[0]
 
     standard_sd_limit = float(st.session_state.get("chart_standard_sd_limit", 4.0))
-    chart_title = (
-        f"{view_mode} - 批次 {batch['id']} - {batch['instrument']} - "
-        f"{batch['reagent']} - {batch['qc_material']} - {batch['concentration']}"
-    )
+    chart_title = _build_lj_chart_title(batch, view_mode)
     return {
         "view_mode": view_mode,
         "view_options": view_options,
@@ -316,6 +329,8 @@ def render_lj_entry_and_stats_section(
     selected_batch_id: int,
 ) -> None:
     batch = context["batch"]
+    input_value_type = context["input_value_type"]
+    input_value_type_label = context["input_value_type_label"]
     operator_options = context["operator_options"]
     stats = context["stats"]
     building_cv_hint = context["building_cv_hint"]
@@ -327,7 +342,6 @@ def render_lj_entry_and_stats_section(
         st.session_state["entry_operator"] = operator_options[0] if operator_options else ""
         st.session_state["entry_value"] = ""
         st.session_state["entry_reagent_changed"] = False
-        st.session_state["entry_manual_note"] = ""
         st.session_state["entry_test_time"] = datetime.now()
     if "entry_test_time" not in st.session_state:
         st.session_state["entry_test_time"] = datetime.now()
@@ -337,21 +351,18 @@ def render_lj_entry_and_stats_section(
         st.session_state["entry_value"] = ""
     if "entry_reagent_changed" not in st.session_state:
         st.session_state["entry_reagent_changed"] = False
-    if "entry_manual_note" not in st.session_state:
-        st.session_state["entry_manual_note"] = ""
 
     if st.session_state.get("reset_entry_form", False):
         last_operator = st.session_state.get("entry_operator", "")
         st.session_state["entry_operator"] = last_operator.strip()
         st.session_state["entry_value"] = ""
         st.session_state["entry_reagent_changed"] = False
-        st.session_state["entry_manual_note"] = ""
         st.session_state["entry_test_time"] = datetime.now()
         st.session_state["reset_entry_form"] = False
 
     with st.container(border=True):
         st.markdown("**本次结果录入**")
-        st.caption("检测时间、检测人、检测值、log10、变更点与备注集中在同一操作卡。")
+        st.caption(f"检测时间、检测人、{input_value_type_label} 与变更点集中在同一操作卡。")
         test_time = st.datetime_input(
             "检测时间",
             key="entry_test_time",
@@ -365,26 +376,18 @@ def render_lj_entry_and_stats_section(
             placeholder="可选择历史姓名，也可直接输入新姓名",
         )
         value_text = st.text_input(
-            "检测值（支持实时 log10）",
+            input_value_type_label,
             key="entry_value",
             placeholder="例如：123.4567",
         )
-        parsed_value, _, log_value = parse_numeric_input(value_text)
-        render_live_log10_panel(
-            value_text=value_text,
-            field_label="检测值（支持实时 log10）",
-            value_element_id="entry-log10-value",
-            hint_element_id="entry-log10-hint",
+        parsed_value, log_value, value_error = parse_project_input_value(
+            value_text,
+            input_value_type,
+            field_label=input_value_type_label,
         )
         reagent_lot_changed = st.checkbox(
             "本次为试剂批号变更点",
             key="entry_reagent_changed",
-        )
-        manual_note = st.text_area(
-            "手动备注（可选）",
-            key="entry_manual_note",
-            height=88,
-            placeholder="例如：换试剂观察、复测说明、当班备注",
         )
 
         if st.button("保存检测结果", type="primary", width="stretch"):
@@ -396,7 +399,7 @@ def render_lj_entry_and_stats_section(
             if not cleaned_operator:
                 validation_errors.append("请填写检测人，不能为空。")
             if parsed_value is None:
-                validation_errors.append("检测值必须为有效数字。")
+                validation_errors.append(value_error or f"{input_value_type_label}必须为有效数字。")
 
             if validation_errors:
                 st.error("\n".join(validation_errors))
@@ -408,7 +411,7 @@ def render_lj_entry_and_stats_section(
                     value=float(parsed_value),
                     log_value=log_value,
                     reagent_lot_changed=int(reagent_lot_changed),
-                    manual_note=str(manual_note or "").strip(),
+                    manual_note="",
                 )
                 st.success("检测结果已保存。")
                 st.session_state["reset_entry_form"] = True
@@ -490,6 +493,7 @@ def render_lj_chart_and_analysis_section(
     context: dict[str, object],
 ) -> tuple[object, dict[str, object]]:
     batch = context["batch"]
+    input_value_type_label = context["input_value_type_label"]
     qc_df = context["qc_df"]
     stats = context["stats"]
     latest_status = context["latest_status"]
@@ -555,13 +559,11 @@ def render_lj_chart_and_analysis_section(
         figure = plot_lj_chart(
             qc_df=qc_df,
             stats=stats,
-            title=(
-                f"{chart_view_mode} - 批次 {batch['id']} - {batch['instrument']} - "
-                f"{batch['reagent']} - {batch['qc_material']} - {batch['concentration']}"
-            ),
+            title=_build_lj_chart_title(batch, chart_view_mode),
             view_mode=chart_view_mode,
             y_axis_mode=chart_y_axis_mode,
             standard_sd_limit=chart_standard_sd_limit,
+            y_axis_label=input_value_type_label,
         )
         st.pyplot(figure, clear_figure=False, width="stretch")
 
@@ -595,14 +597,14 @@ def render_lj_rule_summary_section(stats: dict[str, object]) -> None:
             st.markdown(f"- `{format_rule_code(rule_id)}`：{format_rule_description(rule_id)}")
 
 
-def render_lj_records_section(qc_df: pd.DataFrame) -> None:
+def render_lj_records_section(qc_df: pd.DataFrame, input_value_type: str) -> None:
     with st.expander("当前批次检测记录（点击折叠/展开）", expanded=True):
         st.caption("当前批次的完整检测记录、Westgard 触发规则和分析提示都在此查看。")
-        display_df = prepare_display_records(qc_df)
+        display_df = prepare_display_records(qc_df, input_value_type=input_value_type)
         render_records_table_impl(display_df)
 
 
-def render_lj_maintenance_section(qc_df: pd.DataFrame) -> None:
+def render_lj_maintenance_section(qc_df: pd.DataFrame, input_value_type: str) -> None:
     open_maintenance_disabled = qc_df.empty
     with st.container(border=True):
         if st.button(
@@ -616,7 +618,7 @@ def render_lj_maintenance_section(qc_df: pd.DataFrame) -> None:
         if open_maintenance_disabled:
             st.info("当前批次暂无检测记录可维护。")
     if st.session_state.get("show_record_maintenance_dialog", False):
-        render_record_maintenance_dialog_impl(qc_df)
+        render_record_maintenance_dialog_impl(qc_df, input_value_type=input_value_type)
 
 
 def render_lj_export_import_section(
@@ -626,6 +628,8 @@ def render_lj_export_import_section(
     chart_state: dict[str, object],
 ) -> None:
     batch = context["batch"]
+    input_value_type = context["input_value_type"]
+    input_value_type_label = context["input_value_type_label"]
     qc_df = context["qc_df"]
     stats = context["stats"]
     results_df = context["results_df"]
@@ -645,7 +649,7 @@ def render_lj_export_import_section(
         batch["lot_no"] if "lot_no" in batch.keys() else None,
         f"batch_{batch['id']}",
     )
-    lj_building_template_df = build_lj_building_template_dataframe()
+    lj_building_template_df = build_lj_building_template_dataframe(input_value_type)
     lj_building_template_csv_bytes = lj_building_template_df.to_csv(index=False).encode("utf-8-sig")
     lj_import_scope = f"lj_building_import_{selected_batch_id}"
     lj_import_review_state_key = f"{lj_import_scope}_review"
@@ -670,7 +674,7 @@ def render_lj_export_import_section(
 
     st.markdown("**导出**")
     st.markdown("**分阶段数据导出**")
-    st.caption("可分别导出当前批次的建靶期或正式期数据。")
+    st.caption(f"可分别导出当前批次的建靶期或正式期数据，主值列统一为“{input_value_type_label}”。")
     export_format = st.radio(
         "导出数据格式",
         options=["Excel (.xlsx)", "CSV (.csv)"],
@@ -774,6 +778,7 @@ def render_lj_export_import_section(
                     view_mode="正式质控图",
                     y_axis_mode=chart_state["y_axis_mode"],
                     standard_sd_limit=float(st.session_state.get("chart_standard_sd_limit", 4.0)),
+                    y_axis_label=input_value_type_label,
                 )
                 monthly_png_bytes = figure_to_png_bytes(monthly_figure)
                 monthly_file_name = (
@@ -797,7 +802,7 @@ def render_lj_export_import_section(
     st.markdown("**CSV 导入**")
     st.caption("建靶期与正式期模板、上传、审查、确认导入分开展示。")
     st.markdown("**建靶期 CSV 导入**")
-    st.caption("先下载标准模板，再上传 CSV 审查；只有无阻断错误时，才允许确认导入当前批次建靶期数据。")
+    st.caption(f"先下载标准模板，再上传 CSV 审查；只有无阻断错误时，才允许确认导入当前批次建靶期{input_value_type_label}数据。")
     st.markdown("- `试剂批号变更（可选）` 在建靶期一般不填。")
     st.markdown("- 正式期仅在“更换试剂批号后的第一条记录”填写“是”。")
     st.markdown("- 其余记录填“否”或留空。")
@@ -848,6 +853,7 @@ def render_lj_export_import_section(
             file_bytes=uploaded_lj_building_bytes,
             existing_results_df=results_df,
             target_n=int(batch["target_n"]),
+            input_value_type=input_value_type,
         )
         lj_import_review_state["file_signature"] = current_lj_import_signature
         st.session_state[lj_import_review_state_key] = lj_import_review_state
@@ -886,6 +892,7 @@ def render_lj_export_import_section(
                 test_time=row["test_time"],
                 operator=row["operator"],
                 value=float(row["value"]),
+                log_value=row.get("log_value"),
                 reagent_lot_changed=int(row["reagent_lot_changed"]),
                 manual_note=row["manual_note"],
             )
@@ -899,7 +906,7 @@ def render_lj_export_import_section(
 
     st.divider()
     st.markdown("**LJ 正式期 CSV 导入**")
-    st.caption("先下载标准模板，再上传 CSV 审查；导入目标为当前批次正式期，只有无阻断错误时才允许确认导入。")
+    st.caption(f"先下载标准模板，再上传 CSV 审查；导入目标为当前批次正式期，只有无阻断错误时才允许确认导入当前批次{input_value_type_label}数据。")
     st.markdown("- `试剂批号变更（可选）` 在建靶期一般不填。")
     st.markdown("- 正式期仅在“更换试剂批号后的第一条记录”填写“是”。")
     st.markdown("- 其余记录填“否”或留空。")
@@ -953,6 +960,7 @@ def render_lj_export_import_section(
             existing_results_df=results_df,
             target_n=int(batch["target_n"]),
             target_ready=lj_target_ready,
+            input_value_type=input_value_type,
         )
         lj_formal_import_review_state["file_signature"] = current_lj_formal_signature
         st.session_state[lj_formal_import_review_state_key] = lj_formal_import_review_state
@@ -993,6 +1001,7 @@ def render_lj_export_import_section(
                 test_time=row["test_time"],
                 operator=row["operator"],
                 value=float(row["value"]),
+                log_value=row.get("log_value"),
                 reagent_lot_changed=int(row["reagent_lot_changed"]),
                 manual_note=row["manual_note"],
             )

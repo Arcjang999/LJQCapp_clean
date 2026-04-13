@@ -1,37 +1,72 @@
 from __future__ import annotations
 
 from io import BytesIO
-import math
 from typing import Any
 
 import pandas as pd
 
+from services.value_type_service import (
+    DEFAULT_INPUT_VALUE_TYPE,
+    build_level_measurement_label,
+    get_measurement_label,
+    normalize_input_value_type,
+    parse_project_input_value,
+)
 
-LJ_BUILDING_REQUIRED_COLUMNS = ["检测时间", "检测人", "检测值"]
+
+LJ_BUILDING_BASE_REQUIRED_COLUMNS = ["检测时间", "检测人"]
 LJ_BUILDING_REAGENT_CHANGE_COLUMN = "试剂批号变更（可选）"
 LJ_BUILDING_OPTIONAL_COLUMNS = ["备注", LJ_BUILDING_REAGENT_CHANGE_COLUMN]
-LJ_BUILDING_TEMPLATE_COLUMNS = LJ_BUILDING_REQUIRED_COLUMNS + LJ_BUILDING_OPTIONAL_COLUMNS
 ZSCORE_BUILDING_BASE_COLUMNS = ["检测时间", "检测人"]
 ZSCORE_BUILDING_OPTIONAL_COLUMNS = ["备注"]
 REVIEW_ISSUE_DISPLAY_COLUMNS = ["行号", "字段名", "问题说明", "是否阻断"]
 FILE_LEVEL_ROW_LABEL = "文件级"
 
 
-def build_lj_building_template_dataframe() -> pd.DataFrame:
-    return pd.DataFrame(columns=LJ_BUILDING_TEMPLATE_COLUMNS)
+def build_lj_required_columns(input_value_type: str = DEFAULT_INPUT_VALUE_TYPE) -> list[str]:
+    return LJ_BUILDING_BASE_REQUIRED_COLUMNS + [get_measurement_label(input_value_type)]
 
 
-def build_zscore_building_template_columns(level_count: int) -> list[str]:
+def build_lj_template_columns(input_value_type: str = DEFAULT_INPUT_VALUE_TYPE) -> list[str]:
+    return build_lj_required_columns(input_value_type) + LJ_BUILDING_OPTIONAL_COLUMNS
+
+
+def build_lj_building_template_dataframe(
+    input_value_type: str = DEFAULT_INPUT_VALUE_TYPE,
+) -> pd.DataFrame:
+    return pd.DataFrame(columns=build_lj_template_columns(input_value_type))
+
+
+def build_zscore_level_value_columns(
+    level_count: int,
+    input_value_type: str = DEFAULT_INPUT_VALUE_TYPE,
+) -> list[str]:
     normalized_level_count = int(level_count)
     if normalized_level_count not in {2, 3}:
         raise ValueError("Z-score 建靶期模板仅支持 2 水平或 3 水平。")
 
-    level_columns = [f"Level {index} 值" for index in range(1, normalized_level_count + 1)]
-    return ZSCORE_BUILDING_BASE_COLUMNS + level_columns + ZSCORE_BUILDING_OPTIONAL_COLUMNS
+    return [
+        build_level_measurement_label(f"Level {index}", input_value_type)
+        for index in range(1, normalized_level_count + 1)
+    ]
 
 
-def build_zscore_building_template_dataframe(level_count: int) -> pd.DataFrame:
-    return pd.DataFrame(columns=build_zscore_building_template_columns(level_count))
+def build_zscore_building_template_columns(
+    level_count: int,
+    input_value_type: str = DEFAULT_INPUT_VALUE_TYPE,
+) -> list[str]:
+    return (
+        ZSCORE_BUILDING_BASE_COLUMNS
+        + build_zscore_level_value_columns(level_count, input_value_type)
+        + ZSCORE_BUILDING_OPTIONAL_COLUMNS
+    )
+
+
+def build_zscore_building_template_dataframe(
+    level_count: int,
+    input_value_type: str = DEFAULT_INPUT_VALUE_TYPE,
+) -> pd.DataFrame:
+    return pd.DataFrame(columns=build_zscore_building_template_columns(level_count, input_value_type))
 
 
 def build_review_issues_dataframe(issues: list[dict[str, Any]]) -> pd.DataFrame:
@@ -62,6 +97,7 @@ def review_lj_building_import_csv(
     file_bytes: bytes,
     existing_results_df: pd.DataFrame,
     target_n: int,
+    input_value_type: str = DEFAULT_INPUT_VALUE_TYPE,
 ) -> dict[str, Any]:
     return _review_lj_import_csv(
         file_bytes=file_bytes,
@@ -69,6 +105,7 @@ def review_lj_building_import_csv(
         target_n=target_n,
         phase_scope="building",
         target_ready=True,
+        input_value_type=input_value_type,
     )
 
 
@@ -77,6 +114,7 @@ def review_lj_formal_import_csv(
     existing_results_df: pd.DataFrame,
     target_n: int,
     target_ready: bool,
+    input_value_type: str = DEFAULT_INPUT_VALUE_TYPE,
 ) -> dict[str, Any]:
     return _review_lj_import_csv(
         file_bytes=file_bytes,
@@ -84,6 +122,7 @@ def review_lj_formal_import_csv(
         target_n=target_n,
         phase_scope="formal",
         target_ready=target_ready,
+        input_value_type=input_value_type,
     )
 
 
@@ -92,6 +131,7 @@ def review_zscore_building_import_csv(
     existing_results_df: pd.DataFrame,
     level_count: int,
     target_n: int,
+    input_value_type: str = DEFAULT_INPUT_VALUE_TYPE,
 ) -> dict[str, Any]:
     return _review_zscore_import_csv(
         file_bytes=file_bytes,
@@ -101,6 +141,7 @@ def review_zscore_building_import_csv(
         target_ready=True,
         existing_phase_count=len(existing_results_df),
         target_n=target_n,
+        input_value_type=input_value_type,
     )
 
 
@@ -110,6 +151,7 @@ def review_zscore_formal_import_csv(
     level_count: int,
     target_ready: bool,
     existing_formal_count: int,
+    input_value_type: str = DEFAULT_INPUT_VALUE_TYPE,
 ) -> dict[str, Any]:
     return _review_zscore_import_csv(
         file_bytes=file_bytes,
@@ -119,6 +161,7 @@ def review_zscore_formal_import_csv(
         target_ready=target_ready,
         existing_phase_count=existing_formal_count,
         target_n=None,
+        input_value_type=input_value_type,
     )
 
 
@@ -130,11 +173,23 @@ def _review_zscore_import_csv(
     target_ready: bool,
     existing_phase_count: int,
     target_n: int | None,
+    input_value_type: str,
 ) -> dict[str, Any]:
     normalized_level_count = int(level_count)
-    expected_required_columns = build_zscore_building_template_columns(normalized_level_count)[:-1]
-    expected_template_columns = build_zscore_building_template_columns(normalized_level_count)
-    level_value_columns = expected_required_columns[2:]
+    normalized_input_value_type = normalize_input_value_type(input_value_type)
+    expected_required_columns = build_zscore_building_template_columns(
+        normalized_level_count,
+        normalized_input_value_type,
+    )[:-1]
+    expected_template_columns = build_zscore_building_template_columns(
+        normalized_level_count,
+        normalized_input_value_type,
+    )
+    level_value_columns = build_zscore_level_value_columns(
+        normalized_level_count,
+        normalized_input_value_type,
+    )
+    level_3_column = build_level_measurement_label("Level 3", normalized_input_value_type)
 
     issues: list[dict[str, Any]] = []
     normalized_rows: list[dict[str, Any]] = []
@@ -160,7 +215,14 @@ def _review_zscore_import_csv(
 
     total_rows = len(source_df)
     normalized_df = source_df.copy()
-    normalized_df.columns = [str(column).strip() for column in normalized_df.columns]
+    normalized_df.columns = [
+        _normalize_zscore_column_name(
+            str(column).strip(),
+            normalized_level_count,
+            normalized_input_value_type,
+        )
+        for column in normalized_df.columns
+    ]
     input_columns = list(normalized_df.columns)
 
     missing_required_columns = [
@@ -175,29 +237,29 @@ def _review_zscore_import_csv(
     allowed_column_orders = [expected_required_columns, expected_template_columns]
     has_template_blocking_issues = False
 
-    if normalized_level_count == 2 and "Level 3 值" in input_columns:
+    if normalized_level_count == 2 and level_3_column in input_columns:
         has_template_blocking_issues = True
         issues.append(
             _make_issue(
                 row_label=FILE_LEVEL_ROW_LABEL,
-                field_name="Level 3 值",
-                message="当前批次为 2 水平，不能导入包含 Level 3 值列的 3 水平模板。",
+                field_name=level_3_column,
+                message=f"当前批次为 2 水平，不能导入包含 {level_3_column} 列的 3 水平模板。",
                 is_blocking=True,
             )
         )
-    if normalized_level_count == 3 and "Level 3 值" not in input_columns:
+    if normalized_level_count == 3 and level_3_column not in input_columns:
         has_template_blocking_issues = True
         issues.append(
             _make_issue(
                 row_label=FILE_LEVEL_ROW_LABEL,
-                field_name="Level 3 值",
-                message="当前批次为 3 水平，缺少必填列 Level 3 值，请使用 3 水平模板。",
+                field_name=level_3_column,
+                message=f"当前批次为 3 水平，缺少必填列 {level_3_column}，请使用 3 水平模板。",
                 is_blocking=True,
             )
         )
 
     for column in missing_required_columns:
-        if normalized_level_count == 3 and column == "Level 3 值":
+        if normalized_level_count == 3 and column == level_3_column:
             continue
         has_template_blocking_issues = True
         issues.append(
@@ -209,7 +271,7 @@ def _review_zscore_import_csv(
             )
         )
     for column in unexpected_columns:
-        if normalized_level_count == 2 and column == "Level 3 值":
+        if normalized_level_count == 2 and column == level_3_column:
             continue
         has_template_blocking_issues = True
         issues.append(
@@ -282,8 +344,9 @@ def _review_zscore_import_csv(
 
         normalized_level_results: list[dict[str, Any]] = []
         for level_index, level_column in enumerate(level_value_columns, start=1):
-            parsed_value, value_error = _parse_positive_float(
+            parsed_value, log_value, value_error = parse_project_input_value(
                 row.get(level_column, ""),
+                normalized_input_value_type,
                 field_label=level_column,
             )
             if value_error is not None:
@@ -302,6 +365,7 @@ def _review_zscore_import_csv(
                 {
                     "level_id": f"Level {level_index}",
                     "raw_value": float(parsed_value),
+                    "log_value": log_value,
                 }
             )
 
@@ -393,9 +457,14 @@ def _review_lj_import_csv(
     target_n: int,
     phase_scope: str,
     target_ready: bool,
+    input_value_type: str,
 ) -> dict[str, Any]:
     issues: list[dict[str, Any]] = []
     normalized_rows: list[dict[str, Any]] = []
+    normalized_input_value_type = normalize_input_value_type(input_value_type)
+    value_column = get_measurement_label(normalized_input_value_type)
+    required_columns = build_lj_required_columns(normalized_input_value_type)
+    template_columns = build_lj_template_columns(normalized_input_value_type)
 
     if phase_scope == "formal" and not target_ready:
         issues.append(
@@ -419,16 +488,19 @@ def _review_lj_import_csv(
     total_rows = len(source_df)
     normalized_df = source_df.copy()
     normalized_df.columns = [
-        _normalize_lj_building_column_name(str(column).strip())
+        _normalize_lj_building_column_name(
+            str(column).strip(),
+            normalized_input_value_type,
+        )
         for column in normalized_df.columns
     ]
     input_columns = list(normalized_df.columns)
 
     missing_required_columns = [
-        column for column in LJ_BUILDING_REQUIRED_COLUMNS if column not in input_columns
+        column for column in required_columns if column not in input_columns
     ]
     unexpected_columns = [
-        column for column in input_columns if column not in LJ_BUILDING_TEMPLATE_COLUMNS
+        column for column in input_columns if column not in template_columns
     ]
     missing_optional_columns = [
         column for column in LJ_BUILDING_OPTIONAL_COLUMNS if column not in input_columns
@@ -502,12 +574,16 @@ def _review_lj_import_csv(
             )
             row_has_blocking_error = True
 
-        parsed_value, value_error = _parse_positive_float(row.get("检测值", ""))
+        parsed_value, log_value, value_error = parse_project_input_value(
+            row.get(value_column, ""),
+            normalized_input_value_type,
+            field_label=value_column,
+        )
         if value_error is not None:
             issues.append(
                 _make_issue(
                     row_label=row_number,
-                    field_name="检测值",
+                    field_name=value_column,
                     message=value_error,
                     is_blocking=True,
                 )
@@ -560,6 +636,7 @@ def _review_lj_import_csv(
                 "test_time": parsed_time_string,
                 "operator": operator,
                 "value": float(parsed_value),
+                "log_value": log_value,
                 "manual_note": manual_note,
                 "reagent_lot_changed": int(reagent_lot_changed),
             }
@@ -680,25 +757,30 @@ def _parse_test_time(raw_value: Any) -> tuple[pd.Timestamp | None, str | None]:
     return pd.Timestamp(parsed_time), None
 
 
-def _parse_positive_float(raw_value: Any, field_label: str = "检测值") -> tuple[float | None, str | None]:
-    text = str(raw_value or "").strip()
-    if not text:
-        return None, f"{field_label}不能为空。"
-
-    try:
-        numeric_value = float(text)
-    except ValueError:
-        return None, f"{field_label}必须为有效正数。"
-
-    if not math.isfinite(numeric_value) or numeric_value <= 0:
-        return None, f"{field_label}必须为有效正数。"
-    return float(numeric_value), None
-
-
-def _normalize_lj_building_column_name(column_name: str) -> str:
+def _normalize_lj_building_column_name(
+    column_name: str,
+    input_value_type: str = DEFAULT_INPUT_VALUE_TYPE,
+) -> str:
     stripped_name = str(column_name or "").strip()
     if stripped_name == "试剂批号变更":
         return LJ_BUILDING_REAGENT_CHANGE_COLUMN
+    if normalize_input_value_type(input_value_type) == "raw" and stripped_name == "检测值":
+        return get_measurement_label(input_value_type)
+    return stripped_name
+
+
+def _normalize_zscore_column_name(
+    column_name: str,
+    level_count: int,
+    input_value_type: str = DEFAULT_INPUT_VALUE_TYPE,
+) -> str:
+    stripped_name = str(column_name or "").strip()
+    if normalize_input_value_type(input_value_type) != "raw":
+        return stripped_name
+    for level_index in range(1, int(level_count) + 1):
+        legacy_column = f"Level {level_index} 值"
+        if stripped_name == legacy_column:
+            return build_level_measurement_label(f"Level {level_index}", input_value_type)
     return stripped_name
 
 

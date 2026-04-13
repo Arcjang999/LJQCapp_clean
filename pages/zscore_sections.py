@@ -26,6 +26,13 @@ from pages.management import (
     prepare_zscore_project_batch_context as prepare_zscore_project_batch_context_impl,
     render_zscore_project_batch_management as render_zscore_project_batch_management_impl,
 )
+from services.value_type_service import (
+    build_level_measurement_label,
+    get_input_value_type_label,
+    normalize_input_value_type,
+    parse_project_input_value,
+    validate_project_numeric_value,
+)
 from ui.common import (
     TEXT,
     ZSCORE_PHASE_VIEW_OPTIONS,
@@ -46,7 +53,6 @@ from ui.common import (
     render_html_block,
     render_import_review_summary,
     render_latest_analysis_card,
-    render_live_log10_panel,
     render_standard_view_help,
 )
 from ui.dialogs import (
@@ -85,25 +91,17 @@ def get_latest_zscore_run_for_display(runs: list[dict[str, Any]]) -> dict[str, A
 
 def render_zscore_level_input_block(
     level_label: str,
+    input_value_type: str,
     value_key: str,
-    value_element_id: str,
-    hint_element_id: str,
     level_caption: str | None = None,
 ) -> None:
     st.markdown(f"**{level_label}**")
     if level_caption:
         st.caption(level_caption)
-    field_label = f"{level_label} 检测值（支持实时 log10）"
-    value_text = st.text_input(
-        field_label,
+    st.text_input(
+        build_level_measurement_label(level_label, input_value_type),
         key=value_key,
         placeholder="例如：123.4567",
-    )
-    render_live_log10_panel(
-        value_text=value_text,
-        field_label=field_label,
-        value_element_id=value_element_id,
-        hint_element_id=hint_element_id,
     )
 
 def format_zscore_level_display(level_id: str, level_label_map: dict[str, str]) -> tuple[str, str | None]:
@@ -113,7 +111,11 @@ def format_zscore_level_display(level_id: str, level_label_map: dict[str, str]) 
         return default_level_label, None
     return level_label, default_level_label
 
-def build_zscore_current_level_results(template: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str], bool]:
+def build_zscore_current_level_results(
+    template: dict[str, Any],
+    input_value_type: str,
+    level_label_map: dict[str, str],
+) -> tuple[list[dict[str, Any]], list[str], bool]:
     key_map = {
         "Level 1": "zscore_level1_value",
         "Level 2": "zscore_level2_value",
@@ -125,10 +127,16 @@ def build_zscore_current_level_results(template: dict[str, Any]) -> tuple[list[d
     for level_id in template["level_ids"]:
         value_key = key_map[level_id]
         raw_text = str(st.session_state.get(value_key, "") or "")
-        raw_value, _, log_value = parse_numeric_input(raw_text)
+        display_label = format_zscore_level_display(level_id, level_label_map)[0]
+        field_label = build_level_measurement_label(display_label, input_value_type)
+        raw_value, log_value, value_error = parse_project_input_value(
+            raw_text,
+            input_value_type,
+            field_label=field_label,
+        )
         has_any_input = has_any_input or bool(raw_text.strip())
         if raw_text.strip() and raw_value is None:
-            validation_errors.append(f"{format_level_id_display(level_id)}的检测值必须为有效正数。")
+            validation_errors.append(value_error or f"{field_label}必须为有效数字。")
 
         target_info = template["default_targets"][level_id]
         level_results.append(
@@ -334,7 +342,246 @@ def build_zscore_chart_control_title(
         range_text = "全范围"
     return f"图表控制（点击展开）｜{template_display_name}｜{phase_scope_label}｜{view_mode}｜{scope_text}｜{range_text}"
 
+def _remember_zscore_chart_control_state(batch_id: int) -> None:
+    st.session_state["zscore_chart_state_batch_id"] = int(batch_id)
+    for session_key in [
+        "zscore_phase_scope",
+        "zscore_view_mode",
+        "zscore_selected_level",
+        "zscore_y_axis_mode",
+        "zscore_standard_sd_limit",
+    ]:
+        if session_key in st.session_state:
+            st.session_state[f"{session_key}__saved"] = st.session_state[session_key]
+
+
+def _sync_zscore_chart_control_widget_state(
+    template: dict[str, Any],
+    default_phase_scope: str,
+    *,
+    force: bool = False,
+) -> None:
+    phase_scope_options = list(ZSCORE_PHASE_VIEW_OPTIONS.keys())
+    phase_scope_value = st.session_state.get("zscore_phase_scope", default_phase_scope)
+    if phase_scope_value not in phase_scope_options:
+        phase_scope_value = default_phase_scope
+        st.session_state["zscore_phase_scope"] = phase_scope_value
+    if force or st.session_state.get("zscore_phase_scope_widget") not in phase_scope_options:
+        st.session_state["zscore_phase_scope_widget"] = phase_scope_value
+
+    valid_view_modes = {"单水平视图", "合并视图"}
+    view_mode_value = st.session_state.get("zscore_view_mode", "单水平视图")
+    if view_mode_value not in valid_view_modes:
+        view_mode_value = "单水平视图"
+        st.session_state["zscore_view_mode"] = view_mode_value
+    view_mode_widget_value = st.session_state.get("zscore_view_mode_widget")
+    view_mode_changed = bool(st.session_state.pop("zscore_view_mode_changed", False))
+    should_restore_overlay_view = (
+        not view_mode_changed
+        and view_mode_value == "合并视图"
+        and view_mode_widget_value == "单水平视图"
+        and st.session_state.get("zscore_selected_level_widget") not in template["level_ids"]
+    )
+    if force or view_mode_widget_value not in valid_view_modes or should_restore_overlay_view:
+        st.session_state["zscore_view_mode_widget"] = view_mode_value
+
+    y_axis_mode_value = st.session_state.get("zscore_y_axis_mode", ZSCORE_Y_AXIS_OPTIONS[0])
+    if y_axis_mode_value not in ZSCORE_Y_AXIS_OPTIONS:
+        y_axis_mode_value = ZSCORE_Y_AXIS_OPTIONS[0]
+        st.session_state["zscore_y_axis_mode"] = y_axis_mode_value
+    if force or st.session_state.get("zscore_y_axis_mode_widget") not in ZSCORE_Y_AXIS_OPTIONS:
+        st.session_state["zscore_y_axis_mode_widget"] = y_axis_mode_value
+
+    try:
+        standard_sd_limit_value = float(st.session_state.get("zscore_standard_sd_limit", 4.0) or 4.0)
+    except (TypeError, ValueError):
+        standard_sd_limit_value = 4.0
+    if standard_sd_limit_value <= 0:
+        standard_sd_limit_value = 4.0
+        st.session_state["zscore_standard_sd_limit"] = standard_sd_limit_value
+    widget_sd_limit = st.session_state.get("zscore_standard_sd_limit_widget")
+    if force or widget_sd_limit is None or float(widget_sd_limit or 0.0) <= 0:
+        st.session_state["zscore_standard_sd_limit_widget"] = standard_sd_limit_value
+
+    selected_level_value = st.session_state.get("zscore_selected_level", template["level_ids"][0])
+    if selected_level_value not in template["level_ids"]:
+        selected_level_value = template["level_ids"][0]
+        st.session_state["zscore_selected_level"] = selected_level_value
+    if force or st.session_state.get("zscore_selected_level_widget") not in template["level_ids"]:
+        st.session_state["zscore_selected_level_widget"] = selected_level_value
+
+
+def _capture_zscore_chart_control_state_from_widgets(template: dict[str, Any]) -> None:
+    phase_scope_widget_value = st.session_state.get("zscore_phase_scope_widget")
+    if phase_scope_widget_value in ZSCORE_PHASE_VIEW_OPTIONS:
+        st.session_state["zscore_phase_scope"] = phase_scope_widget_value
+
+    view_mode_widget_value = st.session_state.get("zscore_view_mode_widget")
+    if view_mode_widget_value in {"单水平视图", "合并视图"}:
+        st.session_state["zscore_view_mode"] = view_mode_widget_value
+
+    selected_level_widget_value = st.session_state.get("zscore_selected_level_widget")
+    if selected_level_widget_value in template["level_ids"]:
+        st.session_state["zscore_selected_level"] = selected_level_widget_value
+
+    y_axis_mode_widget_value = st.session_state.get("zscore_y_axis_mode_widget")
+    if y_axis_mode_widget_value in ZSCORE_Y_AXIS_OPTIONS:
+        st.session_state["zscore_y_axis_mode"] = y_axis_mode_widget_value
+
+    try:
+        standard_sd_limit_widget_value = float(st.session_state.get("zscore_standard_sd_limit_widget", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        standard_sd_limit_widget_value = 0.0
+    if standard_sd_limit_widget_value > 0:
+        st.session_state["zscore_standard_sd_limit"] = standard_sd_limit_widget_value
+
+
+def _mark_zscore_view_mode_changed() -> None:
+    st.session_state["zscore_view_mode_changed"] = True
+
+
+def _snapshot_zscore_chart_control_state_for_restore(
+    batch_id: int,
+    template: dict[str, Any],
+    default_phase_scope: str,
+    phase_scope: str,
+    view_mode: str,
+    selected_level: str,
+    y_axis_mode: str,
+    standard_sd_limit: float,
+) -> None:
+    st.session_state["zscore_chart_restore_batch_id"] = int(batch_id)
+
+    phase_scope_value = phase_scope
+    if phase_scope_value not in ZSCORE_PHASE_VIEW_OPTIONS:
+        phase_scope_value = default_phase_scope
+    st.session_state["zscore_phase_scope__restore"] = phase_scope_value
+
+    view_mode_value = view_mode
+    if view_mode_value not in {"单水平视图", "合并视图"}:
+        view_mode_value = "单水平视图"
+    st.session_state["zscore_view_mode__restore"] = view_mode_value
+
+    selected_level_value = selected_level
+    if selected_level_value not in template["level_ids"]:
+        selected_level_value = template["level_ids"][0]
+    st.session_state["zscore_selected_level__restore"] = selected_level_value
+
+    y_axis_mode_value = y_axis_mode
+    if y_axis_mode_value not in ZSCORE_Y_AXIS_OPTIONS:
+        y_axis_mode_value = ZSCORE_Y_AXIS_OPTIONS[0]
+    st.session_state["zscore_y_axis_mode__restore"] = y_axis_mode_value
+
+    try:
+        standard_sd_limit_value = float(standard_sd_limit or 4.0)
+    except (TypeError, ValueError):
+        standard_sd_limit_value = 4.0
+    if standard_sd_limit_value <= 0:
+        standard_sd_limit_value = 4.0
+    st.session_state["zscore_standard_sd_limit__restore"] = standard_sd_limit_value
+
+
+def _restore_zscore_chart_control_state_if_requested(
+    batch_id: int,
+    template: dict[str, Any],
+    default_phase_scope: str,
+) -> bool:
+    restore_requested = bool(st.session_state.get("zscore_restore_chart_controls", False))
+    st.session_state["zscore_restore_chart_controls"] = False
+    if not restore_requested:
+        return False
+
+    saved_batch_id = st.session_state.pop("zscore_chart_restore_batch_id", None)
+    if saved_batch_id is None:
+        saved_batch_id = st.session_state.get("zscore_chart_state_batch_id")
+    if saved_batch_id is None or int(saved_batch_id) != int(batch_id):
+        return False
+
+    restored_phase_scope = st.session_state.pop("zscore_phase_scope__restore", None)
+    if restored_phase_scope is None:
+        restored_phase_scope = st.session_state.get("zscore_phase_scope__saved")
+    if restored_phase_scope not in ZSCORE_PHASE_VIEW_OPTIONS:
+        restored_phase_scope = default_phase_scope
+    st.session_state["zscore_phase_scope"] = restored_phase_scope
+
+    restored_view_mode = st.session_state.pop("zscore_view_mode__restore", None)
+    if restored_view_mode is None:
+        restored_view_mode = st.session_state.get("zscore_view_mode__saved")
+    if restored_view_mode not in {"鍗曟按骞宠鍥?", "鍚堝苟瑙嗗浘"}:
+        restored_view_mode = "鍗曟按骞宠鍥?"
+    st.session_state["zscore_view_mode"] = restored_view_mode
+
+    restored_selected_level = st.session_state.pop("zscore_selected_level__restore", None)
+    if restored_selected_level is None:
+        restored_selected_level = st.session_state.get("zscore_selected_level__saved")
+    if restored_selected_level not in template["level_ids"]:
+        restored_selected_level = template["level_ids"][0]
+    st.session_state["zscore_selected_level"] = restored_selected_level
+
+    restored_y_axis_mode = st.session_state.pop("zscore_y_axis_mode__restore", None)
+    if restored_y_axis_mode is None:
+        restored_y_axis_mode = st.session_state.get("zscore_y_axis_mode__saved")
+    if restored_y_axis_mode not in ZSCORE_Y_AXIS_OPTIONS:
+        restored_y_axis_mode = ZSCORE_Y_AXIS_OPTIONS[0]
+    st.session_state["zscore_y_axis_mode"] = restored_y_axis_mode
+
+    try:
+        restored_sd_limit = float(st.session_state.pop("zscore_standard_sd_limit__restore", None) or 0.0)
+    except (TypeError, ValueError):
+        restored_sd_limit = 0.0
+    if restored_sd_limit <= 0:
+        try:
+            restored_sd_limit = float(st.session_state.get("zscore_standard_sd_limit__saved", 4.0) or 4.0)
+        except (TypeError, ValueError):
+            restored_sd_limit = 4.0
+    if restored_sd_limit <= 0:
+        restored_sd_limit = 4.0
+    st.session_state["zscore_standard_sd_limit"] = restored_sd_limit
+    st.session_state["zscore_chart_controls_force_sync"] = True
+    return True
+
+
+def _apply_saved_zscore_chart_control_state(
+    template: dict[str, Any],
+    default_phase_scope: str,
+) -> None:
+    phase_scope_value = st.session_state.get("zscore_phase_scope__saved", st.session_state.get("zscore_phase_scope"))
+    if phase_scope_value not in ZSCORE_PHASE_VIEW_OPTIONS:
+        phase_scope_value = default_phase_scope
+    st.session_state["zscore_phase_scope"] = phase_scope_value
+
+    view_mode_value = st.session_state.get("zscore_view_mode__saved", st.session_state.get("zscore_view_mode"))
+    if view_mode_value not in {"单水平视图", "合并视图"}:
+        view_mode_value = "单水平视图"
+    st.session_state["zscore_view_mode"] = view_mode_value
+
+    selected_level_value = st.session_state.get(
+        "zscore_selected_level__saved",
+        st.session_state.get("zscore_selected_level"),
+    )
+    if selected_level_value not in template["level_ids"]:
+        selected_level_value = template["level_ids"][0]
+    st.session_state["zscore_selected_level"] = selected_level_value
+
+    y_axis_mode_value = st.session_state.get("zscore_y_axis_mode__saved", st.session_state.get("zscore_y_axis_mode"))
+    if y_axis_mode_value not in ZSCORE_Y_AXIS_OPTIONS:
+        y_axis_mode_value = ZSCORE_Y_AXIS_OPTIONS[0]
+    st.session_state["zscore_y_axis_mode"] = y_axis_mode_value
+
+    try:
+        standard_sd_limit_value = float(
+            st.session_state.get("zscore_standard_sd_limit__saved", st.session_state.get("zscore_standard_sd_limit", 4.0))
+            or 4.0
+        )
+    except (TypeError, ValueError):
+        standard_sd_limit_value = 4.0
+    if standard_sd_limit_value <= 0:
+        standard_sd_limit_value = 4.0
+    st.session_state["zscore_standard_sd_limit"] = standard_sd_limit_value
+
+
 def render_zscore_chart_controls(
+    batch_id: int,
     template: dict[str, Any],
     default_phase_scope: str,
     level_label_map: dict[str, str],
@@ -342,16 +589,11 @@ def render_zscore_chart_controls(
     phase_scope_options = list(ZSCORE_PHASE_VIEW_OPTIONS.keys())
     if st.session_state.get("zscore_phase_scope") not in phase_scope_options:
         st.session_state["zscore_phase_scope"] = default_phase_scope
-    phase_scope = str(st.session_state["zscore_phase_scope"])
-
     if st.session_state.get("zscore_view_mode") not in {"单水平视图", "合并视图"}:
         st.session_state["zscore_view_mode"] = "单水平视图"
-    view_mode = str(st.session_state["zscore_view_mode"])
-
     if st.session_state.get("zscore_y_axis_mode") not in ZSCORE_Y_AXIS_OPTIONS:
         st.session_state["zscore_y_axis_mode"] = ZSCORE_Y_AXIS_OPTIONS[0]
     y_axis_mode = str(st.session_state["zscore_y_axis_mode"])
-
     try:
         standard_sd_limit = float(st.session_state.get("zscore_standard_sd_limit", 4.0) or 4.0)
     except (TypeError, ValueError):
@@ -359,10 +601,16 @@ def render_zscore_chart_controls(
     if standard_sd_limit <= 0:
         standard_sd_limit = 4.0
     st.session_state["zscore_standard_sd_limit"] = standard_sd_limit
-
     if st.session_state.get("zscore_selected_level") not in template["level_ids"]:
         st.session_state["zscore_selected_level"] = template["level_ids"][0]
     selected_level = str(st.session_state["zscore_selected_level"])
+
+    force_widget_sync = bool(st.session_state.pop("zscore_chart_controls_force_sync", False))
+    _sync_zscore_chart_control_widget_state(
+        template,
+        default_phase_scope,
+        force=force_widget_sync,
+    )
 
     with st.container(border=True):
         st.markdown("**图表控制**")
@@ -373,26 +621,25 @@ def render_zscore_chart_controls(
             options=phase_scope_options,
             format_func=lambda option: ZSCORE_PHASE_VIEW_OPTIONS[option],
             horizontal=True,
-            key="zscore_phase_scope",
+            key="zscore_phase_scope_widget",
         )
         view_mode = control_col2.radio(
             "视图模式",
             options=["单水平视图", "合并视图"],
             horizontal=True,
-            key="zscore_view_mode",
+            key="zscore_view_mode_widget",
+            on_change=_mark_zscore_view_mode_changed,
         )
-        if st.session_state.get("zscore_selected_level") not in template["level_ids"]:
-            st.session_state["zscore_selected_level"] = template["level_ids"][0]
         if view_mode == "单水平视图":
             selected_level = st.radio(
                 "当前水平",
                 options=template["level_ids"],
                 horizontal=True,
-                key="zscore_selected_level",
+                key="zscore_selected_level_widget",
                 format_func=lambda option: format_zscore_level_display(option, level_label_map)[0],
             )
         else:
-            selected_level = st.session_state.get("zscore_selected_level", template["level_ids"][0])
+            selected_level = str(st.session_state.get("zscore_selected_level", template["level_ids"][0]))
 
         with st.expander(
             build_zscore_chart_control_title(
@@ -410,7 +657,7 @@ def render_zscore_chart_controls(
                 "Y 轴范围",
                 options=ZSCORE_Y_AXIS_OPTIONS,
                 horizontal=True,
-                key="zscore_y_axis_mode",
+                key="zscore_y_axis_mode_widget",
             )
             if y_axis_mode == "标准视图":
                 standard_sd_limit = float(
@@ -419,12 +666,18 @@ def render_zscore_chart_controls(
                         min_value=2.0,
                         max_value=6.0,
                         step=1.0,
-                        key="zscore_standard_sd_limit",
+                        key="zscore_standard_sd_limit_widget",
                     )
                 )
                 render_standard_view_help(standard_sd_limit)
             else:
                 standard_sd_limit = float(st.session_state.get("zscore_standard_sd_limit", standard_sd_limit))
+    st.session_state["zscore_phase_scope"] = phase_scope
+    st.session_state["zscore_view_mode"] = view_mode
+    st.session_state["zscore_selected_level"] = selected_level
+    st.session_state["zscore_y_axis_mode"] = y_axis_mode
+    st.session_state["zscore_standard_sd_limit"] = standard_sd_limit
+    _remember_zscore_chart_control_state(batch_id)
     return phase_scope, view_mode, selected_level, y_axis_mode, standard_sd_limit
 
 def sync_zscore_workbench_state(
@@ -432,28 +685,48 @@ def sync_zscore_workbench_state(
     template: dict[str, Any],
     default_phase_scope: str,
 ) -> None:
+    restored_chart_state = _restore_zscore_chart_control_state_if_requested(
+        batch_id,
+        template,
+        default_phase_scope,
+    )
+    should_force_widget_sync = restored_chart_state
     if st.session_state.get("zscore_workbench_batch_id") != batch_id:
         st.session_state["zscore_workbench_batch_id"] = batch_id
-        st.session_state["zscore_phase_scope"] = default_phase_scope
-        st.session_state["zscore_selected_level"] = template["level_ids"][0]
+        if not restored_chart_state:
+            st.session_state["zscore_phase_scope"] = default_phase_scope
+            st.session_state["zscore_selected_level"] = template["level_ids"][0]
+            should_force_widget_sync = True
         if st.session_state.get("zscore_view_mode") not in {"单水平视图", "合并视图"}:
             st.session_state["zscore_view_mode"] = "单水平视图"
+            should_force_widget_sync = True
         if st.session_state.get("zscore_y_axis_mode") not in ZSCORE_Y_AXIS_OPTIONS:
             st.session_state["zscore_y_axis_mode"] = ZSCORE_Y_AXIS_OPTIONS[0]
+            should_force_widget_sync = True
         if float(st.session_state.get("zscore_standard_sd_limit", 4.0) or 4.0) <= 0:
             st.session_state["zscore_standard_sd_limit"] = 4.0
+            should_force_widget_sync = True
+        if should_force_widget_sync:
+            st.session_state["zscore_chart_controls_force_sync"] = True
         return
 
     if st.session_state.get("zscore_phase_scope") not in ZSCORE_PHASE_VIEW_OPTIONS:
         st.session_state["zscore_phase_scope"] = default_phase_scope
+        should_force_widget_sync = True
     if st.session_state.get("zscore_selected_level") not in template["level_ids"]:
         st.session_state["zscore_selected_level"] = template["level_ids"][0]
+        should_force_widget_sync = True
     if st.session_state.get("zscore_view_mode") not in {"单水平视图", "合并视图"}:
         st.session_state["zscore_view_mode"] = "单水平视图"
+        should_force_widget_sync = True
     if st.session_state.get("zscore_y_axis_mode") not in ZSCORE_Y_AXIS_OPTIONS:
         st.session_state["zscore_y_axis_mode"] = ZSCORE_Y_AXIS_OPTIONS[0]
+        should_force_widget_sync = True
     if float(st.session_state.get("zscore_standard_sd_limit", 4.0) or 4.0) <= 0:
         st.session_state["zscore_standard_sd_limit"] = 4.0
+        should_force_widget_sync = True
+    if should_force_widget_sync:
+        st.session_state["zscore_chart_controls_force_sync"] = True
 
 def _excel_column_name(index: int) -> str:
     result = ""
@@ -648,10 +921,12 @@ def build_zscore_phase_export_dataframe(
     saved_runs: list[dict[str, Any]],
     required_level_ids: list[str],
     phase_scope: str,
+    input_value_type: str,
 ) -> pd.DataFrame:
     if phase_scope not in {"building", "formal"}:
         raise ValueError(f"Unsupported Z-score export phase: {phase_scope}")
 
+    normalized_input_value_type = normalize_input_value_type(input_value_type)
     if phase_scope == "building":
         export_runs = [
             run
@@ -660,7 +935,12 @@ def build_zscore_phase_export_dataframe(
         ]
         export_columns = ["检测序号", "检测时间", "检测人"]
         for level_id in required_level_ids:
-            export_columns.append(f"{_build_zscore_export_level_prefix(level_id)} 值")
+            export_columns.append(
+                build_level_measurement_label(
+                    _build_zscore_export_level_prefix(level_id),
+                    normalized_input_value_type,
+                )
+            )
         export_columns.extend(["备注", "阶段"])
     else:
         export_runs = [
@@ -668,10 +948,13 @@ def build_zscore_phase_export_dataframe(
         ]
         export_columns = ["检测序号", "检测时间", "检测人"]
         for level_id in required_level_ids:
-            level_prefix = _build_zscore_export_level_prefix(level_id)
+            level_prefix = build_level_measurement_label(
+                _build_zscore_export_level_prefix(level_id),
+                normalized_input_value_type,
+            )
             export_columns.extend(
                 [
-                    f"{level_prefix} 值",
+                    level_prefix,
                     f"{level_prefix} Z值",
                     f"{level_prefix} 状态",
                 ]
@@ -699,9 +982,12 @@ def build_zscore_phase_export_dataframe(
             "检测人": str(run.get("operator", "") or ""),
         }
         for level_id in required_level_ids:
-            level_prefix = _build_zscore_export_level_prefix(level_id)
+            level_prefix = build_level_measurement_label(
+                _build_zscore_export_level_prefix(level_id),
+                normalized_input_value_type,
+            )
             level_result = level_results_by_id.get(level_id, {})
-            row[f"{level_prefix} 值"] = _format_zscore_export_numeric(level_result.get("raw_value"))
+            row[level_prefix] = _format_zscore_export_numeric(level_result.get("raw_value"))
             if phase_scope == "formal":
                 row[f"{level_prefix} Z值"] = _format_zscore_export_numeric(level_result.get("zscore"))
                 row[f"{level_prefix} 状态"] = (
@@ -745,6 +1031,7 @@ def build_zscore_workbench_context(selected_batch_id: int) -> dict[str, object]:
     _ensure_zscore_workbench_session_defaults()
     batch_context = resolve_zscore_batch_context(selected_batch_id)
     batch = batch_context["batch"]
+    input_value_type = normalize_input_value_type(batch["input_value_type"])
     cv_limit = get_saved_batch_cv_limit(batch)
     level_count = int(batch_context["level_count"])
     template_id = str(batch_context["template_id"])
@@ -763,6 +1050,8 @@ def build_zscore_workbench_context(selected_batch_id: int) -> dict[str, object]:
     return {
         "batch_context": batch_context,
         "batch": batch,
+        "input_value_type": input_value_type,
+        "input_value_type_label": get_input_value_type_label(input_value_type),
         "cv_limit": cv_limit,
         "level_count": level_count,
         "template_id": template_id,
@@ -787,6 +1076,8 @@ def render_zscore_entry_section(
     selected_batch_id: int,
 ) -> None:
     template = context["template"]
+    input_value_type = context["input_value_type"]
+    input_value_type_label = context["input_value_type_label"]
     operator_options = context["operator_options"]
     level_count = context["level_count"]
     cv_limit = context["cv_limit"]
@@ -811,13 +1102,12 @@ def render_zscore_entry_section(
         st.session_state["zscore_entry_test_time"] = datetime.now()
         st.session_state["zscore_reset_entry_form"] = False
 
-    current_level_results, input_errors, _ = build_zscore_current_level_results(template)
     notice_message = str(st.session_state.pop("zscore_notice", "") or "")
 
     if notice_message:
         st.success(notice_message)
     st.caption(
-        f"当前项目固定为 {level_count} 水平，规则组合为 {format_zscore_template_display_name(template)}。"
+        f"当前项目固定为 {level_count} 水平，输入值类型为 {input_value_type_label}，规则组合为 {format_zscore_template_display_name(template)}。"
         "完成录入后可查看图表与最新结果分析。"
     )
     if cv_limit is not None:
@@ -825,43 +1115,73 @@ def render_zscore_entry_section(
 
     with st.container(border=True):
         st.markdown("**录入信息**")
-        st.datetime_input("检测时间", key="zscore_entry_test_time")
-        st.selectbox(
-            "检测人",
-            options=operator_options,
-            index=None,
-            key="zscore_entry_operator",
-            accept_new_options=True,
-            placeholder="可选择历史姓名，也可直接输入新姓名",
-        )
-
         level_render_config = {
-            "Level 1": ("zscore_level1_value", "zscore-level1-log10-value", "zscore-level1-log10-hint"),
-            "Level 2": ("zscore_level2_value", "zscore-level2-log10-value", "zscore-level2-log10-hint"),
-            "Level 3": ("zscore_level3_value", "zscore-level3-log10-value", "zscore-level3-log10-hint"),
+            "Level 1": "zscore_level1_value",
+            "Level 2": "zscore_level2_value",
+            "Level 3": "zscore_level3_value",
         }
-        for level_id in template["level_ids"]:
-            display_label, level_caption = format_zscore_level_display(level_id, level_label_map)
-            value_key, value_element_id, hint_element_id = level_render_config[level_id]
-            render_zscore_level_input_block(
-                level_label=display_label,
-                value_key=value_key,
-                value_element_id=value_element_id,
-                hint_element_id=hint_element_id,
-                level_caption=level_caption,
+        current_phase_scope = str(st.session_state.get("zscore_phase_scope", context["default_phase_scope"]))
+        current_view_mode = str(st.session_state.get("zscore_view_mode", "单水平视图"))
+        current_selected_level = str(st.session_state.get("zscore_selected_level", template["level_ids"][0]))
+        current_y_axis_mode = str(st.session_state.get("zscore_y_axis_mode", ZSCORE_Y_AXIS_OPTIONS[0]))
+        try:
+            current_standard_sd_limit = float(st.session_state.get("zscore_standard_sd_limit", 4.0) or 4.0)
+        except (TypeError, ValueError):
+            current_standard_sd_limit = 4.0
+        # Keep entry widgets inside a form so Tab focus changes do not trigger reruns.
+        with st.form("zscore_entry_form"):
+            test_time = st.datetime_input("检测时间", key="zscore_entry_test_time")
+            operator = st.selectbox(
+                "检测人",
+                options=operator_options,
+                index=None,
+                key="zscore_entry_operator",
+                accept_new_options=True,
+                placeholder="可选择历史姓名，也可直接输入新姓名",
+            )
+            for level_id in template["level_ids"]:
+                display_label, level_caption = format_zscore_level_display(level_id, level_label_map)
+                value_key = level_render_config[level_id]
+                render_zscore_level_input_block(
+                    level_label=display_label,
+                    input_value_type=input_value_type,
+                    value_key=value_key,
+                    level_caption=level_caption,
+                )
+            submitted = st.form_submit_button(
+                "保存本次检测",
+                type="primary",
+                width="stretch",
+                on_click=_snapshot_zscore_chart_control_state_for_restore,
+                args=(
+                    selected_batch_id,
+                    template,
+                    str(context["default_phase_scope"]),
+                    current_phase_scope,
+                    current_view_mode,
+                    current_selected_level,
+                    current_y_axis_mode,
+                    current_standard_sd_limit,
+                ),
             )
 
-        if st.button("保存本次检测", type="primary", width="stretch"):
+        if submitted:
+            current_level_results, input_errors, _ = build_zscore_current_level_results(
+                template,
+                input_value_type,
+                level_label_map,
+            )
             validation_errors = list(input_errors)
-            cleaned_operator = str(st.session_state.get("zscore_entry_operator", "") or "").strip()
-            if st.session_state.get("zscore_entry_test_time") is None:
+            cleaned_operator = str(operator or "").strip()
+            if test_time is None:
                 validation_errors.append("请填写检测时间。")
             if not cleaned_operator:
                 validation_errors.append("请填写检测人。")
             for level_result in current_level_results:
                 if level_result["raw_value"] is None:
+                    display_label = format_zscore_level_display(level_result["level_id"], level_label_map)[0]
                     validation_errors.append(
-                        f"{format_level_id_display(level_result['level_id'])}的检测值必须为有效正数。"
+                        f"{build_level_measurement_label(display_label, input_value_type)}不能为空。"
                     )
 
             if validation_errors:
@@ -870,7 +1190,7 @@ def render_zscore_entry_section(
                 try:
                     create_zscore_run(
                         batch_id=selected_batch_id,
-                        test_time=st.session_state["zscore_entry_test_time"],
+                        test_time=test_time,
                         operator=cleaned_operator,
                         level_results=current_level_results,
                         template_id=template_id,
@@ -880,8 +1200,14 @@ def render_zscore_entry_section(
                 except ValueError as exc:
                     st.error(str(exc))
                 else:
+                    _apply_saved_zscore_chart_control_state(
+                        template,
+                        str(context["default_phase_scope"]),
+                    )
                     st.session_state["zscore_notice"] = "Z-score 检测结果已保存。"
                     st.session_state["zscore_reset_entry_form"] = True
+                    st.session_state["zscore_restore_chart_controls"] = True
+                    st.session_state["zscore_chart_controls_force_sync"] = True
                     st.rerun()
 
 def render_zscore_level_summary_section(
@@ -988,6 +1314,7 @@ def render_zscore_chart_analysis_section(
     overall_phase = context["overall_phase"]
     formal_rules_enabled = context["formal_rules_enabled"]
     batch = context["batch"]
+    input_value_type_label = context["input_value_type_label"]
     required_level_ids = context["required_level_ids"]
     template = context["template"]
     level_label_map = context["level_label_map"]
@@ -1005,6 +1332,7 @@ def render_zscore_chart_analysis_section(
             phase_scope=phase_scope,
             y_axis_mode=y_axis_mode,
             standard_sd_limit=standard_sd_limit,
+            y_axis_label=input_value_type_label,
         )
     else:
         figure = plot_zscore_overlay(
@@ -1014,6 +1342,7 @@ def render_zscore_chart_analysis_section(
             phase_scope=phase_scope,
             y_axis_mode=y_axis_mode,
             standard_sd_limit=standard_sd_limit,
+            y_axis_label=input_value_type_label,
         )
     with st.container(border=True):
         st.markdown("**质控图**")
@@ -1082,6 +1411,8 @@ def render_zscore_export_import_section(
 ) -> None:
     batch = context["batch"]
     history_runs = context["history_runs"]
+    input_value_type = context["input_value_type"]
+    input_value_type_label = context["input_value_type_label"]
     level_count = context["level_count"]
     required_level_ids = context["required_level_ids"]
     required_n = context["required_n"]
@@ -1101,7 +1432,10 @@ def render_zscore_export_import_section(
     y_axis_mode = chart_panel_state["y_axis_mode"]
     standard_sd_limit = chart_panel_state["standard_sd_limit"]
 
-    zscore_building_template_df = build_zscore_building_template_dataframe(level_count)
+    zscore_building_template_df = build_zscore_building_template_dataframe(
+        level_count,
+        input_value_type=input_value_type,
+    )
     zscore_building_template_csv_bytes = zscore_building_template_df.to_csv(index=False).encode("utf-8-sig")
     zscore_building_import_scope = f"zscore_building_import_{selected_batch_id}"
     zscore_building_import_review_state_key = f"{zscore_building_import_scope}_review"
@@ -1161,18 +1495,20 @@ def render_zscore_export_import_section(
         history_runs,
         required_level_ids,
         "building",
+        input_value_type,
     )
     formal_export_df = build_zscore_phase_export_dataframe(
         history_runs,
         required_level_ids,
         "formal",
+        input_value_type,
     )
     building_csv_bytes = building_export_df.to_csv(index=False).encode("utf-8-sig")
     building_xlsx_bytes = dataframe_to_xlsx_bytes(building_export_df)
     formal_csv_bytes = formal_export_df.to_csv(index=False).encode("utf-8-sig")
     formal_xlsx_bytes = dataframe_to_xlsx_bytes(formal_export_df)
 
-    st.caption("导出当前批次数据与图表，并按模板导入 CSV。")
+    st.caption(f"导出当前批次数据与图表，并按模板导入 CSV；各水平主值列统一为“{input_value_type_label}”。")
     st.markdown("**导出**")
     st.caption("当前批次数据按每次检测展开为宽表，建靶期与正式期可分别导出。")
     zscore_export_format = st.radio(
@@ -1218,7 +1554,9 @@ def render_zscore_export_import_section(
     st.markdown("**CSV 导入**")
     st.caption("建靶期与正式期模板、上传、审查、确认导入分开展示。")
     st.markdown("**建靶期 CSV 导入**")
-    st.caption("先下载当前批次标准模板，再上传 CSV 审查；只有无阻断错误时，才允许确认导入当前批次建靶期检测记录。")
+    st.caption(
+        f"先下载当前批次标准模板，再上传 CSV 审查；只有无阻断错误时，才允许确认导入当前批次建靶期{input_value_type_label}检测记录。"
+    )
     st.download_button(
         label="下载建靶期 CSV 模板",
         data=zscore_building_template_csv_bytes,
@@ -1278,6 +1616,7 @@ def render_zscore_export_import_section(
             existing_results_df=existing_building_runs_df,
             level_count=level_count,
             target_n=required_n,
+            input_value_type=input_value_type,
         )
         zscore_building_import_review_state["file_signature"] = current_zscore_building_signature
         st.session_state[zscore_building_import_review_state_key] = (
@@ -1343,7 +1682,9 @@ def render_zscore_export_import_section(
             st.rerun()
 
     st.markdown("**正式期 CSV 导入**")
-    st.caption("先下载当前批次标准模板，再上传 CSV 审查；导入目标为当前批次正式期，只有无阻断错误时才允许确认导入。")
+    st.caption(
+        f"先下载当前批次标准模板，再上传 CSV 审查；导入目标为当前批次正式期，只有无阻断错误时才允许确认导入当前批次{input_value_type_label}数据。"
+    )
     st.download_button(
         label="下载正式期 CSV 模板",
         data=zscore_building_template_csv_bytes,
@@ -1402,6 +1743,7 @@ def render_zscore_export_import_section(
             level_count=level_count,
             target_ready=zscore_target_ready,
             existing_formal_count=len(existing_formal_runs),
+            input_value_type=input_value_type,
         )
         zscore_formal_import_review_state["file_signature"] = current_zscore_formal_signature
         st.session_state[zscore_formal_import_review_state_key] = (
@@ -1517,7 +1859,7 @@ def render_zscore_export_import_section(
                 st.info("所选日期范围内没有正式质控数据，无法导出月度图。")
             else:
                 monthly_title = (
-                    f"月度质控图 - 批次 {batch['id']} - {batch['instrument']} - {batch['reagent']} - "
+                    f"月度质控图 - 质控批号 {batch['lot_no']} - {batch['instrument']} - {batch['reagent']} - "
                     f"{batch['qc_material']} - {batch['concentration']}\n"
                     f"正式期｜{current_view_label}｜{monthly_start.strftime('%Y-%m-%d')} 至 {monthly_end.strftime('%Y-%m-%d')}"
                 )
@@ -1529,6 +1871,7 @@ def render_zscore_export_import_section(
                         phase_scope="formal",
                         y_axis_mode=y_axis_mode,
                         standard_sd_limit=standard_sd_limit,
+                        y_axis_label=input_value_type_label,
                     )
                 else:
                     monthly_figure = plot_zscore_overlay(
@@ -1538,6 +1881,7 @@ def render_zscore_export_import_section(
                         phase_scope="formal",
                         y_axis_mode=y_axis_mode,
                         standard_sd_limit=standard_sd_limit,
+                        y_axis_label=input_value_type_label,
                     )
                 monthly_png_bytes = figure_to_png_bytes(monthly_figure)
                 monthly_file_name = (

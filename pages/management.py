@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from database import (
+    count_project_batches,
     create_batch,
     create_project,
     create_zscore_batch,
@@ -19,58 +20,202 @@ from database import (
     update_batch,
     update_project,
 )
+from services.value_type_service import (
+    INPUT_VALUE_TYPE_OPTIONS,
+    get_input_value_type_label,
+    normalize_input_value_type,
+)
 from ui.common import (
     TEXT,
     format_datetime_column,
     format_optional_float,
     format_optional_input_value,
     get_saved_batch_cv_limit,
-    localize_dataframe_columns,
     parse_optional_cv_limit_input,
 )
 from zscore_logic import format_zscore_level_label_summary, resolve_zscore_batch_context
 
 
-def _clean_selector_label_part(value, fallback: str) -> str:
+def _clean_selector_label_part(value, fallback: str = "") -> str:
     cleaned_value = " ".join(str(value or "").split()).strip()
     return cleaned_value or fallback
+
+
+def _format_selector_datetime(value) -> str:
+    cleaned_value = _clean_selector_label_part(value)
+    if not cleaned_value:
+        return ""
+    try:
+        return pd.to_datetime(cleaned_value).strftime("%Y-%m-%d %H:%M")
+    except (TypeError, ValueError):
+        return cleaned_value
+
+
+def _join_display_parts(parts: list[str]) -> str:
+    return " | ".join(part for part in parts if part)
+
+
+def _is_instant_origin_flag(value) -> bool:
+    if value is None:
+        return False
+    text = str(value).strip().lower()
+    if not text:
+        return False
+    return text in {"1", "true", "instant"}
+
+
+def _get_lj_project_source_label(row: pd.Series | dict[str, object]) -> str:
+    return "由即时法转入" if _is_instant_origin_flag(dict(row).get("is_from_instant")) else "普通创建"
+
+
+def _get_lj_batch_source_label(row: pd.Series | dict[str, object]) -> str:
+    return "由即时法转入" if _is_instant_origin_flag(dict(row).get("source_method")) else "普通创建"
 
 
 def build_project_label(row: pd.Series) -> str:
     row = dict(row)
     project_name = _clean_selector_label_part(row.get("name"), "未命名项目")
-    return f"项目 {row['id']} | {project_name}"
+    input_value_type_label = get_input_value_type_label(row.get("input_value_type"))
+    parts = [project_name, input_value_type_label]
+    if _get_lj_project_source_label(row) == "由即时法转入":
+        parts.append("由即时法转入")
+    return _join_display_parts(parts)
 
 
 def build_batch_label(row: pd.Series) -> str:
     row = dict(row)
-    instrument = _clean_selector_label_part(row.get("instrument"), "未填写仪器")
-    reagent = _clean_selector_label_part(row.get("reagent"), "未填写试剂")
-    qc_material = _clean_selector_label_part(row.get("qc_material"), "未填写质控品")
-    concentration = _clean_selector_label_part(row.get("concentration"), "未填写浓度")
-    lot_no = _clean_selector_label_part(row.get("lot_no"), "未填写")
-    return (
-        f"批次 {row['id']} | {instrument} | {reagent} | "
-        f"{qc_material} | {concentration} | 质控批号 {lot_no}"
-    )
+    lot_no = _clean_selector_label_part(row.get("lot_no"))
+    created_at = _format_selector_datetime(row.get("created_at"))
+    parts: list[str] = []
+    if lot_no:
+        parts.append(f"质控批号：{lot_no}")
+    else:
+        fallback_summary = _join_display_parts(
+            [
+                _clean_selector_label_part(row.get("instrument")),
+                _clean_selector_label_part(row.get("reagent")),
+                _clean_selector_label_part(row.get("qc_material")),
+            ]
+        )
+        if fallback_summary:
+            parts.append(fallback_summary)
+    if _get_lj_batch_source_label(row) == "由即时法转入":
+        parts.append("由即时法转入")
+    if created_at:
+        parts.append(f"创建于 {created_at}")
+    if not parts:
+        parts.append("未命名批次")
+    return _join_display_parts(parts)
 
 
 def build_zscore_project_label(row: pd.Series) -> str:
     row = dict(row)
     project_name = _clean_selector_label_part(row.get("name"), "未命名项目")
     level_count = int(row.get("level_count", 0) or 0)
-    return f"项目 {row['id']} | {project_name} | {level_count} 水平"
+    input_value_type_label = get_input_value_type_label(row.get("input_value_type"))
+    return _join_display_parts([project_name, f"{level_count} 水平", input_value_type_label])
 
 
 def build_zscore_batch_label(row: pd.Series) -> str:
     row = dict(row)
-    instrument = _clean_selector_label_part(row.get("instrument"), "未填写仪器")
-    reagent = _clean_selector_label_part(row.get("reagent"), "未填写试剂")
-    lot_no = _clean_selector_label_part(row.get("lot_no"), "未填写")
+    lot_no = _clean_selector_label_part(row.get("lot_no"))
     level_count = int(row.get("level_count", 0) or 0)
-    return (
-        f"批次 {row['id']} | {level_count} 水平 | {instrument} | "
-        f"{reagent} | 质控批号 {lot_no}"
+    created_at = _format_selector_datetime(row.get("created_at"))
+    parts: list[str] = []
+    if lot_no:
+        parts.append(f"质控批号：{lot_no}")
+    else:
+        fallback_summary = _join_display_parts(
+            [
+                _clean_selector_label_part(row.get("instrument")),
+                _clean_selector_label_part(row.get("reagent")),
+            ]
+        )
+        if fallback_summary:
+            parts.append(fallback_summary)
+    parts.append(f"{level_count} 水平")
+    if created_at:
+        parts.append(f"创建于 {created_at}")
+    if not parts:
+        parts.append("未命名批次")
+    return _join_display_parts(parts)
+
+
+def _build_lj_project_table(projects_df: pd.DataFrame) -> pd.DataFrame:
+    if projects_df.empty:
+        return projects_df
+    display_df = format_datetime_column(projects_df, "created_at").copy()
+    display_df["name"] = display_df["name"].map(lambda value: _clean_selector_label_part(value, "未命名项目"))
+    display_df["input_value_type"] = display_df["input_value_type"].map(get_input_value_type_label)
+    display_df["source"] = display_df.apply(_get_lj_project_source_label, axis=1)
+    return display_df[["name", "input_value_type", "source", "created_at"]].rename(
+        columns={
+            "name": "项目名称",
+            "input_value_type": "输入值类型",
+            "source": "来源",
+            "created_at": "创建时间",
+        }
+    )
+
+
+def _build_lj_batch_table(batches_df: pd.DataFrame) -> pd.DataFrame:
+    if batches_df.empty:
+        return batches_df
+    display_df = format_datetime_column(batches_df, "created_at").copy()
+    for column_name in ["lot_no", "instrument", "reagent", "qc_material", "concentration"]:
+        display_df[column_name] = display_df[column_name].map(_clean_selector_label_part)
+    display_df["source"] = display_df.apply(_get_lj_batch_source_label, axis=1)
+    return display_df[
+        ["lot_no", "instrument", "reagent", "qc_material", "concentration", "source", "created_at"]
+    ].rename(
+        columns={
+            "lot_no": "质控品批号",
+            "instrument": "仪器",
+            "reagent": "试剂",
+            "qc_material": "质控品",
+            "concentration": "浓度",
+            "source": "来源",
+            "created_at": "创建时间",
+        }
+    )
+
+
+def _build_zscore_project_table(projects_df: pd.DataFrame) -> pd.DataFrame:
+    if projects_df.empty:
+        return projects_df
+    display_df = format_datetime_column(projects_df, "created_at").copy()
+    display_df["name"] = display_df["name"].map(lambda value: _clean_selector_label_part(value, "未命名项目"))
+    display_df["level_count"] = display_df["level_count"].map(lambda value: f"{int(value or 0)} 水平")
+    display_df["input_value_type"] = display_df["input_value_type"].map(get_input_value_type_label)
+    return display_df[["name", "level_count", "input_value_type", "created_at"]].rename(
+        columns={
+            "name": "项目名称",
+            "level_count": "水平数",
+            "input_value_type": "输入值类型",
+            "created_at": "创建时间",
+        }
+    )
+
+
+def _build_zscore_batch_table(batches_df: pd.DataFrame) -> pd.DataFrame:
+    if batches_df.empty:
+        return batches_df
+    display_df = format_datetime_column(batches_df, "created_at").copy()
+    for column_name in ["lot_no", "instrument", "reagent", "qc_material", "concentration"]:
+        display_df[column_name] = display_df[column_name].map(_clean_selector_label_part)
+    display_df["level_count"] = display_df["level_count"].map(lambda value: f"{int(value or 0)} 水平")
+    return display_df[
+        ["lot_no", "level_count", "instrument", "reagent", "qc_material", "concentration", "created_at"]
+    ].rename(
+        columns={
+            "lot_no": "质控品批号",
+            "level_count": "水平数",
+            "instrument": "仪器",
+            "reagent": "试剂",
+            "qc_material": "质控品",
+            "concentration": "浓度",
+            "created_at": "创建时间",
+        }
     )
 
 
@@ -180,6 +325,12 @@ def render_project_batch_management(
             st.subheader("新建项目")
             with st.form("create_project_form", clear_on_submit=True):
                 project_name = st.text_input("项目名称")
+                input_value_type = st.radio(
+                    "输入值类型",
+                    options=INPUT_VALUE_TYPE_OPTIONS,
+                    format_func=get_input_value_type_label,
+                    horizontal=True,
+                )
                 project_submitted = st.form_submit_button("创建项目", width="stretch")
 
                 if project_submitted:
@@ -187,12 +338,15 @@ def render_project_batch_management(
                         st.error(TEXT["fill_project"])
                     else:
                         try:
-                            project_id = create_project(project_name.strip())
+                            project_id = create_project(
+                                project_name.strip(),
+                                input_value_type=input_value_type,
+                            )
                         except ValueError as exc:
                             st.error(str(exc))
                         else:
                             st.session_state["selected_project_id"] = project_id
-                            st.success(f"项目 {project_id} 已创建。")
+                            st.success(f"项目“{project_name.strip()}”已创建。")
                             st.rerun()
 
             st.subheader("项目列表与选择")
@@ -218,17 +372,33 @@ def render_project_batch_management(
                     st.session_state["batch_selector"] = "请选择批次"
                     st.rerun()
 
-                project_table = localize_dataframe_columns(format_datetime_column(projects_df, "created_at"))
+                project_table = _build_lj_project_table(projects_df)
                 st.dataframe(project_table, width="stretch", hide_index=True)
 
                 if selected_project_id is not None:
                     current_project = get_project(selected_project_id)
+                    current_input_value_type = normalize_input_value_type(
+                        current_project["input_value_type"]
+                    )
+                    has_existing_batches = count_project_batches(selected_project_id) > 0
                     with st.expander("编辑当前项目"):
                         with st.form("edit_project_form"):
                             edit_project_name = st.text_input(
                                 "项目名称",
                                 value=current_project["name"],
                             )
+                            edit_input_value_type = st.radio(
+                                "输入值类型",
+                                options=INPUT_VALUE_TYPE_OPTIONS,
+                                format_func=get_input_value_type_label,
+                                index=INPUT_VALUE_TYPE_OPTIONS.index(current_input_value_type),
+                                horizontal=True,
+                                disabled=has_existing_batches,
+                            )
+                            if has_existing_batches:
+                                st.info(
+                                    "当前项目下已存在批次。为避免批次口径与历史数据不一致，输入值类型已锁定为只读显示。"
+                                )
                             edit_project_submitted = st.form_submit_button(
                                 "保存项目修改",
                                 width="stretch",
@@ -239,7 +409,11 @@ def render_project_batch_management(
                                     st.error(TEXT["fill_project"])
                                 else:
                                     try:
-                                        update_project(selected_project_id, cleaned_name)
+                                        update_project(
+                                            selected_project_id,
+                                            cleaned_name,
+                                            input_value_type=edit_input_value_type,
+                                        )
                                     except ValueError as exc:
                                         st.error(str(exc))
                                     else:
@@ -252,7 +426,12 @@ def render_project_batch_management(
                 st.info(TEXT["choose_project"])
             else:
                 current_project = get_project(selected_project_id)
-                st.caption(f"当前批次将归属于项目：{current_project['name']}")
+                current_input_value_type_label = get_input_value_type_label(
+                    current_project["input_value_type"]
+                )
+                st.caption(
+                    f"当前批次将归属于项目：{current_project['name']}｜输入值类型固定为 {current_input_value_type_label}。"
+                )
                 with st.form("create_batch_form", clear_on_submit=True):
                     instrument = st.text_input("仪器")
                     reagent = st.text_input("试剂")
@@ -296,7 +475,7 @@ def render_project_batch_management(
                                 st.error(str(exc))
                             else:
                                 st.session_state["selected_batch_id"] = batch_id
-                                st.success(f"批次 {batch_id} 已创建。")
+                                st.success(f"批次“{lot_no.strip()}”已创建。")
                                 st.rerun()
 
             st.subheader("批次列表与选择")
@@ -322,7 +501,7 @@ def render_project_batch_management(
                     st.session_state["selected_batch_id"] = new_batch_id
                     st.rerun()
 
-                batch_table = localize_dataframe_columns(format_datetime_column(batches_df, "created_at"))
+                batch_table = _build_lj_batch_table(batches_df)
                 st.dataframe(batch_table, width="stretch", hide_index=True)
 
                 if selected_batch_id is not None:
@@ -333,6 +512,7 @@ def render_project_batch_management(
                         st.text(f"试剂：{current_batch['reagent']}")
                         st.text(f"质控品：{current_batch['qc_material']}")
                         st.text(f"浓度：{current_batch['concentration']}")
+                        st.text(f"输入值类型：{get_input_value_type_label(current_batch['input_value_type'])}")
                         st.text(f"建靶所需次数：{current_batch['target_n']}")
                         st.text(
                             f"CV 要求：{format_optional_float(get_saved_batch_cv_limit(current_batch), digits=2, suffix='%')}"
@@ -387,6 +567,12 @@ def render_zscore_project_batch_management(
             st.subheader("新建 Z-score 项目")
             with st.form("create_zscore_project_form", clear_on_submit=True):
                 project_name = st.text_input("项目名称")
+                input_value_type = st.radio(
+                    "输入值类型",
+                    options=INPUT_VALUE_TYPE_OPTIONS,
+                    format_func=get_input_value_type_label,
+                    horizontal=True,
+                )
                 level_count = st.radio(
                     "项目水平数",
                     options=[2, 3],
@@ -399,13 +585,17 @@ def render_zscore_project_batch_management(
                         st.error(TEXT["fill_project"])
                     else:
                         try:
-                            project_id = create_zscore_project(project_name.strip(), int(level_count))
+                            project_id = create_zscore_project(
+                                project_name.strip(),
+                                int(level_count),
+                                input_value_type=input_value_type,
+                            )
                         except ValueError as exc:
                             st.error(str(exc))
                         else:
                             st.session_state["zscore_selected_project_id"] = project_id
                             st.session_state["zscore_selected_batch_id"] = None
-                            st.success(f"Z-score 项目 {project_id} 已创建。")
+                            st.success(f"Z-score 项目“{project_name.strip()}”已创建。")
                             st.rerun()
 
             st.subheader("Z-score 项目列表与选择")
@@ -431,19 +621,36 @@ def render_zscore_project_batch_management(
                     st.session_state["zscore_batch_selector"] = "请选择 Z-score 批次"
                     st.rerun()
 
-                project_table = localize_dataframe_columns(format_datetime_column(projects_df, "created_at"))
+                project_table = _build_zscore_project_table(projects_df)
                 st.dataframe(project_table, width="stretch", hide_index=True)
 
                 if selected_project_id is not None:
                     current_project = get_zscore_project(selected_project_id)
+                    current_input_value_type = normalize_input_value_type(
+                        current_project["input_value_type"]
+                    )
+                    has_existing_batches = count_project_batches(selected_project_id) > 0
                     with st.expander("当前 Z-score 项目配置"):
                         st.text(f"项目名称：{current_project['name']}")
                         st.text(f"水平数：{int(current_project['level_count'])} 水平")
+                        st.text(f"输入值类型：{get_input_value_type_label(current_project['input_value_type'])}")
                         with st.form("edit_zscore_project_form"):
                             edit_project_name = st.text_input(
                                 "项目名称",
                                 value=current_project["name"],
                             )
+                            edit_input_value_type = st.radio(
+                                "输入值类型",
+                                options=INPUT_VALUE_TYPE_OPTIONS,
+                                format_func=get_input_value_type_label,
+                                index=INPUT_VALUE_TYPE_OPTIONS.index(current_input_value_type),
+                                horizontal=True,
+                                disabled=has_existing_batches,
+                            )
+                            if has_existing_batches:
+                                st.info(
+                                    "当前项目下已存在批次。为避免已建批次的录入、模板和图表口径被动变化，输入值类型已锁定。"
+                                )
                             edit_project_submitted = st.form_submit_button("保存项目修改", width="stretch")
                             if edit_project_submitted:
                                 cleaned_name = edit_project_name.strip()
@@ -451,7 +658,11 @@ def render_zscore_project_batch_management(
                                     st.error(TEXT["fill_project"])
                                 else:
                                     try:
-                                        update_project(selected_project_id, cleaned_name)
+                                        update_project(
+                                            selected_project_id,
+                                            cleaned_name,
+                                            input_value_type=edit_input_value_type,
+                                        )
                                     except ValueError as exc:
                                         st.error(str(exc))
                                     else:
@@ -465,8 +676,11 @@ def render_zscore_project_batch_management(
             else:
                 current_project = get_zscore_project(selected_project_id)
                 project_level_count = int(current_project["level_count"])
+                current_input_value_type_label = get_input_value_type_label(
+                    current_project["input_value_type"]
+                )
                 st.caption(
-                    f"当前批次将归属于项目：{current_project['name']}｜固定为 {project_level_count} 水平。"
+                    f"当前批次将归属于项目：{current_project['name']}｜固定为 {project_level_count} 水平｜输入值类型为 {current_input_value_type_label}。"
                 )
                 with st.form("create_zscore_batch_form", clear_on_submit=True):
                     instrument = st.text_input("仪器")
@@ -520,7 +734,7 @@ def render_zscore_project_batch_management(
                                 st.error(str(exc))
                             else:
                                 st.session_state["zscore_selected_batch_id"] = batch_id
-                                st.success(f"Z-score 批次 {batch_id} 已创建。")
+                                st.success(f"Z-score 批次“{lot_no.strip()}”已创建。")
                                 st.rerun()
 
             st.subheader("Z-score 批次列表与选择")
@@ -546,7 +760,7 @@ def render_zscore_project_batch_management(
                     st.session_state["zscore_selected_batch_id"] = new_batch_id
                     st.rerun()
 
-                batch_table = localize_dataframe_columns(format_datetime_column(batches_df, "created_at"))
+                batch_table = _build_zscore_batch_table(batches_df)
                 st.dataframe(batch_table, width="stretch", hide_index=True)
 
                 if selected_batch_id is not None:
@@ -554,8 +768,9 @@ def render_zscore_project_batch_management(
                     with st.expander("当前 Z-score 批次配置"):
                         current_level_ids = list(resolve_zscore_batch_context(selected_batch_id)["required_level_ids"])
                         st.text(f"项目：{current_batch['project_name']}")
-                        st.text(f"批次：{current_batch['id']}")
+                        st.text(f"质控品批号：{current_batch['lot_no']}")
                         st.text(f"水平数：{int(current_batch['level_count'])} 水平")
+                        st.text(f"输入值类型：{get_input_value_type_label(current_batch['input_value_type'])}")
                         st.text(f"水平说明：{format_zscore_level_label_summary(current_batch, current_level_ids)}")
                         st.text(f"建靶所需次数：{current_batch['target_n']}")
                         st.text(

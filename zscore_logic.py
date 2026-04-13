@@ -879,7 +879,7 @@ def create_zscore_run(
     normalized_level_results = _normalize_input_level_results(level_results, template)
     for level_result in normalized_level_results:
         if level_result.get("raw_value") is None:
-            raise ValueError(f"{level_result['level_id']} 检测值不能为空")
+            raise ValueError(f"{level_result['level_id']} 输入值不能为空")
 
     history_runs = get_zscore_runs(batch_id, template_id)
     next_test_sequence = max((int(run.get("test_sequence") or 0) for run in history_runs), default=0) + 1
@@ -992,7 +992,7 @@ def rebuild_zscore_batch_state(batch_id: int) -> dict[str, Any]:
         )
         for level_result in normalized_level_results:
             if level_result.get("raw_value") is None:
-                raise ValueError(f"run #{raw_run['id']} 的 {level_result['level_id']} 原始值不能为空")
+                raise ValueError(f"run #{raw_run['id']} 的 {level_result['level_id']} 输入值不能为空")
 
         current_phase = determine_zscore_phase(target_profiles, level_ids)
         updated_profiles = deepcopy(target_profiles)
@@ -1120,7 +1120,7 @@ def update_saved_zscore_run(
     normalized_level_results = _normalize_input_level_results(level_results, template)
     for level_result in normalized_level_results:
         if level_result.get("raw_value") is None:
-            raise ValueError(f"{level_result['level_id']} 原始值不能为空")
+            raise ValueError(f"{level_result['level_id']} 输入值不能为空")
 
     db_update_zscore_run(
         run_id,

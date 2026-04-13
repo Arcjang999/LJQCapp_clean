@@ -25,6 +25,35 @@ from ui.common import (
 )
 
 
+def _clean_lj_display_part(value: object) -> str:
+    return " ".join(str(value or "").split()).strip()
+
+
+def _build_lj_batch_display(batch) -> str:
+    batch_dict = dict(batch)
+    lot_no = _clean_lj_display_part(batch_dict.get("lot_no"))
+    if lot_no:
+        return f"质控批号 {lot_no}"
+    created_at = _clean_lj_display_part(batch_dict.get("created_at"))
+    if created_at:
+        return f"创建于 {created_at}"
+    return "当前批次"
+
+
+def _build_lj_source_message(batch) -> str:
+    batch_dict = dict(batch)
+    source_method = str(batch_dict.get("source_method", "") or "").strip().lower()
+    if source_method != "instant":
+        return ""
+    source_project = str(batch_dict.get("source_instant_project_name", "") or "").strip() or "即时法项目"
+    source_batch = str(batch_dict.get("source_instant_batch_lot_no", "") or "").strip() or "未填写质控批号"
+    transfer_time = str(batch_dict.get("source_transfer_time", "") or "").strip() or "-"
+    return (
+        f"来源：即时法｜来源项目：{source_project}｜来源批次：{source_batch or '-'}｜"
+        f"转入时间：{transfer_time}"
+    )
+
+
 def render_lj_page() -> None:
     projects_df, selected_project_id, batches_df, selected_batch_id = prepare_project_batch_context()
     manage_tab, work_tab = st.tabs([TEXT["manage"], TEXT["current_batch"]])
@@ -65,22 +94,27 @@ def render_lj_work_tab(
 ) -> None:
     context = build_lj_workbench_context(selected_batch_id)
     batch = context["batch"]
+    input_value_type_label = context["input_value_type_label"]
     stats = context["stats"]
     qc_df = context["qc_df"]
     phase_label = "正式质控" if stats.get("target_ready") else "建靶期"
     cv_limit = context["cv_limit"]
     target_n = int(batch["target_n"])
+    batch_dict = dict(batch)
+    batch_display = _build_lj_batch_display(batch)
+    is_from_instant = str(batch_dict.get("source_method", "") or "").strip().lower() == "instant"
 
     with work_tab:
         render_workbench_context_bar(
             title="LJ 当前批次",
             caption=(
                 f"当前项目：{batch['project_name']}。"
-                "请确认当前批次与阶段后，再录入检测结果并查看图表与最新结果分析。"
+                f"请确认当前批次、输入值类型（{input_value_type_label}）与阶段后，再录入检测结果并查看图表与最新结果分析。"
             ),
             items=[
                 ("项目名称", batch["project_name"]),
-                ("批次编号", batch["id"]),
+                ("批次标识", batch_display),
+                ("输入值类型", input_value_type_label),
                 ("当前阶段", phase_label),
                 ("建靶要求次数", f"{target_n} 次"),
                 ("仪器", batch["instrument"]),
@@ -89,13 +123,27 @@ def render_lj_work_tab(
                 ("浓度", batch["concentration"]),
                 ("质控品批号", batch["lot_no"]),
                 ("CV 要求", "-" if cv_limit is None else f"≤ {cv_limit:.2f}%"),
+                *(
+                    [("来源", "由即时法转入")]
+                    if is_from_instant
+                    else []
+                ),
             ],
             badges=[
-                f"批次 {batch['id']}",
+                batch_display,
+                input_value_type_label,
                 phase_label,
                 f"建靶要求 {target_n} 次",
+                *(
+                    ["由即时法转入"]
+                    if is_from_instant
+                    else []
+                ),
             ],
         )
+        source_message = _build_lj_source_message(batch)
+        if source_message:
+            st.info(source_message)
 
         st.divider()
         entry_col, chart_col = st.columns([1.0, 1.18], gap="large")
@@ -103,7 +151,7 @@ def render_lj_work_tab(
             with st.container(border=True):
                 render_section_intro(
                     title="结果录入与统计",
-                    caption="在同一区完成结果录入、建靶统计和实时统计查看。",
+                    caption=f"在同一区完成{input_value_type_label}录入、建靶统计和实时统计查看。",
                     tone="accent",
                 )
                 render_lj_entry_and_stats_section(context, selected_batch_id)
@@ -120,7 +168,7 @@ def render_lj_work_tab(
         render_lj_rule_summary_section(stats)
 
         st.divider()
-        render_lj_records_section(qc_df)
+        render_lj_records_section(qc_df, context["input_value_type"])
 
         st.divider()
         with st.container(border=True):
@@ -130,7 +178,7 @@ def render_lj_work_tab(
                 tone="muted",
             )
             _render_lj_maintenance_summary(qc_df)
-            render_lj_maintenance_section(qc_df)
+            render_lj_maintenance_section(qc_df, context["input_value_type"])
 
         st.divider()
         with st.container(border=True):

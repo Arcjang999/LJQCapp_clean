@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from html import escape as html_escape
-import math
 from textwrap import dedent
 from typing import Any
 
@@ -10,8 +9,15 @@ import streamlit as st
 
 from database import delete_result, update_result
 from pages.management import sync_selector_state
+from services.value_type_service import (
+    DEFAULT_INPUT_VALUE_TYPE,
+    build_level_measurement_label,
+    compute_legacy_log_value,
+    get_input_value_type_label,
+    normalize_input_value_type,
+    validate_project_numeric_value,
+)
 from ui.common import (
-    compute_log10_display,
     format_rule_code,
     format_zscore_status_label,
     render_table_html,
@@ -41,12 +47,17 @@ def close_record_maintenance_dialog() -> None:
 
 
 @st.dialog("检测记录维护", width="large", on_dismiss=close_record_maintenance_dialog)
-def render_record_maintenance_dialog(qc_df: pd.DataFrame) -> None:
+def render_record_maintenance_dialog(
+    qc_df: pd.DataFrame,
+    input_value_type: str = DEFAULT_INPUT_VALUE_TYPE,
+) -> None:
     notice_message = st.session_state.pop("record_maintenance_notice", "")
     if notice_message:
         st.success(notice_message)
 
-    st.caption("在此可以选择检测记录进行修改或删除，操作后会自动刷新主页面数据。")
+    normalized_input_value_type = normalize_input_value_type(input_value_type)
+    input_value_type_label = get_input_value_type_label(normalized_input_value_type)
+    st.caption(f"在此可以选择检测记录进行修改或删除，当前项目的输入值类型为 {input_value_type_label}。")
     if qc_df.empty:
         st.info("当前批次暂无检测记录可维护。")
         if st.button("关闭", key="close_record_dialog_empty", width="stretch"):
@@ -79,7 +90,6 @@ def render_record_maintenance_dialog(qc_df: pd.DataFrame) -> None:
         selected_rows = maintenance_df[maintenance_df["id"] == selected_result_id]
         if not selected_rows.empty:
             selected_result = selected_rows.iloc[0]
-            current_log_display, _ = compute_log10_display(float(selected_result["value"]))
             dialog_nonce = int(st.session_state.get("record_maintenance_dialog_nonce", 0))
             confirm_delete_key = f"confirm_delete_result_{dialog_nonce}_{int(selected_result_id)}"
             maintenance_left, maintenance_right = st.columns([1.25, 0.75], gap="large")
@@ -100,15 +110,9 @@ def render_record_maintenance_dialog(qc_df: pd.DataFrame) -> None:
                         value=str(selected_result["operator"]),
                     )
                     edit_value = st.number_input(
-                        "检测值",
+                        input_value_type_label,
                         value=float(selected_result["value"]),
                         format="%.4f",
-                    )
-                    edit_log_display, edit_log_value = compute_log10_display(float(edit_value))
-                    st.text_input(
-                        "log值（log10）",
-                        value=edit_log_display or current_log_display,
-                        disabled=True,
                     )
                     edit_reagent_changed = st.checkbox(
                         "本次为试剂批号变更点",
@@ -132,10 +136,13 @@ def render_record_maintenance_dialog(qc_df: pd.DataFrame) -> None:
                             validation_errors.append("请填写检测时间。")
                         if not cleaned_operator:
                             validation_errors.append("请填写检测人，不能为空。")
-                        if not isinstance(edit_value, (int, float)) or not math.isfinite(float(edit_value)):
-                            validation_errors.append("检测值必须为有效数字。")
-                        elif float(edit_value) <= 0:
-                            validation_errors.append("检测值必须大于 0，才能保存并计算 log值。")
+                        value_error = validate_project_numeric_value(
+                            edit_value,
+                            normalized_input_value_type,
+                            field_label=input_value_type_label,
+                        )
+                        if value_error is not None:
+                            validation_errors.append(value_error)
 
                         if validation_errors:
                             st.error("\n".join(validation_errors))
@@ -145,7 +152,10 @@ def render_record_maintenance_dialog(qc_df: pd.DataFrame) -> None:
                                 test_time=edit_test_time.strftime("%Y-%m-%d %H:%M:%S"),
                                 operator=cleaned_operator,
                                 value=float(edit_value),
-                                log_value=edit_log_value,
+                                log_value=compute_legacy_log_value(
+                                    float(edit_value),
+                                    normalized_input_value_type,
+                                ),
                                 reagent_lot_changed=int(edit_reagent_changed),
                                 manual_note=str(edit_manual_note or "").strip(),
                             )
@@ -198,7 +208,11 @@ def render_zscore_record_maintenance_dialog(
     if notice_message:
         st.success(notice_message)
 
-    st.caption("在此查看当前批次已保存的多水平检测记录，并维护检测时间、检测人和各水平原始值；保存或删除后会自动整批次重算。")
+    input_value_type = normalize_input_value_type(batch_context["batch"]["input_value_type"])
+    input_value_type_label = get_input_value_type_label(input_value_type)
+    st.caption(
+        f"在此查看当前批次已保存的多水平检测记录，并维护检测时间、检测人和各水平{input_value_type_label}；保存或删除后会自动整批次重算。"
+    )
     if not saved_runs:
         st.info("当前批次暂无已保存的检测记录可维护。")
         if st.button("关闭", key="close_zscore_record_dialog_empty", width="stretch"):
@@ -258,7 +272,7 @@ def render_zscore_record_maintenance_dialog(
                     f"触发规则 {format_zscore_rule_hits(selected_run.get('rule_hits_run', []))}"
                 )
                 if is_locked_for_maintenance:
-                    st.caption("已锁定 run 仍可补充或修改手动备注，原始值不会被改动。")
+                    st.caption(f"已锁定 run 仍可补充或修改手动备注，各水平{input_value_type_label}不会被改动。")
                     st.info("建靶期数据在正式期启用后已锁定，只可查看，不可编辑或删除。")
 
                 with st.form(f"edit_zscore_run_form_{dialog_nonce}_{int(selected_run_id)}"):
@@ -277,7 +291,7 @@ def render_zscore_record_maintenance_dialog(
                         value=str(selected_run.get("manual_note", "") or ""),
                         height=88,
                     )
-                    st.markdown("**多水平原始值**")
+                    st.markdown(f"**多水平{input_value_type_label}**")
                     edited_level_values: dict[str, float] = {}
                     level_result_map = {
                         str(level_result.get("level_id")): level_result
@@ -286,8 +300,9 @@ def render_zscore_record_maintenance_dialog(
                     for level_id in template["level_ids"]:
                         display_label, level_caption = format_zscore_level_display(level_id, level_label_map)
                         current_level_result = level_result_map.get(level_id, {})
+                        field_label = build_level_measurement_label(display_label, input_value_type)
                         edited_level_values[level_id] = st.number_input(
-                            display_label,
+                            field_label,
                             value=float(current_level_result.get("raw_value") or 0.0),
                             format="%.4f",
                             key=f"edit_zscore_run_{dialog_nonce}_{int(selected_run_id)}_{level_id.replace(' ', '_')}",
@@ -330,16 +345,20 @@ def render_zscore_record_maintenance_dialog(
                         for level_id in template["level_ids"]:
                             display_level = format_zscore_level_display(level_id, level_label_map)[0]
                             raw_value = edited_level_values[level_id]
-                            if not isinstance(raw_value, (int, float)) or not math.isfinite(float(raw_value)):
-                                validation_errors.append(f"{display_level}的原始值必须为有效数字。")
-                                continue
-                            if float(raw_value) <= 0:
-                                validation_errors.append(f"{display_level}的原始值必须大于 0。")
+                            field_label = build_level_measurement_label(display_level, input_value_type)
+                            value_error = validate_project_numeric_value(
+                                raw_value,
+                                input_value_type,
+                                field_label=field_label,
+                            )
+                            if value_error is not None:
+                                validation_errors.append(value_error)
                                 continue
                             updated_level_results.append(
                                 {
                                     "level_id": level_id,
                                     "raw_value": float(raw_value),
+                                    "log_value": compute_legacy_log_value(float(raw_value), input_value_type),
                                 }
                             )
 

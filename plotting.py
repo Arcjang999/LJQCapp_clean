@@ -72,6 +72,7 @@ def plot_lj_chart(
     view_mode: str = "\u5168\u90e8\u6570\u636e\u56fe",
     y_axis_mode: str = "\u6807\u51c6\u89c6\u56fe",
     standard_sd_limit: float = 4.0,
+    y_axis_label: str = "检测值",
 ):
     figure, axis = plt.subplots(figsize=(9.4, 5.9), dpi=150)
     plot_df = _filter_view_data(qc_df, view_mode)
@@ -120,7 +121,7 @@ def plot_lj_chart(
 
     axis.set_title(title, pad=10)
     axis.set_xlabel("\u68c0\u6d4b\u5e8f\u53f7")
-    axis.set_ylabel("\u68c0\u6d4b\u503c")
+    axis.set_ylabel(y_axis_label)
     _configure_x_axis(axis, display_df)
     axis.grid(True, linestyle=":", alpha=0.35)
     _add_lj_legend(axis)
@@ -375,6 +376,157 @@ def _add_lj_legend(axis) -> None:
         unique_handles.append(handle)
         unique_labels.append(label)
     axis.legend(unique_handles, unique_labels, loc="best")
+
+
+def plot_instant_chart(
+    analysis_df: pd.DataFrame,
+    summary: dict[str, object],
+    title: str,
+    *,
+    y_axis_label: str = "检测值",
+):
+    figure, axis = plt.subplots(figsize=(9.2, 5.6), dpi=150)
+    if analysis_df.empty:
+        axis.set_title(title, pad=10)
+        axis.text(
+            0.5,
+            0.5,
+            "暂无数据",
+            ha="center",
+            va="center",
+            transform=axis.transAxes,
+        )
+        axis.set_axis_off()
+        figure.tight_layout(pad=0.7)
+        return figure
+
+    plot_df = analysis_df[analysis_df["is_effective"] == 1].copy()
+    plot_df = plot_df.sort_values(["test_time", "id"]).reset_index(drop=True)
+    if plot_df.empty:
+        axis.set_title(title, pad=10)
+        axis.text(
+            0.5,
+            0.5,
+            "当前批次暂无有效点",
+            ha="center",
+            va="center",
+            transform=axis.transAxes,
+        )
+        axis.set_axis_off()
+        figure.tight_layout(pad=0.7)
+        return figure
+
+    if "effective_sequence" not in plot_df.columns or plot_df["effective_sequence"].isna().all():
+        plot_df["effective_sequence"] = range(1, len(plot_df) + 1)
+    x_values = plot_df["effective_sequence"].astype(float)
+    y_values = plot_df["value"].astype(float)
+
+    axis.plot(
+        x_values,
+        y_values,
+        color="#4e79a7",
+        linewidth=1.25,
+        alpha=0.85,
+        label="有效点趋势",
+        zorder=2,
+    )
+
+    normal_df = plot_df[plot_df["is_outlier_suspect"] != 1]
+    suspect_df = plot_df[plot_df["is_outlier_suspect"] == 1]
+    if not normal_df.empty:
+        axis.scatter(
+            normal_df["effective_sequence"],
+            normal_df["value"],
+            color="#59a14f",
+            marker="o",
+            s=48,
+            label="有效点",
+            zorder=3,
+        )
+    if not suspect_df.empty:
+        axis.scatter(
+            suspect_df["effective_sequence"],
+            suspect_df["value"],
+            color="#e15759",
+            marker="D",
+            s=68,
+            label="疑似离群",
+            zorder=4,
+        )
+        for _, point in suspect_df.iterrows():
+            axis.annotate(
+                "疑似离群",
+                xy=(float(point["effective_sequence"]), float(point["value"])),
+                xytext=(0, -12),
+                textcoords="offset points",
+                ha="center",
+                fontsize=8,
+                color="#8f1f28",
+            )
+
+    latest_point = plot_df.iloc[-1]
+    axis.scatter(
+        [float(latest_point["effective_sequence"])],
+        [float(latest_point["value"])],
+        s=132,
+        facecolors="none",
+        edgecolors="#1f2d3d",
+        linewidths=1.4,
+        label="当前点",
+        zorder=5,
+    )
+
+    mean_value = summary.get("mean")
+    sd_value = summary.get("sd")
+    if mean_value is not None:
+        resolved_mean = float(mean_value)
+        axis.axhline(resolved_mean, color="#222222", linewidth=1.1, linestyle="-", label="均值")
+        axis.text(1.01, resolved_mean, "均值", transform=axis.get_yaxis_transform(), fontsize=8, va="center")
+        if sd_value is not None and not math.isclose(float(sd_value), 0.0, abs_tol=1e-12):
+            resolved_sd = float(sd_value)
+            upper = resolved_mean + resolved_sd
+            lower = resolved_mean - resolved_sd
+            axis.axhline(upper, color="#76b7b2", linewidth=1.0, linestyle="--", label="+1SD")
+            axis.axhline(lower, color="#76b7b2", linewidth=1.0, linestyle="--", label="-1SD")
+
+    _configure_instant_x_axis(axis, plot_df)
+    axis.set_title(title, pad=10)
+    axis.set_xlabel("有效点序号")
+    axis.set_ylabel(y_axis_label)
+    axis.grid(True, linestyle=":", alpha=0.35)
+
+    handles, labels = axis.get_legend_handles_labels()
+    unique_handles: list[object] = []
+    unique_labels: list[str] = []
+    for handle, label in zip(handles, labels):
+        if not label or label.startswith("_") or label in unique_labels:
+            continue
+        unique_handles.append(handle)
+        unique_labels.append(label)
+    axis.legend(unique_handles, unique_labels, loc="best")
+    figure.tight_layout(pad=0.7)
+    return figure
+
+
+def _configure_instant_x_axis(axis, plot_df: pd.DataFrame) -> None:
+    sequences = plot_df["effective_sequence"].dropna().astype(int).tolist()
+    if not sequences:
+        return
+    max_labels = 8
+    step = max(1, math.ceil(len(sequences) / max_labels))
+    tick_positions = sequences[::step]
+    if sequences[-1] not in tick_positions:
+        tick_positions.append(sequences[-1])
+    axis.xaxis.set_major_locator(FixedLocator(tick_positions))
+    tick_labels = []
+    for sequence in tick_positions:
+        matched_rows = plot_df.loc[plot_df["effective_sequence"] == sequence, "test_time"]
+        if matched_rows.empty:
+            tick_labels.append(str(sequence))
+            continue
+        test_time = pd.Timestamp(matched_rows.iloc[0])
+        tick_labels.append(f"{sequence}\n{test_time.strftime('%m-%d')}")
+    axis.set_xticklabels(tick_labels)
 
 
 def figure_to_png_bytes(figure) -> bytes:
