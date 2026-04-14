@@ -42,14 +42,80 @@ def _get_persistent_data_dir() -> Path:
 
 
 DATA_DIR = _get_persistent_data_dir()
-DB_PATH = DATA_DIR / "qc_lj_app.db"
+DEFAULT_DB_PATH = DATA_DIR / "qc_lj_app.db"
+STORAGE_CONFIG_PATH = DATA_DIR / "storage_config.json"
 LEGACY_DB_CANDIDATES = [
     PROJECT_DB_PATH,
     PROJECT_LEGACY_DB_PATH,
+    DEFAULT_DB_PATH,
 ]
+DB_PATH = DEFAULT_DB_PATH
+
+
+def _read_storage_config_payload() -> dict[str, object]:
+    if not STORAGE_CONFIG_PATH.exists():
+        return {}
+    try:
+        payload = json.loads(STORAGE_CONFIG_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _extract_configured_db_path(payload: dict[str, object] | None = None) -> Path | None:
+    resolved_payload = payload if payload is not None else _read_storage_config_payload()
+    raw_path = str((resolved_payload or {}).get("database_path") or "").strip()
+    if not raw_path:
+        return None
+    return Path(raw_path).expanduser()
+
+
+def _resolve_runtime_db_path() -> Path:
+    configured_path = _extract_configured_db_path()
+    return configured_path or DEFAULT_DB_PATH
+
+
+DB_PATH = _resolve_runtime_db_path()
 
 
 def get_db_path() -> Path:
+    return DB_PATH
+
+
+def get_default_db_path() -> Path:
+    return DEFAULT_DB_PATH
+
+
+def get_storage_config_path() -> Path:
+    return STORAGE_CONFIG_PATH
+
+
+def get_configured_db_path() -> Path | None:
+    return _extract_configured_db_path()
+
+
+def save_db_path_config(db_path: Path) -> Path:
+    normalized_path = Path(db_path).expanduser()
+    STORAGE_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "database_path": str(normalized_path.resolve()),
+    }
+    temp_path = STORAGE_CONFIG_PATH.with_name(f"{STORAGE_CONFIG_PATH.name}.tmp")
+    temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_path.replace(STORAGE_CONFIG_PATH)
+    return STORAGE_CONFIG_PATH
+
+
+def clear_db_path_config() -> None:
+    try:
+        STORAGE_CONFIG_PATH.unlink()
+    except FileNotFoundError:
+        return
+
+
+def refresh_db_path_from_config() -> Path:
+    global DB_PATH
+    DB_PATH = _resolve_runtime_db_path()
     return DB_PATH
 
 
@@ -106,6 +172,7 @@ def init_db() -> None:
         _ensure_zscore_level_results_table(connection)
         _ensure_zscore_level_targets_table(connection)
         _ensure_report_exports_table(connection)
+        _ensure_app_settings_table(connection)
         _rebind_legacy_batches_foreign_keys(connection)
         connection.execute(
             """
@@ -1252,6 +1319,18 @@ def _ensure_report_exports_table(connection: sqlite3.Connection) -> None:
     )
 
 
+def _ensure_app_settings_table(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
 def _legacy_value(
     row: sqlite3.Row,
     legacy_columns: set[str],
@@ -1706,6 +1785,41 @@ def list_report_exports(
         lambda value: json.loads(value) if str(value or "").strip() else {}
     )
     return dataframe
+
+
+def get_app_settings(keys: list[str] | tuple[str, ...] | None = None) -> dict[str, str]:
+    query = "SELECT key, value FROM app_settings"
+    params: list[object] = []
+    if keys:
+        placeholders = ", ".join("?" for _ in keys)
+        query += f" WHERE key IN ({placeholders})"
+        params.extend(str(key) for key in keys)
+
+    with get_connection() as connection:
+        rows = connection.execute(query, params).fetchall()
+    return {str(row["key"]): str(row["value"] or "") for row in rows}
+
+
+def save_app_settings(settings: dict[str, object]) -> None:
+    normalized_items = [
+        (str(key).strip(), str(value or "").strip())
+        for key, value in dict(settings or {}).items()
+        if str(key).strip()
+    ]
+    if not normalized_items:
+        return
+
+    with get_connection() as connection:
+        connection.executemany(
+            """
+            INSERT INTO app_settings (key, value, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET
+                value = excluded.value,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            normalized_items,
+        )
 
 
 def create_instant_project(name: str, input_value_type: str = DEFAULT_INPUT_VALUE_TYPE) -> int:

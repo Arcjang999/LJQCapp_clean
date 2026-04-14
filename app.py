@@ -10,6 +10,8 @@ from pages.main_page import (
     normalize_top_level_method_selection,
     render_main_entry_page,
 )
+from pages.report_history_page import render_report_history_page
+from pages.settings_page import render_settings_page
 from pages.zscore_page import render_zscore_page
 from ui.common import APP_TITLE, inject_global_styles, render_page_chrome
 
@@ -49,6 +51,15 @@ inject_global_styles()
 normalize_top_level_method_selection()
 _consume_pending_navigation_intent()
 render_page_chrome()
+
+if bool(st.session_state.get("show_settings_page", False)):
+    render_settings_page()
+    st.stop()
+
+if bool(st.session_state.get("show_report_history_page", False)):
+    render_report_history_page()
+    st.stop()
+
 selected_method = st.radio(
     "功能入口",
     options=METHOD_ENTRY_OPTIONS,

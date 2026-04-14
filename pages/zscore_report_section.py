@@ -143,6 +143,10 @@ def _render_report_preview(package: ZScoreMonthlyReportPackage) -> None:
 
     basic_info_df = pd.DataFrame(
         [
+            ("实验室名称", report.basic_info.lab_name),
+            ("科室名称", report.basic_info.department_name),
+            ("质控负责人", report.basic_info.qc_owner_name),
+            ("审核人", report.basic_info.reviewer_name),
             ("方法", report.basic_info.method_label),
             ("报告月份", report.report_month_label),
             ("报告期间", report.report_period_label),

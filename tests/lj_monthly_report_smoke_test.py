@@ -31,6 +31,7 @@ from services.report_service import (
     list_lj_report_month_options,
     save_lj_monthly_report_snapshot,
 )
+from services.settings_service import REPORT_SETTINGS_FALLBACKS, save_report_settings_form
 
 
 LJ_PAGE_APPTEST_SCRIPT = """
@@ -251,9 +252,50 @@ def test_lj_monthly_report_page_exposes_generate_and_download_flow() -> None:
         assert any("报告期间：2026-04-01 至 2026-04-30" in str(item.value) for item in at.caption)
 
 
+def test_lj_monthly_report_reads_saved_system_settings_and_falls_back_on_empty_values() -> None:
+    with TemporaryDatabaseContext():
+        save_report_settings_form(
+            {
+                "lab_name": "StarLab",
+                "department_name": "Molecular Center",
+                "qc_owner_name": "Alice QC",
+                "reviewer_name": "Bob Review",
+                "report_statement": "Monthly report for QC archive only.",
+            }
+        )
+        _project_id, batch_id = seed_lj_batch_with_formal_monthly_data()
+        package = build_lj_monthly_report_package(batch_id, "2026-04")
+
+        assert package.report.basic_info.lab_name == "StarLab"
+        assert package.report.basic_info.department_name == "Molecular Center"
+        assert package.report.basic_info.qc_owner_name == "Alice QC"
+        assert package.report.basic_info.reviewer_name == "Bob Review"
+        assert package.report.declaration == "Monthly report for QC archive only."
+
+        pdf_bytes = build_lj_monthly_report_pdf(package)
+        assert pdf_bytes.startswith(b"%PDF")
+
+        save_report_settings_form(
+            {
+                "lab_name": "",
+                "department_name": "",
+                "qc_owner_name": "",
+                "reviewer_name": "",
+                "report_statement": "",
+            }
+        )
+        fallback_package = build_lj_monthly_report_package(batch_id, "2026-04")
+        assert fallback_package.report.basic_info.lab_name == REPORT_SETTINGS_FALLBACKS["lab_name"]
+        assert fallback_package.report.basic_info.department_name == REPORT_SETTINGS_FALLBACKS["department_name"]
+        assert fallback_package.report.basic_info.qc_owner_name == REPORT_SETTINGS_FALLBACKS["qc_owner_name"]
+        assert fallback_package.report.basic_info.reviewer_name == REPORT_SETTINGS_FALLBACKS["reviewer_name"]
+        assert fallback_package.report.declaration == REPORT_SETTINGS_FALLBACKS["report_statement"]
+
+
 if __name__ == "__main__":
     test_lj_monthly_report_builds_pdf_and_snapshot()
     test_lj_monthly_report_requires_formal_data()
     test_lj_monthly_report_uses_business_text_for_single_record_and_no_abnormal()
     test_lj_monthly_report_page_exposes_generate_and_download_flow()
+    test_lj_monthly_report_reads_saved_system_settings_and_falls_back_on_empty_values()
     print("lj_monthly_report_smoke_test passed")

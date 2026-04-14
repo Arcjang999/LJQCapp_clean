@@ -866,27 +866,32 @@ def inject_global_styles() -> None:
     )
 
 def render_page_chrome() -> None:
-    render_html_block(
-        dedent(
-            """
-            <div class="top-feedback-bar">
-                <span class="top-feedback-note">
-                    此软件由邦德盛开发，如有疑问，请联系我司相关人员
-                </span>
-                <a
-                    class="top-feedback-link"
-                    href="https://docs.qq.com/sheet/DY3V4b0FqS3psbkdK?tab=BB08J2"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                >
-                    \u95ee\u9898\u53cd\u9988
-                </a>
-            </div>
-            """
-        ).strip()
-    )
-    st.title(APP_TITLE)
-    st.caption("当前版本已支持 LJ 与 Z-score 主流程；如需反馈问题，可使用右上角“问题反馈”。")
+    title_column, action_column = st.columns([0.72, 0.28], gap="medium", vertical_alignment="top")
+    with title_column:
+        st.title(APP_TITLE)
+        st.caption("当前版本已支持 LJ 与 Z-score 主流程；报告默认信息可从右上角“系统设置”统一维护。")
+
+    with action_column:
+        st.caption("此软件由邦德盛开发，如有疑问，请联系我司相关人员。")
+        history_column, settings_column, feedback_column = st.columns(3, gap="small")
+        with history_column:
+            if st.button("报告历史", key="open_report_history_page", use_container_width=True):
+                st.session_state["show_report_history_page"] = True
+                st.rerun()
+        with settings_column:
+            if st.button("系统设置", key="open_system_settings", use_container_width=True):
+                st.session_state["show_settings_page"] = True
+                st.session_state["refresh_settings_form"] = True
+                st.rerun()
+        with feedback_column:
+            if hasattr(st, "link_button"):
+                st.link_button(
+                    "问题反馈",
+                    "https://docs.qq.com/sheet/DY3V4b0FqS3psbkdK?tab=BB08J2",
+                    use_container_width=True,
+                )
+            else:
+                st.markdown("[问题反馈](https://docs.qq.com/sheet/DY3V4b0FqS3psbkdK?tab=BB08J2)")
 
 def _stringify_display_value(value: Any, fallback: str = "-") -> str:
     if value is None:

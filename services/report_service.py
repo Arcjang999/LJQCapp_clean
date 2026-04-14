@@ -14,10 +14,18 @@ from matplotlib.backends.backend_pdf import PdfPages
 from database import (
     create_report_export_snapshot,
     get_batch,
+    get_project,
     get_results,
+    get_zscore_batch,
+    get_zscore_project,
+    list_report_exports,
 )
 from plotting import plot_lj_chart
 from qc_logic import LJ_FORMAL_PHASE_LABEL, persist_lj_batch_outlier_snapshot
+from services.settings_service import (
+    DEFAULT_REPORT_STATEMENT,
+    get_report_settings_with_fallbacks,
+)
 from services.value_type_service import get_input_value_type_label, normalize_input_value_type
 from zscore_logic import (
     PHASE_FORMAL_QC,
@@ -37,10 +45,7 @@ from zscore_plotting import plot_zscore_overlay
 REPORT_TYPE_LJ_MONTHLY = "lj_monthly_report"
 LJ_METHOD_LABEL = "单水平（LJ法）"
 LJ_REPORT_TITLE = "单水平（LJ法）月度质控报告"
-DEFAULT_DECLARATION = (
-    "本报告由软件根据所选月份内的 LJ 正式期质控数据自动生成，仅作为室内质控归档与复核参考。"
-    "报告结果应结合原始记录、异常备注和实验室实际处理情况共同判读。"
-)
+DEFAULT_DECLARATION = DEFAULT_REPORT_STATEMENT
 PDF_FONT_CANDIDATES = [
     "Microsoft YaHei",
     "SimHei",
@@ -88,6 +93,10 @@ class LjMonthlyReportBasicInfo:
     report_month_label: str
     method_label: str
     input_value_type_label: str
+    lab_name: str
+    department_name: str
+    qc_owner_name: str
+    reviewer_name: str
     lot_no: str
     instrument: str
     reagent: str
@@ -189,6 +198,10 @@ class ZScoreMonthlyReportBasicInfo:
     report_month_label: str
     method_label: str
     input_value_type_label: str
+    lab_name: str
+    department_name: str
+    qc_owner_name: str
+    reviewer_name: str
     level_count_label: str
     level_summary: str
     template_label: str
@@ -298,6 +311,42 @@ class ZScoreMonthlyReportPackage:
     active_levels: list[str]
 
 
+@dataclass(frozen=True)
+class ReportHistoryRecord:
+    export_id: int
+    report_type: str
+    project_id: int
+    batch_id: int
+    project_name: str
+    batch_label: str
+    report_month: str
+    report_month_label: str
+    report_period_label: str
+    generated_at: pd.Timestamp | None
+    generated_at_label: str
+    input_value_type: str
+    input_value_type_label: str
+    method_label: str
+    summary_text: str
+    overview_text: str
+    conclusion_text: str
+    file_name: str
+    statistics: dict[str, Any]
+    summary_json: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ReportRegenerationResult:
+    export_id: int
+    snapshot_id: int
+    report_type: str
+    project_name: str
+    method_label: str
+    report_month: str
+    file_name: str
+    pdf_bytes: bytes
+
+
 def list_lj_report_month_options(batch_id: int) -> list[str]:
     results_df = get_results(batch_id, include_manual_note=True)
     if results_df.empty:
@@ -316,6 +365,7 @@ def list_lj_report_month_options(batch_id: int) -> list[str]:
 def build_lj_monthly_report_package(batch_id: int, report_month: str) -> LjMonthlyReportPackage:
     normalized_month = _normalize_report_month(report_month)
     batch = get_batch(batch_id)
+    report_settings = get_report_settings_with_fallbacks()
     qc_df, stats = persist_lj_batch_outlier_snapshot(batch_id)
     formal_df = _filter_monthly_formal_df(qc_df, normalized_month)
     if formal_df.empty:
@@ -359,6 +409,10 @@ def build_lj_monthly_report_package(batch_id: int, report_month: str) -> LjMonth
             report_month_label=report_month_label,
             method_label=LJ_METHOD_LABEL,
             input_value_type_label=input_value_type_label,
+            lab_name=report_settings.lab_name,
+            department_name=report_settings.department_name,
+            qc_owner_name=report_settings.qc_owner_name,
+            reviewer_name=report_settings.reviewer_name,
             lot_no=str(batch["lot_no"] or "-"),
             instrument=str(batch["instrument"] or "-"),
             reagent=str(batch["reagent"] or "-"),
@@ -374,7 +428,7 @@ def build_lj_monthly_report_package(batch_id: int, report_month: str) -> LjMonth
         corrective_actions_empty_text=corrective_actions_empty_text,
         abnormal_summary_text=abnormal_summary_text,
         conclusion=_build_conclusion(statistics),
-        declaration=DEFAULT_DECLARATION,
+        declaration=report_settings.report_statement,
         chart_title=(
             f"{LJ_METHOD_LABEL}月度质控图\n"
             f"项目：{batch['project_name']}｜质控批号：{batch['lot_no']}｜报告月份：{report_month_label}"
@@ -490,6 +544,7 @@ def build_zscore_monthly_report_package(
     normalized_month = _normalize_report_month(report_month)
     batch_context = resolve_zscore_batch_context(batch_id)
     batch = batch_context["batch"]
+    report_settings = get_report_settings_with_fallbacks()
     template_id = str(batch_context["template_id"])
     template = batch_context["template"]
     required_level_ids = list(batch_context["required_level_ids"])
@@ -555,6 +610,10 @@ def build_zscore_monthly_report_package(
             report_month_label=report_month_label,
             method_label=ZSCORE_METHOD_LABEL,
             input_value_type_label=input_value_type_label,
+            lab_name=report_settings.lab_name,
+            department_name=report_settings.department_name,
+            qc_owner_name=report_settings.qc_owner_name,
+            reviewer_name=report_settings.reviewer_name,
             level_count_label=level_count_label,
             level_summary=level_summary,
             template_label=template_label,
@@ -574,7 +633,7 @@ def build_zscore_monthly_report_package(
         corrective_actions_empty_text=corrective_actions_empty_text,
         abnormal_summary_text=abnormal_summary_text,
         conclusion=_build_zscore_monthly_conclusion(statistics),
-        declaration=DEFAULT_DECLARATION,
+        declaration=report_settings.report_statement,
         chart_title=(
             f"{ZSCORE_METHOD_LABEL}月度质控图\n"
             f"项目：{batch['project_name']}｜质控批号：{batch['lot_no']}｜"
@@ -669,6 +728,391 @@ def build_zscore_monthly_preview_summary(report: ZScoreMonthlyReportData) -> lis
         ("当前阶段", statistics.current_phase_label),
         ("全部 level 已完成建靶", "是" if statistics.all_levels_ready else "否"),
     ]
+
+
+def list_report_history_records() -> list[ReportHistoryRecord]:
+    exports_df = list_report_exports()
+    if exports_df.empty:
+        return []
+
+    records: list[ReportHistoryRecord] = []
+    for row in exports_df.to_dict(orient="records"):
+        summary_json = row.get("summary_json")
+        if not isinstance(summary_json, dict):
+            summary_json = {}
+
+        basic_info = summary_json.get("basic_info")
+        if not isinstance(basic_info, dict):
+            basic_info = {}
+
+        statistics = _merge_report_history_statistics(row, summary_json)
+        report_type = str(row.get("report_type") or summary_json.get("report_type") or "").strip()
+        report_month = str(row.get("report_month") or summary_json.get("report_month") or "").strip()
+        generated_at = _coerce_history_timestamp(row.get("generated_at"))
+        input_value_type = normalize_input_value_type(
+            row.get("input_value_type") or summary_json.get("input_value_type")
+        )
+
+        records.append(
+            ReportHistoryRecord(
+                export_id=_coerce_report_history_int(row.get("id")),
+                report_type=report_type,
+                project_id=_coerce_report_history_int(row.get("project_id")),
+                batch_id=_coerce_report_history_int(row.get("batch_id")),
+                project_name=_resolve_report_history_project_name(
+                    row=row,
+                    summary_json=summary_json,
+                    basic_info=basic_info,
+                ),
+                batch_label=_build_report_history_batch_label(
+                    row=row,
+                    summary_json=summary_json,
+                    basic_info=basic_info,
+                ),
+                report_month=report_month,
+                report_month_label=str(
+                    summary_json.get("report_month_label")
+                    or basic_info.get("report_month_label")
+                    or (_format_report_month_label(report_month) if report_month else "-")
+                ).strip(),
+                report_period_label=str(summary_json.get("report_period_label") or "-").strip() or "-",
+                generated_at=generated_at,
+                generated_at_label=_format_history_generated_at(
+                    generated_at=generated_at,
+                    summary_json=summary_json,
+                    created_at=row.get("created_at"),
+                ),
+                input_value_type=input_value_type,
+                input_value_type_label=str(
+                    summary_json.get("input_value_type_label")
+                    or basic_info.get("input_value_type_label")
+                    or get_input_value_type_label(input_value_type)
+                ).strip(),
+                method_label=_resolve_report_history_method_label(
+                    report_type=report_type,
+                    row=row,
+                    summary_json=summary_json,
+                    basic_info=basic_info,
+                ),
+                summary_text=_build_report_history_summary_text(
+                    report_type=report_type,
+                    summary_json=summary_json,
+                    statistics=statistics,
+                ),
+                overview_text=str(summary_json.get("overview_text") or "").strip(),
+                conclusion_text=str(summary_json.get("conclusion") or "").strip(),
+                file_name=str(row.get("file_name") or summary_json.get("file_name") or "").strip(),
+                statistics=statistics,
+                summary_json=summary_json,
+            )
+        )
+    return records
+
+
+def get_report_history_record(export_id: int) -> ReportHistoryRecord:
+    target_export_id = int(export_id)
+    for record in list_report_history_records():
+        if record.export_id == target_export_id:
+            return record
+    raise ValueError(f"鏈壘鍒版姤鍛婂巻鍙茶褰?{target_export_id}")
+
+
+def filter_report_history_records(
+    records: list[ReportHistoryRecord],
+    *,
+    project_query: str = "",
+    method_label: str = "",
+    batch_query: str = "",
+    report_month: str = "",
+) -> list[ReportHistoryRecord]:
+    normalized_project_query = str(project_query or "").strip().casefold()
+    normalized_method_label = str(method_label or "").strip()
+    normalized_batch_query = str(batch_query or "").strip().casefold()
+    normalized_report_month = str(report_month or "").strip()
+
+    filtered_records: list[ReportHistoryRecord] = []
+    for record in records:
+        if normalized_project_query and normalized_project_query not in record.project_name.casefold():
+            continue
+        if normalized_method_label and record.method_label != normalized_method_label:
+            continue
+        if normalized_batch_query:
+            batch_haystack = " ".join(
+                part
+                for part in [record.batch_label, record.file_name]
+                if str(part or "").strip()
+            ).casefold()
+            if normalized_batch_query not in batch_haystack:
+                continue
+        if normalized_report_month and record.report_month != normalized_report_month:
+            continue
+        filtered_records.append(record)
+    return filtered_records
+
+
+def build_report_history_statistics_summary(record: ReportHistoryRecord) -> list[tuple[str, str]]:
+    statistics = record.statistics
+    if record.report_type == REPORT_TYPE_ZSCORE_MONTHLY:
+        return [
+            ("正式期 run 数", str(_coerce_report_history_int(statistics.get("formal_count")))),
+            ("在控 run 数", str(_coerce_report_history_int(statistics.get("in_control_count")))),
+            ("警告 run 数", str(_coerce_report_history_int(statistics.get("warning_count")))),
+            ("失控 run 数", str(_coerce_report_history_int(statistics.get("out_of_control_count")))),
+            ("规则组合", str(statistics.get("template_label") or "-")),
+            ("当前阶段", str(statistics.get("current_phase_label") or "-")),
+            ("全部 level 已完成建靶", "是" if bool(statistics.get("all_levels_ready")) else "否"),
+        ]
+
+    return [
+        ("正式期总记录数", str(_coerce_report_history_int(statistics.get("formal_count")))),
+        ("在控记录数", str(_coerce_report_history_int(statistics.get("in_control_count")))),
+        ("警告记录数", str(_coerce_report_history_int(statistics.get("warning_count")))),
+        ("失控记录数", str(_coerce_report_history_int(statistics.get("out_of_control_count")))),
+        ("月度均值", _format_float(_coerce_report_history_float(statistics.get("monthly_mean")))),
+        ("月度 SD", _format_float(_coerce_report_history_float(statistics.get("monthly_sd")))),
+        ("月度 CV%", _format_float(_coerce_report_history_float(statistics.get("monthly_cv")), digits=2, suffix="%")),
+        ("当前目标均值", _format_float(_coerce_report_history_float(statistics.get("target_mean")))),
+    ]
+
+
+def regenerate_report_from_history(
+    record_or_export_id: ReportHistoryRecord | int,
+) -> ReportRegenerationResult:
+    record = (
+        record_or_export_id
+        if isinstance(record_or_export_id, ReportHistoryRecord)
+        else get_report_history_record(int(record_or_export_id))
+    )
+
+    if record.report_type == REPORT_TYPE_LJ_MONTHLY:
+        _validate_lj_report_history_source(record)
+        package = build_lj_monthly_report_package(record.batch_id, record.report_month)
+        pdf_bytes = build_lj_monthly_report_pdf(package)
+        snapshot_id = save_lj_monthly_report_snapshot(package)
+        return ReportRegenerationResult(
+            export_id=record.export_id,
+            snapshot_id=snapshot_id,
+            report_type=record.report_type,
+            project_name=record.project_name,
+            method_label=record.method_label,
+            report_month=record.report_month,
+            file_name=package.report.file_name,
+            pdf_bytes=pdf_bytes,
+        )
+
+    if record.report_type == REPORT_TYPE_ZSCORE_MONTHLY:
+        _validate_zscore_report_history_source(record)
+        package = build_zscore_monthly_report_package(record.batch_id, record.report_month)
+        pdf_bytes = build_zscore_monthly_report_pdf(package)
+        snapshot_id = save_zscore_monthly_report_snapshot(package)
+        return ReportRegenerationResult(
+            export_id=record.export_id,
+            snapshot_id=snapshot_id,
+            report_type=record.report_type,
+            project_name=record.project_name,
+            method_label=record.method_label,
+            report_month=record.report_month,
+            file_name=package.report.file_name,
+            pdf_bytes=pdf_bytes,
+        )
+
+    raise ValueError("当前报告历史记录暂不支持重新生成。")
+
+
+def _merge_report_history_statistics(
+    row: dict[str, Any],
+    summary_json: dict[str, Any],
+) -> dict[str, Any]:
+    statistics = summary_json.get("statistics")
+    resolved_statistics = dict(statistics) if isinstance(statistics, dict) else {}
+
+    for field_name in [
+        "formal_count",
+        "in_control_count",
+        "warning_count",
+        "out_of_control_count",
+        "monthly_mean",
+        "monthly_sd",
+        "monthly_cv",
+        "target_mean",
+        "target_sd",
+    ]:
+        if field_name in resolved_statistics and resolved_statistics[field_name] not in (None, ""):
+            continue
+        raw_value = row.get(field_name)
+        if raw_value is None or pd.isna(raw_value):
+            continue
+        resolved_statistics[field_name] = raw_value
+    return resolved_statistics
+
+
+def _resolve_report_history_project_name(
+    *,
+    row: dict[str, Any],
+    summary_json: dict[str, Any],
+    basic_info: dict[str, Any],
+) -> str:
+    candidate = str(basic_info.get("project_name") or summary_json.get("project_name") or "").strip()
+    if candidate:
+        return candidate
+
+    batch_id = _coerce_report_history_int(row.get("batch_id"))
+    project_id = _coerce_report_history_int(row.get("project_id"))
+    report_type = str(row.get("report_type") or summary_json.get("report_type") or "").strip()
+    try:
+        if report_type == REPORT_TYPE_ZSCORE_MONTHLY and batch_id > 0:
+            return str(get_zscore_batch(batch_id)["project_name"] or "").strip() or "未命名项目"
+        if report_type == REPORT_TYPE_LJ_MONTHLY and batch_id > 0:
+            return str(get_batch(batch_id)["project_name"] or "").strip() or "未命名项目"
+        if report_type == REPORT_TYPE_ZSCORE_MONTHLY and project_id > 0:
+            return str(get_zscore_project(project_id)["name"] or "").strip() or "未命名项目"
+        if project_id > 0:
+            return str(get_project(project_id)["name"] or "").strip() or "未命名项目"
+    except ValueError:
+        pass
+    return "未命名项目"
+
+
+def _build_report_history_batch_label(
+    *,
+    row: dict[str, Any],
+    summary_json: dict[str, Any],
+    basic_info: dict[str, Any],
+) -> str:
+    lot_no = str(basic_info.get("lot_no") or summary_json.get("lot_no") or "").strip()
+    if lot_no:
+        return f"质控批号 {lot_no}"
+    file_name = str(row.get("file_name") or summary_json.get("file_name") or "").strip()
+    if file_name:
+        return file_name
+    return "批次信息未保存"
+
+
+def _resolve_report_history_method_label(
+    *,
+    report_type: str,
+    row: dict[str, Any],
+    summary_json: dict[str, Any],
+    basic_info: dict[str, Any],
+) -> str:
+    candidate = str(
+        row.get("method_label")
+        or summary_json.get("method_label")
+        or basic_info.get("method_label")
+        or ""
+    ).strip()
+    if candidate:
+        return candidate
+    if report_type == REPORT_TYPE_ZSCORE_MONTHLY:
+        return ZSCORE_METHOD_LABEL
+    return LJ_METHOD_LABEL
+
+
+def _build_report_history_summary_text(
+    *,
+    report_type: str,
+    summary_json: dict[str, Any],
+    statistics: dict[str, Any],
+) -> str:
+    for field_name in ["report_note", "summary_text", "note", "remark"]:
+        explicit_note = str(summary_json.get(field_name) or "").strip()
+        if explicit_note:
+            return explicit_note
+
+    formal_count = _coerce_report_history_int(statistics.get("formal_count"))
+    in_control_count = _coerce_report_history_int(statistics.get("in_control_count"))
+    warning_count = _coerce_report_history_int(statistics.get("warning_count"))
+    out_of_control_count = _coerce_report_history_int(statistics.get("out_of_control_count"))
+
+    count_label = "本月正式期 run 数" if report_type == REPORT_TYPE_ZSCORE_MONTHLY else "本月正式期总记录数"
+    fragments = [
+        f"{count_label} {formal_count}",
+        f"在控 {in_control_count}，警告 {warning_count}，失控 {out_of_control_count}",
+    ]
+    overview_text = str(summary_json.get("overview_text") or "").strip()
+    conclusion_text = str(summary_json.get("conclusion") or "").strip()
+    if overview_text:
+        fragments.append(overview_text)
+    elif conclusion_text:
+        fragments.append(f"结论：{conclusion_text}")
+
+    return textwrap.shorten("；".join(fragment for fragment in fragments if fragment), width=120, placeholder="...")
+
+
+def _coerce_history_timestamp(value: Any) -> pd.Timestamp | None:
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return None
+    if isinstance(value, pd.Timestamp):
+        return None if pd.isna(value) else value
+    try:
+        resolved_value = pd.to_datetime(value, errors="coerce")
+    except (TypeError, ValueError):
+        return None
+    if pd.isna(resolved_value):
+        return None
+    return resolved_value
+
+
+def _format_history_generated_at(
+    *,
+    generated_at: pd.Timestamp | None,
+    summary_json: dict[str, Any],
+    created_at: Any,
+) -> str:
+    if generated_at is not None:
+        return generated_at.strftime("%Y-%m-%d %H:%M")
+    fallback_timestamp = _coerce_history_timestamp(summary_json.get("generated_at")) or _coerce_history_timestamp(created_at)
+    if fallback_timestamp is not None:
+        return fallback_timestamp.strftime("%Y-%m-%d %H:%M")
+    return str(summary_json.get("generated_at") or "-").strip() or "-"
+
+
+def _coerce_report_history_int(value: Any) -> int:
+    try:
+        if value is None or (isinstance(value, float) and math.isnan(value)):
+            return 0
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _coerce_report_history_float(value: Any) -> float | None:
+    try:
+        if value is None or (isinstance(value, float) and math.isnan(value)):
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _validate_lj_report_history_source(record: ReportHistoryRecord) -> None:
+    try:
+        project = get_project(record.project_id)
+    except ValueError as exc:
+        raise ValueError("原始 LJ 项目不存在，无法按当前数据重新生成报告。") from exc
+
+    try:
+        batch = get_batch(record.batch_id)
+    except ValueError as exc:
+        raise ValueError("原始 LJ 批次不存在，无法按当前数据重新生成报告。") from exc
+
+    if int(batch["project_id"]) != int(project["id"]):
+        raise ValueError("原始 LJ 批次已不再属于该历史项目，无法按原参数重新生成。")
+
+
+def _validate_zscore_report_history_source(record: ReportHistoryRecord) -> None:
+    try:
+        project = get_zscore_project(record.project_id)
+    except ValueError as exc:
+        raise ValueError("原始 Z-score 项目不存在，无法按当前数据重新生成报告。") from exc
+
+    try:
+        batch = get_zscore_batch(record.batch_id)
+    except ValueError as exc:
+        raise ValueError("原始 Z-score 批次不存在，无法按当前数据重新生成报告。") from exc
+
+    if int(batch["project_id"]) != int(project["id"]):
+        raise ValueError("原始 Z-score 批次已不再属于该历史项目，无法按原参数重新生成。")
 
 
 def _normalize_report_month(report_month: str) -> str:
@@ -878,7 +1322,15 @@ def _build_summary_page(report: LjMonthlyReportData):
     axis.text(0.5, 0.975, report.title, ha="center", va="top", fontsize=20, fontweight="bold")
     axis.text(
         0.5,
-        0.945,
+        0.948,
+        f"实验室名称：{report.basic_info.lab_name}    科室名称：{report.basic_info.department_name}",
+        ha="center",
+        va="top",
+        fontsize=10,
+    )
+    axis.text(
+        0.5,
+        0.925,
         f"项目名称：{report.basic_info.project_name}    报告月份：{report.report_month_label}",
         ha="center",
         va="top",
@@ -886,15 +1338,26 @@ def _build_summary_page(report: LjMonthlyReportData):
     )
     axis.text(
         0.5,
-        0.922,
+        0.902,
         f"报告期间：{report.report_period_label}    生成时间：{report.generated_at}",
         ha="center",
         va="top",
         fontsize=10,
     )
-    axis.text(0.5, 0.899, f"方法标识：{report.method_label}", ha="center", va="top", fontsize=11)
+    axis.text(
+        0.5,
+        0.879,
+        (
+            f"方法标识：{report.method_label}"
+            f"    质控负责人：{report.basic_info.qc_owner_name}"
+            f"    审核人：{report.basic_info.reviewer_name}"
+        ),
+        ha="center",
+        va="top",
+        fontsize=10,
+    )
 
-    _draw_section_title(axis, 0.868, "基本信息")
+    _draw_section_title(axis, 0.845, "基本信息")
     basic_rows = [
         ["方法", report.basic_info.method_label, "输入值类型", report.basic_info.input_value_type_label],
         ["质控品批号", report.basic_info.lot_no, "仪器", report.basic_info.instrument],
@@ -907,7 +1370,7 @@ def _build_summary_page(report: LjMonthlyReportData):
         cellText=basic_rows,
         cellLoc="left",
         colWidths=[0.15, 0.35, 0.15, 0.35],
-        bbox=[0.0, 0.64, 1.0, 0.18],
+        bbox=[0.0, 0.62, 1.0, 0.18],
     )
     _style_table(basic_table, header_rows=0, font_size=9)
 
@@ -1385,7 +1848,15 @@ def _build_zscore_summary_page(report: ZScoreMonthlyReportData):
     axis.text(0.5, 0.975, report.title, ha="center", va="top", fontsize=20, fontweight="bold")
     axis.text(
         0.5,
-        0.945,
+        0.948,
+        f"实验室名称：{report.basic_info.lab_name}    科室名称：{report.basic_info.department_name}",
+        ha="center",
+        va="top",
+        fontsize=10,
+    )
+    axis.text(
+        0.5,
+        0.925,
         f"项目名称：{report.basic_info.project_name}    报告月份：{report.report_month_label}",
         ha="center",
         va="top",
@@ -1393,15 +1864,26 @@ def _build_zscore_summary_page(report: ZScoreMonthlyReportData):
     )
     axis.text(
         0.5,
-        0.922,
+        0.902,
         f"报告期间：{report.report_period_label}    生成时间：{report.generated_at}",
         ha="center",
         va="top",
         fontsize=10,
     )
-    axis.text(0.5, 0.899, f"方法标识：{report.method_label}", ha="center", va="top", fontsize=11)
+    axis.text(
+        0.5,
+        0.879,
+        (
+            f"方法标识：{report.method_label}"
+            f"    质控负责人：{report.basic_info.qc_owner_name}"
+            f"    审核人：{report.basic_info.reviewer_name}"
+        ),
+        ha="center",
+        va="top",
+        fontsize=10,
+    )
 
-    _draw_section_title(axis, 0.868, "基本信息")
+    _draw_section_title(axis, 0.845, "基本信息")
     basic_rows = [
         ["方法", report.basic_info.method_label, "输入值类型", report.basic_info.input_value_type_label],
         ["水平数", report.basic_info.level_count_label, "规则组合", report.basic_info.template_label],
@@ -1415,21 +1897,21 @@ def _build_zscore_summary_page(report: ZScoreMonthlyReportData):
         cellText=basic_rows,
         cellLoc="left",
         colWidths=[0.18, 0.32, 0.18, 0.32],
-        bbox=[0.0, 0.60, 1.0, 0.22],
+        bbox=[0.0, 0.58, 1.0, 0.20],
     )
     _style_table(basic_table, header_rows=0, font_size=8.8)
 
-    _draw_section_title(axis, 0.565, "本月质控概况")
+    _draw_section_title(axis, 0.535, "本月质控概况")
     axis.text(
         0.0,
-        0.532,
+        0.502,
         textwrap.fill(report.overview_text, width=58),
         ha="left",
         va="top",
         fontsize=10.5,
     )
 
-    _draw_section_title(axis, 0.455, "月度统计摘要")
+    _draw_section_title(axis, 0.425, "月度统计摘要")
     summary_rows = [
         ["月度正式期总 run 数", str(report.statistics.formal_count), "在控 run 数", str(report.statistics.in_control_count)],
         ["警告 run 数", str(report.statistics.warning_count), "失控 run 数", str(report.statistics.out_of_control_count)],
@@ -1440,15 +1922,15 @@ def _build_zscore_summary_page(report: ZScoreMonthlyReportData):
         cellText=summary_rows,
         cellLoc="left",
         colWidths=[0.22, 0.28, 0.22, 0.28],
-        bbox=[0.0, 0.28, 1.0, 0.14],
+        bbox=[0.0, 0.255, 1.0, 0.14],
     )
     _style_table(summary_table, header_rows=0, font_size=9.5)
 
-    _draw_section_title(axis, 0.245, "月度结论")
-    axis.text(0.0, 0.212, textwrap.fill(report.conclusion, width=50), ha="left", va="top", fontsize=11)
+    _draw_section_title(axis, 0.22, "月度结论")
+    axis.text(0.0, 0.187, textwrap.fill(report.conclusion, width=50), ha="left", va="top", fontsize=11)
 
-    _draw_section_title(axis, 0.14, "声明区")
-    axis.text(0.0, 0.107, textwrap.fill(report.declaration, width=56), ha="left", va="top", fontsize=10)
+    _draw_section_title(axis, 0.12, "声明区")
+    axis.text(0.0, 0.087, textwrap.fill(report.declaration, width=56), ha="left", va="top", fontsize=10)
     return figure
 
 
