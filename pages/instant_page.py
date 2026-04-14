@@ -654,7 +654,7 @@ def _render_instant_chart_analysis_section(context: dict[str, object]) -> object
 
     st.divider()
     st.markdown("**最新判定区**")
-    st.caption("即时法页面的判定输出统一收口在这里，左侧累计统计区不再重复展示判定结果。")
+    st.caption("即时法页面的判定输出集中显示在这里，左侧累计统计区不再重复展示判定结果。")
     latest_source_text = (
         f"最近记录 #{int(latest_row['sequence'])}"
         if latest_row is not None and "sequence" in latest_row
@@ -825,8 +825,8 @@ def _render_instant_maintenance_section(context: dict[str, object]) -> None:
 def render_instant_page() -> None:
     st.subheader("即时法")
     st.caption(
-        "即时法用于短期内难以快速积累满 20 个点的单水平项目；当前阶段支持单水平录入、"
-        "格拉布斯法基础提示、有效点累计统计，以及满足条件后的“确认转入 LJ 法”。"
+        "即时法是面向单水平项目的过渡方法，适用于短期内难以快速累积 20 个点的场景；"
+        "页面重点突出有效点累计、格拉布斯法提示和确认转入 LJ 法。"
     )
     projects_df, selected_project_id, batches_df, selected_batch_id = prepare_instant_project_batch_context()
     manage_tab, work_tab = st.tabs([TEXT["manage"], TEXT["current_batch"]])
@@ -894,7 +894,7 @@ def render_instant_page() -> None:
         render_section_intro(
             title="当前动作区",
             caption="左侧聚焦单水平录入与累计统计，右侧保留唯一的最新判定区，减少即时法页面的重复判定提示。",
-            badges=["过渡方法", f"有效点 {summary['effective_count']}/{INSTANT_TRANSFER_READY_COUNT}", input_value_type_label],
+            badges=["即时法", "过渡方法", f"有效点 {summary['effective_count']}/{INSTANT_TRANSFER_READY_COUNT}", input_value_type_label],
             tone="accent",
         )
         entry_col, chart_col = st.columns([0.98, 1.12], gap="large")
@@ -917,7 +917,7 @@ def render_instant_page() -> None:
 
         render_section_intro(
             title="历史与次要操作区",
-            caption="转入 LJ、记录表、维护区和判定口径说明统一下沉到主区下方，保留追溯但降低页面噪音。",
+            caption="转入 LJ、记录表、维护区和判定口径说明统一下沉到主区下方，既保留追溯，也避免干扰主录入和最新判定。",
             badges=["转入 LJ", "记录回顾", "维护与说明"],
             tone="muted",
         )

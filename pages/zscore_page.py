@@ -252,9 +252,9 @@ def _render_zscore_maintenance_summary(context: dict[str, object]) -> None:
 
 
 def render_zscore_page() -> None:
-    st.subheader("Z-score")
+    st.subheader("多水平（Z-score法）")
     st.caption(
-        "多水平（Z-score法）页面用于双水平或三水平联合判断；页面结构强调多水平摘要、视图切换和单 level 维护。"
+        "适用于 2 水平或 3 水平项目的联合判断。页面重点突出多水平摘要、图表控制、视图切换和单 level 维护。"
     )
     projects_df, selected_project_id, batches_df, selected_batch_id = prepare_zscore_project_batch_context()
     manage_tab, work_tab, report_tab = st.tabs([TEXT["manage"], TEXT["current_batch"], "Z-score 月报"])
@@ -298,8 +298,8 @@ def render_zscore_page() -> None:
 
         render_section_intro(
             title="当前动作区",
-            caption="左侧聚焦本次多水平录入，右侧聚焦图表控制、视图切换与最新分析，保持多水平工作台主区的稳定层级。",
-            badges=[f"{level_count} 水平", context["overall_phase_label"], input_value_type_label],
+            caption="左侧聚焦本次多水平录入，右侧聚焦图表控制、视图切换与最新分析，突出多水平联合判断主区。",
+            badges=["多水平（Z-score法）", f"{level_count} 水平", context["overall_phase_label"], input_value_type_label],
             tone="accent",
         )
         entry_col, chart_col = st.columns([0.94, 1.24], gap="large")
@@ -308,7 +308,7 @@ def render_zscore_page() -> None:
             with st.container():
                 render_section_intro(
                     title="图表与最新结果分析",
-                    caption="在同一区查看质控图、当前判读和异常备注入口。",
+                    caption="在同一区查看多水平质控图、当前判读和异常备注入口。",
                     tone="accent",
                 )
                 phase_scope, view_mode, selected_level, y_axis_mode, standard_sd_limit = render_zscore_chart_controls(
@@ -330,14 +330,14 @@ def render_zscore_page() -> None:
             with st.container():
                 render_section_intro(
                     title="本次检测录入",
-                    caption=f"请填写检测时间、检测人与各水平{input_value_type_label}。",
+                    caption=f"请填写检测时间、检测人与各水平{input_value_type_label}，并结合 level 摘要判断当前阶段。",
                     tone="accent",
                 )
                 render_zscore_entry_section(context, selected_batch_id)
 
         render_section_intro(
             title="历史与次要操作区",
-            caption="把各水平摘要、厂家参考、维护区和导入导出统一放到主区下方，减少图表周围的信息噪音。",
+            caption="各水平摘要、厂家参考、维护区和导入导出统一放在主区下方，让图表控制与最新分析更集中。",
             badges=["水平摘要", "维护", "导入导出"],
             tone="muted",
         )

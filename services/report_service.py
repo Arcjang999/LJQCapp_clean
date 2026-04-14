@@ -10,6 +10,7 @@ from typing import Any
 import pandas as pd
 from matplotlib import font_manager, pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib.lines import Line2D
 
 from database import (
     create_report_export_snapshot,
@@ -22,6 +23,10 @@ from database import (
 )
 from plotting import plot_lj_chart
 from qc_logic import LJ_FORMAL_PHASE_LABEL, persist_lj_batch_outlier_snapshot
+from services.report_pdf_layout import (
+    render_lj_monthly_report_pdf,
+    render_zscore_monthly_report_pdf,
+)
 from services.settings_service import (
     DEFAULT_REPORT_STATEMENT,
     get_report_settings_with_fallbacks,
@@ -39,7 +44,7 @@ from zscore_logic import (
     resolve_zscore_batch_context,
     should_enable_formal_rules,
 )
-from zscore_plotting import plot_zscore_overlay
+from zscore_plotting import plot_zscore_overlay, plot_zscore_single_level
 
 
 REPORT_TYPE_LJ_MONTHLY = "lj_monthly_report"
@@ -489,6 +494,9 @@ def build_lj_monthly_report_pdf(package: LjMonthlyReportPackage) -> bytes:
 
     return buffer.getvalue()
 
+def build_lj_monthly_report_pdf(package: LjMonthlyReportPackage) -> bytes:
+    return render_lj_monthly_report_pdf(package, _resolve_pdf_font_name())
+
 
 def save_lj_monthly_report_snapshot(package: LjMonthlyReportPackage) -> int:
     report = package.report
@@ -700,6 +708,9 @@ def build_zscore_monthly_report_pdf(package: ZScoreMonthlyReportPackage) -> byte
             plt.close(action_figure)
 
     return buffer.getvalue()
+
+def build_zscore_monthly_report_pdf(package: ZScoreMonthlyReportPackage) -> bytes:
+    return render_zscore_monthly_report_pdf(package, _resolve_pdf_font_name())
 
 
 def save_zscore_monthly_report_snapshot(package: ZScoreMonthlyReportPackage) -> int:

@@ -56,6 +56,13 @@ def normalize_top_level_method_selection() -> None:
     st.session_state["top_level_method_selector"] = METHOD_ENTRY_OPTIONS[0]
 
 
+def _open_global_page(page_key: str) -> None:
+    st.session_state[page_key] = True
+    if page_key == "show_settings_page":
+        st.session_state["refresh_settings_form"] = True
+    st.rerun()
+
+
 def _render_method_card(
     *,
     eyebrow: str,
@@ -82,19 +89,160 @@ def _render_method_card(
     render_html_block(html)
 
 
-def _render_muted_info_card(*, title: str, caption: str, items: list[str]) -> None:
-    html = dedent(
-        f"""
-        <div class="main-entry-card main-entry-card-muted">
-            <div class="main-entry-card-title" style="font-size:18px; margin-top:0;">{title}</div>
-            <div class="main-entry-card-caption">{caption}</div>
-            <ul class="main-entry-card-list">
-                {''.join(f"<li>{item}</li>" for item in items)}
-            </ul>
-        </div>
-        """
-    ).strip()
-    render_html_block(html)
+def _render_instruction_block(title: str, items: list[str]) -> None:
+    with st.container(border=True):
+        st.markdown(f"**{title}**")
+        st.markdown("\n".join(f"- {item}" for item in items))
+
+
+def _render_instruction_module(
+    *,
+    scene_items: list[str],
+    flow_items: list[str],
+    statistics_items: list[str],
+    judgment_items: list[str],
+    note_items: list[str],
+) -> None:
+    _render_instruction_block("适用场景", scene_items)
+    _render_instruction_block("操作流程", flow_items)
+    _render_instruction_block("统计口径", statistics_items)
+    _render_instruction_block("判定方法", judgment_items)
+    _render_instruction_block("注意事项", note_items)
+
+
+def _render_usage_guide_tabs() -> None:
+    tabs = st.tabs(
+        [
+            LJ_ENTRY_LABEL,
+            ZSCORE_ENTRY_LABEL,
+            INSTANT_ENTRY_LABEL,
+            "报告历史",
+            "系统设置",
+        ]
+    )
+
+    with tabs[0]:
+        _render_instruction_module(
+            scene_items=[
+                "适用于单水平项目的日常室内质控。",
+                "同一页面内完成建靶、正式质控、记录维护与月报生成。",
+            ],
+            flow_items=[
+                "新建项目 → 新建批次 → 建靶 → 正式质控 → 记录维护 → 月报。",
+                "进入“当前批次”后，可连续完成录入、图表查看、最新分析和维护。",
+            ],
+            statistics_items=[
+                "建靶统计仅基于当前批次建靶期有效点。",
+                "建靶禁用点不参与建靶统计。",
+                "正式期实时统计仅基于正式期中在控数据。",
+                "月报统计仅基于所选月份正式期数据。",
+            ],
+            judgment_items=[
+                "建靶期显示离群值判断。",
+                "正式期按 Westgard 规则判定。",
+            ],
+            note_items=[
+                "录入第一条正式期数据后，建靶期数据锁定。",
+                "离群点只做保留、禁用、恢复，不删除原始记录。",
+            ],
+        )
+
+    with tabs[1]:
+        _render_instruction_module(
+            scene_items=[
+                "适用于 2 水平或 3 水平项目的联合判断场景。",
+                "适合需要同时查看各 level 摘要、图表和 run 级判定的多水平质控流程。",
+            ],
+            flow_items=[
+                "新建项目并确定水平数 → 新建批次 → 多水平建靶 → 全部水平满足条件后进入正式期 → 图表分析 → 月报。",
+                "在“当前批次”页可切换单水平视图或合并视图，并继续进行 level 维护。",
+            ],
+            statistics_items=[
+                "建靶统计按 level 分别计算。",
+                "禁用粒度是单 level 点，不是整条 run。",
+                "月报统计仅基于所选月份正式期 run。",
+            ],
+            judgment_items=[
+                "建靶期重点查看离群值与 level 摘要。",
+                "正式期按当前规则组合输出 run 级警告或失控。",
+            ],
+            note_items=[
+                "全部水平达到建靶条件后才进入正式期。",
+                "进入正式期后建靶期数据锁定。",
+            ],
+        )
+
+    with tabs[2]:
+        _render_instruction_module(
+            scene_items=[
+                "适用于样本量较少、短期内不易快速累积 20 个点的单水平项目。",
+                "作为过渡方法使用，满足条件后由人工确认转入 LJ 法。",
+            ],
+            flow_items=[
+                "新建项目 → 新建批次 → 逐步录入 → 格拉布斯法判断 → 处理疑似离群点 → 达到 20 个有效点后确认转入 LJ 法。",
+                "转入后继续到对应 LJ 批次完成后续建靶和正式质控。",
+            ],
+            statistics_items=[
+                "统计仅基于有效点。",
+                "禁用点不参与均值、SD、CV。",
+            ],
+            judgment_items=[
+                "采用格拉布斯法。",
+                "n < 3 不判定，n >= 3 开始提示疑似离群。",
+            ],
+            note_items=[
+                "确认转入 LJ 法后源批次冻结为只读。",
+                "前 20 个有效点进入 LJ 建靶，后续有效点进入 LJ 正式期。",
+            ],
+        )
+
+    with tabs[3]:
+        _render_instruction_module(
+            scene_items=[
+                "适用于查看已生成的 LJ 与 Z-score 月报记录。",
+                "在统一页面中按项目名称定位报告，再用方法学、批次、月份和生成时间辅助识别。",
+            ],
+            flow_items=[
+                "打开报告历史 → 按项目名称、方法学、批次或月份筛选 → 查看摘要 → 按当前数据重新生成。",
+                "需要重新下载 PDF 时，先执行重新生成，再下载新生成的文件。",
+            ],
+            statistics_items=[
+                "历史页展示的是快照摘要。",
+                "重新生成使用当前数据库中的数据，不是下载旧 PDF 原件。",
+            ],
+            judgment_items=[
+                "本页不重新执行历史判定规则，摘要区展示生成报告时保存的关键统计和结论摘要。",
+                "选择“按当前数据重新生成”后，会调用对应月报生成逻辑并按当前数据重新计算。",
+            ],
+            note_items=[
+                "项目名称是主词条，方法学是辅助标签。",
+                "若原始项目或批次不存在，无法重新生成。",
+            ],
+        )
+
+    with tabs[4]:
+        _render_instruction_module(
+            scene_items=[
+                "系统设置属于全局功能，不属于某一种方法学。",
+                "用于统一维护报告默认信息，以及数据存储、迁移、备份和恢复入口。",
+            ],
+            flow_items=[
+                "填写实验室默认信息 → 保存设置。",
+                "查看当前数据库位置 → 迁移数据库 / 立即备份 / 从备份恢复。",
+            ],
+            statistics_items=[
+                "本页不参与质控统计，也不改变报告统计口径。",
+                "保存后的默认信息会用于后续新生成的月报。",
+            ],
+            judgment_items=[
+                "本页不执行质控判定，相关操作主要进行路径可写性或 SQLite 有效性校验。",
+                "数据库迁移和恢复都会先做必要校验，再执行对应操作。",
+            ],
+            note_items=[
+                "数据库迁移和恢复成功后需重启应用生效。",
+                "迁移和恢复均通过系统原生目录或文件选择窗口完成，不需手输路径。",
+            ],
+        )
 
 
 def render_main_entry_page() -> None:
@@ -103,14 +251,14 @@ def render_main_entry_page() -> None:
         <div class="home-hero">
             <div class="home-hero-title">实验室室内质控工作台</div>
             <div class="home-hero-caption">
-                面向单机版日常使用场景，统一承载单水平（LJ法）、多水平（Z-score法）与即时法流程。
-                当前版本重点提供项目与批次管理、检测录入、图表判读、月报生成、报告历史与系统设置。
+                面向日常单机使用场景，统一提供单水平（LJ法）、多水平（Z-score法）、即时法、
+                月报生成、报告历史与系统设置入口。
             </div>
             <div class="welcome-chip-row">
-                <span class="welcome-chip">轻量医疗工作台</span>
-                <span class="welcome-chip">固定模板月报</span>
-                <span class="welcome-chip">本地 SQLite 数据</span>
-                <span class="welcome-chip">报告历史与设置全局入口</span>
+                <span class="welcome-chip">单水平（LJ法）</span>
+                <span class="welcome-chip">多水平（Z-score法）</span>
+                <span class="welcome-chip">即时法</span>
+                <span class="welcome-chip">月报、报告历史与系统设置</span>
             </div>
         </div>
         """
@@ -122,18 +270,18 @@ def render_main_entry_page() -> None:
         if st.button("进入单水平（LJ法）", key="hero_jump_lj", type="primary", width="stretch"):
             switch_top_level_method(LJ_ENTRY_LABEL)
     with action_col2:
-        if st.button("进入即时法", key="hero_jump_instant", type="primary", width="stretch"):
-            switch_top_level_method(INSTANT_ENTRY_LABEL)
-    with action_col3:
         if st.button("进入多水平（Z-score法）", key="hero_jump_zscore", type="primary", width="stretch"):
             switch_top_level_method(ZSCORE_ENTRY_LABEL)
+    with action_col3:
+        if st.button("进入即时法", key="hero_jump_instant", type="primary", width="stretch"):
+            switch_top_level_method(INSTANT_ENTRY_LABEL)
 
-    st.caption("右上角继续保留全局入口，用于打开报告历史与系统设置。")
+    st.caption("右上角保留报告历史和系统设置等全局入口，当前页面主要用于方法选择和使用说明查看。")
 
     render_section_intro(
-        title="三种方法工作台",
-        caption="主页只负责快速进入不同方法学流程，不再堆叠说明文字；每张卡片强调方法定位、适用场景和核心动作。",
-        badges=["主页", "统一入口", "方法学差异清晰"],
+        title="方法入口",
+        caption="按方法学进入对应工作台。首页只保留方法定位、适用场景和核心动作，不再堆叠冗长说明文字。",
+        badges=[LJ_ENTRY_LABEL, ZSCORE_ENTRY_LABEL, INSTANT_ENTRY_LABEL],
         tone="accent",
     )
     method_col1, method_col2, method_col3 = st.columns(3, gap="large")
@@ -142,122 +290,98 @@ def render_main_entry_page() -> None:
         _render_method_card(
             eyebrow="单水平",
             title="LJ 法",
-            caption="适用于单水平日常室内质控，强调建靶完成后的 Westgard 判读与月度回顾。",
+            caption="适用于单水平日常室内质控，页面重点突出建靶、Westgard 判读和月度回顾。",
             bullet_points=[
-                "本次录入、当前统计、图表与最新分析集中在同一工作台。",
-                "建靶期关注离群值判断，正式期聚焦 Westgard 规则。",
-                "下部保留记录维护、导入导出和月报入口。",
+                "建靶期重点查看离群值判断，正式期聚焦 Westgard 规则。",
+                "录入、统计、图表和最新分析集中在同一工作台。",
+                "记录维护、导入导出和月报入口统一放在下部区域。",
             ],
             tags=["单水平", "Westgard", "月报"],
         )
-        if st.button("打开 LJ 工作台", key="open_main_lj_card", width="stretch"):
+        if st.button("打开单水平（LJ法）", key="open_main_lj_card", width="stretch"):
             switch_top_level_method(LJ_ENTRY_LABEL)
 
     with method_col2:
         _render_method_card(
-            eyebrow="过渡方法",
-            title="即时法",
-            caption="适用于短期内难以快速积累 20 个点的单水平项目，提供基础离群提示与转入 LJ 流程。",
+            eyebrow="多水平",
+            title="Z-score 法",
+            caption="适用于 2 水平或 3 水平联合判断，页面重点突出 level 摘要、图表控制和最新分析。",
             bullet_points=[
-                "3 个有效点后开始格拉布斯法提示。",
-                "累计到 20 个有效点后可人工确认转入 LJ 法。",
-                "转入后保留追溯关系，并冻结即时法源批次。",
+                "支持单水平视图与合并视图切换。",
+                "建靶统计按 level 分别计算，维护粒度也是单 level 点。",
+                "图表、level 摘要、维护区和月报入口分层清晰。",
             ],
-            tags=["单水平", "格拉布斯法", "转入 LJ"],
+            tags=["多水平", "2 水平 / 3 水平", "联合判断"],
         )
-        if st.button("打开即时法工作台", key="open_main_instant_card", width="stretch"):
-            switch_top_level_method(INSTANT_ENTRY_LABEL)
+        if st.button("打开多水平（Z-score法）", key="open_main_zscore_card", width="stretch"):
+            switch_top_level_method(ZSCORE_ENTRY_LABEL)
 
     with method_col3:
         _render_method_card(
-            eyebrow="多水平",
-            title="Z-score 法",
-            caption="适用于 2 水平或 3 水平联合判断场景，强调多水平结构、图表切换与 level 维护。",
+            eyebrow="过渡方法",
+            title="即时法",
+            caption="适用于短期内难以快速累积 20 个点的单水平项目，满足条件后可人工确认转入 LJ 法。",
             bullet_points=[
-                "顶部上下文条显示当前阶段、水平数、模板和输入值类型。",
-                "主区支持单水平视图与合并视图切换。",
-                "下部保留 level 摘要、维护区、导入导出和月报入口。",
+                "3 个有效点后开始格拉布斯法提示。",
+                "累计到 20 个有效点后可确认转入 LJ 法。",
+                "转入后源批次冻结为只读，去向 LJ 项目和批次可追溯。",
             ],
-            tags=["多水平", "联合判断", "Level 管理"],
+            tags=["单水平", "格拉布斯法", "转入 LJ"],
         )
-        if st.button("打开 Z-score 工作台", key="open_main_zscore_card", width="stretch"):
-            switch_top_level_method(ZSCORE_ENTRY_LABEL)
+        if st.button("打开即时法", key="open_main_instant_card", width="stretch"):
+            switch_top_level_method(INSTANT_ENTRY_LABEL)
 
     render_section_intro(
-        title="快速开始",
-        caption="保持主页轻量，但仍提供最常用的操作路径，方便首次上手和重新进入时快速定位。",
-        badges=["项目创建", "检测录入", "报告与历史"],
+        title="全局入口",
+        caption="报告历史和系统设置属于全局功能，不进入某一种方法学页面内部；需要查看报告记录或维护默认配置时，可从这里或右上角入口进入。",
+        badges=["报告历史", "系统设置"],
         tone="muted",
     )
-    quick_col1, quick_col2, quick_col3 = st.columns(3, gap="large")
-    with quick_col1:
-        _render_muted_info_card(
-            title="开始一个新项目",
-            caption="先按方法学选择合适工作台，再创建项目与批次。",
-            items=[
-                "创建项目时确定输入值类型。",
-                "按项目进入批次管理并完成批号、仪器、试剂等信息填写。",
-                "完成后切到“当前批次”开始录入。",
+    global_col1, global_col2 = st.columns(2, gap="large")
+    with global_col1:
+        _render_method_card(
+            eyebrow="全局功能",
+            title="报告历史",
+            caption="统一查看 LJ 与 Z-score 月报记录，以项目名称为主词条，支持查看摘要和按当前数据重新生成。",
+            bullet_points=[
+                "支持项目名称、方法学、批次和月份筛选。",
+                "摘要区可帮助快速确认是否为目标报告。",
+                "重新生成得到的是按当前数据生成的新 PDF。",
             ],
+            tags=["历史记录中心", "摘要查看", "重新生成"],
         )
-    with quick_col2:
-        _render_muted_info_card(
-            title="生成与回看报告",
-            caption="LJ 与 Z-score 月报入口保留在各自工作台中，历史回看统一走全局入口。",
-            items=[
-                "在方法学页面生成固定模板月报 PDF。",
-                "右上角“报告历史”统一查看 LJ 与 Z-score 报告记录。",
-                "历史记录支持查看摘要并按同参数重新生成。",
+        if st.button("打开报告历史", key="open_main_report_history_card", width="stretch"):
+            _open_global_page("show_report_history_page")
+
+    with global_col2:
+        _render_method_card(
+            eyebrow="全局功能",
+            title="系统设置",
+            caption="集中维护报告默认信息，以及数据库迁移、备份和恢复入口，避免打断方法学工作流。",
+            bullet_points=[
+                "可维护实验室名称、科室名称、质控负责人、审核人和固定声明。",
+                "迁移数据库、立即备份和从备份恢复都在这里完成。",
+                "迁移和恢复成功后需按提示重启应用。",
             ],
+            tags=["报告默认信息", "数据存储", "备份恢复"],
         )
-    with quick_col3:
-        _render_muted_info_card(
-            title="维护默认信息",
-            caption="系统设置负责统一维护报告默认信息与数据存储入口。",
-            items=[
-                "实验室信息和报告声明影响后续新生成的月报。",
-                "数据库迁移、备份和恢复入口全部收口到系统设置。",
-                "危险操作在设置页内单独区分，不进入主导航。",
-            ],
-        )
+        if st.button("打开系统设置", key="open_main_settings_card", width="stretch"):
+            _open_global_page("show_settings_page")
 
     render_section_intro(
-        title="说明入口",
-        caption="把长说明收纳到折叠区，首页只保留高频信息和最近更新摘要，减少纯文字堆叠感。",
-        badges=["最近更新", "使用边界", "后续入口"],
+        title="使用说明",
+        caption="使用说明按方法学和全局功能拆分，统一写明适用场景、操作流程、统计口径、判定方法和注意事项，方便首次上手和复查。",
+        badges=["适用场景", "统计口径", "判定方法", "注意事项"],
         tone="default",
     )
-    info_col1, info_col2 = st.columns([0.9, 1.1], gap="large")
-    with info_col1:
-        _render_muted_info_card(
-            title="最近更新",
-            caption="当前版本已经完成主流程闭环，并进入发布前 UI/UX 收口阶段。",
-            items=[
-                "LJ、Z-score 月报已接入固定模板输出。",
-                "报告历史已收口为全局统一页面。",
-                "系统设置已包含实验室信息、数据库迁移、备份与恢复。",
-            ],
-        )
-    with info_col2:
-        with st.expander("查看使用说明与当前版本边界", expanded=False):
-            st.markdown(
-                "\n".join(
-                    [
-                        "- LJ 页面面向单水平常规质控，建靶期与正式期分析入口已经分离。",
-                        "- Z-score 页面面向 2 水平或 3 水平场景，支持单水平视图和合并视图。",
-                        "- 即时法用于过渡阶段，满足条件后由用户确认转入 LJ 法，而不是自动转入。",
-                        "- 报告历史只做统一历史记录、摘要查看和按当前数据重新生成，不做旧 PDF 归档中心。",
-                        "- 系统设置属于全局功能，不进入方法学导航。数据库迁移仍要求通过目录选择完成。",
-                    ]
-                )
-            )
+    _render_usage_guide_tabs()
 
 
 def render_instant_placeholder_page() -> None:
     render_section_intro(
         title="即时法",
-        caption="即时法入口已经升级为正式工作台，请从顶部主导航直接进入。",
-        badges=["过渡方法", "单水平", "确认转入 LJ"],
+        caption="即时法已经纳入顶部主导航，请直接从“即时法”入口进入正式工作台。",
+        badges=["即时法", "过渡方法", "确认转入 LJ 法"],
         tone="accent",
     )
     st.info("请从顶部“即时法”入口进入正式页面；此占位页仅保留兼容说明。")

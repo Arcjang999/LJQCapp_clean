@@ -225,10 +225,18 @@ def test_report_history_page_renders_from_global_entry() -> None:
         app.run()
 
         assert not list(app.exception)
+        assert any(
+            "WATERMARK_TEXT: 本软件由邦德盛开发，该版本仅供演示或试用。" in str(item.value)
+            for item in app.markdown
+        )
         assert any(button.key == "open_report_history_page" for button in app.button)
 
         app.button(key="open_report_history_page").click().run()
         assert not list(app.exception)
+        assert any(
+            "WATERMARK_TEXT: 本软件由邦德盛开发，该版本仅供演示或试用。" in str(item.value)
+            for item in app.markdown
+        )
         assert any(text_input.key == "report_history_project_query" for text_input in app.text_input)
         assert any(selectbox.key == "report_history_method_filter" for selectbox in app.selectbox)
         assert any(selectbox.key == "report_history_month_filter" for selectbox in app.selectbox)

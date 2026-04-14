@@ -38,22 +38,34 @@ def render_report_history_page() -> None:
     records = list_report_history_records()
     render_section_intro(
         title="报告历史",
-        caption="统一查看 LJ 与 Z-score 月报记录，按项目名称组织，再用方法标签、批次、月份和生成时间辅助识别；支持查看摘要并按当前数据重新生成。",
+        caption="统一查看 LJ 与 Z-score 月报记录。页面以项目名称为主词条，再用方法标签、批次、月份和生成时间辅助识别；支持查看摘要并按当前数据重新生成。",
         eyebrow="全局入口",
-        badges=["统一历史页", "项目名称主词条", "支持重新生成"],
+        badges=["项目名称主词条", "摘要查看", "按当前数据重新生成"],
         tone="accent",
     )
     render_workbench_context_bar(
         title="历史记录概览",
-        caption="报告历史不拆成方法学子页，而是统一收口为记录中心。项目名称是主识别字段，方法标签只作为辅助标签。",
+        caption="报告历史不拆成方法学子页，而是统一作为记录中心。项目名称是主识别字段，方法标签只作为辅助标签。",
         items=[
             ("历史报告数", len(records)),
             ("涉及项目数", len({record.project_name for record in records})),
             ("单水平（LJ法）", sum(1 for record in records if record.report_type == REPORT_TYPE_LJ_MONTHLY)),
             ("多水平（Z-score法）", sum(1 for record in records if record.report_type == REPORT_TYPE_ZSCORE_MONTHLY)),
         ],
-        badges=["摘要可查看", "按当前数据重新生成", "文件归档不在本轮范围"],
+        badges=["快照摘要", "筛选定位", "当前数据重生成"],
     )
+    with st.expander("本页说明", expanded=False):
+        st.markdown(
+            "\n".join(
+                [
+                    "- 报告历史适用于查看已生成的 LJ / Z-score 月报记录。",
+                    "- 页面以项目名称为主词条，方法学、批次、月份和生成时间用于辅助识别。",
+                    "- 历史页展示的是生成时保存的快照摘要，不是旧 PDF 原件仓库。",
+                    "- 选择“按当前数据重新生成”后，会基于当前数据库重新生成新的 PDF，内容可能与历史记录当时不同。",
+                    "- 若原始项目或批次不存在，将无法重新生成。",
+                ]
+            )
+        )
 
     if not records:
         st.info("当前还没有可展示的月度报告历史。请先在 LJ 或 Z-score 月报入口生成至少一份报告。")
@@ -217,34 +229,45 @@ def _render_report_history_card(record: ReportHistoryRecord) -> None:
                 st.markdown("**结论摘要**")
                 st.write(record.conclusion_text)
 
-        if st.button(
-            "按当前数据重新生成 PDF",
-            key=f"report_history_regenerate_{record.export_id}",
-            type="primary",
-            use_container_width=True,
-        ):
-            try:
-                regeneration_result = regenerate_report_from_history(record)
-            except ValueError as exc:
-                st.session_state.pop(regeneration_state_key, None)
-                st.warning(str(exc))
-            else:
-                st.session_state[regeneration_state_key] = {
-                    "pdf_bytes": regeneration_result.pdf_bytes,
-                    "file_name": regeneration_result.file_name,
-                    "snapshot_id": regeneration_result.snapshot_id,
-                }
-                st.success("已按当前数据重新生成报告，可继续下载新的 PDF。")
+        action_left, action_right = st.columns(2, gap="small")
+        with action_left:
+            if st.button(
+                "按当前数据重新生成 PDF",
+                key=f"report_history_regenerate_{record.export_id}",
+                type="primary",
+                use_container_width=True,
+            ):
+                try:
+                    regeneration_result = regenerate_report_from_history(record)
+                except ValueError as exc:
+                    st.session_state.pop(regeneration_state_key, None)
+                    st.warning(str(exc))
+                else:
+                    st.session_state[regeneration_state_key] = {
+                        "pdf_bytes": regeneration_result.pdf_bytes,
+                        "file_name": regeneration_result.file_name,
+                        "snapshot_id": regeneration_result.snapshot_id,
+                    }
+                    st.success("已按当前数据重新生成报告，可继续下载新的 PDF。")
 
         regeneration_state = st.session_state.get(regeneration_state_key)
         if isinstance(regeneration_state, dict):
             st.caption("这是按当前数据重新生成的 PDF，内容可能与历史记录当时不同，并非下载历史原始旧 PDF。")
-            st.download_button(
-                label="下载重新生成的 PDF",
-                data=regeneration_state["pdf_bytes"],
-                file_name=regeneration_state["file_name"],
-                mime="application/pdf",
-                key=f"report_history_download_{record.export_id}",
-                use_container_width=True,
-            )
+            with action_right:
+                st.download_button(
+                    label="下载重新生成的 PDF",
+                    data=regeneration_state["pdf_bytes"],
+                    file_name=regeneration_state["file_name"],
+                    mime="application/pdf",
+                    key=f"report_history_download_{record.export_id}",
+                    use_container_width=True,
+                )
             st.caption(f"本次重新生成已新增历史快照 #{regeneration_state['snapshot_id']}")
+        else:
+            with action_right:
+                st.button(
+                    "下载重新生成的 PDF",
+                    key=f"report_history_download_placeholder_{record.export_id}",
+                    disabled=True,
+                    use_container_width=True,
+                )

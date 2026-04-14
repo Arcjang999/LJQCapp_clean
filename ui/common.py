@@ -106,25 +106,27 @@ ZSCORE_PHASE_VIEW_OPTIONS = {
 ZSCORE_Y_AXIS_OPTIONS = ["标准视图", "全范围视图"]
 
 APP_TITLE = TEXT["app_title"]
+APP_WATERMARK_TEXT = "本软件由邦德盛开发，该版本仅供演示或试用。"
 
 def inject_global_styles() -> None:
     st.markdown(
         """
         <style>
-        .demo-watermark-layer {
-            position: fixed;
-            inset: 0;
-            z-index: 999;
-            pointer-events: none;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='760' height='360' viewBox='0 0 760 360'%3E%3Cg transform='rotate(-24 380 180)'%3E%3Ctext x='44' y='188' fill='%23184d8d' fill-opacity='0.10' font-size='30' font-family='Segoe UI,%20Microsoft YaHei,sans-serif' font-weight='700'%3E%E6%AD%A4%E8%BD%AF%E4%BB%B6%E5%BD%92%E5%BC%80%E5%8F%91%E8%80%85%E6%89%80%E6%9C%89%EF%BC%8C%E4%BB%85%E4%BE%9B%E6%BC%94%E7%A4%BA%E4%BD%BF%E7%94%A8%EF%BC%8C%E4%B8%8D%E5%81%9A%E4%BB%BB%E4%BD%95%E6%AD%A3%E5%BC%8F%E4%BD%BF%E7%94%A8%3C/text%3E%3C/g%3E%3C/svg%3E");
-            background-repeat: repeat;
-            background-position: center center;
-            background-size: 680px 320px;
+        /* WATERMARK_TEXT: __APP_WATERMARK_TEXT__ */
+        [data-testid="stSidebarNav"],
+        [data-testid="stSidebarNavItems"],
+        [data-testid="stSidebarNavSeparator"],
+        [data-testid="collapsedControl"] {
+            display: none !important;
         }
         .stApp {
             background:
+                url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScxNjAwJyBoZWlnaHQ9JzkwMCcgdmlld0JveD0nMCAwIDE2MDAgOTAwJz4KICA8ZyB0cmFuc2Zvcm09J3JvdGF0ZSgtMjQgODAwIDQ1MCknPgogICAgPHRleHQgeD0nMjIwJyB5PScyNTAnIGZvbnQtZmFtaWx5PSdNaWNyb3NvZnQgWWFIZWksIFNpbUhlaSwgU2Vnb2UgVUksIEFyaWFsLCBzYW5zLXNlcmlmJyBmb250LXNpemU9JzI0JyBmb250LXdlaWdodD0nNzAwJyBmaWxsPScjYzRjY2Q3JyBmaWxsLW9wYWNpdHk9JzAuMjQnPuacrOi9r+S7tueUsemCpuW+t+ebm+W8gOWPke+8jOivpeeJiOacrOS7heS+m+a8lOekuuaIluivleeUqOOAgjwvdGV4dD4KICAgIDx0ZXh0IHg9JzEwNDAnIHk9JzI1MCcgZm9udC1mYW1pbHk9J01pY3Jvc29mdCBZYUhlaSwgU2ltSGVpLCBTZWdvZSBVSSwgQXJpYWwsIHNhbnMtc2VyaWYnIGZvbnQtc2l6ZT0nMjQnIGZvbnQtd2VpZ2h0PSc3MDAnIGZpbGw9JyNjNGNjZDcnIGZpbGwtb3BhY2l0eT0nMC4yNCc+5pys6L2v5Lu255Sx6YKm5b6355ub5byA5Y+R77yM6K+l54mI5pys5LuF5L6b5ryU56S65oiW6K+V55So44CCPC90ZXh0PgogICAgPHRleHQgeD0nMTIwJyB5PSc2NjAnIGZvbnQtZmFtaWx5PSdNaWNyb3NvZnQgWWFIZWksIFNpbUhlaSwgU2Vnb2UgVUksIEFyaWFsLCBzYW5zLXNlcmlmJyBmb250LXNpemU9JzI0JyBmb250LXdlaWdodD0nNzAwJyBmaWxsPScjYzRjY2Q3JyBmaWxsLW9wYWNpdHk9JzAuMjQnPuacrOi9r+S7tueUsemCpuW+t+ebm+W8gOWPke+8jOivpeeJiOacrOS7heS+m+a8lOekuuaIluivleeUqOOAgjwvdGV4dD4KICAgIDx0ZXh0IHg9Jzk0MCcgeT0nNjYwJyBmb250LWZhbWlseT0nTWljcm9zb2Z0IFlhSGVpLCBTaW1IZWksIFNlZ29lIFVJLCBBcmlhbCwgc2Fucy1zZXJpZicgZm9udC1zaXplPScyNCcgZm9udC13ZWlnaHQ9JzcwMCcgZmlsbD0nI2M0Y2NkNycgZmlsbC1vcGFjaXR5PScwLjI0Jz7mnKzova/ku7bnlLHpgqblvrfnm5vlvIDlj5HvvIzor6XniYjmnKzku4XkvpvmvJTnpLrmiJbor5XnlKjjgII8L3RleHQ+CiAgPC9nPgo8L3N2Zz4="),
                 radial-gradient(circle at top left, rgba(24, 77, 141, 0.05), transparent 24%),
                 linear-gradient(180deg, #f4f7fb 0%, #f8fafc 100%);
+            background-attachment: fixed, scroll, scroll;
+            background-repeat: repeat, no-repeat, no-repeat;
+            background-size: 1600px 900px, auto, auto;
         }
         section.main > div.block-container {
             padding-top: 1.1rem;
@@ -441,9 +443,6 @@ def inject_global_styles() -> None:
             }
         }
         @media (max-width: 960px) {
-            .demo-watermark-layer {
-                background-size: 520px 260px;
-            }
             .workbench-context-chip-row,
             .section-chip-row {
                 justify-content: flex-start;
@@ -762,18 +761,18 @@ def inject_global_styles() -> None:
         .section-shell {
             border: 1px solid #d8e4ef;
             border-radius: 18px;
-            background: linear-gradient(180deg, #fbfdff 0%, #f5f9fd 100%);
+            background: linear-gradient(180deg, #fcfdff 0%, #f7fafe 100%);
             padding: 14px 16px 12px 16px;
             margin: 0 0 12px 0;
         }
         .section-shell.section-shell-accent {
-            border-color: #cfe0f1;
+            border-color: #d7e4ef;
             background:
-                radial-gradient(circle at top right, rgba(24, 77, 141, 0.12), transparent 26%),
-                linear-gradient(135deg, #fbfdff 0%, #eff5fb 100%);
+                radial-gradient(circle at top right, rgba(24, 77, 141, 0.08), transparent 24%),
+                linear-gradient(135deg, #fcfdff 0%, #f3f7fc 100%);
         }
         .section-shell.section-shell-muted {
-            background: linear-gradient(180deg, #f9fbfd 0%, #f4f7fb 100%);
+            background: linear-gradient(180deg, #fbfcfe 0%, #f5f7fa 100%);
             border-color: #e0e7ef;
         }
         .section-shell-top {
@@ -797,7 +796,7 @@ def inject_global_styles() -> None:
         }
         .section-title {
             margin-top: 8px;
-            font-size: 22px;
+            font-size: 20px;
             font-weight: 800;
             line-height: 1.2;
             color: #1b3553;
@@ -973,11 +972,7 @@ def inject_global_styles() -> None:
             word-break: break-word;
         }
         </style>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        '<div class="demo-watermark-layer" aria-hidden="true"></div>',
+        """.replace("__APP_WATERMARK_TEXT__", APP_WATERMARK_TEXT),
         unsafe_allow_html=True,
     )
 
@@ -985,10 +980,10 @@ def render_page_chrome() -> None:
     title_column, action_column = st.columns([0.72, 0.28], gap="medium", vertical_alignment="top")
     with title_column:
         st.title(APP_TITLE)
-        st.caption("单水平（LJ法）、多水平（Z-score法）与即时法共用一套全局工作台入口；报告历史与系统设置继续保留在右上角。")
+        st.caption("单水平（LJ法）、多水平（Z-score法）与即时法共用同一主导航；报告历史与系统设置位于右上角全局入口。")
 
     with action_column:
-        st.caption("此软件由邦德盛开发，如有疑问，请联系我司相关人员。")
+        st.caption("全局入口：报告历史用于查看已生成报告，系统设置用于维护默认信息和数据存储；如需提交使用问题，可通过“问题反馈”进入反馈表。")
         history_column, settings_column, feedback_column = st.columns(3, gap="small")
         with history_column:
             if st.button("报告历史", key="open_report_history_page", use_container_width=True):

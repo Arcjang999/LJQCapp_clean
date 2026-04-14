@@ -17,7 +17,7 @@ from services.report_service import (
     save_zscore_monthly_report_snapshot,
 )
 from ui.common import render_compact_stat_metrics, render_section_intro, render_workbench_context_bar
-from zscore_plotting import plot_zscore_overlay
+from zscore_plotting import plot_zscore_single_level
 
 
 def render_zscore_monthly_report_section(selected_batch_id: int) -> None:
@@ -28,7 +28,7 @@ def render_zscore_monthly_report_section(selected_batch_id: int) -> None:
 
     with st.container(border=True):
         render_section_intro(
-            title="多水平（Z-score法）月度报告",
+            title="多水平（Z-score法）月度质控报告",
             caption="当前入口只支持多水平（Z-score法）月报，不支持 LJ 月报混用。",
             tone="accent",
         )
@@ -166,17 +166,21 @@ def _render_report_preview(package: ZScoreMonthlyReportPackage) -> None:
     )
     st.dataframe(basic_info_df, hide_index=True, width="stretch")
 
-    chart_figure = plot_zscore_overlay(
-        plot_df=package.monthly_plot_df.copy(),
-        title=report.chart_title,
-        active_levels=package.active_levels,
-        phase_scope="formal",
-        y_axis_mode="标准视图",
-        standard_sd_limit=4.0,
-        y_axis_label=report.chart_axis_label,
-    )
-    st.pyplot(chart_figure, width="stretch")
-    plt.close(chart_figure)
+    st.markdown("**单水平月度图**")
+    level_label_map = {item.level_id: item.level_label for item in report.level_statistics}
+    for level_id in package.active_levels:
+        level_label = level_label_map.get(level_id, level_id)
+        chart_figure = plot_zscore_single_level(
+            plot_df=package.monthly_plot_df.copy(),
+            level_id=level_id,
+            title=f"{level_label} 单水平月度图",
+            phase_scope="formal",
+            y_axis_mode="标准视图",
+            standard_sd_limit=4.0,
+            y_axis_label=report.chart_axis_label,
+        )
+        st.pyplot(chart_figure, width="stretch")
+        plt.close(chart_figure)
 
     st.markdown("**各 level 统计摘要**")
     level_rows = []

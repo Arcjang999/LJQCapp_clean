@@ -56,6 +56,8 @@ def _build_lj_source_message(batch) -> str:
 
 
 def render_lj_page() -> None:
+    st.subheader("单水平（LJ法）")
+    st.caption("适用于单水平项目的日常室内质控。建靶期重点查看离群值判断，进入正式期后按 Westgard 规则判读并生成月报。")
     projects_df, selected_project_id, batches_df, selected_batch_id = prepare_project_batch_context()
     manage_tab, work_tab, report_tab = st.tabs([TEXT["manage"], TEXT["current_batch"], "LJ 月报"])
     render_project_batch_management(
@@ -110,10 +112,11 @@ def render_lj_work_tab(
 
     with work_tab:
         render_workbench_context_bar(
-            title="LJ 当前批次",
+            title="单水平（LJ法）当前批次",
             caption=(
                 f"当前项目：{batch['project_name']}。"
-                f"请确认当前批次、输入值类型（{input_value_type_label}）与阶段后，再录入检测结果并查看图表与最新结果分析。"
+                f"请先确认当前批次、输入值类型（{input_value_type_label}）与阶段。"
+                "建靶期重点查看离群值判断，正式期重点查看 Westgard 判读。"
             ),
             items=[
                 ("项目名称", batch["project_name"]),
@@ -151,8 +154,8 @@ def render_lj_work_tab(
 
         render_section_intro(
             title="当前动作区",
-            caption="左侧聚焦本次录入与当前统计，右侧聚焦图表与最新分析，减少同层重复提示和重复卡片。",
-            badges=["单水平工作台", phase_label, input_value_type_label],
+            caption="左侧聚焦本次录入与当前统计，右侧聚焦图表与最新分析；单水平页面只保留当前阶段最需要的判断信息。",
+            badges=["单水平（LJ法）", phase_label, input_value_type_label],
             tone="accent",
         )
         entry_col, chart_col = st.columns([1.0, 1.18], gap="large")
@@ -160,7 +163,7 @@ def render_lj_work_tab(
             with st.container():
                 render_section_intro(
                     title="结果录入与统计",
-                    caption=f"在同一区完成{input_value_type_label}录入、建靶统计和实时统计查看。",
+                    caption=f"在同一区完成{input_value_type_label}录入、建靶统计和正式期实时统计查看。",
                     tone="accent",
                 )
                 render_lj_entry_and_stats_section(context, selected_batch_id)
@@ -175,7 +178,7 @@ def render_lj_work_tab(
 
         render_section_intro(
             title="历史与次要操作区",
-            caption="把规则回顾、记录表、维护区和导入导出统一下沉到页面下部，避免主操作区被次级信息打断。",
+            caption="规则回顾、记录表、维护区和导入导出统一放在页面下部，避免主操作区被次级信息打断。",
             badges=["记录回顾", "维护", "导入导出"],
             tone="muted",
         )
@@ -183,7 +186,7 @@ def render_lj_work_tab(
         with st.container(border=True):
             render_section_intro(
                 title="规则与记录概览",
-                caption="正式期重点回顾 Westgard 规则，建靶期则保留记录列表与离群维护入口。",
+                caption="建靶期重点查看离群判断相关记录，正式期重点回顾 Westgard 规则与完整记录。",
                 tone="default",
             )
             render_lj_rule_summary_section(stats)

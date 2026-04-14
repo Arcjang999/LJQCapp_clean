@@ -30,6 +30,7 @@ from services.report_service import (
     save_zscore_monthly_report_snapshot,
 )
 from services.settings_service import REPORT_SETTINGS_FALLBACKS, save_report_settings_form
+from tests.report_pdf_assertions import assert_uniform_a4_pages_and_watermark
 from zscore_logic import create_zscore_run, get_template_id_for_level_count
 
 
@@ -70,6 +71,14 @@ def _make_level_results(level_1: float, level_2: float) -> list[dict[str, float]
     return [
         {"level_id": "Level 1", "raw_value": float(level_1)},
         {"level_id": "Level 2", "raw_value": float(level_2)},
+    ]
+
+
+def _make_three_level_results(level_1: float, level_2: float, level_3: float) -> list[dict[str, float]]:
+    return [
+        {"level_id": "Level 1", "raw_value": float(level_1)},
+        {"level_id": "Level 2", "raw_value": float(level_2)},
+        {"level_id": "Level 3", "raw_value": float(level_3)},
     ]
 
 
@@ -141,6 +150,48 @@ def seed_zscore_batch_with_building_only_data() -> tuple[int, int]:
     return project_id, batch_id
 
 
+def seed_three_level_zscore_batch_without_abnormal() -> tuple[int, int]:
+    project_id = create_zscore_project("Three-Level Z-score Project", level_count=3, input_value_type="raw")
+    batch_id = create_zscore_batch(
+        project_id=project_id,
+        instrument="AU680",
+        reagent="Chemistry Reagent 3L",
+        qc_material="Control C",
+        concentration="3 Levels",
+        lot_no="ZS-3L-202604",
+        target_n=5,
+        level_1_label="Level 1",
+        level_2_label="Level 2",
+        level_3_label="Level 3",
+        cv_limit=5.0,
+    )
+    template_id = get_template_id_for_level_count(3)
+
+    building_runs = [
+        ("2026-03-27 08:00:00", (100.0, 150.0, 200.0)),
+        ("2026-03-28 08:00:00", (100.2, 150.2, 200.2)),
+        ("2026-03-29 08:00:00", (99.8, 149.8, 199.8)),
+        ("2026-03-30 08:00:00", (100.1, 150.1, 200.1)),
+        ("2026-03-31 08:00:00", (99.9, 149.9, 199.9)),
+    ]
+    formal_runs = [
+        ("2026-04-01 08:00:00", (100.0, 150.0, 200.0)),
+        ("2026-04-02 08:00:00", (100.3, 150.1, 200.2)),
+        ("2026-04-03 08:00:00", (99.9, 149.8, 199.7)),
+    ]
+
+    for test_time, values in building_runs + formal_runs:
+        create_zscore_run(
+            batch_id=batch_id,
+            test_time=test_time,
+            operator="tester-3l",
+            level_results=_make_three_level_results(*values),
+            template_id=template_id,
+            required_n=5,
+        )
+    return project_id, batch_id
+
+
 def test_zscore_monthly_report_builds_pdf_and_snapshot() -> None:
     with TemporaryDatabaseContext():
         _project_id, batch_id = seed_zscore_batch_with_formal_monthly_data()
@@ -168,8 +219,8 @@ def test_zscore_monthly_report_builds_pdf_and_snapshot() -> None:
         pdf_bytes = build_zscore_monthly_report_pdf(package)
         assert pdf_bytes.startswith(b"%PDF")
 
-        reader = pypdf.PdfReader(BytesIO(pdf_bytes))
-        assert len(reader.pages) == 5
+        reader = assert_uniform_a4_pages_and_watermark(pdf_bytes)
+        assert len(reader.pages) == 6
         assert str(reader.metadata.get("/Subject", "")) == REPORT_TYPE_ZSCORE_MONTHLY
 
         snapshot_id = save_zscore_monthly_report_snapshot(package)
@@ -200,6 +251,22 @@ def test_zscore_monthly_report_requires_formal_data() -> None:
             assert "所选月份无正式期数据" in str(exc)
         else:
             raise AssertionError("expected build_zscore_monthly_report_package to reject building-only months")
+
+
+def test_zscore_monthly_report_outputs_three_single_level_chart_pages() -> None:
+    with TemporaryDatabaseContext():
+        _project_id, batch_id = seed_three_level_zscore_batch_without_abnormal()
+        package = build_zscore_monthly_report_package(batch_id, "2026-04")
+
+        assert package.report.basic_info.level_count_label.startswith("3")
+        assert len(package.active_levels) == 3
+        assert len(package.report.level_statistics) == 3
+        assert package.report.abnormal_records == []
+
+        pdf_bytes = build_zscore_monthly_report_pdf(package)
+        reader = assert_uniform_a4_pages_and_watermark(pdf_bytes)
+
+        assert len(reader.pages) == 6
 
 
 def test_zscore_monthly_report_page_exposes_generate_and_download_flow() -> None:
@@ -266,6 +333,7 @@ def test_zscore_monthly_report_reads_saved_system_settings_and_falls_back_on_emp
 if __name__ == "__main__":
     test_zscore_monthly_report_builds_pdf_and_snapshot()
     test_zscore_monthly_report_requires_formal_data()
+    test_zscore_monthly_report_outputs_three_single_level_chart_pages()
     test_zscore_monthly_report_page_exposes_generate_and_download_flow()
     test_zscore_monthly_report_reads_saved_system_settings_and_falls_back_on_empty_values()
     print("zscore_monthly_report_smoke_test passed")

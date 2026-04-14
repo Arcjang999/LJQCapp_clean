@@ -31,7 +31,9 @@ from services.report_service import (
     list_lj_report_month_options,
     save_lj_monthly_report_snapshot,
 )
+from services.report_pdf_layout import DECLARATION_TEXT_WIDTH, _wrap_text
 from services.settings_service import REPORT_SETTINGS_FALLBACKS, save_report_settings_form
+from tests.report_pdf_assertions import assert_uniform_a4_pages_and_watermark
 
 
 LJ_PAGE_APPTEST_SCRIPT = """
@@ -181,7 +183,7 @@ def test_lj_monthly_report_builds_pdf_and_snapshot() -> None:
         pdf_bytes = build_lj_monthly_report_pdf(package)
         assert pdf_bytes.startswith(b"%PDF")
 
-        reader = pypdf.PdfReader(BytesIO(pdf_bytes))
+        reader = assert_uniform_a4_pages_and_watermark(pdf_bytes)
         assert len(reader.pages) == 4
         assert str(reader.metadata.get("/Subject", "")) == REPORT_TYPE_LJ_MONTHLY
 
@@ -229,6 +231,11 @@ def test_lj_monthly_report_uses_business_text_for_single_record_and_no_abnormal(
         assert package.report.corrective_actions_empty_text == "本月无异常记录，无需原因与纠正措施。"
         assert package.report.abnormal_summary_text == "本月无异常记录，无需原因与纠正措施。"
         assert "整体运行稳定" in package.report.overview_text
+
+
+        pdf_bytes = build_lj_monthly_report_pdf(package)
+        reader = assert_uniform_a4_pages_and_watermark(pdf_bytes)
+        assert len(reader.pages) == 3
 
 
 def test_lj_monthly_report_page_exposes_generate_and_download_flow() -> None:
@@ -292,10 +299,25 @@ def test_lj_monthly_report_reads_saved_system_settings_and_falls_back_on_empty_v
         assert fallback_package.report.declaration == REPORT_SETTINGS_FALLBACKS["report_statement"]
 
 
+def test_report_pdf_wraps_long_declaration_text_within_content_width() -> None:
+    long_text = (
+        "本软件由邦德盛开发，该版本仅供演示或试用。"
+        "本声明用于验证说明页正文在版心内自动换行，不允许超出右边界。"
+        "This declaration block should also wrap safely when the sentence becomes very long. "
+        "This declaration block should also wrap safely when the sentence becomes very long."
+    )
+    wrapped = _wrap_text(long_text, DECLARATION_TEXT_WIDTH)
+    wrapped_lines = [line for line in wrapped.splitlines() if line]
+
+    assert len(wrapped_lines) >= 2
+    assert all(len(line) <= DECLARATION_TEXT_WIDTH for line in wrapped_lines)
+
+
 if __name__ == "__main__":
     test_lj_monthly_report_builds_pdf_and_snapshot()
     test_lj_monthly_report_requires_formal_data()
     test_lj_monthly_report_uses_business_text_for_single_record_and_no_abnormal()
     test_lj_monthly_report_page_exposes_generate_and_download_flow()
     test_lj_monthly_report_reads_saved_system_settings_and_falls_back_on_empty_values()
+    test_report_pdf_wraps_long_declaration_text_within_content_width()
     print("lj_monthly_report_smoke_test passed")
