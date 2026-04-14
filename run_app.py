@@ -7,7 +7,7 @@ import traceback
 from pathlib import Path
 
 
-DEFAULT_SERVER_ADDRESS = os.environ.get("LJQCAPP_ADDRESS", "127.0.0.1")
+DEFAULT_SERVER_ADDRESS = "0.0.0.0"
 DEFAULT_SERVER_PORT = int(os.environ.get("LJQCAPP_PORT", "8501"))
 
 
