@@ -149,10 +149,15 @@ def render_lj_work_tab(
         if source_message:
             st.info(source_message)
 
-        st.divider()
+        render_section_intro(
+            title="当前动作区",
+            caption="左侧聚焦本次录入与当前统计，右侧聚焦图表与最新分析，减少同层重复提示和重复卡片。",
+            badges=["单水平工作台", phase_label, input_value_type_label],
+            tone="accent",
+        )
         entry_col, chart_col = st.columns([1.0, 1.18], gap="large")
         with entry_col:
-            with st.container(border=True):
+            with st.container():
                 render_section_intro(
                     title="结果录入与统计",
                     caption=f"在同一区完成{input_value_type_label}录入、建靶统计和实时统计查看。",
@@ -160,7 +165,7 @@ def render_lj_work_tab(
                 )
                 render_lj_entry_and_stats_section(context, selected_batch_id)
         with chart_col:
-            with st.container(border=True):
+            with st.container():
                 render_section_intro(
                     title="图表与最新结果分析",
                     caption="在同一区查看质控图、当前判读和异常备注入口。",
@@ -168,27 +173,37 @@ def render_lj_work_tab(
                 )
                 figure, chart_state = render_lj_chart_and_analysis_section(context)
 
-        st.divider()
-        render_lj_rule_summary_section(stats)
+        render_section_intro(
+            title="历史与次要操作区",
+            caption="把规则回顾、记录表、维护区和导入导出统一下沉到页面下部，避免主操作区被次级信息打断。",
+            badges=["记录回顾", "维护", "导入导出"],
+            tone="muted",
+        )
 
-        st.divider()
-        render_lj_records_section(qc_df, context["input_value_type"])
-
-        st.divider()
         with st.container(border=True):
             render_section_intro(
-                title="检测记录维护",
-                caption="可在此查看、编辑或删除历史检测记录。",
-                tone="muted",
+                title="规则与记录概览",
+                caption="正式期重点回顾 Westgard 规则，建靶期则保留记录列表与离群维护入口。",
+                tone="default",
             )
-            _render_lj_maintenance_summary(qc_df)
-            render_lj_maintenance_section(context)
+            render_lj_rule_summary_section(stats)
+            render_lj_records_section(qc_df, context["input_value_type"])
 
-        st.divider()
-        with st.container(border=True):
-            render_section_intro(
-                title="导出与导入",
-                caption="导出当前批次数据与图表，并按模板导入 CSV。",
-                tone="muted",
-            )
-            render_lj_export_import_section(context, selected_batch_id, figure, chart_state)
+        lower_left, lower_right = st.columns([1.0, 1.0], gap="large")
+        with lower_left:
+            with st.container():
+                render_section_intro(
+                    title="检测记录维护",
+                    caption="集中处理建靶期离群点与历史记录维护，避免主区重复提示。",
+                    tone="muted",
+                )
+                _render_lj_maintenance_summary(qc_df)
+                render_lj_maintenance_section(context)
+        with lower_right:
+            with st.container(border=True):
+                render_section_intro(
+                    title="导出与导入",
+                    caption="导出当前批次数据和图表，并按模板导入 CSV。",
+                    tone="muted",
+                )
+                render_lj_export_import_section(context, selected_batch_id, figure, chart_state)

@@ -121,6 +121,122 @@ def inject_global_styles() -> None:
             background-position: center center;
             background-size: 680px 320px;
         }
+        .stApp {
+            background:
+                radial-gradient(circle at top left, rgba(24, 77, 141, 0.05), transparent 24%),
+                linear-gradient(180deg, #f4f7fb 0%, #f8fafc 100%);
+        }
+        section.main > div.block-container {
+            padding-top: 1.1rem;
+            padding-bottom: 2rem;
+            max-width: 1460px;
+        }
+        div[data-testid="stVerticalBlockBorderWrapper"] {
+            border-radius: 18px !important;
+            border: 1px solid #dbe4ef !important;
+            background: rgba(255, 255, 255, 0.94);
+            box-shadow: 0 8px 24px rgba(20, 44, 74, 0.05);
+        }
+        div[data-testid="stExpander"] {
+            border: 1px solid #dbe4ef;
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.94);
+            box-shadow: 0 6px 18px rgba(20, 44, 74, 0.04);
+            overflow: hidden;
+        }
+        div[data-testid="stExpander"] details summary {
+            background: #f8fbff;
+        }
+        div[data-testid="stDataFrame"] {
+            border: 1px solid #dbe4ef;
+            border-radius: 16px;
+            overflow: hidden;
+            background: #ffffff;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+        }
+        div[data-testid="stAlert"] {
+            border-radius: 14px;
+            border-width: 1px;
+            box-shadow: 0 4px 14px rgba(20, 44, 74, 0.03);
+        }
+        div[data-baseweb="tab-list"] {
+            gap: 8px;
+            background: #eaf0f6;
+            border: 1px solid #d9e3ee;
+            border-radius: 16px;
+            padding: 6px;
+        }
+        button[data-baseweb="tab"] {
+            border-radius: 12px;
+            height: 40px;
+            padding: 0 14px;
+            color: #4a5f76;
+            font-weight: 700;
+            background: transparent;
+        }
+        button[data-baseweb="tab"][aria-selected="true"] {
+            background: #ffffff;
+            color: #184d8d;
+            box-shadow: 0 6px 16px rgba(24, 77, 141, 0.10);
+        }
+        div[data-baseweb="tab-highlight"] {
+            display: none;
+        }
+        div[data-testid="stRadio"] div[role="radiogroup"] {
+            gap: 8px;
+        }
+        div[data-testid="stRadio"] label[data-baseweb="radio"] {
+            border: 1px solid #d8e3ee;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 4px 12px;
+            min-height: 36px;
+            box-shadow: 0 2px 8px rgba(20, 44, 74, 0.03);
+        }
+        div[data-testid="stTextInput"] input,
+        div[data-testid="stTextArea"] textarea,
+        div[data-testid="stNumberInput"] input,
+        div[data-testid="stDateInput"] input,
+        div[data-testid="stSelectbox"] div[data-baseweb="select"] > div {
+            border-radius: 12px;
+            border-color: #d6e1ec;
+            background: #ffffff;
+        }
+        div[data-testid="stTextInput"] input:focus,
+        div[data-testid="stTextArea"] textarea:focus,
+        div[data-testid="stNumberInput"] input:focus,
+        div[data-testid="stDateInput"] input:focus {
+            border-color: #184d8d;
+            box-shadow: 0 0 0 1px #184d8d;
+        }
+        div.stButton > button,
+        div.stDownloadButton > button,
+        div[data-testid="stDownloadButton"] > button,
+        div.stFormSubmitButton > button,
+        div[data-testid="stFormSubmitButton"] > button {
+            min-height: 40px;
+            border-radius: 12px;
+            font-weight: 700;
+            box-shadow: 0 4px 14px rgba(20, 44, 74, 0.05);
+        }
+        div.stButton > button[kind="secondary"],
+        div.stDownloadButton > button[kind="secondary"],
+        div[data-testid="stDownloadButton"] > button[kind="secondary"],
+        div.stFormSubmitButton > button[kind="secondary"],
+        div[data-testid="stFormSubmitButton"] > button[kind="secondary"] {
+            background: #ffffff;
+            border: 1px solid #d7e1ec;
+            color: #254363;
+        }
+        div.stButton > button[kind="secondary"]:hover,
+        div.stDownloadButton > button[kind="secondary"]:hover,
+        div[data-testid="stDownloadButton"] > button[kind="secondary"]:hover,
+        div.stFormSubmitButton > button[kind="secondary"]:hover,
+        div[data-testid="stFormSubmitButton"] > button[kind="secondary"]:hover {
+            border-color: #b8cbe0;
+            color: #184d8d;
+            background: #f8fbff;
+        }
         div.stButton > button[kind="primary"],
         div.stFormSubmitButton > button[kind="primary"],
         div[data-testid="stFormSubmitButton"] > button[kind="primary"],
@@ -869,7 +985,7 @@ def render_page_chrome() -> None:
     title_column, action_column = st.columns([0.72, 0.28], gap="medium", vertical_alignment="top")
     with title_column:
         st.title(APP_TITLE)
-        st.caption("当前版本已支持 LJ 与 Z-score 主流程；报告默认信息可从右上角“系统设置”统一维护。")
+        st.caption("单水平（LJ法）、多水平（Z-score法）与即时法共用一套全局工作台入口；报告历史与系统设置继续保留在右上角。")
 
     with action_column:
         st.caption("此软件由邦德盛开发，如有疑问，请联系我司相关人员。")

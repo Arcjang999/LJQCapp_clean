@@ -697,6 +697,10 @@ def render_lj_chart_and_analysis_section(
 
 
 def render_lj_rule_summary_section(stats: dict[str, object]) -> None:
+    if not bool(stats.get("target_ready")):
+        st.info("当前仍在建靶期，上方最新分析仅显示离群值判断；Westgard 规则汇总会在正式期启用后显示。")
+        return
+
     st.markdown("**本批次规则汇总**")
     render_rule_summary_metrics(stats.get("rule_summary", {}))
 

@@ -468,29 +468,7 @@ def _render_instant_entry_and_summary_section(
 
     st.markdown("**结果录入区**")
     if is_transferred:
-        st.success("该批次已转入 LJ 法，请到对应由即时法转入的 LJ 批次继续后续质控。")
-        render_compact_stat_metrics(
-            [
-                ("当前状态", "已转入 LJ 法"),
-                ("转入时间", _format_instant_datetime_text(transfer_state.get("transferred_at"))),
-                ("转入有效点数", str(transfer_state.get("transferred_effective_count") or 0)),
-                ("去向 LJ 项目", str(transfer_state.get("transferred_to_lj_project_name") or "-")),
-                ("去向 LJ 批次", str(transfer_state.get("transferred_to_lj_batch_display") or "-")),
-            ]
-        )
-        st.caption("转入后当前即时法批次已冻结为只读，不允许继续录入新结果或修改记录状态。")
-        st.caption("目标 LJ 批次会带有“由即时法转入”来源标识，便于后续追溯。")
-        if st.button(
-            "前往对应 LJ 批次",
-            key="instant_go_to_transferred_lj_batch",
-            type="primary",
-            width="stretch",
-        ):
-            _navigate_to_lj_batch(
-                transfer_state.get("transferred_to_lj_project_id"),
-                transfer_state.get("transferred_to_lj_batch_id"),
-            )
-            st.rerun()
+        st.info("该批次已转入 LJ 法，当前录入区已冻结为只读。")
     else:
         if st.session_state.get("instant_entry_batch_id") != selected_batch_id:
             st.session_state["instant_entry_batch_id"] = selected_batch_id
@@ -563,30 +541,65 @@ def _render_instant_entry_and_summary_section(
     )
     st.caption("统计口径：均值、SD、CV 仅基于当前有效点计算；疑似离群点在未手工禁用前仍计入有效统计。")
 
+
+def _render_instant_transfer_section(context: dict[str, object]) -> None:
+    summary = context["summary"]
+    transfer_state = context["transfer_state"]
+    is_transferred = bool(transfer_state.get("is_transferred"))
+
+    if is_transferred:
+        st.success("该即时法批次已转入 LJ 法，后续请在对应 LJ 批次继续流程。")
+        render_compact_stat_metrics(
+            [
+                ("当前状态", "已转入 LJ 法"),
+                ("转入时间", _format_instant_datetime_text(transfer_state.get("transferred_at"))),
+                ("转入有效点数", str(transfer_state.get("transferred_effective_count") or 0)),
+                ("去向 LJ 项目", str(transfer_state.get("transferred_to_lj_project_name") or "-")),
+                ("去向 LJ 批次", str(transfer_state.get("transferred_to_lj_batch_display") or "-")),
+            ]
+        )
+        st.caption("转入后当前即时法批次已冻结为只读，目标 LJ 批次会保留“由即时法转入”的来源标识。")
+        if st.button(
+            "前往对应 LJ 批次",
+            key="instant_go_to_transferred_lj_batch",
+            type="primary",
+            width="stretch",
+        ):
+            _navigate_to_lj_batch(
+                transfer_state.get("transferred_to_lj_project_id"),
+                transfer_state.get("transferred_to_lj_batch_id"),
+            )
+            st.rerun()
+        return
+
+    render_compact_stat_metrics(
+        [
+            ("当前有效点数", str(summary["effective_count"])),
+            ("达到转入阈值", "是" if summary.get("transfer_ready") else "否"),
+            ("待处理疑似离群点", str(summary.get("pending_outlier_review_count", 0))),
+            ("目标阈值", str(INSTANT_TRANSFER_READY_COUNT)),
+        ]
+    )
     if summary.get("transfer_ready"):
         st.success("已达到 20 个有效点，可确认转入 LJ 法。")
     else:
-        st.caption(
-            f"达到 {INSTANT_TRANSFER_READY_COUNT} 个有效点后，才可执行“确认转入 LJ 法”。"
-        )
-    if is_transferred:
-        st.info("该即时法批次已完成转入并冻结，请在 LJ 页面继续后续流程。")
-    else:
-        st.caption(
-            "转入规则：前 20 个有效点作为 LJ 建靶数据；第 21 个及之后的有效点作为 LJ 正式期数据；"
-            "转入后当前即时法批次将冻结为只读。"
-        )
-        if st.button(
-            "确认转入 LJ 法",
-            key="open_instant_transfer_dialog",
-            type="primary",
-            disabled=not bool(transfer_state.get("eligible")),
-            width="stretch",
-        ):
-            st.session_state["show_instant_transfer_dialog"] = True
-        blockers = list(transfer_state.get("blockers", []))
-        if blockers:
-            st.info("当前暂不可转入：\n" + "\n".join(f"- {reason}" for reason in blockers))
+        st.caption(f"达到 {INSTANT_TRANSFER_READY_COUNT} 个有效点后，才可执行“确认转入 LJ 法”。")
+
+    st.caption(
+        "转入规则：前 20 个有效点作为 LJ 建靶数据；第 21 个及之后的有效点作为 LJ 正式期数据；"
+        "转入后当前即时法批次将冻结为只读。"
+    )
+    if st.button(
+        "确认转入 LJ 法",
+        key="open_instant_transfer_dialog",
+        type="primary",
+        disabled=not bool(transfer_state.get("eligible")),
+        width="stretch",
+    ):
+        st.session_state["show_instant_transfer_dialog"] = True
+    blockers = list(transfer_state.get("blockers", []))
+    if blockers:
+        st.info("当前暂不可转入：\n" + "\n".join(f"- {reason}" for reason in blockers))
 
 
 def _resolve_instant_tone_key(status: str) -> str | None:
@@ -641,6 +654,7 @@ def _render_instant_chart_analysis_section(context: dict[str, object]) -> object
 
     st.divider()
     st.markdown("**最新判定区**")
+    st.caption("即时法页面的判定输出统一收口在这里，左侧累计统计区不再重复展示判定结果。")
     latest_source_text = (
         f"最近记录 #{int(latest_row['sequence'])}"
         if latest_row is not None and "sequence" in latest_row
@@ -708,7 +722,7 @@ def _build_instant_display_dataframe(
 def _render_instant_records_section(context: dict[str, object]) -> None:
     analysis_df = context["analysis_df"]
     input_value_type_label = context["input_value_type_label"]
-    with st.expander("当前记录表（点击折叠/展开）", expanded=True):
+    with st.expander("当前记录表（点击折叠/展开）", expanded=False):
         st.caption("当前批次历史记录、疑似离群提示状态与手工处理状态都会保留在此。")
         display_df = _build_instant_display_dataframe(analysis_df, input_value_type_label)
         st.dataframe(display_df, width="stretch", hide_index=True)
@@ -875,42 +889,68 @@ def render_instant_page() -> None:
             badges=context_badges,
         )
 
-        _render_grubbs_method_explanation(summary)
         if st.session_state.get("show_instant_transfer_dialog"):
             _render_instant_transfer_dialog(selected_batch_id)
-        st.divider()
+        render_section_intro(
+            title="当前动作区",
+            caption="左侧聚焦单水平录入与累计统计，右侧保留唯一的最新判定区，减少即时法页面的重复判定提示。",
+            badges=["过渡方法", f"有效点 {summary['effective_count']}/{INSTANT_TRANSFER_READY_COUNT}", input_value_type_label],
+            tone="accent",
+        )
         entry_col, chart_col = st.columns([0.98, 1.12], gap="large")
         with entry_col:
-            with st.container(border=True):
+            with st.container():
                 render_section_intro(
                     title="结果录入与累计统计",
-                    caption="在同一区完成单水平结果录入、累计统计查看和 20 点提示。",
+                    caption="左侧只保留结果录入和累计统计，不再混入最新判定。",
                     tone="accent",
                 )
                 _render_instant_entry_and_summary_section(context, selected_batch_id)
         with chart_col:
-            with st.container(border=True):
+            with st.container():
                 render_section_intro(
                     title="图表与最新判定",
-                    caption="默认仅展示有效点趋势，并显示最近一次即时法状态。",
+                    caption="右侧统一承载趋势图和最新判定，是当前页面唯一的判定出口。",
                     tone="accent",
                 )
                 _render_instant_chart_analysis_section(context)
 
-        st.divider()
+        render_section_intro(
+            title="历史与次要操作区",
+            caption="转入 LJ、记录表、维护区和判定口径说明统一下沉到主区下方，保留追溯但降低页面噪音。",
+            badges=["转入 LJ", "记录回顾", "维护与说明"],
+            tone="muted",
+        )
         with st.container(border=True):
             render_section_intro(
-                title="当前记录表",
-                caption="查看历史记录、疑似离群状态和手工处理状态。",
+                title="转入 LJ 法",
+                caption="明确显示当前是否可转入 LJ 法，以及转入后对应的去向项目和批次。",
                 tone="muted",
             )
-            _render_instant_records_section(context)
+            _render_instant_transfer_section(context)
 
-        st.divider()
+        lower_left, lower_right = st.columns([1.0, 1.0], gap="large")
+        with lower_left:
+            with st.container(border=True):
+                render_section_intro(
+                    title="当前记录表",
+                    caption="查看历史记录、疑似离群状态和手工处理状态。",
+                    tone="muted",
+                )
+                _render_instant_records_section(context)
+        with lower_right:
+            with st.container(border=True):
+                render_section_intro(
+                    title="记录维护区",
+                    caption="本阶段支持即时法记录禁用与恢复，已转入 LJ 后统一冻结为只读。",
+                    tone="muted",
+                )
+                _render_instant_maintenance_section(context)
+
         with st.container(border=True):
             render_section_intro(
-                title="记录维护区",
-                caption="本阶段支持即时法记录禁用与恢复，后续可在此继续扩展手工处理。",
+                title="判定口径说明",
+                caption="格拉布斯法说明保留在下部，避免干扰主录入和最新判定。",
                 tone="muted",
             )
-            _render_instant_maintenance_section(context)
+            _render_grubbs_method_explanation(summary)

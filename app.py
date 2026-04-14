@@ -6,7 +6,11 @@ from database import init_db
 from pages.instant_page import render_instant_page
 from pages.lj_page import render_lj_page
 from pages.main_page import (
+    INSTANT_ENTRY_LABEL,
+    LJ_ENTRY_LABEL,
+    MAIN_ENTRY_LABEL,
     METHOD_ENTRY_OPTIONS,
+    ZSCORE_ENTRY_LABEL,
     normalize_top_level_method_selection,
     render_main_entry_page,
 )
@@ -25,7 +29,7 @@ def _consume_pending_navigation_intent() -> None:
     pending_batch_id = st.session_state.pop("pending_lj_batch_id", None)
     st.session_state.pop("pending_navigation_source", None)
 
-    st.session_state["top_level_method_selector"] = "单水平（LJ法）"
+    st.session_state["top_level_method_selector"] = LJ_ENTRY_LABEL
 
     if pending_project_id is not None:
         try:
@@ -67,13 +71,13 @@ selected_method = st.radio(
     key="top_level_method_selector",
 )
 
-if selected_method == "主页":
+if selected_method == MAIN_ENTRY_LABEL:
     render_main_entry_page()
-elif selected_method == "单水平（LJ法）":
+elif selected_method == LJ_ENTRY_LABEL:
     render_lj_page()
-elif selected_method == "多水平（Z-score法）":
+elif selected_method == ZSCORE_ENTRY_LABEL:
     render_zscore_page()
-elif selected_method == "即时法":
+elif selected_method == INSTANT_ENTRY_LABEL:
     render_instant_page()
 else:
     render_main_entry_page()

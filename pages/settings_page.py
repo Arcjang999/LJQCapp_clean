@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import streamlit as st
 
 from services.settings_service import (
@@ -19,7 +21,7 @@ from services.storage_service import (
     validate_directory_writable,
     validate_sqlite_database,
 )
-from ui.common import render_section_intro, render_workbench_context_bar
+from ui.common import render_compact_stat_metrics, render_section_intro, render_workbench_context_bar
 
 
 SETTINGS_FORM_FIELD_MAP = {
@@ -52,73 +54,81 @@ def render_settings_page() -> None:
 
     render_section_intro(
         title="系统设置",
-        caption="本页统一维护报告默认信息，以及数据库存储位置迁移、手动备份与恢复。",
+        caption="将报告默认信息与数据存储相关操作统一收口到全局页面，弱化表单堆叠感，保留清晰的层级与风险提示。",
         eyebrow="全局入口",
-        badges=["报告默认信息", "数据存储与备份"],
+        badges=["报告默认信息", "数据存储与备份", "危险操作分区"],
         tone="accent",
     )
     render_workbench_context_bar(
         title="当前配置摘要",
-        caption="LJ 月报与 Z-score 月报都会优先读取这里保存的默认信息；空值会在报告侧自动回退到安全默认值。",
+        caption="LJ 月报与 Z-score 月报都会优先读取此处保存的默认信息；数据库迁移、备份与恢复继续保持全局入口，不进入方法学导航。",
         items=[
             ("实验室名称", current_settings.lab_name or "未填写"),
             ("科室名称", current_settings.department_name or "未填写"),
             ("质控负责人", current_settings.qc_owner_name or "未填写"),
             ("审核人", current_settings.reviewer_name or "未填写"),
-            ("声明默认值", "已配置" if current_settings.report_statement else "将回退到系统默认声明"),
+            ("报告声明", "已配置" if current_settings.report_statement else "回退到系统默认声明"),
         ],
-        badges=["不进入主导航", "影响 LJ / Z-score 月报"],
+        badges=["影响后续新报告", "设置页独立入口"],
     )
 
-    saved_settings: ReportSettings | None = None
-    st.markdown("**实验室与科室信息**")
-    info_left, info_right = st.columns(2, gap="large")
-    with info_left:
-        st.text_input("实验室名称", key=SETTINGS_FORM_FIELD_MAP["lab_name"])
-        st.text_input("质控负责人", key=SETTINGS_FORM_FIELD_MAP["qc_owner_name"])
-    with info_right:
-        st.text_input("科室名称", key=SETTINGS_FORM_FIELD_MAP["department_name"])
-        st.text_input("审核人", key=SETTINGS_FORM_FIELD_MAP["reviewer_name"])
-
-    st.markdown("**报告固定声明**")
-    st.text_area(
-        "报告声明正文",
-        key=SETTINGS_FORM_FIELD_MAP["report_statement"],
-        height=160,
-    )
-    if st.button("保存设置", key="save_system_settings", type="primary", use_container_width=True):
-        saved_settings = save_report_settings_form(
-            {
-                field_name: st.session_state[widget_key]
-                for field_name, widget_key in SETTINGS_FORM_FIELD_MAP.items()
-            }
+    with st.container():
+        render_section_intro(
+            title="报告默认信息",
+            caption="集中维护实验室、科室、报告责任人和默认声明，让月报生成时的默认信息来源更清晰。",
+            badges=["常规配置", "影响 LJ / Z-score 月报"],
+            tone="accent",
         )
-        st.session_state["refresh_settings_form"] = True
-        st.session_state["settings_saved_notice"] = (
-            "系统设置已保存，后续生成的 LJ / Z-score 月报会优先使用这些默认信息。"
+        info_left, info_right = st.columns(2, gap="large")
+        with info_left:
+            st.text_input("实验室名称", key=SETTINGS_FORM_FIELD_MAP["lab_name"])
+            st.text_input("质控负责人", key=SETTINGS_FORM_FIELD_MAP["qc_owner_name"])
+        with info_right:
+            st.text_input("科室名称", key=SETTINGS_FORM_FIELD_MAP["department_name"])
+            st.text_input("审核人", key=SETTINGS_FORM_FIELD_MAP["reviewer_name"])
+
+        st.markdown("**报告固定声明**")
+        st.text_area(
+            "报告声明正文",
+            key=SETTINGS_FORM_FIELD_MAP["report_statement"],
+            height=180,
         )
-        st.rerun()
+        if st.button("保存设置", key="save_system_settings", type="primary", use_container_width=True):
+            save_report_settings_form(
+                {
+                    field_name: st.session_state[widget_key]
+                    for field_name, widget_key in SETTINGS_FORM_FIELD_MAP.items()
+                }
+            )
+            st.session_state["refresh_settings_form"] = True
+            st.session_state["settings_saved_notice"] = (
+                "系统设置已保存，后续新生成的 LJ / Z-score 月报会优先使用这里的默认信息。"
+            )
+            st.rerun()
 
-    if saved_settings is not None:
-        current_settings = saved_settings
+        saved_notice = str(st.session_state.pop("settings_saved_notice", "") or "").strip()
+        if saved_notice:
+            st.success(saved_notice)
 
-    saved_notice = str(st.session_state.pop("settings_saved_notice", "") or "").strip()
-    if saved_notice:
-        st.success(saved_notice)
+        st.caption(
+            "空值策略：实验室名称、科室名称、质控负责人、审核人为空时，报告会显示“未填写”；"
+            "报告声明为空时，系统会回退到默认声明。"
+        )
+        with st.expander("查看当前报告回退默认值", expanded=False):
+            st.write(f"实验室名称：{REPORT_SETTINGS_FALLBACKS['lab_name']}")
+            st.write(f"科室名称：{REPORT_SETTINGS_FALLBACKS['department_name']}")
+            st.write(f"质控负责人：{REPORT_SETTINGS_FALLBACKS['qc_owner_name']}")
+            st.write(f"审核人：{REPORT_SETTINGS_FALLBACKS['reviewer_name']}")
+            st.write(f"报告声明：{REPORT_SETTINGS_FALLBACKS['report_statement']}")
 
-    st.caption(
-        "空值策略：实验室名称、科室名称、质控负责人、审核人为空时，报告会显示“未填写”；"
-        "声明为空时，报告会自动回退到系统默认声明。"
-    )
-    with st.expander("当前报告回退默认值", expanded=False):
-        st.write(f"实验室名称：{REPORT_SETTINGS_FALLBACKS['lab_name']}")
-        st.write(f"科室名称：{REPORT_SETTINGS_FALLBACKS['department_name']}")
-        st.write(f"质控负责人：{REPORT_SETTINGS_FALLBACKS['qc_owner_name']}")
-        st.write(f"审核人：{REPORT_SETTINGS_FALLBACKS['reviewer_name']}")
-        st.write(f"报告声明：{REPORT_SETTINGS_FALLBACKS['report_statement']}")
-
-    st.divider()
-    _render_storage_section()
+    with st.container():
+        render_section_intro(
+            title="数据存储与备份",
+            caption="数据库位置、迁移、备份和恢复继续保留在设置页中，避免打断业务工作流；恢复操作单独做高风险提示。",
+            badges=["数据库迁移", "备份恢复", "重启后生效"],
+            tone="muted",
+        )
+        _render_storage_section()
 
 
 def _hydrate_settings_form_state(settings: ReportSettings, *, force: bool) -> None:
@@ -129,13 +139,6 @@ def _hydrate_settings_form_state(settings: ReportSettings, *, force: bool) -> No
 
 def _render_storage_section() -> None:
     status = get_database_location_status()
-    render_section_intro(
-        title="数据存储与备份",
-        caption="数据库位置配置保存在业务数据库之外；迁移与恢复成功后都需要重启应用后生效。",
-        eyebrow="数据安全",
-        badges=["原生目录/文件选择窗口", "不做在线热切换"],
-        tone="default",
-    )
     render_workbench_context_bar(
         title="当前数据库位置",
         caption=status.status_text,
@@ -151,12 +154,25 @@ def _render_storage_section() -> None:
         ],
     )
 
-    st.markdown("**当前数据库路径**")
-    st.code(str(status.db_path))
-    st.markdown("**当前数据库所在目录**")
-    st.code(str(status.db_dir))
-    action_left, action_right = st.columns(2, gap="small")
-    with action_left:
+    location_col, action_col = st.columns([1.1, 0.9], gap="large")
+    with location_col:
+        render_compact_stat_metrics(
+            [
+                ("数据库文件", str(status.db_path.name)),
+                ("目录可见性", "可读取" if status.is_readable or not status.exists else "需检查"),
+                ("SQLite 状态", "有效" if status.is_valid_sqlite or not status.exists else "异常"),
+                ("文件大小", f"{status.size_bytes} 字节" if status.exists else "-"),
+            ]
+        )
+        with st.expander("查看路径详情", expanded=False):
+            st.markdown("**当前数据库路径**")
+            st.code(str(status.db_path))
+            st.markdown("**当前数据库目录**")
+            st.code(str(status.db_dir))
+            st.markdown("**默认备份目录**")
+            st.code(str(status.default_backup_dir))
+
+    with action_col:
         if st.button("打开数据库所在文件夹", key="open_db_folder", use_container_width=True):
             try:
                 open_folder_in_system(status.db_dir)
@@ -164,7 +180,6 @@ def _render_storage_section() -> None:
                 st.error(str(exc))
             else:
                 st.success("已调用系统资源管理器打开数据库所在目录。")
-    with action_right:
         if st.button("打开默认备份目录", key="open_default_backup_dir", use_container_width=True):
             try:
                 status.default_backup_dir.mkdir(parents=True, exist_ok=True)
@@ -180,53 +195,55 @@ def _render_storage_section() -> None:
         st.warning("当前数据库文件存在但无法读取，请先检查文件权限或目录可用性。")
     elif not status.is_valid_sqlite:
         st.warning(status.status_text)
-    else:
-        st.caption(f"当前数据库大小：{status.size_bytes} 字节")
 
-    st.markdown("**更换数据库存储目录**")
-    st.caption("点击“选择新目录”后会弹出系统原生目录选择窗口；迁移成功后请立即重启应用。")
-    if st.button("选择新目录", key="pick_storage_migration_dir", use_container_width=True):
-        try:
-            selected_dir = choose_directory_via_dialog(
-                initial_dir=status.db_dir,
-                title="选择新的数据库存储目录",
-            )
-        except RuntimeError as exc:
-            st.error(str(exc))
-        else:
-            if selected_dir is not None:
-                st.session_state[STORAGE_SESSION_KEYS["migration_dir"]] = str(selected_dir)
+    st.markdown("**数据库迁移**")
+    st.caption("通过系统目录选择器选择新的数据库存储目录；迁移成功后需要重启应用。")
+    migration_left, migration_right = st.columns([1.1, 0.9], gap="large")
+    with migration_left:
+        if st.button("选择新目录", key="pick_storage_migration_dir", use_container_width=True):
+            try:
+                selected_dir = choose_directory_via_dialog(
+                    initial_dir=status.db_dir,
+                    title="选择新的数据库存储目录",
+                )
+            except RuntimeError as exc:
+                st.error(str(exc))
+            else:
+                if selected_dir is not None:
+                    st.session_state[STORAGE_SESSION_KEYS["migration_dir"]] = str(selected_dir)
 
-    selected_migration_dir = _read_optional_path(STORAGE_SESSION_KEYS["migration_dir"])
-    migration_ready = False
-    if selected_migration_dir is not None:
-        st.write("已选择的新目录：")
-        st.code(str(selected_migration_dir))
-        migration_validation = validate_directory_writable(selected_migration_dir, create_if_missing=False)
-        if migration_validation[0]:
-            st.success("目标目录校验通过。")
-            migration_ready = True
-        else:
-            st.warning(migration_validation[1])
+        selected_migration_dir = _read_optional_path(STORAGE_SESSION_KEYS["migration_dir"])
+        migration_ready = False
+        if selected_migration_dir is not None:
+            st.write("已选择的新目录：")
+            st.code(str(selected_migration_dir))
+            migration_validation = validate_directory_writable(selected_migration_dir, create_if_missing=False)
+            if migration_validation[0]:
+                st.success("目标目录校验通过。")
+                migration_ready = True
+            else:
+                st.warning(migration_validation[1])
+        if st.button(
+            "确认迁移数据库",
+            key="confirm_storage_migration",
+            type="primary",
+            use_container_width=True,
+            disabled=not migration_ready,
+        ):
+            try:
+                result = migrate_database_to_directory(selected_migration_dir)
+            except RuntimeError as exc:
+                st.error(str(exc))
+            else:
+                st.success(result.message)
+                if result.config_path is not None:
+                    st.caption(f"数据库路径配置已写入：{result.config_path}")
+    with migration_right:
+        st.info("迁移只切换数据库文件所在目录，不改变业务数据结构。")
+        st.caption("建议迁移前先做一次备份，迁移完成后按提示重启应用。")
 
-    if st.button(
-        "确认迁移数据库",
-        key="confirm_storage_migration",
-        type="primary",
-        use_container_width=True,
-        disabled=not migration_ready,
-    ):
-        try:
-            result = migrate_database_to_directory(selected_migration_dir)
-        except RuntimeError as exc:
-            st.error(str(exc))
-        else:
-            st.success(result.message)
-            if result.config_path is not None:
-                st.caption(f"数据库路径配置已写入：{result.config_path}")
-
-    st.markdown("**立即备份数据库**")
-    st.caption(f"默认备份目录：{status.default_backup_dir}")
+    st.markdown("**数据备份**")
+    st.caption("支持直接备份到默认目录，也支持先选目录再立即备份。")
     backup_left, backup_right = st.columns(2, gap="small")
     with backup_left:
         if st.button("立即备份到默认目录", key="backup_default_dir", use_container_width=True):
@@ -258,8 +275,8 @@ def _render_storage_section() -> None:
                         st.success(result.message)
                         st.code(str(result.target_path))
 
-    st.markdown("**从备份恢复数据库**")
-    st.caption("恢复会覆盖当前数据库内容；系统会在恢复前自动生成一份保护性备份。")
+    st.markdown("**危险操作：从备份恢复数据库**")
+    st.warning("恢复会覆盖当前数据库内容；系统会在恢复前自动生成一份保护性备份。")
     if st.button("选择备份文件", key="pick_restore_backup_file", use_container_width=True):
         try:
             selected_backup_file = choose_backup_file_via_dialog(
@@ -286,7 +303,7 @@ def _render_storage_section() -> None:
             st.warning(restore_validation[1])
 
     st.checkbox(
-        "我已知晓恢复会覆盖当前数据库内容，且需要在恢复后重启应用。",
+        "我已知晓恢复会覆盖当前数据库内容，并且需要在恢复后重启应用。",
         key=STORAGE_SESSION_KEYS["restore_confirmed"],
         disabled=selected_restore_file is None,
     )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from textwrap import dedent
 
 import pandas as pd
 import streamlit as st
@@ -16,7 +17,12 @@ from services.report_service import (
     list_report_history_records,
     regenerate_report_from_history,
 )
-from ui.common import render_compact_stat_metrics, render_section_intro, render_workbench_context_bar
+from ui.common import (
+    render_compact_stat_metrics,
+    render_html_block,
+    render_section_intro,
+    render_workbench_context_bar,
+)
 
 
 REGENERATION_STATE_PREFIX = "report_history_regenerated_"
@@ -32,28 +38,36 @@ def render_report_history_page() -> None:
     records = list_report_history_records()
     render_section_intro(
         title="报告历史",
-        caption="统一查看 LJ 与 Z-score 月度报告历史，按项目名称组织，并支持按同参数基于当前数据重新生成 PDF。",
+        caption="统一查看 LJ 与 Z-score 月报记录，按项目名称组织，再用方法标签、批次、月份和生成时间辅助识别；支持查看摘要并按当前数据重新生成。",
         eyebrow="全局入口",
         badges=["统一历史页", "项目名称主词条", "支持重新生成"],
         tone="accent",
     )
     render_workbench_context_bar(
         title="历史记录概览",
-        caption="页面按项目名称分组组织，同一项目下再用方法学、批次、月份和生成时间辅助识别具体记录。",
+        caption="报告历史不拆成方法学子页，而是统一收口为记录中心。项目名称是主识别字段，方法标签只作为辅助标签。",
         items=[
             ("历史报告数", len(records)),
             ("涉及项目数", len({record.project_name for record in records})),
             ("单水平（LJ法）", sum(1 for record in records if record.report_type == REPORT_TYPE_LJ_MONTHLY)),
             ("多水平（Z-score法）", sum(1 for record in records if record.report_type == REPORT_TYPE_ZSCORE_MONTHLY)),
         ],
-        badges=["方法学只作辅助标签", "说明位复用快照摘要"],
+        badges=["摘要可查看", "按当前数据重新生成", "文件归档不在本轮范围"],
     )
 
     if not records:
         st.info("当前还没有可展示的月度报告历史。请先在 LJ 或 Z-score 月报入口生成至少一份报告。")
         return
 
-    project_query, method_label, batch_query, report_month = _render_filters(records)
+    with st.container():
+        render_section_intro(
+            title="筛选条件",
+            caption="支持组合筛选项目名称、方法学、批次和报告月份，同时保留项目名称优先的浏览方式。",
+            badges=["可组合筛选", "组内按时间倒序"],
+            tone="muted",
+        )
+        project_query, method_label, batch_query, report_month = _render_filters(records)
+
     filtered_records = filter_report_history_records(
         records,
         project_query=project_query,
@@ -66,10 +80,18 @@ def render_report_history_page() -> None:
         return
 
     for project_name, project_records in _group_records_by_project(filtered_records):
-        st.markdown(f"### {project_name}")
-        st.caption(f"共 {len(project_records)} 份历史报告，当前组内按生成时间倒序展示。")
-        for record in project_records:
-            _render_report_history_card(record)
+        with st.container():
+            render_section_intro(
+                title=project_name,
+                caption=f"共 {len(project_records)} 份历史记录，组内按生成时间倒序显示。",
+                badges=[
+                    f"LJ {sum(1 for item in project_records if item.report_type == REPORT_TYPE_LJ_MONTHLY)}",
+                    f"Z-score {sum(1 for item in project_records if item.report_type == REPORT_TYPE_ZSCORE_MONTHLY)}",
+                ],
+                tone="default",
+            )
+            for record in project_records:
+                _render_report_history_card(record)
 
 
 def _render_filters(records: list[ReportHistoryRecord]) -> tuple[str, str, str, str]:
@@ -98,7 +120,7 @@ def _render_filters(records: list[ReportHistoryRecord]) -> tuple[str, str, str, 
         batch_query = st.text_input(
             "批次筛选",
             key="report_history_batch_query",
-            placeholder="输入批次标识关键字",
+            placeholder="输入批次关键字",
         )
     with filter_columns[3]:
         report_month = st.selectbox(
@@ -129,23 +151,41 @@ def _group_records_by_project(
     ]
 
 
+def _render_record_meta_row(record: ReportHistoryRecord) -> None:
+    html = dedent(
+        f"""
+        <div class="main-entry-card-tags" style="margin-top:4px; margin-bottom:10px;">
+            <span class="main-entry-card-tag">{record.method_label}</span>
+            <span class="main-entry-card-tag">{record.batch_label}</span>
+            <span class="main-entry-card-tag">{record.report_month_label}</span>
+            <span class="main-entry-card-tag">{record.generated_at_label}</span>
+            <span class="main-entry-card-tag">{record.input_value_type_label}</span>
+        </div>
+        """
+    ).strip()
+    render_html_block(html)
+
+
 def _render_report_history_card(record: ReportHistoryRecord) -> None:
     export_identifier = record.file_name or f"历史记录 #{record.export_id}"
     regeneration_state_key = f"{REGENERATION_STATE_PREFIX}{record.export_id}"
 
     with st.container(border=True):
-        header_left, header_right = st.columns([0.68, 0.32], gap="small")
-        with header_left:
+        title_col, info_col = st.columns([0.68, 0.32], gap="small")
+        with title_col:
             st.markdown(f"**{record.project_name}**")
-            st.caption(
-                f"{record.method_label} | {record.batch_label} | 报告月份：{record.report_month_label}"
+            st.caption(f"报告月份：{record.report_month_label}｜批次：{record.batch_label}")
+        with info_col:
+            render_compact_stat_metrics(
+                [
+                    ("方法标签", record.method_label),
+                    ("生成时间", record.generated_at_label),
+                ]
             )
-        with header_right:
-            st.caption(f"生成时间：{record.generated_at_label}")
-            st.caption(f"输入值类型：{record.input_value_type_label}")
 
+        _render_record_meta_row(record)
         st.write(record.summary_text or "暂无摘要说明。")
-        st.caption(f"文件名/导出标识：{export_identifier}")
+        st.caption(f"文件名 / 导出标识：{export_identifier}")
 
         with st.expander("查看摘要", expanded=False):
             detail_rows = pd.DataFrame(
@@ -157,7 +197,7 @@ def _render_report_history_card(record: ReportHistoryRecord) -> None:
                     ("报告期间", record.report_period_label),
                     ("输入值类型", record.input_value_type_label),
                     ("生成时间", record.generated_at_label),
-                    ("文件名/导出标识", export_identifier),
+                    ("文件名 / 导出标识", export_identifier),
                 ],
                 columns=["字段", "内容"],
             )
@@ -166,7 +206,7 @@ def _render_report_history_card(record: ReportHistoryRecord) -> None:
             st.markdown("**关键统计摘要**")
             render_compact_stat_metrics(build_report_history_statistics_summary(record))
 
-            st.markdown("**备注/说明**")
+            st.markdown("**备注 / 说明**")
             st.write(record.summary_text or "暂无说明。")
 
             if record.overview_text:

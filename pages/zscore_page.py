@@ -254,7 +254,7 @@ def _render_zscore_maintenance_summary(context: dict[str, object]) -> None:
 def render_zscore_page() -> None:
     st.subheader("Z-score")
     st.caption(
-        "Z-score 页面用于多水平室内质控管理；项目创建时固定为双水平或三水平，批次自动继承。"
+        "多水平（Z-score法）页面用于双水平或三水平联合判断；页面结构强调多水平摘要、视图切换和单 level 维护。"
     )
     projects_df, selected_project_id, batches_df, selected_batch_id = prepare_zscore_project_batch_context()
     manage_tab, work_tab, report_tab = st.tabs([TEXT["manage"], TEXT["current_batch"], "Z-score 月报"])
@@ -296,11 +296,16 @@ def render_zscore_page() -> None:
             cv_limit=cv_limit,
         )
 
-        st.divider()
+        render_section_intro(
+            title="当前动作区",
+            caption="左侧聚焦本次多水平录入，右侧聚焦图表控制、视图切换与最新分析，保持多水平工作台主区的稳定层级。",
+            badges=[f"{level_count} 水平", context["overall_phase_label"], input_value_type_label],
+            tone="accent",
+        )
         entry_col, chart_col = st.columns([0.94, 1.24], gap="large")
 
         with chart_col:
-            with st.container(border=True):
+            with st.container():
                 render_section_intro(
                     title="图表与最新结果分析",
                     caption="在同一区查看质控图、当前判读和异常备注入口。",
@@ -322,7 +327,7 @@ def render_zscore_page() -> None:
                 )
 
         with entry_col:
-            with st.container(border=True):
+            with st.container():
                 render_section_intro(
                     title="本次检测录入",
                     caption=f"请填写检测时间、检测人与各水平{input_value_type_label}。",
@@ -330,10 +335,14 @@ def render_zscore_page() -> None:
                 )
                 render_zscore_entry_section(context, selected_batch_id)
 
-        st.divider()
+        render_section_intro(
+            title="历史与次要操作区",
+            caption="把各水平摘要、厂家参考、维护区和导入导出统一放到主区下方，减少图表周围的信息噪音。",
+            badges=["水平摘要", "维护", "导入导出"],
+            tone="muted",
+        )
         _render_zscore_level_summary_cards_section(context)
 
-        st.divider()
         with st.container(border=True):
             render_section_intro(
                 title="厂家参考值（仅作参考）",
@@ -342,24 +351,24 @@ def render_zscore_page() -> None:
             )
             render_zscore_vendor_reference_section(context, selected_batch_id)
 
-        st.divider()
-        with st.container(border=True):
-            render_section_intro(
-                title="记录维护",
-                caption="可在此查看、编辑或删除允许维护的历史记录。",
-                tone="muted",
-            )
-            _render_zscore_maintenance_summary(context)
-            render_zscore_maintenance_section(context)
-
-        st.divider()
-        with st.container(border=True):
-            render_section_intro(
-                title="导出与导入",
-                caption="导出当前批次数据与图表，并按模板导入 CSV。",
-                tone="muted",
-            )
-            render_zscore_export_import_section(context, selected_batch_id, chart_panel_state)
+        lower_left, lower_right = st.columns([1.0, 1.0], gap="large")
+        with lower_left:
+            with st.container():
+                render_section_intro(
+                    title="记录维护",
+                    caption="建靶期支持按单 level 点进行维护，正式期则保留只读追溯。",
+                    tone="muted",
+                )
+                _render_zscore_maintenance_summary(context)
+                render_zscore_maintenance_section(context)
+        with lower_right:
+            with st.container(border=True):
+                render_section_intro(
+                    title="导出与导入",
+                    caption="导出当前批次数据与图表，并按模板导入 CSV。",
+                    tone="muted",
+                )
+                render_zscore_export_import_section(context, selected_batch_id, chart_panel_state)
 
     with report_tab:
         render_zscore_monthly_report_section(selected_batch_id)
