@@ -9,6 +9,10 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
+from services.outlier_service import (
+    get_outlier_manual_status_label,
+    get_outlier_status_label,
+)
 from services.value_type_service import (
     DEFAULT_INPUT_VALUE_TYPE,
     get_measurement_label,
@@ -1319,37 +1323,79 @@ def prepare_display_records(
         )
     if "manual_note" in display_df.columns:
         display_df["manual_note"] = display_df["manual_note"].fillna("").map(summarize_note_for_table)
+    if "effective_sequence" in display_df.columns:
+        display_df["effective_sequence"] = display_df["effective_sequence"].map(
+            lambda value: "" if pd.isna(value) else str(int(value))
+        )
+    if "is_building_included" in display_df.columns:
+        display_df["is_building_included"] = display_df["is_building_included"].map(
+            lambda value: "是" if int(value) == 1 else "否"
+        )
+    if "is_outlier_suspect" in display_df.columns:
+        display_df["is_outlier_suspect"] = display_df["is_outlier_suspect"].map(
+            lambda value: "是" if int(value) == 1 else "否"
+        )
+    for float_column in ["grubbs_statistic", "grubbs_threshold"]:
+        if float_column in display_df.columns:
+            display_df[float_column] = display_df[float_column].map(
+                lambda value: "" if pd.isna(value) else f"{float(value):.4f}"
+            )
+    for text_column in ["outlier_status", "manual_status", "outlier_method", "handled_at"]:
+        if text_column in display_df.columns:
+            display_df[text_column] = display_df[text_column].fillna("")
+    if "outlier_status" in display_df.columns:
+        display_df["outlier_status"] = display_df["outlier_status"].map(get_outlier_status_label)
+    if "manual_status" in display_df.columns:
+        display_df["manual_status"] = display_df["manual_status"].map(get_outlier_manual_status_label)
 
     preferred_columns = [
         "sequence",
+        "effective_sequence",
         "test_time",
         "operator",
         "value",
         "reagent_lot_changed",
+        "is_building_included",
+        "is_outlier_suspect",
+        "outlier_status",
+        "manual_status",
+        "outlier_method",
+        "grubbs_statistic",
+        "grubbs_threshold",
         "z",
         "status",
         "rule_hits",
         "error_type",
         "analysis_prompt",
         "phase",
+        "handled_at",
         "manual_note",
     ]
     if should_show_auxiliary_log_column(normalized_input_value_type) and "log_value" in display_df.columns:
         preferred_columns.insert(4, "log_value")
     column_mapping = {
         "sequence": "\u68c0\u6d4b\u5e8f\u53f7",
+        "effective_sequence": "生效建靶序号",
         "test_time": "\u68c0\u6d4b\u65f6\u95f4",
         "operator": "\u68c0\u6d4b\u4eba",
         "value": measurement_label,
         "log_value": "log\u503c",
         "manual_note": "\u5907\u6ce8",
         "reagent_lot_changed": "\u8bd5\u5242\u6279\u53f7\u53d8\u66f4",
+        "is_building_included": "参与建靶统计",
+        "is_outlier_suspect": "疑似离群",
+        "outlier_status": "离群状态",
+        "manual_status": "手工处理状态",
+        "outlier_method": "离群方法",
+        "grubbs_statistic": "Grubbs G",
+        "grubbs_threshold": "G临界值",
         "z": "Z\u503c",
         "status": "\u5224\u5b9a\u7ed3\u679c",
         "rule_hits": "\u89e6\u53d1\u89c4\u5219",
         "error_type": "\u8bef\u5dee\u7c7b\u578b",
         "analysis_prompt": "\u5206\u6790\u63d0\u793a",
         "phase": "\u9636\u6bb5",
+        "handled_at": "处理时间",
     }
     ordered_columns = [column for column in preferred_columns if column in display_df.columns]
     return display_df[ordered_columns].rename(columns=column_mapping)

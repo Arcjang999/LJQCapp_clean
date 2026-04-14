@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import datetime
 import json
 import math
 from typing import Any
@@ -15,15 +16,28 @@ from database import (
     delete_zscore_run as db_delete_zscore_run,
     delete_zscore_targets_by_batch as db_delete_zscore_targets_by_batch,
     get_zscore_batch,
+    get_zscore_level_result as db_get_zscore_level_result,
     get_zscore_level_results_df,
     get_zscore_level_targets_df,
     get_zscore_run_with_levels as db_get_zscore_run_with_levels,
     get_zscore_runs_df,
     get_zscore_runs_with_levels_for_batch as db_get_zscore_runs_with_levels_for_batch,
+    set_zscore_level_result_building_state as db_set_zscore_level_result_building_state,
     update_zscore_batch_effective_building_count as db_update_zscore_batch_effective_building_count,
     update_zscore_level_results as db_update_zscore_level_results,
     update_zscore_run as db_update_zscore_run,
     upsert_zscore_level_target as db_upsert_zscore_level_target,
+)
+from services.outlier_service import (
+    DEFAULT_GRUBBS_ALPHA,
+    GRUBBS_METHOD_NAME,
+    OUTLIER_MANUAL_STATUS_DISABLED,
+    OUTLIER_MANUAL_STATUS_KEEP,
+    OUTLIER_MANUAL_STATUS_NORMAL,
+    OUTLIER_MANUAL_STATUS_RESTORED,
+    calculate_grubbs_test,
+    derive_outlier_status,
+    normalize_outlier_manual_status,
 )
 
 
@@ -138,6 +152,37 @@ RULE_DEFINITIONS = {
 
 def get_phase_label(phase: str) -> str:
     return PHASE_LABELS.get(str(phase), str(phase))
+
+
+def _normalize_level_outlier_fields(level_result: dict[str, Any]) -> dict[str, Any]:
+    normalized = deepcopy(level_result)
+    normalized["is_building_included"] = int(bool(normalized.get("is_building_included", 1)))
+    normalized["is_outlier_suspect"] = int(bool(normalized.get("is_outlier_suspect", 0)))
+    normalized["manual_status"] = normalize_outlier_manual_status(
+        normalized.get("manual_status"),
+        fallback=OUTLIER_MANUAL_STATUS_NORMAL,
+    )
+    normalized["outlier_status"] = derive_outlier_status(
+        is_building_included=bool(normalized["is_building_included"]),
+        is_suspect=bool(normalized["is_outlier_suspect"]),
+        manual_status=normalized["manual_status"],
+    )
+    normalized["outlier_method"] = str(normalized.get("outlier_method", "") or "")
+    normalized["grubbs_statistic"] = _float_or_none(normalized.get("grubbs_statistic"))
+    normalized["grubbs_threshold"] = _float_or_none(normalized.get("grubbs_threshold"))
+    normalized["handled_at"] = normalized.get("handled_at")
+    return normalized
+
+
+def _is_level_result_building_included(level_result: dict[str, Any]) -> bool:
+    return bool(int(level_result.get("is_building_included", 1) or 0))
+
+
+def _get_level_result(run: dict[str, Any], level_id: str) -> dict[str, Any] | None:
+    for level_result in run.get("level_results", []):
+        if str(level_result.get("level_id")) == str(level_id):
+            return level_result
+    return None
 
 
 def compute_zscore(raw_value: float | None, target_mean: float | None, target_sd: float | None) -> float | None:
@@ -388,6 +433,11 @@ def build_zscore_plot_dataframe(
         "is_building_stat_point",
         "is_preview",
         "manual_note",
+        "is_building_included",
+        "outlier_status",
+        "manual_status",
+        "grubbs_statistic",
+        "grubbs_threshold",
     ]
     building_run_ids = get_building_stat_run_ids(saved_runs)
     reference_map = _build_plot_reference_map(saved_runs, building_run_ids)
@@ -405,6 +455,8 @@ def build_zscore_plot_dataframe(
             level_id = str(level_result.get("level_id"))
             raw_value = level_result.get("raw_value")
             if raw_value is None:
+                continue
+            if run_phase == PHASE_TARGET_BUILDING and not _is_level_result_building_included(level_result):
                 continue
             reference_profile = reference_map.get((run_id, level_id), {})
             rows.append(
@@ -428,6 +480,11 @@ def build_zscore_plot_dataframe(
                     "is_building_stat_point": is_building_stat_point,
                     "is_preview": False,
                     "manual_note": str(run.get("manual_note", "") or ""),
+                    "is_building_included": int(level_result.get("is_building_included", 1) or 0),
+                    "outlier_status": str(level_result.get("outlier_status", "") or ""),
+                    "manual_status": str(level_result.get("manual_status", "") or ""),
+                    "grubbs_statistic": _float_or_none(level_result.get("grubbs_statistic")),
+                    "grubbs_threshold": _float_or_none(level_result.get("grubbs_threshold")),
                 }
             )
 
@@ -464,6 +521,11 @@ def build_zscore_plot_dataframe(
                         "is_building_stat_point": draft_is_building_stat_point,
                         "is_preview": True,
                         "manual_note": str(draft_run.get("manual_note", "") or ""),
+                        "is_building_included": int(level_result.get("is_building_included", 1) or 0),
+                        "outlier_status": str(level_result.get("outlier_status", "") or ""),
+                        "manual_status": str(level_result.get("manual_status", "") or ""),
+                        "grubbs_statistic": _float_or_none(level_result.get("grubbs_statistic")),
+                        "grubbs_threshold": _float_or_none(level_result.get("grubbs_threshold")),
                     }
                 )
 
@@ -503,7 +565,10 @@ def _build_plot_reference_map(
         ]
         for run in ordered_building_runs:
             run_id = int(run.get("run_id") or 0)
-            raw_value = _get_level_raw_value(run, level_id)
+            level_result = _get_level_result(run, level_id)
+            if level_result is None or not _is_level_result_building_included(level_result):
+                continue
+            raw_value = _float_or_none(level_result.get("raw_value"))
             if raw_value is None:
                 continue
             building_values.append(float(raw_value))
@@ -552,7 +617,10 @@ def _build_building_display_zscores(
         ]
         for run in ordered_building_runs:
             run_id = int(run.get("run_id") or 0)
-            raw_value = _get_level_raw_value(run, level_id)
+            level_result = _get_level_result(run, level_id)
+            if level_result is None or not _is_level_result_building_included(level_result):
+                continue
+            raw_value = _float_or_none(level_result.get("raw_value"))
             if raw_value is None:
                 continue
             raw_values.append(float(raw_value))
@@ -593,22 +661,32 @@ def get_zscore_level_results(
     rows: list[dict[str, Any]] = []
     for record in dataframe.to_dict(orient="records"):
         rows.append(
-            {
-                "id": int(record["id"]),
-                "run_id": int(record["run_id"]),
-                "level_id": str(record["level_id"]),
-                "raw_value": _float_or_none(record.get("raw_value")),
-                "log_value": _float_or_none(record.get("log_value")),
-                "zscore": _float_or_none(record.get("zscore")),
-                "status": str(record.get("level_status", "pending")),
-                "rule_hits_local": _parse_json_list(record.get("rule_hits_local")),
-                "is_in_control_for_realtime_stats": bool(record.get("is_in_control_for_realtime_stats", 0)),
-                "created_at": record.get("created_at"),
-                "phase": _normalize_run_phase(record.get("phase")),
-                "run_status": str(record.get("run_status", "pending")),
-                "rule_template_id": record.get("rule_template_id"),
-                "test_time": record.get("test_time"),
-            }
+            _normalize_level_outlier_fields(
+                {
+                    "id": int(record["id"]),
+                    "run_id": int(record["run_id"]),
+                    "level_id": str(record["level_id"]),
+                    "raw_value": _float_or_none(record.get("raw_value")),
+                    "log_value": _float_or_none(record.get("log_value")),
+                    "zscore": _float_or_none(record.get("zscore")),
+                    "status": str(record.get("level_status", "pending")),
+                    "rule_hits_local": _parse_json_list(record.get("rule_hits_local")),
+                    "is_in_control_for_realtime_stats": bool(record.get("is_in_control_for_realtime_stats", 0)),
+                    "created_at": record.get("created_at"),
+                    "phase": _normalize_run_phase(record.get("phase")),
+                    "run_status": str(record.get("run_status", "pending")),
+                    "rule_template_id": record.get("rule_template_id"),
+                    "test_time": record.get("test_time"),
+                    "is_building_included": int(record.get("is_building_included", 1) or 0),
+                    "is_outlier_suspect": int(record.get("is_outlier_suspect", 0) or 0),
+                    "outlier_status": record.get("outlier_status"),
+                    "outlier_method": record.get("outlier_method"),
+                    "grubbs_statistic": record.get("grubbs_statistic"),
+                    "grubbs_threshold": record.get("grubbs_threshold"),
+                    "manual_status": record.get("manual_status"),
+                    "handled_at": record.get("handled_at"),
+                }
+            )
         )
     return rows
 
@@ -748,7 +826,10 @@ def build_level_target_profiles(
         for run in history_runs:
             if _normalize_run_phase(run.get("phase")) != PHASE_TARGET_BUILDING:
                 continue
-            raw_value = _get_level_raw_value(run, level_id)
+            level_result = _get_level_result(run, level_id)
+            if level_result is None or not _is_level_result_building_included(level_result):
+                continue
+            raw_value = _float_or_none(level_result.get("raw_value"))
             if raw_value is not None:
                 building_values.append(float(raw_value))
 
@@ -936,27 +1017,81 @@ def create_zscore_run(
         manual_note=current_run["manual_note"],
     )
     db_add_zscore_level_results(run_id, current_run["level_results"])
-
-    persisted_runs = get_zscore_runs(batch_id, template_id)
-    realtime_profiles = calculate_formal_realtime_stats(persisted_runs, template["level_ids"])
-    for level_id in template["level_ids"]:
-        updated_profiles[level_id]["realtime_mean"] = realtime_profiles[level_id]["realtime_mean"]
-        updated_profiles[level_id]["realtime_sd"] = realtime_profiles[level_id]["realtime_sd"]
-        updated_profiles[level_id]["realtime_cv"] = realtime_profiles[level_id]["realtime_cv"]
-        _persist_target_profile(batch_id, level_id, updated_profiles[level_id], target_n)
-    db_update_zscore_batch_effective_building_count(
-        batch_id,
-        get_effective_building_run_count(updated_profiles, template["level_ids"]),
-    )
-
-    final_runs = get_zscore_runs(batch_id, template_id)
-    latest_run = deepcopy(final_runs[-1])
-    latest_run["target_profiles"] = get_zscore_level_targets(batch_id, template_id, required_n=target_n)
+    rebuild_state = rebuild_zscore_batch_state(batch_id)
+    latest_run = deepcopy(rebuild_state["latest_run"]) if rebuild_state.get("latest_run") is not None else {}
+    if latest_run:
+        latest_run["target_profiles"] = deepcopy(rebuild_state["target_profiles"])
     return latest_run
 
 
 def add_zscore_level_results(run_id: int, level_results: list[dict[str, Any]]) -> None:
     db_add_zscore_level_results(run_id, level_results)
+
+
+def _apply_zscore_building_outlier_snapshots(
+    rebuilt_runs: list[dict[str, Any]],
+    level_ids: list[str],
+) -> None:
+    for level_id in level_ids:
+        building_level_results: list[dict[str, Any]] = []
+        for run in rebuilt_runs:
+            if _normalize_run_phase(run.get("phase")) != PHASE_TARGET_BUILDING:
+                continue
+            level_result = _get_level_result(run, level_id)
+            if level_result is None or not _is_level_result_building_included(level_result):
+                continue
+            if _float_or_none(level_result.get("raw_value")) is None:
+                continue
+            building_level_results.append(level_result)
+
+        grubbs_result = calculate_grubbs_test(
+            [float(level_result["raw_value"]) for level_result in building_level_results],
+            alpha=DEFAULT_GRUBBS_ALPHA,
+        )
+        suspect_level_result_id = None
+        if grubbs_result.get("is_suspect"):
+            suspect_index = int(grubbs_result.get("suspected_index") or 0)
+            suspect_level_result_id = int(building_level_results[suspect_index]["id"])
+
+        for run in rebuilt_runs:
+            level_result = _get_level_result(run, level_id)
+            if level_result is None:
+                continue
+            if _normalize_run_phase(run.get("phase")) != PHASE_TARGET_BUILDING:
+                level_result.update(
+                    _normalize_level_outlier_fields(
+                        {
+                            **level_result,
+                            "is_outlier_suspect": 0,
+                            "outlier_method": "",
+                            "grubbs_statistic": None,
+                            "grubbs_threshold": None,
+                        }
+                    )
+                )
+                continue
+
+            is_suspect = bool(
+                suspect_level_result_id is not None
+                and int(level_result.get("id") or 0) == suspect_level_result_id
+            )
+            level_result.update(
+                _normalize_level_outlier_fields(
+                    {
+                        **level_result,
+                        "is_outlier_suspect": int(is_suspect),
+                        "outlier_method": (
+                            GRUBBS_METHOD_NAME if bool(grubbs_result.get("evaluation_ready")) else ""
+                        ),
+                        "grubbs_statistic": grubbs_result.get("statistic") if is_suspect else None,
+                        "grubbs_threshold": (
+                            grubbs_result.get("threshold")
+                            if bool(grubbs_result.get("evaluation_ready"))
+                            else None
+                        ),
+                    }
+                )
+            )
 
 
 def rebuild_zscore_batch_state(batch_id: int) -> dict[str, Any]:
@@ -985,6 +1120,14 @@ def rebuild_zscore_batch_state(batch_id: int) -> dict[str, Any]:
                     "level_id": raw_level.get("level_id"),
                     "raw_value": raw_level.get("raw_value"),
                     "log_value": raw_level.get("log_value"),
+                    "is_building_included": raw_level.get("is_building_included", 1),
+                    "is_outlier_suspect": raw_level.get("is_outlier_suspect", 0),
+                    "outlier_status": raw_level.get("outlier_status"),
+                    "outlier_method": raw_level.get("outlier_method"),
+                    "grubbs_statistic": raw_level.get("grubbs_statistic"),
+                    "grubbs_threshold": raw_level.get("grubbs_threshold"),
+                    "manual_status": raw_level.get("manual_status"),
+                    "handled_at": raw_level.get("handled_at"),
                 }
                 for raw_level in raw_run.get("level_results", [])
             ],
@@ -998,11 +1141,14 @@ def rebuild_zscore_batch_state(batch_id: int) -> dict[str, Any]:
         updated_profiles = deepcopy(target_profiles)
         if current_phase == PHASE_TARGET_BUILDING:
             for level_result in normalized_level_results:
+                if not _is_level_result_building_included(level_result):
+                    continue
                 level_id = str(level_result["level_id"])
+                level_required_n = int(updated_profiles[level_id].get("required_n") or target_n)
                 updated_profiles[level_id] = _advance_building_profile(
                     updated_profiles[level_id],
                     float(level_result["raw_value"]),
-                    target_n,
+                    level_required_n,
                 )
 
         current_run = evaluate_zscore_run_with_phase(
@@ -1041,9 +1187,23 @@ def rebuild_zscore_batch_state(batch_id: int) -> dict[str, Any]:
             level_result["is_in_control_for_realtime_stats"] = bool(
                 is_realtime_accepted_run and level_result.get("status") == "accept"
             )
+            level_result["is_building_included"] = int(raw_level.get("is_building_included", 1) or 0)
+            level_result["manual_status"] = normalize_outlier_manual_status(
+                raw_level.get("manual_status"),
+                fallback=OUTLIER_MANUAL_STATUS_NORMAL,
+            )
+            level_result["handled_at"] = raw_level.get("handled_at")
+            level_result["is_outlier_suspect"] = int(raw_level.get("is_outlier_suspect", 0) or 0)
+            level_result["outlier_status"] = raw_level.get("outlier_status")
+            level_result["outlier_method"] = raw_level.get("outlier_method")
+            level_result["grubbs_statistic"] = raw_level.get("grubbs_statistic")
+            level_result["grubbs_threshold"] = raw_level.get("grubbs_threshold")
+            level_result.update(_normalize_level_outlier_fields(level_result))
 
         target_profiles = updated_profiles
         rebuilt_runs.append(current_run)
+
+    _apply_zscore_building_outlier_snapshots(rebuilt_runs, level_ids)
 
     realtime_profiles = calculate_formal_realtime_stats(rebuilt_runs, level_ids)
     for level_id in level_ids:
@@ -1053,7 +1213,12 @@ def rebuild_zscore_batch_state(batch_id: int) -> dict[str, Any]:
 
     db_delete_zscore_targets_by_batch(batch_id)
     for level_id in level_ids:
-        _persist_target_profile(batch_id, level_id, target_profiles[level_id], target_n)
+        _persist_target_profile(
+            batch_id,
+            level_id,
+            target_profiles[level_id],
+            int(target_profiles[level_id].get("required_n") or target_n),
+        )
     db_update_zscore_batch_effective_building_count(
         batch_id,
         get_effective_building_run_count(target_profiles, level_ids),
@@ -1082,6 +1247,14 @@ def rebuild_zscore_batch_state(batch_id: int) -> dict[str, Any]:
                     "status": level_result.get("status"),
                     "rule_hits_local": level_result.get("rule_hits_local", []),
                     "is_in_control_for_realtime_stats": level_result.get("is_in_control_for_realtime_stats", False),
+                    "is_building_included": level_result.get("is_building_included", 1),
+                    "is_outlier_suspect": level_result.get("is_outlier_suspect", 0),
+                    "outlier_status": level_result.get("outlier_status"),
+                    "outlier_method": level_result.get("outlier_method"),
+                    "grubbs_statistic": level_result.get("grubbs_statistic"),
+                    "grubbs_threshold": level_result.get("grubbs_threshold"),
+                    "manual_status": level_result.get("manual_status"),
+                    "handled_at": level_result.get("handled_at"),
                 }
                 for level_result in run["level_results"]
             ],
@@ -1180,6 +1353,60 @@ def _get_zscore_run_for_maintenance(run_id: int) -> dict[str, Any]:
         if int(saved_run["run_id"]) == int(run_id):
             return saved_run
     raise ValueError(f"未找到 Z-score run {run_id}")
+
+
+def _get_zscore_level_result_for_outlier_action(level_result_id: int) -> tuple[dict[str, Any], dict[str, Any], int]:
+    raw_level_result = db_get_zscore_level_result(level_result_id)
+    batch_id = int(raw_level_result["batch_id"])
+    template_id = str(raw_level_result["rule_template_id"])
+    saved_runs = get_zscore_runs(batch_id, template_id)
+    if any(_normalize_run_phase(run.get("phase")) == PHASE_FORMAL_QC for run in saved_runs):
+        raise ValueError("正式期启用后不再允许调整 Z-score 建靶期离群值状态。")
+
+    target_run = next(
+        (run for run in saved_runs if int(run.get("run_id") or 0) == int(raw_level_result["run_id"])),
+        None,
+    )
+    if target_run is None or _normalize_run_phase(target_run.get("phase")) != PHASE_TARGET_BUILDING:
+        raise ValueError("仅建靶期的单水平点支持离群值处理。")
+
+    target_level_result = _get_level_result(target_run, str(raw_level_result["level_id"]))
+    if target_level_result is None:
+        raise ValueError(f"未找到 Z-score level result {level_result_id}")
+    return target_run, target_level_result, batch_id
+
+
+def disable_zscore_level_result(level_result_id: int) -> dict[str, Any]:
+    _, target_level_result, batch_id = _get_zscore_level_result_for_outlier_action(level_result_id)
+    db_set_zscore_level_result_building_state(
+        int(target_level_result["id"]),
+        is_building_included=0,
+        manual_status=OUTLIER_MANUAL_STATUS_DISABLED,
+        handled_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    return rebuild_zscore_batch_state(batch_id)
+
+
+def restore_zscore_level_result(level_result_id: int) -> dict[str, Any]:
+    _, target_level_result, batch_id = _get_zscore_level_result_for_outlier_action(level_result_id)
+    db_set_zscore_level_result_building_state(
+        int(target_level_result["id"]),
+        is_building_included=1,
+        manual_status=OUTLIER_MANUAL_STATUS_RESTORED,
+        handled_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    return rebuild_zscore_batch_state(batch_id)
+
+
+def keep_zscore_level_result(level_result_id: int) -> dict[str, Any]:
+    _, target_level_result, batch_id = _get_zscore_level_result_for_outlier_action(level_result_id)
+    db_set_zscore_level_result_building_state(
+        int(target_level_result["id"]),
+        is_building_included=1,
+        manual_status=OUTLIER_MANUAL_STATUS_KEEP,
+        handled_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    return rebuild_zscore_batch_state(batch_id)
 
 
 def evaluate_zscore_run_with_phase(
@@ -1816,9 +2043,10 @@ def _build_rebuild_target_profiles(
     rebuilt_profiles: dict[str, dict[str, Any]] = {}
     for level_id in level_ids:
         existing_profile = existing_profiles.get(level_id, {})
+        profile_required_n = int(existing_profile.get("required_n") or required_n)
         rebuilt_profiles[level_id] = _build_target_profile(
             level_id=level_id,
-            required_n=required_n,
+            required_n=profile_required_n,
             vendor_reference_mean=existing_profile.get("vendor_reference_mean"),
             vendor_reference_sd=existing_profile.get("vendor_reference_sd"),
             vendor_reference_cv=existing_profile.get("vendor_reference_cv"),
@@ -1839,13 +2067,21 @@ def _normalize_input_level_results(level_results: list[dict[str, Any]], template
             "level_id": level_id,
             "raw_value": None,
             "log_value": None,
+            "is_building_included": 1,
+            "is_outlier_suspect": 0,
+            "outlier_status": "normal",
+            "outlier_method": "",
+            "grubbs_statistic": None,
+            "grubbs_threshold": None,
+            "manual_status": OUTLIER_MANUAL_STATUS_NORMAL,
+            "handled_at": None,
         }
         current.update(input_map.get(level_id, {}))
         raw_value = _float_or_none(current.get("raw_value"))
         current["raw_value"] = raw_value
         if raw_value is not None and current.get("log_value") is None and raw_value > 0:
             current["log_value"] = math.log10(raw_value)
-        normalized_results.append(current)
+        normalized_results.append(_normalize_level_outlier_fields(current))
     return normalized_results
 
 

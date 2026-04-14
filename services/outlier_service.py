@@ -12,6 +12,71 @@ GRUBBS_METHOD_LABEL = "双侧单异常值 Grubbs 检验"
 GRUBBS_FORMULA_TEXT = "G = max(|xi - x̄|) / s"
 MIN_GRUBBS_SAMPLE_SIZE = 3
 
+OUTLIER_STATUS_NORMAL = "normal"
+OUTLIER_STATUS_SUSPECT = "outlier_suspect"
+OUTLIER_STATUS_KEPT = "kept"
+OUTLIER_STATUS_DISABLED = "disabled"
+OUTLIER_STATUS_RESTORED = "restored"
+
+OUTLIER_MANUAL_STATUS_NORMAL = "normal"
+OUTLIER_MANUAL_STATUS_PENDING_REVIEW = "pending_review"
+OUTLIER_MANUAL_STATUS_KEEP = "keep"
+OUTLIER_MANUAL_STATUS_DISABLED = "disabled"
+OUTLIER_MANUAL_STATUS_RESTORED = "restored"
+
+OUTLIER_STATUS_LABELS = {
+    OUTLIER_STATUS_NORMAL: "姝ｅ父",
+    OUTLIER_STATUS_SUSPECT: "鐤戜技绂荤兢",
+    OUTLIER_STATUS_KEPT: "宸蹭繚鐣?",
+    OUTLIER_STATUS_DISABLED: "宸茬鐢?",
+    OUTLIER_STATUS_RESTORED: "宸叉仮澶?",
+}
+
+OUTLIER_MANUAL_STATUS_LABELS = {
+    OUTLIER_MANUAL_STATUS_NORMAL: "鏈鐞?",
+    OUTLIER_MANUAL_STATUS_PENDING_REVIEW: "寰呭鐞?",
+    OUTLIER_MANUAL_STATUS_KEEP: "淇濈暀",
+    OUTLIER_MANUAL_STATUS_DISABLED: "绂佺敤",
+    OUTLIER_MANUAL_STATUS_RESTORED: "鎭㈠",
+}
+
+
+SAFE_OUTLIER_STATUS_LABELS = {
+    OUTLIER_STATUS_NORMAL: "正常",
+    OUTLIER_STATUS_SUSPECT: "疑似离群",
+    OUTLIER_STATUS_KEPT: "已保留",
+    OUTLIER_STATUS_DISABLED: "已禁用",
+    OUTLIER_STATUS_RESTORED: "已恢复",
+}
+
+SAFE_OUTLIER_MANUAL_STATUS_LABELS = {
+    OUTLIER_MANUAL_STATUS_NORMAL: "未处理",
+    OUTLIER_MANUAL_STATUS_PENDING_REVIEW: "待处理",
+    OUTLIER_MANUAL_STATUS_KEEP: "保留",
+    OUTLIER_MANUAL_STATUS_DISABLED: "禁用",
+    OUTLIER_MANUAL_STATUS_RESTORED: "恢复",
+}
+
+
+def _build_outlier_alias_map(
+    safe_labels: dict[str, str],
+    legacy_labels: dict[str, str],
+) -> dict[str, str]:
+    alias_map: dict[str, str] = {}
+    for code, label in safe_labels.items():
+        alias_map[code] = code
+        alias_map[str(label).strip().lower()] = code
+    for code, label in legacy_labels.items():
+        alias_map[str(label).strip().lower()] = code
+    return alias_map
+
+
+OUTLIER_STATUS_ALIASES = _build_outlier_alias_map(SAFE_OUTLIER_STATUS_LABELS, OUTLIER_STATUS_LABELS)
+OUTLIER_MANUAL_STATUS_ALIASES = _build_outlier_alias_map(
+    SAFE_OUTLIER_MANUAL_STATUS_LABELS,
+    OUTLIER_MANUAL_STATUS_LABELS,
+)
+
 
 def _simpson_integral(func, start: float, end: float) -> float:
     midpoint = (start + end) / 2.0
@@ -185,3 +250,53 @@ def calculate_grubbs_test(
     result["suspected_value"] = cleaned_values[suspected_index]
     result["is_suspect"] = bool(threshold is not None and statistic > threshold)
     return result
+
+
+def normalize_outlier_status(
+    status: object,
+    *,
+    fallback: str = OUTLIER_STATUS_NORMAL,
+) -> str:
+    normalized_status = str(status or "").strip().lower()
+    if normalized_status in OUTLIER_STATUS_ALIASES:
+        return OUTLIER_STATUS_ALIASES[normalized_status]
+    return fallback
+
+
+def normalize_outlier_manual_status(
+    status: object,
+    *,
+    fallback: str = OUTLIER_MANUAL_STATUS_NORMAL,
+) -> str:
+    normalized_status = str(status or "").strip().lower()
+    if normalized_status in OUTLIER_MANUAL_STATUS_ALIASES:
+        return OUTLIER_MANUAL_STATUS_ALIASES[normalized_status]
+    return fallback
+
+
+def get_outlier_status_label(status: object) -> str:
+    normalized_status = normalize_outlier_status(status)
+    return SAFE_OUTLIER_STATUS_LABELS.get(normalized_status, "正常")
+
+
+def get_outlier_manual_status_label(status: object) -> str:
+    normalized_status = normalize_outlier_manual_status(status)
+    return SAFE_OUTLIER_MANUAL_STATUS_LABELS.get(normalized_status, "未处理")
+
+
+def derive_outlier_status(
+    *,
+    is_building_included: bool,
+    is_suspect: bool,
+    manual_status: object,
+) -> str:
+    normalized_manual_status = normalize_outlier_manual_status(manual_status)
+    if not is_building_included or normalized_manual_status == OUTLIER_MANUAL_STATUS_DISABLED:
+        return OUTLIER_STATUS_DISABLED
+    if normalized_manual_status == OUTLIER_MANUAL_STATUS_RESTORED:
+        return OUTLIER_STATUS_RESTORED
+    if normalized_manual_status == OUTLIER_MANUAL_STATUS_KEEP:
+        return OUTLIER_STATUS_KEPT
+    if is_suspect:
+        return OUTLIER_STATUS_SUSPECT
+    return OUTLIER_STATUS_NORMAL

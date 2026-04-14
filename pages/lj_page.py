@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from pages.lj_report_section import render_lj_monthly_report_section
 from pages.lj_sections import (
     build_lj_workbench_context,
     render_lj_chart_and_analysis_section,
@@ -56,7 +57,7 @@ def _build_lj_source_message(batch) -> str:
 
 def render_lj_page() -> None:
     projects_df, selected_project_id, batches_df, selected_batch_id = prepare_project_batch_context()
-    manage_tab, work_tab = st.tabs([TEXT["manage"], TEXT["current_batch"]])
+    manage_tab, work_tab, report_tab = st.tabs([TEXT["manage"], TEXT["current_batch"], "LJ 月报"])
     render_project_batch_management(
         manage_tab,
         projects_df,
@@ -65,7 +66,10 @@ def render_lj_page() -> None:
         selected_batch_id,
     )
     guard_work_tab_selection(work_tab, selected_project_id, selected_batch_id)
+    guard_work_tab_selection(report_tab, selected_project_id, selected_batch_id)
     render_lj_work_tab(work_tab, selected_batch_id)
+    with report_tab:
+        render_lj_monthly_report_section(selected_batch_id)
 
 
 def _render_lj_maintenance_summary(qc_df: pd.DataFrame) -> None:
@@ -178,7 +182,7 @@ def render_lj_work_tab(
                 tone="muted",
             )
             _render_lj_maintenance_summary(qc_df)
-            render_lj_maintenance_section(qc_df, context["input_value_type"])
+            render_lj_maintenance_section(context)
 
         st.divider()
         with st.container(border=True):

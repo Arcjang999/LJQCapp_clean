@@ -10,6 +10,12 @@ from pathlib import Path
 
 import pandas as pd
 
+from services.outlier_service import (
+    OUTLIER_MANUAL_STATUS_NORMAL,
+    OUTLIER_STATUS_NORMAL,
+    normalize_outlier_manual_status,
+    normalize_outlier_status,
+)
 from services.value_type_service import (
     DEFAULT_INPUT_VALUE_TYPE,
     get_measurement_label,
@@ -99,6 +105,7 @@ def init_db() -> None:
         _ensure_zscore_runs_table(connection)
         _ensure_zscore_level_results_table(connection)
         _ensure_zscore_level_targets_table(connection)
+        _ensure_report_exports_table(connection)
         _rebind_legacy_batches_foreign_keys(connection)
         connection.execute(
             """
@@ -152,6 +159,12 @@ def init_db() -> None:
             """
             CREATE INDEX IF NOT EXISTS idx_zscore_level_targets_batch_level
             ON zscore_level_targets (batch_id, level_id)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_report_exports_scope
+            ON report_exports (report_type, batch_id, report_month, generated_at)
             """
         )
 
@@ -560,6 +573,14 @@ def _ensure_results_table(connection: sqlite3.Connection) -> None:
         "value",
         "log_value",
         "reagent_lot_changed",
+        "is_building_included",
+        "is_outlier_suspect",
+        "outlier_status",
+        "outlier_method",
+        "grubbs_statistic",
+        "grubbs_threshold",
+        "manual_status",
+        "handled_at",
         "manual_note",
         "created_at",
     }
@@ -583,6 +604,22 @@ def _ensure_results_table(connection: sqlite3.Connection) -> None:
             default=_safe_log10(value),
         )
         reagent_lot_changed = int(_legacy_value(row, legacy_columns, "reagent_lot_changed", default=0))
+        is_building_included = int(
+            _legacy_value(row, legacy_columns, "is_building_included", default=1) or 0
+        )
+        is_outlier_suspect = int(
+            _legacy_value(row, legacy_columns, "is_outlier_suspect", default=0) or 0
+        )
+        outlier_status = normalize_outlier_status(
+            _legacy_value(row, legacy_columns, "outlier_status", default=OUTLIER_STATUS_NORMAL)
+        )
+        outlier_method = str(_legacy_value(row, legacy_columns, "outlier_method", default="") or "")
+        grubbs_statistic = _legacy_value(row, legacy_columns, "grubbs_statistic", default=None)
+        grubbs_threshold = _legacy_value(row, legacy_columns, "grubbs_threshold", default=None)
+        manual_status = normalize_outlier_manual_status(
+            _legacy_value(row, legacy_columns, "manual_status", default=OUTLIER_MANUAL_STATUS_NORMAL)
+        )
+        handled_at = _legacy_value(row, legacy_columns, "handled_at", default=None)
         manual_note = str(_legacy_value(row, legacy_columns, "manual_note", default="") or "")
         created_at = row["created_at"] if "created_at" in legacy_columns else None
 
@@ -590,9 +627,10 @@ def _ensure_results_table(connection: sqlite3.Connection) -> None:
             """
             INSERT INTO results (
                 id, batch_id, test_time, operator, value, log_value, reagent_lot_changed,
-                manual_note, created_at
+                is_building_included, is_outlier_suspect, outlier_status, outlier_method,
+                grubbs_statistic, grubbs_threshold, manual_status, handled_at, manual_note, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
             """,
             (
                 row["id"],
@@ -602,6 +640,14 @@ def _ensure_results_table(connection: sqlite3.Connection) -> None:
                 value,
                 log_value,
                 reagent_lot_changed,
+                is_building_included,
+                is_outlier_suspect,
+                outlier_status,
+                outlier_method,
+                grubbs_statistic,
+                grubbs_threshold,
+                manual_status,
+                handled_at,
                 manual_note,
                 created_at,
             ),
@@ -646,6 +692,14 @@ def _create_results_table(connection: sqlite3.Connection) -> None:
             value REAL NOT NULL,
             log_value REAL,
             reagent_lot_changed INTEGER NOT NULL DEFAULT 0,
+            is_building_included INTEGER NOT NULL DEFAULT 1,
+            is_outlier_suspect INTEGER NOT NULL DEFAULT 0,
+            outlier_status TEXT NOT NULL DEFAULT 'normal',
+            outlier_method TEXT NOT NULL DEFAULT '',
+            grubbs_statistic REAL,
+            grubbs_threshold REAL,
+            manual_status TEXT NOT NULL DEFAULT 'normal',
+            handled_at TEXT,
             manual_note TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (batch_id) REFERENCES batches (id) ON DELETE CASCADE
@@ -1087,10 +1141,51 @@ def _ensure_zscore_level_results_table(connection: sqlite3.Connection) -> None:
             level_status TEXT NOT NULL,
             rule_hits_local TEXT NOT NULL DEFAULT '[]',
             is_in_control_for_realtime_stats INTEGER NOT NULL DEFAULT 0,
+            is_building_included INTEGER NOT NULL DEFAULT 1,
+            is_outlier_suspect INTEGER NOT NULL DEFAULT 0,
+            outlier_status TEXT NOT NULL DEFAULT 'normal',
+            outlier_method TEXT NOT NULL DEFAULT '',
+            grubbs_statistic REAL,
+            grubbs_threshold REAL,
+            manual_status TEXT NOT NULL DEFAULT 'normal',
+            handled_at TEXT,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (run_id) REFERENCES zscore_runs (id) ON DELETE CASCADE
         )
         """
+    )
+    existing_columns = {
+        row["name"] for row in connection.execute("PRAGMA table_info(zscore_level_results)").fetchall()
+    }
+    missing_columns = {
+        "is_building_included": "INTEGER NOT NULL DEFAULT 1",
+        "is_outlier_suspect": "INTEGER NOT NULL DEFAULT 0",
+        "outlier_status": "TEXT NOT NULL DEFAULT 'normal'",
+        "outlier_method": "TEXT NOT NULL DEFAULT ''",
+        "grubbs_statistic": "REAL",
+        "grubbs_threshold": "REAL",
+        "manual_status": "TEXT NOT NULL DEFAULT 'normal'",
+        "handled_at": "TEXT",
+    }
+    for column_name, column_type in missing_columns.items():
+        if column_name in existing_columns:
+            continue
+        connection.execute(f"ALTER TABLE zscore_level_results ADD COLUMN {column_name} {column_type}")
+    connection.execute(
+        """
+        UPDATE zscore_level_results
+        SET outlier_status = ?
+        WHERE outlier_status IS NULL OR TRIM(outlier_status) = ''
+        """,
+        (OUTLIER_STATUS_NORMAL,),
+    )
+    connection.execute(
+        """
+        UPDATE zscore_level_results
+        SET manual_status = ?
+        WHERE manual_status IS NULL OR TRIM(manual_status) = ''
+        """,
+        (OUTLIER_MANUAL_STATUS_NORMAL,),
     )
 
 
@@ -1120,6 +1215,37 @@ def _ensure_zscore_level_targets_table(connection: sqlite3.Connection) -> None:
             phase TEXT NOT NULL DEFAULT 'target_building',
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE (batch_id, level_id),
+            FOREIGN KEY (batch_id) REFERENCES batches (id) ON DELETE CASCADE
+        )
+        """
+    )
+
+
+def _ensure_report_exports_table(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS report_exports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            report_type TEXT NOT NULL,
+            project_id INTEGER NOT NULL,
+            batch_id INTEGER NOT NULL,
+            report_month TEXT NOT NULL,
+            generated_at TEXT NOT NULL,
+            input_value_type TEXT NOT NULL,
+            method_label TEXT NOT NULL,
+            summary_json TEXT NOT NULL DEFAULT '{}',
+            monthly_mean REAL,
+            monthly_sd REAL,
+            monthly_cv REAL,
+            target_mean REAL,
+            target_sd REAL,
+            formal_count INTEGER NOT NULL DEFAULT 0,
+            in_control_count INTEGER NOT NULL DEFAULT 0,
+            warning_count INTEGER NOT NULL DEFAULT 0,
+            out_of_control_count INTEGER NOT NULL DEFAULT 0,
+            file_name TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE,
             FOREIGN KEY (batch_id) REFERENCES batches (id) ON DELETE CASCADE
         )
         """
@@ -1460,6 +1586,126 @@ def get_batch(batch_id: int) -> sqlite3.Row:
     if row is None:
         raise ValueError(f"\u672a\u627e\u5230\u6279\u6b21 {batch_id}")
     return row
+
+
+def create_report_export_snapshot(
+    *,
+    report_type: str,
+    project_id: int,
+    batch_id: int,
+    report_month: str,
+    generated_at: str,
+    input_value_type: str,
+    method_label: str,
+    summary: dict[str, object],
+    file_name: str,
+) -> int:
+    summary_payload = dict(summary or {})
+    statistics = summary_payload.get("statistics")
+    if not isinstance(statistics, dict):
+        statistics = {}
+    with get_connection() as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO report_exports (
+                report_type,
+                project_id,
+                batch_id,
+                report_month,
+                generated_at,
+                input_value_type,
+                method_label,
+                summary_json,
+                monthly_mean,
+                monthly_sd,
+                monthly_cv,
+                target_mean,
+                target_sd,
+                formal_count,
+                in_control_count,
+                warning_count,
+                out_of_control_count,
+                file_name
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(report_type or "").strip(),
+                int(project_id),
+                int(batch_id),
+                str(report_month or "").strip(),
+                str(generated_at or "").strip(),
+                normalize_input_value_type(input_value_type),
+                str(method_label or "").strip(),
+                json.dumps(summary_payload, ensure_ascii=False),
+                statistics.get("monthly_mean"),
+                statistics.get("monthly_sd"),
+                statistics.get("monthly_cv"),
+                statistics.get("target_mean"),
+                statistics.get("target_sd"),
+                int(statistics.get("formal_count", 0) or 0),
+                int(statistics.get("in_control_count", 0) or 0),
+                int(statistics.get("warning_count", 0) or 0),
+                int(statistics.get("out_of_control_count", 0) or 0),
+                str(file_name or "").strip(),
+            ),
+        )
+        return int(cursor.lastrowid)
+
+
+def list_report_exports(
+    *,
+    report_type: str | None = None,
+    batch_id: int | None = None,
+) -> pd.DataFrame:
+    clauses: list[str] = []
+    params: list[object] = []
+    if report_type is not None:
+        clauses.append("report_type = ?")
+        params.append(str(report_type))
+    if batch_id is not None:
+        clauses.append("batch_id = ?")
+        params.append(int(batch_id))
+    where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    with get_connection() as connection:
+        dataframe = pd.read_sql_query(
+            f"""
+            SELECT
+                id,
+                report_type,
+                project_id,
+                batch_id,
+                report_month,
+                generated_at,
+                input_value_type,
+                method_label,
+                summary_json,
+                monthly_mean,
+                monthly_sd,
+                monthly_cv,
+                target_mean,
+                target_sd,
+                formal_count,
+                in_control_count,
+                warning_count,
+                out_of_control_count,
+                file_name,
+                created_at
+            FROM report_exports
+            {where_clause}
+            ORDER BY datetime(generated_at) DESC, id DESC
+            """,
+            connection,
+            params=tuple(params),
+        )
+    if dataframe.empty:
+        return dataframe
+    dataframe["generated_at"] = pd.to_datetime(dataframe["generated_at"], errors="coerce")
+    dataframe["created_at"] = pd.to_datetime(dataframe["created_at"], errors="coerce")
+    dataframe["summary_json"] = dataframe["summary_json"].map(
+        lambda value: json.loads(value) if str(value or "").strip() else {}
+    )
+    return dataframe
 
 
 def create_instant_project(name: str, input_value_type: str = DEFAULT_INPUT_VALUE_TYPE) -> int:
@@ -1985,6 +2231,21 @@ def delete_result(result_id: int) -> None:
             raise ValueError(f"未找到检测记录 {result_id}")
 
 
+def get_result(result_id: int) -> sqlite3.Row:
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT *
+            FROM results
+            WHERE id = ?
+            """,
+            (result_id,),
+        ).fetchone()
+    if row is None:
+        raise ValueError(f"未找到检测记录 {result_id}")
+    return row
+
+
 def get_results(batch_id: int, include_manual_note: bool = False) -> pd.DataFrame:
     select_columns = """
                 id,
@@ -1994,6 +2255,14 @@ def get_results(batch_id: int, include_manual_note: bool = False) -> pd.DataFram
                 value,
                 log_value,
                 reagent_lot_changed,
+                is_building_included,
+                is_outlier_suspect,
+                outlier_status,
+                outlier_method,
+                grubbs_statistic,
+                grubbs_threshold,
+                manual_status,
+                handled_at,
                 created_at
     """
     if include_manual_note:
@@ -2015,9 +2284,71 @@ def get_results(batch_id: int, include_manual_note: bool = False) -> pd.DataFram
         dataframe["test_time"] = pd.to_datetime(dataframe["test_time"])
         dataframe["created_at"] = pd.to_datetime(dataframe["created_at"])
         dataframe["reagent_lot_changed"] = dataframe["reagent_lot_changed"].fillna(0).astype(int)
+        dataframe["is_building_included"] = dataframe["is_building_included"].fillna(1).astype(int)
+        dataframe["is_outlier_suspect"] = dataframe["is_outlier_suspect"].fillna(0).astype(int)
+        dataframe["outlier_status"] = dataframe["outlier_status"].map(
+            lambda value: normalize_outlier_status(value, fallback=OUTLIER_STATUS_NORMAL)
+        )
+        dataframe["outlier_method"] = dataframe["outlier_method"].fillna("")
+        dataframe["manual_status"] = dataframe["manual_status"].map(
+            lambda value: normalize_outlier_manual_status(value, fallback=OUTLIER_MANUAL_STATUS_NORMAL)
+        )
+        dataframe["handled_at"] = pd.to_datetime(dataframe["handled_at"], errors="coerce")
         if include_manual_note:
             dataframe["manual_note"] = dataframe["manual_note"].fillna("")
     return dataframe
+
+
+def set_result_building_inclusion_state(
+    result_id: int,
+    *,
+    is_building_included: int,
+    manual_status: str,
+    handled_at: str | None = None,
+) -> None:
+    with get_connection() as connection:
+        cursor = connection.execute(
+            """
+            UPDATE results
+            SET is_building_included = ?,
+                manual_status = ?,
+                handled_at = ?
+            WHERE id = ?
+            """,
+            (
+                int(is_building_included),
+                normalize_outlier_manual_status(manual_status),
+                handled_at,
+                int(result_id),
+            ),
+        )
+        if cursor.rowcount == 0:
+            raise ValueError(f"未找到检测记录 {result_id}")
+
+
+def save_result_outlier_snapshot(batch_id: int, analysis_rows: list[dict[str, object]]) -> None:
+    with get_connection() as connection:
+        for analysis_row in analysis_rows:
+            connection.execute(
+                """
+                UPDATE results
+                SET is_outlier_suspect = ?,
+                    outlier_status = ?,
+                    outlier_method = ?,
+                    grubbs_statistic = ?,
+                    grubbs_threshold = ?
+                WHERE id = ? AND batch_id = ?
+                """,
+                (
+                    int(analysis_row.get("is_outlier_suspect", 0) or 0),
+                    normalize_outlier_status(analysis_row.get("outlier_status")),
+                    str(analysis_row.get("outlier_method", "") or ""),
+                    analysis_row.get("grubbs_statistic"),
+                    analysis_row.get("grubbs_threshold"),
+                    int(analysis_row["id"]),
+                    int(batch_id),
+                ),
+            )
 
 
 def add_instant_result(
@@ -2537,6 +2868,22 @@ def update_zscore_level_results(run_id: int, level_results: list[dict]) -> None:
             rule_hits_local = level_result.get("rule_hits_local")
             in_control_provided = "is_in_control_for_realtime_stats" in level_result
             in_control_value = level_result.get("is_in_control_for_realtime_stats")
+            is_building_included_provided = "is_building_included" in level_result
+            is_building_included = level_result.get("is_building_included")
+            is_outlier_suspect_provided = "is_outlier_suspect" in level_result
+            is_outlier_suspect = level_result.get("is_outlier_suspect")
+            outlier_status_provided = "outlier_status" in level_result
+            outlier_status = level_result.get("outlier_status")
+            outlier_method_provided = "outlier_method" in level_result
+            outlier_method = level_result.get("outlier_method")
+            grubbs_statistic_provided = "grubbs_statistic" in level_result
+            grubbs_statistic = level_result.get("grubbs_statistic")
+            grubbs_threshold_provided = "grubbs_threshold" in level_result
+            grubbs_threshold = level_result.get("grubbs_threshold")
+            manual_status_provided = "manual_status" in level_result
+            manual_status = level_result.get("manual_status")
+            handled_at_provided = "handled_at" in level_result
+            handled_at = level_result.get("handled_at")
 
             existing_result_id = existing_by_level.get(level_id)
             if existing_result_id is not None:
@@ -2560,6 +2907,30 @@ def update_zscore_level_results(run_id: int, level_results: list[dict]) -> None:
                 if in_control_provided:
                     assignments.append("is_in_control_for_realtime_stats = ?")
                     values.append(int(bool(in_control_value)))
+                if is_building_included_provided:
+                    assignments.append("is_building_included = ?")
+                    values.append(int(bool(is_building_included)))
+                if is_outlier_suspect_provided:
+                    assignments.append("is_outlier_suspect = ?")
+                    values.append(int(bool(is_outlier_suspect)))
+                if outlier_status_provided:
+                    assignments.append("outlier_status = ?")
+                    values.append(normalize_outlier_status(outlier_status))
+                if outlier_method_provided:
+                    assignments.append("outlier_method = ?")
+                    values.append(str(outlier_method or ""))
+                if grubbs_statistic_provided:
+                    assignments.append("grubbs_statistic = ?")
+                    values.append(None if grubbs_statistic is None else float(grubbs_statistic))
+                if grubbs_threshold_provided:
+                    assignments.append("grubbs_threshold = ?")
+                    values.append(None if grubbs_threshold is None else float(grubbs_threshold))
+                if manual_status_provided:
+                    assignments.append("manual_status = ?")
+                    values.append(normalize_outlier_manual_status(manual_status))
+                if handled_at_provided:
+                    assignments.append("handled_at = ?")
+                    values.append(handled_at)
 
                 if assignments:
                     values.append(existing_result_id)
@@ -2586,9 +2957,17 @@ def update_zscore_level_results(run_id: int, level_results: list[dict]) -> None:
                     zscore,
                     level_status,
                     rule_hits_local,
-                    is_in_control_for_realtime_stats
+                    is_in_control_for_realtime_stats,
+                    is_building_included,
+                    is_outlier_suspect,
+                    outlier_status,
+                    outlier_method,
+                    grubbs_statistic,
+                    grubbs_threshold,
+                    manual_status,
+                    handled_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     int(run_id),
@@ -2599,6 +2978,16 @@ def update_zscore_level_results(run_id: int, level_results: list[dict]) -> None:
                     str(status_value or "pending"),
                     json.dumps(rule_hits_local or [], ensure_ascii=False),
                     int(bool(in_control_value)),
+                    int(bool(is_building_included)) if is_building_included_provided else 1,
+                    int(bool(is_outlier_suspect)) if is_outlier_suspect_provided else 0,
+                    normalize_outlier_status(outlier_status) if outlier_status_provided else OUTLIER_STATUS_NORMAL,
+                    str(outlier_method or "") if outlier_method_provided else "",
+                    None if grubbs_statistic is None else float(grubbs_statistic),
+                    None if grubbs_threshold is None else float(grubbs_threshold),
+                    normalize_outlier_manual_status(manual_status)
+                    if manual_status_provided
+                    else OUTLIER_MANUAL_STATUS_NORMAL,
+                    handled_at if handled_at_provided else None,
                 ),
             )
 
@@ -2657,6 +3046,17 @@ def _build_zscore_level_result_record(row: sqlite3.Row) -> dict:
         "status": status,
         "rule_hits_local": _deserialize_json_list(row["rule_hits_local"]),
         "is_in_control_for_realtime_stats": bool(row["is_in_control_for_realtime_stats"]),
+        "is_building_included": int(row["is_building_included"]) if row["is_building_included"] is not None else 1,
+        "is_outlier_suspect": int(row["is_outlier_suspect"]) if row["is_outlier_suspect"] is not None else 0,
+        "outlier_status": normalize_outlier_status(row["outlier_status"], fallback=OUTLIER_STATUS_NORMAL),
+        "outlier_method": str(row["outlier_method"] or ""),
+        "grubbs_statistic": None if row["grubbs_statistic"] is None else float(row["grubbs_statistic"]),
+        "grubbs_threshold": None if row["grubbs_threshold"] is None else float(row["grubbs_threshold"]),
+        "manual_status": normalize_outlier_manual_status(
+            row["manual_status"],
+            fallback=OUTLIER_MANUAL_STATUS_NORMAL,
+        ),
+        "handled_at": row["handled_at"],
         "created_at": row["created_at"],
     }
 
@@ -2711,6 +3111,49 @@ def get_zscore_run_with_levels(run_id: int) -> dict:
     return run_record
 
 
+def get_zscore_level_result(level_result_id: int) -> sqlite3.Row:
+    with get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT level_results.*, runs.batch_id, runs.phase, runs.rule_template_id, runs.test_time
+            FROM zscore_level_results AS level_results
+            INNER JOIN zscore_runs AS runs ON runs.id = level_results.run_id
+            WHERE level_results.id = ?
+            """,
+            (level_result_id,),
+        ).fetchone()
+    if row is None:
+        raise ValueError(f"未找到 Z-score level result {level_result_id}")
+    return row
+
+
+def set_zscore_level_result_building_state(
+    level_result_id: int,
+    *,
+    is_building_included: int,
+    manual_status: str,
+    handled_at: str | None = None,
+) -> None:
+    with get_connection() as connection:
+        cursor = connection.execute(
+            """
+            UPDATE zscore_level_results
+            SET is_building_included = ?,
+                manual_status = ?,
+                handled_at = ?
+            WHERE id = ?
+            """,
+            (
+                int(is_building_included),
+                normalize_outlier_manual_status(manual_status),
+                handled_at,
+                int(level_result_id),
+            ),
+        )
+        if cursor.rowcount == 0:
+            raise ValueError(f"未找到 Z-score level result {level_result_id}")
+
+
 def get_zscore_runs_with_levels_for_batch(batch_id: int) -> list[dict]:
     with get_connection() as connection:
         run_rows = connection.execute(
@@ -2756,6 +3199,17 @@ def add_zscore_level_results(run_id: int, level_results: list[dict]) -> None:
                 str(level_result.get("status", "pending")),
                 json.dumps(level_result.get("rule_hits_local") or [], ensure_ascii=False),
                 int(bool(level_result.get("is_in_control_for_realtime_stats", False))),
+                int(bool(level_result.get("is_building_included", 1))),
+                int(bool(level_result.get("is_outlier_suspect", 0))),
+                normalize_outlier_status(level_result.get("outlier_status"), fallback=OUTLIER_STATUS_NORMAL),
+                str(level_result.get("outlier_method", "") or ""),
+                level_result.get("grubbs_statistic"),
+                level_result.get("grubbs_threshold"),
+                normalize_outlier_manual_status(
+                    level_result.get("manual_status"),
+                    fallback=OUTLIER_MANUAL_STATUS_NORMAL,
+                ),
+                level_result.get("handled_at"),
             )
         )
 
@@ -2770,9 +3224,17 @@ def add_zscore_level_results(run_id: int, level_results: list[dict]) -> None:
                 zscore,
                 level_status,
                 rule_hits_local,
-                is_in_control_for_realtime_stats
+                is_in_control_for_realtime_stats,
+                is_building_included,
+                is_outlier_suspect,
+                outlier_status,
+                outlier_method,
+                grubbs_statistic,
+                grubbs_threshold,
+                manual_status,
+                handled_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
@@ -2911,6 +3373,16 @@ def get_zscore_level_results_df(
         dataframe["is_in_control_for_realtime_stats"] = (
             dataframe["is_in_control_for_realtime_stats"].fillna(0).astype(int)
         )
+        dataframe["is_building_included"] = dataframe["is_building_included"].fillna(1).astype(int)
+        dataframe["is_outlier_suspect"] = dataframe["is_outlier_suspect"].fillna(0).astype(int)
+        dataframe["outlier_status"] = dataframe["outlier_status"].map(
+            lambda value: normalize_outlier_status(value, fallback=OUTLIER_STATUS_NORMAL)
+        )
+        dataframe["outlier_method"] = dataframe["outlier_method"].fillna("")
+        dataframe["manual_status"] = dataframe["manual_status"].map(
+            lambda value: normalize_outlier_manual_status(value, fallback=OUTLIER_MANUAL_STATUS_NORMAL)
+        )
+        dataframe["handled_at"] = pd.to_datetime(dataframe["handled_at"], errors="coerce")
     return dataframe
 
 

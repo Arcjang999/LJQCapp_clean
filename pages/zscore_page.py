@@ -8,6 +8,7 @@ from pages.management import (
     prepare_zscore_project_batch_context,
     render_zscore_project_batch_management,
 )
+from pages.zscore_report_section import render_zscore_monthly_report_section
 from pages.zscore_sections import (
     build_zscore_workbench_context,
     format_zscore_level_display,
@@ -42,6 +43,32 @@ def _build_empty_realtime_profiles(required_level_ids: list[str]) -> dict[str, d
         }
         for level_id in required_level_ids
     }
+
+
+def _build_level_building_summary(context: dict[str, object]) -> dict[str, dict[str, int]]:
+    required_level_ids = context["required_level_ids"]
+    history_runs = context["history_runs"]
+    summary = {
+        level_id: {
+            "total_n": 0,
+            "effective_n": 0,
+            "disabled_n": 0,
+        }
+        for level_id in required_level_ids
+    }
+    for run in history_runs:
+        if str(run.get("phase") or "") != "target_building":
+            continue
+        for level_result in run.get("level_results", []):
+            level_id = str(level_result.get("level_id"))
+            if level_id not in summary:
+                continue
+            summary[level_id]["total_n"] += 1
+            if int(level_result.get("is_building_included", 1) or 0) == 1:
+                summary[level_id]["effective_n"] += 1
+            else:
+                summary[level_id]["disabled_n"] += 1
+    return summary
 
 
 def _build_filtered_realtime_profiles(
@@ -108,11 +135,13 @@ def _build_zscore_level_cards(
     required_level_ids = context["required_level_ids"]
     cv_limit = context["cv_limit"]
     realtime_profiles = realtime_profiles or _build_empty_realtime_profiles(required_level_ids)
+    building_summary = _build_level_building_summary(context)
 
     cards: list[dict[str, object]] = []
     for level_id in required_level_ids:
         profile = level_target_profiles[level_id]
         realtime_profile = realtime_profiles.get(level_id, {})
+        summary_item = building_summary.get(level_id, {})
         display_label, level_caption = format_zscore_level_display(level_id, level_label_map)
         building_mean = profile.get("final_target_mean") if profile.get("is_ready") else profile.get("provisional_mean")
         building_sd = profile.get("final_target_sd") if profile.get("is_ready") else profile.get("provisional_sd")
@@ -128,7 +157,9 @@ def _build_zscore_level_cards(
                 "title": display_label,
                 "subtitle": level_caption,
                 "chips": [
-                    f"已收集 {profile['collected_n']} 次",
+                    f"总点数 {summary_item.get('total_n', 0)}",
+                    f"生效建靶点 {summary_item.get('effective_n', 0)}",
+                    f"已禁用点 {summary_item.get('disabled_n', 0)}",
                     f"建靶要求 {profile['required_n']} 次",
                     f"已达条件 {'是' if profile['is_ready'] else '否'}",
                     f"当前阶段 {profile['phase_label']}",
@@ -191,6 +222,9 @@ def _render_zscore_level_summary_cards_section(context: dict[str, object]) -> No
 def _render_zscore_maintenance_summary(context: dict[str, object]) -> None:
     history_runs = context["history_runs"]
     latest_run = context["latest_run"]
+    level_summary = _build_level_building_summary(context)
+    disabled_total = sum(item["disabled_n"] for item in level_summary.values())
+    effective_total = sum(item["effective_n"] for item in level_summary.values())
     abnormal_run_count = sum(
         1 for run in history_runs if str(run.get("run_status") or "") in {"warning", "reject"}
     )
@@ -205,11 +239,13 @@ def _render_zscore_maintenance_summary(context: dict[str, object]) -> None:
                 "title": "维护概览",
                 "chips": [
                     f"当前记录 {len(history_runs)} 次",
+                    f"生效建靶点 {effective_total} 个",
+                    f"已禁用点 {disabled_total} 个",
                     f"异常记录 {abnormal_run_count} 次",
                     f"最新检测 {latest_test_time}",
                 ],
                 "sections": [],
-                "footer": "可在此补充备注，并维护允许编辑的正式期检测记录。",
+                "footer": "可在此查看单 level 离群状态，并维护仍处于建靶期的水平点。",
             }
         ]
     )
@@ -221,7 +257,7 @@ def render_zscore_page() -> None:
         "Z-score 页面用于多水平室内质控管理；项目创建时固定为双水平或三水平，批次自动继承。"
     )
     projects_df, selected_project_id, batches_df, selected_batch_id = prepare_zscore_project_batch_context()
-    manage_tab, work_tab = st.tabs([TEXT["manage"], TEXT["current_batch"]])
+    manage_tab, work_tab, report_tab = st.tabs([TEXT["manage"], TEXT["current_batch"], "Z-score 月报"])
     render_zscore_project_batch_management(
         manage_tab,
         projects_df,
@@ -230,6 +266,7 @@ def render_zscore_page() -> None:
         selected_batch_id,
     )
     guard_work_tab_selection(work_tab, selected_project_id, selected_batch_id)
+    guard_work_tab_selection(report_tab, selected_project_id, selected_batch_id)
 
     context = build_zscore_workbench_context(selected_batch_id)
     batch = context["batch"]
@@ -323,3 +360,6 @@ def render_zscore_page() -> None:
                 tone="muted",
             )
             render_zscore_export_import_section(context, selected_batch_id, chart_panel_state)
+
+    with report_tab:
+        render_zscore_monthly_report_section(selected_batch_id)

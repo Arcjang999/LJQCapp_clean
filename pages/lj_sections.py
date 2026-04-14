@@ -24,7 +24,20 @@ from pages.management import (
     render_project_batch_management,
 )
 from plotting import figure_to_png_bytes, plot_lj_chart
-from qc_logic import calculate_qc_results, calculate_realtime_stats, calculate_target_building_cv_hint
+from qc_logic import (
+    calculate_qc_results,
+    calculate_realtime_stats,
+    calculate_target_building_cv_hint,
+    disable_lj_building_result,
+    keep_lj_building_result,
+    persist_lj_batch_outlier_snapshot,
+    restore_lj_building_result,
+)
+from services.outlier_service import (
+    DEFAULT_GRUBBS_ALPHA,
+    get_outlier_manual_status_label,
+    get_outlier_status_label,
+)
 from services.value_type_service import (
     get_input_value_type_label,
     get_measurement_label,
@@ -78,6 +91,99 @@ def get_latest_qc_row(qc_df: pd.DataFrame) -> pd.Series | None:
     if latest_df.empty:
         return None
     return latest_df.iloc[-1]
+
+
+def resolve_lj_latest_analysis_mode(stats: dict[str, object]) -> str:
+    return "formal" if bool(stats.get("has_formal_started")) else "building"
+
+
+def build_lj_building_outlier_panel_data(
+    stats: dict[str, object],
+    latest_source_text: str,
+) -> dict[str, object]:
+    suspect_row = stats.get("current_suspect_row")
+    suspect_details: dict[str, object] | None = None
+    if suspect_row is not None:
+        suspect_details = {
+            "sequence": int(suspect_row.get("sequence", 0) or 0),
+            "test_time": pd.Timestamp(suspect_row["test_time"]).strftime("%Y-%m-%d %H:%M"),
+            "grubbs_statistic": suspect_row.get("grubbs_statistic"),
+            "grubbs_threshold": suspect_row.get("grubbs_threshold"),
+            "alpha": DEFAULT_GRUBBS_ALPHA,
+            "status_label": get_outlier_status_label(suspect_row.get("outlier_status")),
+        }
+    return {
+        "phase_label": "建靶期",
+        "effective_building_count": int(stats.get("effective_building_count", 0) or 0),
+        "disabled_building_count": int(stats.get("disabled_building_count", 0) or 0),
+        "mean": stats.get("mean"),
+        "sd": stats.get("sd"),
+        "cv": stats.get("cv"),
+        "grubbs_ready": int(stats.get("effective_building_count", 0) or 0) >= 3,
+        "suspect_details": suspect_details,
+        "source_text": latest_source_text,
+        "target_ready": bool(stats.get("target_ready")),
+    }
+
+
+def _format_lj_stat_text(value: object, digits: int = 4, suffix: str = "") -> str:
+    if value is None or pd.isna(value):
+        return "-"
+    return f"{float(value):.{digits}f}{suffix}"
+
+
+def render_lj_building_outlier_panel(
+    stats: dict[str, object],
+    latest_source_text: str,
+) -> None:
+    panel_data = build_lj_building_outlier_panel_data(stats, latest_source_text)
+    st.markdown("**建靶期离群值判断模块**")
+    render_compact_stat_metrics(
+        [
+            ("当前阶段", str(panel_data["phase_label"])),
+            ("当前有效建靶点数", str(panel_data["effective_building_count"])),
+            ("当前已禁用点数", str(panel_data["disabled_building_count"])),
+            ("当前建靶均值", _format_lj_stat_text(panel_data["mean"])),
+            ("当前建靶 SD", _format_lj_stat_text(panel_data["sd"])),
+            ("当前建靶 CV%", _format_lj_stat_text(panel_data["cv"], digits=2, suffix="%")),
+        ]
+    )
+    st.caption(str(panel_data["source_text"]))
+    if not bool(panel_data["grubbs_ready"]):
+        st.info("当前点数不足，暂不进行格拉布斯法判断。")
+    elif panel_data["suspect_details"] is None:
+        if bool(panel_data["target_ready"]):
+            st.success("当前未发现疑似离群建靶点，建靶统计已可用于进入正式期。")
+        else:
+            st.success("当前未发现疑似离群建靶点。")
+    else:
+        suspect_details = panel_data["suspect_details"]
+        st.warning(
+            "发现疑似离群建靶点："
+            f"序号 #{suspect_details['sequence']} | "
+            f"时间 {suspect_details['test_time']} | "
+            f"G={float(suspect_details['grubbs_statistic'] or 0.0):.4f} | "
+            f"G临界值={float(suspect_details['grubbs_threshold'] or 0.0):.4f} | "
+            f"alpha={float(suspect_details['alpha']):.2f} | "
+            f"状态={suspect_details['status_label']}"
+        )
+    st.caption("如需保留、禁用或恢复，请到“检测记录维护”区处理。")
+
+
+def render_lj_formal_westgard_panel(
+    latest_status: str,
+    latest_compact_message: str,
+    latest_rule_hits: str,
+    latest_source_text: str,
+) -> None:
+    st.markdown("**Westgard 分析模块**")
+    render_status_panel(
+        latest_status,
+        latest_compact_message,
+        latest_rule_hits,
+        source_text=latest_source_text,
+        phase_text="正式期",
+    )
 
 def render_lj_abnormal_note_quick_entry(latest_row: pd.Series | None) -> None:
     if latest_row is None:
@@ -269,8 +375,8 @@ def build_monthly_chart_title(batch, start_date, end_date) -> str:
 
 def build_lj_workbench_context(selected_batch_id: int) -> dict[str, object]:
     batch = get_batch(selected_batch_id)
+    qc_df, stats = persist_lj_batch_outlier_snapshot(selected_batch_id)
     results_df = get_results(selected_batch_id, include_manual_note=True)
-    qc_df, stats = calculate_qc_results(results_df, int(batch["target_n"]))
     latest_status, latest_status_message = get_latest_status_context(qc_df)
     latest_rule_hits, latest_compact_message = get_latest_result_panel_content(qc_df, latest_status_message)
     return {
@@ -421,6 +527,9 @@ def render_lj_entry_and_stats_section(
         st.markdown("**建靶统计**")
         render_compact_stat_metrics(
             [
+                ("总记录数", f"{stats.get('building_total_count', 0)}"),
+                ("生效建靶点", f"{stats.get('effective_building_count', 0)}"),
+                ("已禁用点", f"{stats.get('disabled_building_count', 0)}"),
                 ("均值", "-" if stats["mean"] is None else f"{stats['mean']:.4f}"),
                 ("SD", "-" if stats["sd"] is None else f"{stats['sd']:.4f}"),
                 ("CV%", "-" if stats["cv"] is None else f"{stats['cv']:.2f}%"),
@@ -505,7 +614,6 @@ def render_lj_chart_and_analysis_section(
     view_mode = chart_state["view_mode"]
     y_axis_mode = chart_state["y_axis_mode"]
     standard_sd_limit = chart_state["standard_sd_limit"]
-    phase_label = "正式质控" if stats.get("target_ready") else "建靶期"
     latest_source_text = (
         f"最近已保存检测序号 #{int(latest_row['sequence'])}"
         if latest_row is not None and "sequence" in latest_row
@@ -569,14 +677,18 @@ def render_lj_chart_and_analysis_section(
 
     with st.container(border=True):
         st.markdown("**最新结果分析**")
-        render_status_panel(
-            latest_status,
-            latest_compact_message,
-            latest_rule_hits,
-            source_text=latest_source_text,
-            phase_text=phase_label,
-        )
-    render_lj_abnormal_note_quick_entry(latest_row)
+        analysis_mode = resolve_lj_latest_analysis_mode(stats)
+        if analysis_mode == "building":
+            render_lj_building_outlier_panel(stats, latest_source_text)
+        else:
+            render_lj_formal_westgard_panel(
+                latest_status,
+                latest_compact_message,
+                latest_rule_hits,
+                latest_source_text,
+            )
+    if resolve_lj_latest_analysis_mode(stats) == "formal":
+        render_lj_abnormal_note_quick_entry(latest_row)
     return figure, {
         "view_mode": chart_view_mode,
         "y_axis_mode": chart_y_axis_mode,
@@ -604,19 +716,109 @@ def render_lj_records_section(qc_df: pd.DataFrame, input_value_type: str) -> Non
         render_records_table_impl(display_df)
 
 
-def render_lj_maintenance_section(qc_df: pd.DataFrame, input_value_type: str) -> None:
-    open_maintenance_disabled = qc_df.empty
+def render_lj_maintenance_section(context: dict[str, object]) -> None:
+    qc_df = context["qc_df"]
+    input_value_type = context["input_value_type"]
+    stats = context["stats"]
+
+    building_df = (
+        qc_df[qc_df["phase"] == "建靶数据"]
+        .sort_values(["test_time", "id"], ascending=[False, False])
+        .reset_index(drop=True)
+    )
+    notice_message = str(st.session_state.pop("lj_outlier_notice", "") or "")
+    if notice_message:
+        st.success(notice_message)
+
     with st.container(border=True):
+        render_compact_stat_metrics(
+            [
+                ("总记录数", f"{stats.get('building_total_count', 0)}"),
+                ("生效建靶点", f"{stats.get('effective_building_count', 0)}"),
+                ("已禁用点", f"{stats.get('disabled_building_count', 0)}"),
+                ("均值", "-" if stats.get("mean") is None else f"{stats['mean']:.4f}"),
+                ("SD", "-" if stats.get("sd") is None else f"{stats['sd']:.4f}"),
+                ("CV%", "-" if stats.get("cv") is None else f"{stats['cv']:.2f}%"),
+            ]
+        )
+
+        suspect_row = stats.get("current_suspect_row")
+        if suspect_row is not None:
+            suspect_time = pd.Timestamp(suspect_row["test_time"]).strftime("%Y-%m-%d %H:%M")
+            st.warning(
+                "当前存在疑似离群建靶点："
+                f"序号 #{int(suspect_row.get('sequence', 0) or 0)} | "
+                f"时间 {suspect_time} | "
+                f"G={float(suspect_row.get('grubbs_statistic') or 0.0):.4f} | "
+                f"G临界值={float(suspect_row.get('grubbs_threshold') or 0.0):.4f} | "
+                f"alpha={DEFAULT_GRUBBS_ALPHA:.2f} | "
+                f"状态={get_outlier_status_label(suspect_row.get('outlier_status'))}"
+            )
+
+        if building_df.empty:
+            st.info("当前批次暂无建靶期记录可维护。")
+        else:
+            option_map: dict[str, int] = {}
+            option_labels: list[str] = []
+            for _, row in building_df.iterrows():
+                label = (
+                    f"序号 #{int(row.get('sequence', 0) or 0)} | "
+                    f"{pd.Timestamp(row['test_time']).strftime('%Y-%m-%d %H:%M')} | "
+                    f"{get_outlier_status_label(row.get('outlier_status'))}"
+                )
+                option_labels.append(label)
+                option_map[label] = int(row["id"])
+
+            selected_label = st.selectbox(
+                "选择需要处理的建靶点",
+                options=option_labels,
+                key="lj_outlier_record_selector",
+            )
+            selected_result_id = option_map[selected_label]
+            selected_row = building_df[building_df["id"] == selected_result_id].iloc[0]
+            statistic_text = ""
+            if not pd.isna(selected_row.get("grubbs_statistic")):
+                statistic_text = f"{float(selected_row.get('grubbs_statistic')):.4f}"
+            threshold_text = ""
+            if not pd.isna(selected_row.get("grubbs_threshold")):
+                threshold_text = f"{float(selected_row.get('grubbs_threshold')):.4f}"
+            st.caption(
+                f"当前状态：{get_outlier_status_label(selected_row.get('outlier_status'))} | "
+                f"手工处理：{get_outlier_manual_status_label(selected_row.get('manual_status'))} | "
+                f"G={statistic_text} | "
+                f"G临界值={threshold_text} | "
+                f"alpha={DEFAULT_GRUBBS_ALPHA:.2f}"
+            )
+            if stats.get("has_formal_started"):
+                st.info("正式期启用后，LJ 建靶期离群值状态将锁定，不再允许保留、禁用或恢复。")
+
+            action_cols = st.columns(3)
+            keep_disabled = bool(stats.get("has_formal_started"))
+            disable_disabled = bool(stats.get("has_formal_started")) or int(selected_row.get("is_building_included", 1) or 0) == 0
+            restore_disabled = bool(stats.get("has_formal_started")) or int(selected_row.get("is_building_included", 1) or 0) == 1
+
+            if action_cols[0].button("保留", key=f"lj_keep_{selected_result_id}", width="stretch", disabled=keep_disabled):
+                keep_lj_building_result(int(selected_result_id))
+                st.session_state["lj_outlier_notice"] = "建靶点已标记为保留，并已重算建靶统计。"
+                st.rerun()
+            if action_cols[1].button("禁用", key=f"lj_disable_{selected_result_id}", width="stretch", disabled=disable_disabled):
+                disable_lj_building_result(int(selected_result_id))
+                st.session_state["lj_outlier_notice"] = "建靶点已禁用，并已重算建靶统计。"
+                st.rerun()
+            if action_cols[2].button("恢复", key=f"lj_restore_{selected_result_id}", width="stretch", disabled=restore_disabled):
+                restore_lj_building_result(int(selected_result_id))
+                st.session_state["lj_outlier_notice"] = "建靶点已恢复，并已重算建靶统计。"
+                st.rerun()
+
         if st.button(
             "打开检测记录维护",
             key="open_record_maintenance_dialog",
             width="stretch",
-            disabled=open_maintenance_disabled,
+            disabled=qc_df.empty,
         ):
             bump_record_maintenance_dialog_nonce_impl()
             st.session_state["show_record_maintenance_dialog"] = True
-        if open_maintenance_disabled:
-            st.info("当前批次暂无检测记录可维护。")
+
     if st.session_state.get("show_record_maintenance_dialog", False):
         render_record_maintenance_dialog_impl(qc_df, input_value_type=input_value_type)
 

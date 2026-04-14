@@ -59,18 +59,26 @@ from ui.dialogs import (
     bump_zscore_record_maintenance_dialog_nonce as bump_zscore_record_maintenance_dialog_nonce_impl,
     render_zscore_record_maintenance_dialog as render_zscore_record_maintenance_dialog_impl,
 )
+from services.outlier_service import (
+    DEFAULT_GRUBBS_ALPHA,
+    get_outlier_manual_status_label,
+    get_outlier_status_label,
+)
 from zscore_logic import (
     PHASE_FORMAL_QC,
     PHASE_TARGET_BUILDING,
     build_zscore_plot_dataframe as build_zscore_plot_dataframe_logic,
     create_zscore_run,
+    disable_zscore_level_result,
     determine_zscore_phase,
     format_level_id_display,
     get_phase_label,
     get_zscore_display_sequence,
     get_zscore_level_targets,
     get_zscore_runs,
+    keep_zscore_level_result,
     resolve_zscore_batch_context,
+    restore_zscore_level_result,
     should_enable_formal_rules,
     update_saved_zscore_run_manual_note,
     upsert_zscore_level_target,
@@ -1387,18 +1395,119 @@ def render_zscore_chart_analysis_section(
 def render_zscore_maintenance_section(context: dict[str, object]) -> None:
     history_runs = context["history_runs"]
     batch_context = context["batch_context"]
+    level_label_map = dict(batch_context["level_label_map"])
+    formal_rules_enabled = bool(context["formal_rules_enabled"])
+    building_runs = [
+        run for run in history_runs if str(run.get("phase") or "") == PHASE_TARGET_BUILDING
+    ]
 
-    open_zscore_maintenance_disabled = not history_runs
+    notice_message = str(st.session_state.pop("zscore_outlier_notice", "") or "")
+    if notice_message:
+        st.success(notice_message)
+
     with st.container(border=True):
+        if not building_runs:
+            st.info("当前批次暂无建靶期 level 点可维护。")
+        else:
+            ordered_runs = sorted(
+                building_runs,
+                key=lambda run: (
+                    get_zscore_display_sequence(run),
+                    int(run.get("run_id") or 0),
+                ),
+                reverse=True,
+            )
+            run_options: dict[str, int] = {}
+            run_labels: list[str] = []
+            for run in ordered_runs:
+                label = (
+                    f"run #{get_zscore_display_sequence(run)} | "
+                    f"{pd.Timestamp(run['test_time']).strftime('%Y-%m-%d %H:%M')}"
+                )
+                run_labels.append(label)
+                run_options[label] = int(run["run_id"])
+
+            selected_run_label = st.selectbox(
+                "选择建靶期 run",
+                options=run_labels,
+                key="zscore_outlier_run_selector",
+            )
+            selected_run_id = run_options[selected_run_label]
+            selected_run = next(
+                run for run in ordered_runs if int(run["run_id"]) == int(selected_run_id)
+            )
+            if formal_rules_enabled:
+                st.info("正式期启用后，Z-score 建靶期单 level 离群值状态将锁定，不再允许保留、禁用或恢复。")
+
+            for level_result in selected_run.get("level_results", []):
+                display_label, level_caption = format_zscore_level_display(
+                    level_result["level_id"],
+                    level_label_map,
+                )
+                statistic_text = ""
+                if level_result.get("grubbs_statistic") is not None:
+                    statistic_text = f"{float(level_result['grubbs_statistic']):.4f}"
+                threshold_text = ""
+                if level_result.get("grubbs_threshold") is not None:
+                    threshold_text = f"{float(level_result['grubbs_threshold']):.4f}"
+                with st.container(border=True):
+                    st.markdown(f"**{display_label}**")
+                    if level_caption:
+                        st.caption(level_caption)
+                    st.caption(
+                        f"所属 run：#{get_zscore_display_sequence(selected_run)} | "
+                        f"所属 level：{display_label} | "
+                        f"状态：{get_outlier_status_label(level_result.get('outlier_status'))} | "
+                        f"手工处理：{get_outlier_manual_status_label(level_result.get('manual_status'))} | "
+                        f"G={statistic_text} | "
+                        f"G临界值={threshold_text} | "
+                        f"alpha={DEFAULT_GRUBBS_ALPHA:.2f}"
+                    )
+                    if int(level_result.get("is_outlier_suspect", 0) or 0) == 1:
+                        st.warning(
+                            f"run #{get_zscore_display_sequence(selected_run)} 的 {display_label} 当前为疑似离群点。"
+                        )
+                    action_cols = st.columns(3)
+                    keep_disabled = formal_rules_enabled
+                    disable_disabled = formal_rules_enabled or int(level_result.get("is_building_included", 1) or 0) == 0
+                    restore_disabled = formal_rules_enabled or int(level_result.get("is_building_included", 1) or 0) == 1
+                    if action_cols[0].button(
+                        "保留",
+                        key=f"zscore_keep_{level_result['id']}",
+                        width="stretch",
+                        disabled=keep_disabled,
+                    ):
+                        keep_zscore_level_result(int(level_result["id"]))
+                        st.session_state["zscore_outlier_notice"] = f"{display_label} 已标记为保留，并已重算建靶统计。"
+                        st.rerun()
+                    if action_cols[1].button(
+                        "禁用",
+                        key=f"zscore_disable_{level_result['id']}",
+                        width="stretch",
+                        disabled=disable_disabled,
+                    ):
+                        disable_zscore_level_result(int(level_result["id"]))
+                        st.session_state["zscore_outlier_notice"] = f"{display_label} 已禁用，并已重算建靶统计。"
+                        st.rerun()
+                    if action_cols[2].button(
+                        "恢复",
+                        key=f"zscore_restore_{level_result['id']}",
+                        width="stretch",
+                        disabled=restore_disabled,
+                    ):
+                        restore_zscore_level_result(int(level_result["id"]))
+                        st.session_state["zscore_outlier_notice"] = f"{display_label} 已恢复，并已重算建靶统计。"
+                        st.rerun()
+
         if st.button(
             "打开记录维护",
             key="open_zscore_record_maintenance_dialog",
             width="stretch",
-            disabled=open_zscore_maintenance_disabled,
+            disabled=not history_runs,
         ):
             bump_zscore_record_maintenance_dialog_nonce_impl()
             st.session_state["show_zscore_record_maintenance_dialog"] = True
-        if open_zscore_maintenance_disabled:
+        if not history_runs:
             st.info("当前批次暂无已保存的检测记录可维护。")
     if st.session_state.get("show_zscore_record_maintenance_dialog", False):
         render_zscore_record_maintenance_dialog_impl(history_runs, batch_context)

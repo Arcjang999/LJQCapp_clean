@@ -219,11 +219,18 @@ def _configure_x_axis(axis, plot_df: pd.DataFrame) -> None:
 def _filter_view_data(qc_df: pd.DataFrame, view_mode: str) -> pd.DataFrame:
     if qc_df.empty or "phase" not in qc_df.columns:
         return qc_df.copy()
+    filtered_df = qc_df.copy()
+    if "is_building_included" in filtered_df.columns:
+        disabled_build_mask = (
+            (filtered_df["phase"] == "\u5efa\u9776\u6570\u636e")
+            & (filtered_df["is_building_included"].fillna(1).astype(int) == 0)
+        )
+        filtered_df = filtered_df.loc[~disabled_build_mask].copy()
     if view_mode == "\u5efa\u9776\u56fe":
-        return qc_df[qc_df["phase"] == "\u5efa\u9776\u6570\u636e"].copy()
+        return filtered_df[filtered_df["phase"] == "\u5efa\u9776\u6570\u636e"].copy()
     if view_mode == "\u6b63\u5f0f\u8d28\u63a7\u56fe":
-        return qc_df[qc_df["phase"] == "\u6b63\u5f0f\u6570\u636e"].copy()
-    return qc_df.copy()
+        return filtered_df[filtered_df["phase"] == "\u6b63\u5f0f\u6570\u636e"].copy()
+    return filtered_df.copy()
 
 
 def _annotate_rule_hits(axis, points: pd.DataFrame) -> None:

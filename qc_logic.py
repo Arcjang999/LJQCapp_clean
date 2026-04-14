@@ -1,8 +1,32 @@
 from __future__ import annotations
 
+from datetime import datetime
 import math
 
 import pandas as pd
+
+from database import (
+    get_batch,
+    get_result,
+    get_results,
+    save_result_outlier_snapshot,
+    set_result_building_inclusion_state,
+)
+from services.outlier_service import (
+    DEFAULT_GRUBBS_ALPHA,
+    GRUBBS_METHOD_NAME,
+    calculate_grubbs_test,
+    derive_outlier_status,
+    normalize_outlier_manual_status,
+    OUTLIER_MANUAL_STATUS_DISABLED,
+    OUTLIER_MANUAL_STATUS_KEEP,
+    OUTLIER_MANUAL_STATUS_NORMAL,
+    OUTLIER_MANUAL_STATUS_RESTORED,
+)
+
+
+LJ_BUILDING_PHASE_LABEL = "建靶数据"
+LJ_FORMAL_PHASE_LABEL = "正式数据"
 
 
 RULE_PRIORITY = {
@@ -64,12 +88,21 @@ def _empty_qc_dataframe(results_df: pd.DataFrame | None = None) -> pd.DataFrame:
         "reagent_lot_changed",
         "created_at",
         "sequence",
+        "effective_sequence",
         "phase",
         "z",
         "status",
         "rule_hits",
         "error_type",
         "analysis_prompt",
+        "is_building_included",
+        "is_outlier_suspect",
+        "outlier_status",
+        "outlier_method",
+        "grubbs_statistic",
+        "grubbs_threshold",
+        "manual_status",
+        "handled_at",
     ]
     for column in default_columns:
         if column not in base.columns:
@@ -77,83 +110,224 @@ def _empty_qc_dataframe(results_df: pd.DataFrame | None = None) -> pd.DataFrame:
     return base.iloc[0:0].copy()
 
 
-def calculate_qc_results(results_df: pd.DataFrame, target_count: int) -> tuple[pd.DataFrame, dict]:
-    dataframe = results_df.copy()
-    stats = {
+def _empty_lj_stats(target_count: int) -> dict:
+    return {
         "mean": None,
         "sd": None,
         "cv": None,
         "target_ready": False,
         "message": (
-            f"\u5f53\u524d\u5efa\u9776\u672a\u5b8c\u6210\uff0c"
-            f"\u8bf7\u81f3\u5c11\u5f55\u5165\u524d {target_count} \u6b21\u7ed3\u679c\u3002"
+            f"当前建靶未完成，请至少录入前 {target_count} 个有效建靶点。"
         ),
-        "latest_analysis": "\u5efa\u9776\u672a\u5b8c\u6210\uff0c\u6682\u65e0 Westgard \u89c4\u5219\u5206\u6790\u3002",
+        "latest_analysis": "建靶未完成，暂无 Westgard 规则分析。",
         "rule_summary": _empty_rule_summary(),
+        "building_total_count": 0,
+        "effective_building_count": 0,
+        "disabled_building_count": 0,
+        "has_formal_started": False,
+        "current_suspect_id": None,
+        "current_suspect_row": None,
+        "grubbs_alpha": DEFAULT_GRUBBS_ALPHA,
     }
 
+
+def _normalize_lj_result_columns(results_df: pd.DataFrame) -> pd.DataFrame:
+    dataframe = results_df.copy()
+    defaults: dict[str, object] = {
+        "is_building_included": 1,
+        "is_outlier_suspect": 0,
+        "outlier_status": "normal",
+        "outlier_method": "",
+        "grubbs_statistic": pd.NA,
+        "grubbs_threshold": pd.NA,
+        "manual_status": OUTLIER_MANUAL_STATUS_NORMAL,
+        "handled_at": pd.NA,
+    }
+    for column_name, default_value in defaults.items():
+        if column_name not in dataframe.columns:
+            dataframe[column_name] = default_value
+    dataframe["is_building_included"] = dataframe["is_building_included"].fillna(1).astype(int)
+    dataframe["is_outlier_suspect"] = dataframe["is_outlier_suspect"].fillna(0).astype(int)
+    dataframe["manual_status"] = dataframe["manual_status"].map(normalize_outlier_manual_status)
+    return dataframe
+
+
+def _assign_lj_building_phase(
+    dataframe: pd.DataFrame,
+    target_count: int,
+) -> tuple[pd.DataFrame, int]:
+    effective_build_count = 0
+    build_boundary_index = len(dataframe) - 1
+    for index, row in dataframe.iterrows():
+        dataframe.at[index, "sequence"] = index + 1
+        dataframe.at[index, "effective_sequence"] = pd.NA
+        if effective_build_count < target_count:
+            dataframe.at[index, "phase"] = LJ_BUILDING_PHASE_LABEL
+            if bool(int(row.get("is_building_included", 1) or 0)):
+                effective_build_count += 1
+                dataframe.at[index, "effective_sequence"] = effective_build_count
+            build_boundary_index = index
+            continue
+        dataframe.at[index, "phase"] = LJ_FORMAL_PHASE_LABEL
+    if effective_build_count >= target_count:
+        return dataframe, int(build_boundary_index)
+    return dataframe, len(dataframe) - 1
+
+
+def _apply_lj_building_outlier_snapshot(
+    dataframe: pd.DataFrame,
+    target_count: int,
+) -> tuple[pd.DataFrame, dict]:
+    stats = _empty_lj_stats(target_count)
     if dataframe.empty:
+        return dataframe, stats
+
+    dataframe = _normalize_lj_result_columns(dataframe)
+    dataframe = dataframe.sort_values(["test_time", "id"]).reset_index(drop=True)
+    dataframe["sequence"] = pd.NA
+    dataframe["effective_sequence"] = pd.NA
+    dataframe["phase"] = LJ_BUILDING_PHASE_LABEL
+    dataframe["z"] = pd.NA
+    dataframe["status"] = "待建靶"
+    dataframe["rule_hits"] = ""
+    dataframe["error_type"] = "无"
+    dataframe["analysis_prompt"] = "建靶未完成，暂不进行 Westgard 判定。"
+    dataframe["is_outlier_suspect"] = 0
+    dataframe["outlier_method"] = ""
+    dataframe["grubbs_statistic"] = pd.NA
+    dataframe["grubbs_threshold"] = pd.NA
+
+    dataframe, build_boundary_index = _assign_lj_building_phase(dataframe, target_count)
+    build_mask = dataframe["phase"] == LJ_BUILDING_PHASE_LABEL
+    building_df = dataframe.loc[build_mask].copy()
+    effective_building_df = building_df[building_df["is_building_included"] == 1].copy()
+    formal_mask = dataframe["phase"] == LJ_FORMAL_PHASE_LABEL
+
+    stats["building_total_count"] = int(len(building_df))
+    stats["effective_building_count"] = int(len(effective_building_df))
+    stats["disabled_building_count"] = int((building_df["is_building_included"] == 0).sum())
+    stats["has_formal_started"] = bool(formal_mask.any())
+
+    if not building_df.empty:
+        dataframe.loc[build_mask, "status"] = LJ_BUILDING_PHASE_LABEL
+        dataframe.loc[build_mask, "analysis_prompt"] = "建靶数据，不参与 Westgard 规则判定。"
+
+    grubbs_result = calculate_grubbs_test(
+        effective_building_df["value"].astype(float).tolist(),
+        alpha=DEFAULT_GRUBBS_ALPHA,
+    )
+    suspect_build_id = None
+    if grubbs_result.get("is_suspect"):
+        suspected_index = int(grubbs_result.get("suspected_index") or 0)
+        suspect_row = effective_building_df.iloc[suspected_index]
+        suspect_build_id = int(suspect_row["id"])
+        stats["current_suspect_id"] = suspect_build_id
+
+    for index, row in dataframe.iterrows():
+        phase = str(row.get("phase") or LJ_BUILDING_PHASE_LABEL)
+        included = bool(int(row.get("is_building_included", 1) or 0))
+        manual_status = normalize_outlier_manual_status(row.get("manual_status"))
+        is_suspect = bool(phase == LJ_BUILDING_PHASE_LABEL and suspect_build_id == int(row["id"]))
+
+        dataframe.at[index, "is_outlier_suspect"] = int(is_suspect)
+        dataframe.at[index, "outlier_method"] = (
+            GRUBBS_METHOD_NAME
+            if phase == LJ_BUILDING_PHASE_LABEL and bool(grubbs_result.get("evaluation_ready"))
+            else ""
+        )
+        dataframe.at[index, "grubbs_threshold"] = (
+            grubbs_result.get("threshold")
+            if phase == LJ_BUILDING_PHASE_LABEL and bool(grubbs_result.get("evaluation_ready"))
+            else pd.NA
+        )
+        dataframe.at[index, "grubbs_statistic"] = (
+            grubbs_result.get("statistic")
+            if is_suspect
+            else pd.NA
+        )
+        dataframe.at[index, "outlier_status"] = derive_outlier_status(
+            is_building_included=included,
+            is_suspect=is_suspect,
+            manual_status=manual_status,
+        )
+
+        if phase != LJ_BUILDING_PHASE_LABEL:
+            continue
+        if not included:
+            dataframe.at[index, "status"] = "建靶禁用"
+            dataframe.at[index, "analysis_prompt"] = "该建靶点已禁用，不参与建靶统计与建靶图。"
+            continue
+        if manual_status == OUTLIER_MANUAL_STATUS_KEEP:
+            dataframe.at[index, "status"] = "建靶保留"
+            dataframe.at[index, "analysis_prompt"] = "该建靶点已人工保留，继续参与建靶统计。"
+            continue
+        if manual_status == OUTLIER_MANUAL_STATUS_RESTORED:
+            dataframe.at[index, "status"] = "建靶恢复"
+            dataframe.at[index, "analysis_prompt"] = "该建靶点已恢复参与建靶统计。"
+            continue
+        if is_suspect:
+            dataframe.at[index, "status"] = "建靶疑似离群"
+            dataframe.at[index, "analysis_prompt"] = (
+                f"当前建靶点触发 Grubbs 疑似离群提示："
+                f"G={float(grubbs_result.get('statistic') or 0.0):.4f}，"
+                f"G临界值={float(grubbs_result.get('threshold') or 0.0):.4f}，"
+                f"alpha={DEFAULT_GRUBBS_ALPHA:.2f}。"
+            )
+
+    if not effective_building_df.empty:
+        mean = float(effective_building_df["value"].mean())
+        stats["mean"] = mean
+        if len(effective_building_df) >= 2:
+            sd = float(effective_building_df["value"].std(ddof=1))
+            stats["sd"] = sd
+            if not math.isclose(mean, 0.0, abs_tol=1e-12):
+                stats["cv"] = float(sd / mean * 100)
+
+    stats["target_ready"] = int(len(effective_building_df)) >= int(target_count) and stats["sd"] is not None
+    if stats["target_ready"]:
+        stats["message"] = "建靶已完成，后续结果会自动进行 Westgard 质控判定。"
+    else:
+        remaining = max(int(target_count) - int(len(effective_building_df)), 0)
+        stats["message"] = f"当前建靶未完成，还需补充 {remaining} 个有效建靶点。"
+
+    if suspect_build_id is not None:
+        suspect_row = dataframe.loc[dataframe["id"] == suspect_build_id].iloc[0]
+        stats["current_suspect_row"] = suspect_row.to_dict()
+    return dataframe, stats
+
+
+def calculate_qc_results(results_df: pd.DataFrame, target_count: int) -> tuple[pd.DataFrame, dict]:
+    stats = _empty_lj_stats(target_count)
+    if results_df.empty:
         return _empty_qc_dataframe(results_df), stats
 
-    dataframe = dataframe.sort_values(["test_time", "id"]).reset_index(drop=True)
-    dataframe["sequence"] = dataframe.index + 1
-    dataframe["phase"] = dataframe["sequence"].apply(
-        lambda seq: "\u5efa\u9776\u6570\u636e" if seq <= target_count else "\u6b63\u5f0f\u6570\u636e"
-    )
-    dataframe["z"] = pd.NA
-    dataframe["status"] = "\u5f85\u5efa\u9776"
-    dataframe["rule_hits"] = ""
-    dataframe["error_type"] = "\u65e0"
-    dataframe["analysis_prompt"] = "\u5efa\u9776\u672a\u5b8c\u6210\uff0c\u6682\u4e0d\u8fdb\u884c Westgard \u5224\u5b9a\u3002"
-
-    if len(dataframe) < target_count:
+    dataframe, stats = _apply_lj_building_outlier_snapshot(results_df, target_count)
+    formal_mask = dataframe["phase"] == LJ_FORMAL_PHASE_LABEL
+    if not stats.get("target_ready"):
+        latest_row = dataframe.sort_values(["test_time", "id"]).iloc[-1]
+        stats["latest_analysis"] = str(latest_row.get("analysis_prompt", stats["latest_analysis"]))
         return dataframe, stats
 
-    target_df = dataframe.iloc[:target_count].copy()
-    mean = float(target_df["value"].mean())
-    sd = float(target_df["value"].std(ddof=1))
-    cv = None if math.isclose(mean, 0.0, abs_tol=1e-12) else float(sd / mean * 100)
-
-    stats = {
-        "mean": mean,
-        "sd": sd,
-        "cv": cv,
-        "target_ready": True,
-        "message": (
-            "\u5efa\u9776\u5df2\u5b8c\u6210\uff0c"
-            "\u540e\u7eed\u7ed3\u679c\u4f1a\u81ea\u52a8\u8fdb\u884c Westgard \u8d28\u63a7\u5224\u5b9a\u3002"
-        ),
-        "latest_analysis": "\u6682\u65e0\u6b63\u5f0f\u8d28\u63a7\u6570\u636e\u3002",
-        "rule_summary": _empty_rule_summary(),
-    }
-
-    build_mask = dataframe["sequence"] <= target_count
-    dataframe.loc[build_mask, "status"] = "\u5efa\u9776\u6570\u636e"
-    dataframe.loc[build_mask, "analysis_prompt"] = "\u5efa\u9776\u6570\u636e\uff0c\u4e0d\u53c2\u4e0e Westgard \u89c4\u5219\u5224\u5b9a\u3002"
-
-    if math.isclose(sd, 0.0, abs_tol=1e-12):
-        formal_mask = dataframe["sequence"] > target_count
-        dataframe.loc[formal_mask, "status"] = "\u65e0\u6cd5\u5224\u5b9a\uff08SD=0\uff09"
-        dataframe.loc[formal_mask, "analysis_prompt"] = (
-            "\u5efa\u9776\u5df2\u5b8c\u6210\uff0c\u4f46 SD=0\uff0c\u6682\u65f6\u65e0\u6cd5\u8fdb\u884c Westgard \u89c4\u5219\u5206\u6790\u3002"
-        )
-        stats["message"] = (
-            "\u5efa\u9776\u5df2\u5b8c\u6210\uff0c\u4f46 SD=0\uff0c"
-            "\u540e\u7eed\u7ed3\u679c\u6682\u65f6\u65e0\u6cd5\u8ba1\u7b97 z \u503c\u548c Westgard \u89c4\u5219\u3002"
-        )
-        stats["latest_analysis"] = dataframe.loc[formal_mask, "analysis_prompt"].iloc[-1] if formal_mask.any() else stats["latest_analysis"]
+    if math.isclose(float(stats["sd"]), 0.0, abs_tol=1e-12):
+        dataframe.loc[formal_mask, "status"] = "无法判定（SD=0）"
+        dataframe.loc[formal_mask, "analysis_prompt"] = "建靶已完成，但 SD=0，暂时无法进行 Westgard 规则分析。"
+        stats["message"] = "建靶已完成，但 SD=0，后续结果暂时无法计算 z 值和 Westgard 规则。"
+        if formal_mask.any():
+            stats["latest_analysis"] = dataframe.loc[formal_mask, "analysis_prompt"].iloc[-1]
         return dataframe, stats
 
-    formal_mask = dataframe["sequence"] > target_count
     dataframe.loc[formal_mask, "z"] = (
-        dataframe.loc[formal_mask, "value"] - mean
-    ) / sd
+        dataframe.loc[formal_mask, "value"] - float(stats["mean"])
+    ) / float(stats["sd"])
     _apply_westgard_rules(dataframe, formal_mask)
 
     formal_df = dataframe.loc[formal_mask].copy()
     if not formal_df.empty:
         stats["latest_analysis"] = _build_latest_analysis(formal_df.iloc[-1])
         stats["rule_summary"] = _build_rule_summary(formal_df)
+    else:
+        latest_row = dataframe.sort_values(["test_time", "id"]).iloc[-1]
+        stats["latest_analysis"] = str(latest_row.get("analysis_prompt", stats["latest_analysis"]))
     return dataframe, stats
 
 
@@ -161,6 +335,8 @@ def calculate_target_building_cv_hint(results_df: pd.DataFrame, target_count: in
     # This helper is only for build-stage CV reminders and must not affect existing判读逻辑.
     empty_hint = {
         "collected_n": 0,
+        "effective_n": 0,
+        "disabled_n": 0,
         "evaluated_n": 0,
         "mean": None,
         "sd": None,
@@ -171,31 +347,19 @@ def calculate_target_building_cv_hint(results_df: pd.DataFrame, target_count: in
     if results_df.empty:
         return empty_hint
 
-    dataframe = results_df.copy().sort_values(["test_time", "id"]).reset_index(drop=True)
-    evaluated_n = min(len(dataframe), int(target_count))
-    if evaluated_n <= 0:
-        return empty_hint
-
-    building_df = dataframe.iloc[:evaluated_n].copy()
-    mean = float(building_df["value"].mean()) if not building_df.empty else None
-    if len(building_df) < 2:
-        return {
-            **empty_hint,
-            "collected_n": len(building_df),
-            "evaluated_n": evaluated_n,
-            "mean": mean,
-        }
-
-    sd = float(building_df["value"].std(ddof=1))
-    cv = None if mean is None or math.isclose(mean, 0.0, abs_tol=1e-12) else float(sd / mean * 100)
+    qc_df, stats = calculate_qc_results(results_df, target_count)
+    building_df = qc_df[qc_df["phase"] == LJ_BUILDING_PHASE_LABEL].copy()
+    effective_building_df = building_df[building_df["is_building_included"] == 1].copy()
     return {
         "collected_n": len(building_df),
-        "evaluated_n": evaluated_n,
-        "mean": mean,
-        "sd": sd,
-        "cv": cv,
-        "can_evaluate": cv is not None,
-        "target_ready": len(building_df) >= int(target_count) and cv is not None,
+        "effective_n": len(effective_building_df),
+        "disabled_n": int((building_df["is_building_included"] == 0).sum()),
+        "evaluated_n": len(effective_building_df),
+        "mean": stats.get("mean"),
+        "sd": stats.get("sd"),
+        "cv": stats.get("cv"),
+        "can_evaluate": stats.get("cv") is not None,
+        "target_ready": bool(stats.get("target_ready")),
     }
 
 
@@ -227,7 +391,7 @@ def calculate_realtime_stats(
         return empty_stats, "\u6682\u65e0\u6570\u636e\uff0c\u65e0\u6cd5\u8ba1\u7b97\u5b9e\u65f6\u7edf\u8ba1\u3002"
 
     qc_df, _ = calculate_qc_results(results_df, target_n)
-    formal_df = qc_df[qc_df["phase"] == "\u6b63\u5f0f\u6570\u636e"].copy()
+    formal_df = qc_df[qc_df["phase"] == LJ_FORMAL_PHASE_LABEL].copy()
     if formal_df.empty:
         return empty_stats, "\u6682\u65e0\u6b63\u5f0f\u8d28\u63a7\u6570\u636e\uff0c\u65e0\u6cd5\u8ba1\u7b97\u5b9e\u65f6\u7edf\u8ba1\u3002"
 
@@ -255,6 +419,79 @@ def calculate_realtime_stats(
     sd = float(filtered["value"].std(ddof=1))
     cv = None if math.isclose(mean, 0.0, abs_tol=1e-12) else float(sd / mean * 100)
     return {"mean": mean, "sd": sd, "cv": cv}, ""
+
+
+def persist_lj_batch_outlier_snapshot(batch_id: int) -> tuple[pd.DataFrame, dict]:
+    batch = get_batch(batch_id)
+    results_df = get_results(batch_id, include_manual_note=True)
+    if results_df.empty:
+        return _empty_qc_dataframe(results_df), _empty_lj_stats(int(batch["target_n"]))
+
+    qc_df, stats = calculate_qc_results(results_df, int(batch["target_n"]))
+    save_result_outlier_snapshot(
+        batch_id,
+        qc_df[
+            [
+                "id",
+                "is_outlier_suspect",
+                "outlier_status",
+                "outlier_method",
+                "grubbs_statistic",
+                "grubbs_threshold",
+            ]
+        ].to_dict(orient="records"),
+    )
+    return qc_df, stats
+
+
+def _get_lj_building_row_for_action(result_id: int) -> tuple[pd.Series, dict]:
+    result_row = get_result(result_id)
+    batch_id = int(result_row["batch_id"])
+    batch = get_batch(batch_id)
+    results_df = get_results(batch_id, include_manual_note=True)
+    qc_df, stats = calculate_qc_results(results_df, int(batch["target_n"]))
+    selected_rows = qc_df[qc_df["id"] == int(result_id)]
+    if selected_rows.empty:
+        raise ValueError(f"未找到检测记录 {result_id}")
+    selected_row = selected_rows.iloc[0]
+    if str(selected_row.get("phase")) != LJ_BUILDING_PHASE_LABEL:
+        raise ValueError("仅建靶期记录支持离群值处理。")
+    if bool(stats.get("has_formal_started")):
+        raise ValueError("正式期启用后不再允许调整 LJ 建靶期离群值状态。")
+    return selected_row, stats
+
+
+def disable_lj_building_result(result_id: int) -> tuple[pd.DataFrame, dict]:
+    selected_row, _ = _get_lj_building_row_for_action(result_id)
+    set_result_building_inclusion_state(
+        int(selected_row["id"]),
+        is_building_included=0,
+        manual_status=OUTLIER_MANUAL_STATUS_DISABLED,
+        handled_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    return persist_lj_batch_outlier_snapshot(int(selected_row["batch_id"]))
+
+
+def restore_lj_building_result(result_id: int) -> tuple[pd.DataFrame, dict]:
+    selected_row, _ = _get_lj_building_row_for_action(result_id)
+    set_result_building_inclusion_state(
+        int(selected_row["id"]),
+        is_building_included=1,
+        manual_status=OUTLIER_MANUAL_STATUS_RESTORED,
+        handled_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    return persist_lj_batch_outlier_snapshot(int(selected_row["batch_id"]))
+
+
+def keep_lj_building_result(result_id: int) -> tuple[pd.DataFrame, dict]:
+    selected_row, _ = _get_lj_building_row_for_action(result_id)
+    set_result_building_inclusion_state(
+        int(selected_row["id"]),
+        is_building_included=1,
+        manual_status=OUTLIER_MANUAL_STATUS_KEEP,
+        handled_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    )
+    return persist_lj_batch_outlier_snapshot(int(selected_row["batch_id"]))
 
 
 def _apply_westgard_rules(dataframe: pd.DataFrame, formal_mask: pd.Series) -> None:
