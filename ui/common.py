@@ -4,6 +4,7 @@ import math
 from html import escape as html_escape
 from textwrap import dedent
 from typing import Any
+from urllib.parse import quote
 
 import pandas as pd
 import streamlit as st
@@ -106,32 +107,91 @@ ZSCORE_PHASE_VIEW_OPTIONS = {
 ZSCORE_Y_AXIS_OPTIONS = ["标准视图", "全范围视图"]
 
 APP_TITLE = TEXT["app_title"]
-APP_WATERMARK_TEXT = "本软件由邦德盛开发，该版本仅供演示或试用。"
+
+GLOBAL_PAGE_WATERMARK_TEXT = "本软件由邦德盛开发，该版本仅供演示或试用。"
+GLOBAL_PAGE_WATERMARK_ROTATION_DEGREES = -24
+GLOBAL_PAGE_WATERMARK_FONT_SIZE_PX = 28
+GLOBAL_PAGE_WATERMARK_FILL_COLOR = "#c3ccd9"
+GLOBAL_PAGE_WATERMARK_FILL_OPACITY = 0.18
+GLOBAL_PAGE_WATERMARK_TILE_WIDTH_PX = 760
+GLOBAL_PAGE_WATERMARK_TILE_HEIGHT_PX = 260
+GLOBAL_PAGE_WATERMARK_LAYER_Z_INDEX = 1000
+
+
+def _build_global_watermark_data_uri() -> str:
+    center_x = GLOBAL_PAGE_WATERMARK_TILE_WIDTH_PX / 2
+    center_y = GLOBAL_PAGE_WATERMARK_TILE_HEIGHT_PX / 2
+    watermark_svg = dedent(
+        f"""
+        <svg xmlns="http://www.w3.org/2000/svg" width="{GLOBAL_PAGE_WATERMARK_TILE_WIDTH_PX}" height="{GLOBAL_PAGE_WATERMARK_TILE_HEIGHT_PX}" viewBox="0 0 {GLOBAL_PAGE_WATERMARK_TILE_WIDTH_PX} {GLOBAL_PAGE_WATERMARK_TILE_HEIGHT_PX}">
+            <rect width="100%" height="100%" fill="transparent" />
+            <text
+                x="{center_x:.1f}"
+                y="{center_y:.1f}"
+                text-anchor="middle"
+                dominant-baseline="middle"
+                font-family="Microsoft YaHei, Noto Sans CJK SC, SimHei, sans-serif"
+                font-size="{GLOBAL_PAGE_WATERMARK_FONT_SIZE_PX}"
+                font-weight="500"
+                fill="{GLOBAL_PAGE_WATERMARK_FILL_COLOR}"
+                fill-opacity="{GLOBAL_PAGE_WATERMARK_FILL_OPACITY:.2f}"
+                transform="rotate({GLOBAL_PAGE_WATERMARK_ROTATION_DEGREES} {center_x:.1f} {center_y:.1f})"
+            >{html_escape(GLOBAL_PAGE_WATERMARK_TEXT)}</text>
+        </svg>
+        """
+    ).strip()
+    return f"data:image/svg+xml;charset=utf-8,{quote(watermark_svg)}"
+
 
 def inject_global_styles() -> None:
+    watermark_data_uri = _build_global_watermark_data_uri()
+    watermark_style = dedent(
+        f"""
+        /* WATERMARK_TEXT: {GLOBAL_PAGE_WATERMARK_TEXT} */
+        body::before {{
+            content: "";
+            position: fixed;
+            inset: 0;
+            z-index: {GLOBAL_PAGE_WATERMARK_LAYER_Z_INDEX};
+            pointer-events: none;
+            user-select: none;
+            background-color: transparent;
+            background-image: url("{watermark_data_uri}");
+            background-repeat: repeat;
+            background-position: 48px 28px;
+            background-size: {GLOBAL_PAGE_WATERMARK_TILE_WIDTH_PX}px {GLOBAL_PAGE_WATERMARK_TILE_HEIGHT_PX}px;
+        }}
+        """
+    ).strip()
     st.markdown(
         """
         <style>
-        /* WATERMARK_TEXT: __APP_WATERMARK_TEXT__ */
         [data-testid="stSidebarNav"],
         [data-testid="stSidebarNavItems"],
         [data-testid="stSidebarNavSeparator"],
         [data-testid="collapsedControl"] {
             display: none !important;
         }
-        .stApp {
-            background:
-                url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHdpZHRoPScxNjAwJyBoZWlnaHQ9JzkwMCcgdmlld0JveD0nMCAwIDE2MDAgOTAwJz4KICA8ZyB0cmFuc2Zvcm09J3JvdGF0ZSgtMjQgODAwIDQ1MCknPgogICAgPHRleHQgeD0nMjIwJyB5PScyNTAnIGZvbnQtZmFtaWx5PSdNaWNyb3NvZnQgWWFIZWksIFNpbUhlaSwgU2Vnb2UgVUksIEFyaWFsLCBzYW5zLXNlcmlmJyBmb250LXNpemU9JzI0JyBmb250LXdlaWdodD0nNzAwJyBmaWxsPScjYzRjY2Q3JyBmaWxsLW9wYWNpdHk9JzAuMjQnPuacrOi9r+S7tueUsemCpuW+t+ebm+W8gOWPke+8jOivpeeJiOacrOS7heS+m+a8lOekuuaIluivleeUqOOAgjwvdGV4dD4KICAgIDx0ZXh0IHg9JzEwNDAnIHk9JzI1MCcgZm9udC1mYW1pbHk9J01pY3Jvc29mdCBZYUhlaSwgU2ltSGVpLCBTZWdvZSBVSSwgQXJpYWwsIHNhbnMtc2VyaWYnIGZvbnQtc2l6ZT0nMjQnIGZvbnQtd2VpZ2h0PSc3MDAnIGZpbGw9JyNjNGNjZDcnIGZpbGwtb3BhY2l0eT0nMC4yNCc+5pys6L2v5Lu255Sx6YKm5b6355ub5byA5Y+R77yM6K+l54mI5pys5LuF5L6b5ryU56S65oiW6K+V55So44CCPC90ZXh0PgogICAgPHRleHQgeD0nMTIwJyB5PSc2NjAnIGZvbnQtZmFtaWx5PSdNaWNyb3NvZnQgWWFIZWksIFNpbUhlaSwgU2Vnb2UgVUksIEFyaWFsLCBzYW5zLXNlcmlmJyBmb250LXNpemU9JzI0JyBmb250LXdlaWdodD0nNzAwJyBmaWxsPScjYzRjY2Q3JyBmaWxsLW9wYWNpdHk9JzAuMjQnPuacrOi9r+S7tueUsemCpuW+t+ebm+W8gOWPke+8jOivpeeJiOacrOS7heS+m+a8lOekuuaIluivleeUqOOAgjwvdGV4dD4KICAgIDx0ZXh0IHg9Jzk0MCcgeT0nNjYwJyBmb250LWZhbWlseT0nTWljcm9zb2Z0IFlhSGVpLCBTaW1IZWksIFNlZ29lIFVJLCBBcmlhbCwgc2Fucy1zZXJpZicgZm9udC1zaXplPScyNCcgZm9udC13ZWlnaHQ9JzcwMCcgZmlsbD0nI2M0Y2NkNycgZmlsbC1vcGFjaXR5PScwLjI0Jz7mnKzova/ku7bnlLHpgqblvrfnm5vlvIDlj5HvvIzor6XniYjmnKzku4XkvpvmvJTnpLrmiJbor5XnlKjjgII8L3RleHQ+CiAgPC9nPgo8L3N2Zz4="),
-                radial-gradient(circle at top left, rgba(24, 77, 141, 0.05), transparent 24%),
-                linear-gradient(180deg, #f4f7fb 0%, #f8fafc 100%);
-            background-attachment: fixed, scroll, scroll;
-            background-repeat: repeat, no-repeat, no-repeat;
-            background-size: 1600px 900px, auto, auto;
+        /* Keep the root shell visible; global decoration must never cover the page. */
+        .stApp,
+        [data-testid="stAppViewContainer"],
+        section.main,
+        section.main > div.block-container {
+            opacity: 1 !important;
+            visibility: visible !important;
         }
+        .stApp,
+        [data-testid="stAppViewContainer"] {
+            background: transparent;
+        }
+        """
+        + "\n"
+        + watermark_style
+        + "\n"
+        + """
         section.main > div.block-container {
             padding-top: 1.1rem;
             padding-bottom: 2rem;
-            max-width: 1460px;
         }
         div[data-testid="stVerticalBlockBorderWrapper"] {
             border-radius: 18px !important;
@@ -972,7 +1032,7 @@ def inject_global_styles() -> None:
             word-break: break-word;
         }
         </style>
-        """.replace("__APP_WATERMARK_TEXT__", APP_WATERMARK_TEXT),
+        """,
         unsafe_allow_html=True,
     )
 

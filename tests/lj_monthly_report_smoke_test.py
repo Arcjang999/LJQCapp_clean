@@ -33,7 +33,7 @@ from services.report_service import (
 )
 from services.report_pdf_layout import DECLARATION_TEXT_WIDTH, _wrap_text
 from services.settings_service import REPORT_SETTINGS_FALLBACKS, save_report_settings_form
-from tests.report_pdf_assertions import assert_uniform_a4_pages_and_watermark
+from tests.report_pdf_assertions import assert_uniform_a4_pages_without_watermark
 
 
 LJ_PAGE_APPTEST_SCRIPT = """
@@ -183,7 +183,7 @@ def test_lj_monthly_report_builds_pdf_and_snapshot() -> None:
         pdf_bytes = build_lj_monthly_report_pdf(package)
         assert pdf_bytes.startswith(b"%PDF")
 
-        reader = assert_uniform_a4_pages_and_watermark(pdf_bytes)
+        reader = assert_uniform_a4_pages_without_watermark(pdf_bytes)
         assert len(reader.pages) == 4
         assert str(reader.metadata.get("/Subject", "")) == REPORT_TYPE_LJ_MONTHLY
 
@@ -234,7 +234,7 @@ def test_lj_monthly_report_uses_business_text_for_single_record_and_no_abnormal(
 
 
         pdf_bytes = build_lj_monthly_report_pdf(package)
-        reader = assert_uniform_a4_pages_and_watermark(pdf_bytes)
+        reader = assert_uniform_a4_pages_without_watermark(pdf_bytes)
         assert len(reader.pages) == 3
 
 

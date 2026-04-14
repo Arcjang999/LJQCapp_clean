@@ -15,6 +15,7 @@ import database
 from database import init_db
 from pages.main_page import INSTANT_ENTRY_LABEL, LJ_ENTRY_LABEL, MAIN_ENTRY_LABEL, ZSCORE_ENTRY_LABEL
 from services.settings_service import get_report_settings
+from ui.common import GLOBAL_PAGE_WATERMARK_TEXT
 
 
 APP_FILE_PATH = str(PROJECT_ROOT / "app.py")
@@ -43,10 +44,25 @@ def _assert_global_navigation_and_watermark(at: AppTest) -> None:
     assert st.get_option("client.showSidebarNavigation") is False
     style_markup = " ".join(str(item.value) for item in at.markdown)
     assert '[data-testid="stSidebarNav"]' in style_markup
-    assert "WATERMARK_TEXT: 本软件由邦德盛开发，该版本仅供演示或试用。" in style_markup
-    assert "data:image/svg+xml;base64" in style_markup
-    assert "LJQCApp" not in style_markup
-    assert "Quality Control" not in style_markup
+    assert "WATERMARK_TEXT:" in style_markup
+    assert GLOBAL_PAGE_WATERMARK_TEXT in style_markup
+    assert "body::before" in style_markup
+    assert ".stApp::before" not in style_markup
+    assert ".stApp::after" not in style_markup
+    assert '[data-testid="stAppViewContainer"]::before' not in style_markup
+    assert '[data-testid="stAppViewContainer"]::after' not in style_markup
+    assert "data:image/svg+xml;charset=utf-8," in style_markup
+    assert "position: fixed" in style_markup
+    assert "inset: 0" in style_markup
+    assert "pointer-events: none" in style_markup
+    assert "background-color: transparent" in style_markup
+    assert "background-repeat: repeat" in style_markup
+    assert "background-size:" in style_markup
+    assert "visibility: hidden !important" not in style_markup
+    assert "opacity: 0 !important" not in style_markup
+    assert "opacity:0!important" not in style_markup
+    assert "opacity: 1 !important" in style_markup
+    assert "visibility: visible !important" in style_markup
 
 
 def test_global_navigation_and_watermark_apply_to_top_level_pages() -> None:

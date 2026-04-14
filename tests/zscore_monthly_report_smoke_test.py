@@ -30,7 +30,7 @@ from services.report_service import (
     save_zscore_monthly_report_snapshot,
 )
 from services.settings_service import REPORT_SETTINGS_FALLBACKS, save_report_settings_form
-from tests.report_pdf_assertions import assert_uniform_a4_pages_and_watermark
+from tests.report_pdf_assertions import assert_uniform_a4_pages_without_watermark
 from zscore_logic import create_zscore_run, get_template_id_for_level_count
 
 
@@ -219,7 +219,7 @@ def test_zscore_monthly_report_builds_pdf_and_snapshot() -> None:
         pdf_bytes = build_zscore_monthly_report_pdf(package)
         assert pdf_bytes.startswith(b"%PDF")
 
-        reader = assert_uniform_a4_pages_and_watermark(pdf_bytes)
+        reader = assert_uniform_a4_pages_without_watermark(pdf_bytes)
         assert len(reader.pages) == 6
         assert str(reader.metadata.get("/Subject", "")) == REPORT_TYPE_ZSCORE_MONTHLY
 
@@ -264,7 +264,7 @@ def test_zscore_monthly_report_outputs_three_single_level_chart_pages() -> None:
         assert package.report.abnormal_records == []
 
         pdf_bytes = build_zscore_monthly_report_pdf(package)
-        reader = assert_uniform_a4_pages_and_watermark(pdf_bytes)
+        reader = assert_uniform_a4_pages_without_watermark(pdf_bytes)
 
         assert len(reader.pages) == 6
 

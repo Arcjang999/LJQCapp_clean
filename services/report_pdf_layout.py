@@ -45,16 +45,6 @@ DECLARATION_TEXT_WIDTH = 46
 CHART_AXES_RECT = [0.10, 0.150, 0.80, 0.610]
 FOOTER_DIVIDER_Y = 0.085
 FOOTER_TEXT_Y = 0.055
-WATERMARK_COLOR = "#c4ccd7"
-WATERMARK_TEXT = "本软件由邦德盛开发，该版本仅供演示或试用。"
-WATERMARK_ALPHA = 0.24
-WATERMARK_FONT_SIZE = 17
-WATERMARK_ROTATION = 31
-WATERMARK_Y_POSITIONS = [0.14, 0.34, 0.54, 0.74, 0.94]
-WATERMARK_ROW_X_POSITIONS = [
-    [-0.04, 0.42, 0.88],
-    [0.18, 0.64, 1.10],
-]
 PDF_AUTHOR = "邦德盛"
 PDF_CREATOR = "邦德盛"
 
@@ -139,7 +129,6 @@ def render_zscore_monthly_report_pdf(package: Any, font_name: str) -> bytes:
 def _write_pages(pdf, pages: list[tuple[Any, str]], report: Any) -> None:
     total_pages = len(pages)
     for page_index, (figure, footer_label) in enumerate(pages, start=1):
-        _apply_page_watermark(figure=figure)
         _apply_page_footer(
             figure=figure,
             method_label=report.method_label,
@@ -670,26 +659,6 @@ def _decorate_chart_page(
     )
     if figure.axes:
         figure.axes[0].set_position(CHART_AXES_RECT)
-
-
-def _apply_page_watermark(*, figure) -> None:
-    for row_index, y_position in enumerate(WATERMARK_Y_POSITIONS):
-        for x_position in WATERMARK_ROW_X_POSITIONS[row_index % len(WATERMARK_ROW_X_POSITIONS)]:
-            figure.text(
-                x_position,
-                y_position,
-                WATERMARK_TEXT,
-                ha="center",
-                va="center",
-                fontsize=WATERMARK_FONT_SIZE,
-                fontweight="bold",
-                color=WATERMARK_COLOR,
-                alpha=WATERMARK_ALPHA,
-                rotation=WATERMARK_ROTATION,
-                zorder=0,
-            )
-
-
 def _apply_page_footer(
     *,
     figure,
