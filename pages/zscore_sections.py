@@ -494,6 +494,7 @@ def _restore_zscore_chart_control_state_if_requested(
     template: dict[str, Any],
     default_phase_scope: str,
 ) -> bool:
+    valid_view_modes = {"单水平视图", "合并视图"}
     restore_requested = bool(st.session_state.get("zscore_restore_chart_controls", False))
     st.session_state["zscore_restore_chart_controls"] = False
     if not restore_requested:
@@ -515,8 +516,8 @@ def _restore_zscore_chart_control_state_if_requested(
     restored_view_mode = st.session_state.pop("zscore_view_mode__restore", None)
     if restored_view_mode is None:
         restored_view_mode = st.session_state.get("zscore_view_mode__saved")
-    if restored_view_mode not in {"鍗曟按骞宠鍥?", "鍚堝苟瑙嗗浘"}:
-        restored_view_mode = "鍗曟按骞宠鍥?"
+    if restored_view_mode not in valid_view_modes:
+        restored_view_mode = "单水平视图"
     st.session_state["zscore_view_mode"] = restored_view_mode
 
     restored_selected_level = st.session_state.pop("zscore_selected_level__restore", None)

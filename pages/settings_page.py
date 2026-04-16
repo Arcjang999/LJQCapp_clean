@@ -38,6 +38,25 @@ STORAGE_SESSION_KEYS = {
 }
 
 
+def _format_settings_path_summary(path: Path | None, *, tail_parts: int = 2) -> str:
+    if path is None:
+        return "-"
+
+    path_text = str(path)
+    if len(path_text) <= 44:
+        return path_text
+
+    anchor = path.anchor.rstrip("\\/")
+    remainder_parts = list(path.parts[1:] if anchor else path.parts)
+    if len(remainder_parts) <= tail_parts:
+        return path_text
+
+    suffix = "\\".join(remainder_parts[-tail_parts:])
+    if anchor:
+        return f"{anchor}\\...\\{suffix}"
+    return f"...\\{suffix}"
+
+
 def render_settings_page() -> None:
     current_settings = get_report_settings()
     if bool(st.session_state.get("refresh_settings_form", False)):
@@ -46,7 +65,7 @@ def render_settings_page() -> None:
     else:
         _hydrate_settings_form_state(current_settings, force=False)
 
-    action_column, _ = st.columns([0.22, 0.78], gap="small")
+    action_column, _ = st.columns([0.28, 0.72], gap="small")
     with action_column:
         if st.button("返回当前页面", key="close_settings_page", use_container_width=True):
             st.session_state["show_settings_page"] = False
@@ -91,7 +110,7 @@ def render_settings_page() -> None:
             badges=["常规配置", "影响 LJ / Z-score 月报"],
             tone="accent",
         )
-        info_left, info_right = st.columns(2, gap="large")
+        info_left, info_right = st.columns(2, gap="medium")
         with info_left:
             st.text_input("实验室名称", key=SETTINGS_FORM_FIELD_MAP["lab_name"])
             st.text_input("质控负责人", key=SETTINGS_FORM_FIELD_MAP["qc_owner_name"])
@@ -155,10 +174,10 @@ def _render_storage_section() -> None:
         title="当前数据库位置",
         caption=status.status_text,
         items=[
-            ("当前数据库文件", str(status.db_path)),
-            ("当前数据库目录", str(status.db_dir)),
-            ("路径配置文件", str(status.config_path)),
-            ("默认备份目录", str(status.default_backup_dir)),
+            ("当前数据库文件", _format_settings_path_summary(status.db_path)),
+            ("当前数据库目录", _format_settings_path_summary(status.db_dir)),
+            ("路径配置文件", _format_settings_path_summary(status.config_path)),
+            ("默认备份目录", _format_settings_path_summary(status.default_backup_dir)),
         ],
         badges=[
             "已使用外部路径配置" if status.configured_db_path is not None else "使用默认数据库路径",
@@ -166,7 +185,7 @@ def _render_storage_section() -> None:
         ],
     )
 
-    location_col, action_col = st.columns([1.1, 0.9], gap="large")
+    location_col, action_col = st.columns([1.1, 0.9], gap="medium")
     with location_col:
         render_compact_stat_metrics(
             [
@@ -210,7 +229,7 @@ def _render_storage_section() -> None:
 
     st.markdown("**数据库迁移**")
     st.caption("通过系统目录选择器选择新的数据库存储目录；迁移成功后需要重启应用。")
-    migration_left, migration_right = st.columns([1.1, 0.9], gap="large")
+    migration_left, migration_right = st.columns([1.1, 0.9], gap="medium")
     with migration_left:
         if st.button("选择新目录", key="pick_storage_migration_dir", use_container_width=True):
             try:
@@ -256,7 +275,7 @@ def _render_storage_section() -> None:
 
     st.markdown("**数据备份**")
     st.caption("支持直接备份到默认目录，也支持先选目录再立即备份。")
-    backup_left, backup_right = st.columns(2, gap="small")
+    backup_left, backup_right = st.columns(2, gap="medium")
     with backup_left:
         if st.button("立即备份到默认目录", key="backup_default_dir", use_container_width=True):
             try:

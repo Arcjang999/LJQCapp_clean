@@ -431,16 +431,28 @@ def render_records_table(display_df: pd.DataFrame) -> None:
         st.info("当前批次暂无检测记录。")
         return
 
+    def resolve_column_class(column_name: str) -> str:
+        if column_name in {"检测序号", "生效建靶序号", "阶段", "判定结果", "疑似离群", "参与建靶统计"}:
+            return "qc-records-col-narrow"
+        if column_name in {"检测时间", "检测人", "处理时间", "触发规则", "分析提示", "备注"}:
+            return "qc-records-col-wide"
+        return "qc-records-col-default"
+
     html_rows: list[str] = []
     for _, row in display_df.iterrows():
         row_cells: list[str] = []
         for column_name in display_df.columns:
             value = "" if pd.isna(row[column_name]) else str(row[column_name])
             cell_text = html_escape(value).replace("\n", "<br>")
-            row_cells.append(f'<td title="{html_escape(value)}">{cell_text}</td>')
+            row_cells.append(
+                f'<td class="{resolve_column_class(str(column_name))}" title="{html_escape(value)}">{cell_text}</td>'
+            )
         html_rows.append("<tr>" + "".join(row_cells) + "</tr>")
 
-    headers = "".join(f"<th>{html_escape(str(column))}</th>" for column in display_df.columns)
+    headers = "".join(
+        f'<th class="{resolve_column_class(str(column))}">{html_escape(str(column))}</th>'
+        for column in display_df.columns
+    )
     records_html = dedent(
         f"""
         <div class="qc-records-wrapper">
@@ -448,19 +460,26 @@ def render_records_table(display_df: pd.DataFrame) -> None:
             .qc-records-wrapper {{
                 width: 100%;
                 overflow-x: auto;
+                border: 1px solid #d9dde7;
+                border-radius: 14px;
+                background: #ffffff;
             }}
             .qc-records-table {{
-                width: 100%;
+                width: max-content;
+                min-width: 100%;
                 border-collapse: collapse;
-                table-layout: fixed;
+                table-layout: auto;
                 font-size: 13px;
             }}
             .qc-records-table th,
             .qc-records-table td {{
+                min-width: 104px;
+                max-width: 260px;
                 border: 1px solid #d9dde7;
-                padding: 8px 10px;
+                padding: 9px 10px;
                 vertical-align: top;
                 white-space: normal;
+                overflow-wrap: anywhere;
                 word-break: break-word;
                 line-height: 1.55;
             }}
@@ -468,6 +487,17 @@ def render_records_table(display_df: pd.DataFrame) -> None:
                 background: #f2f5fa;
                 font-weight: 700;
                 color: #223045;
+                position: sticky;
+                top: 0;
+                z-index: 1;
+            }}
+            .qc-records-table .qc-records-col-narrow {{
+                min-width: 86px;
+                max-width: 128px;
+            }}
+            .qc-records-table .qc-records-col-wide {{
+                min-width: 156px;
+                max-width: 360px;
             }}
             .qc-records-table tbody tr:nth-child(even) {{
                 background: #fbfcfe;

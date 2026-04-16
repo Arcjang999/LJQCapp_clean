@@ -715,7 +715,7 @@ def render_lj_rule_summary_section(stats: dict[str, object]) -> None:
 
 def render_lj_records_section(qc_df: pd.DataFrame, input_value_type: str) -> None:
     with st.expander("当前批次检测记录（点击折叠/展开）", expanded=True):
-        st.caption("当前批次的完整检测记录、Westgard 触发规则和分析提示都在此查看。")
+        st.caption("当前批次的完整检测记录、Westgard 触发规则和分析提示都在此查看；列较多时可横向滚动查看完整内容。")
         display_df = prepare_display_records(qc_df, input_value_type=input_value_type)
         render_records_table_impl(display_df)
 

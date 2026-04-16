@@ -443,6 +443,7 @@ def inject_global_styles() -> None:
             font-weight: 700;
             color: #233246;
             line-height: 1.2;
+            overflow-wrap: anywhere;
             word-break: break-word;
         }
         .zscore-summary-grid {
@@ -470,7 +471,51 @@ def inject_global_styles() -> None:
             font-weight: 700;
             color: #233246;
             line-height: 1.15;
+            overflow-wrap: anywhere;
             word-break: break-word;
+        }
+        @media (max-width: 1500px) {
+            .workbench-context-shell {
+                padding: 16px 16px 14px 16px;
+            }
+            .workbench-context-title {
+                font-size: 22px;
+            }
+            .workbench-context-caption,
+            .section-caption {
+                font-size: 12px;
+            }
+            .workbench-context-grid {
+                grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+                gap: 10px;
+            }
+            .workbench-context-item {
+                padding: 9px 10px 10px 10px;
+            }
+            .workbench-context-value {
+                font-size: 14px;
+            }
+            .section-shell {
+                padding: 12px 14px 10px 14px;
+            }
+            .section-title {
+                font-size: 18px;
+            }
+            .section-chip-row,
+            .workbench-context-chip-row {
+                justify-content: flex-start;
+            }
+            .section-chip,
+            .workbench-context-chip {
+                min-height: auto;
+                padding: 6px 10px;
+            }
+            .stat-card-grid {
+                grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+            }
+            .stat-card-value {
+                font-size: 16px;
+            }
         }
         @media (max-width: 1680px) {
             .batch-summary-grid {
@@ -681,6 +726,7 @@ def inject_global_styles() -> None:
             font-weight: 800;
             color: #193553;
             line-height: 1.2;
+            overflow-wrap: anywhere;
         }
         .workbench-context-chip-row {
             display: flex;
@@ -700,12 +746,14 @@ def inject_global_styles() -> None:
             font-size: 12px;
             font-weight: 700;
             line-height: 1.2;
+            overflow-wrap: anywhere;
         }
         .workbench-context-caption {
             margin-top: 10px;
             font-size: 13px;
             color: #48627d;
             line-height: 1.6;
+            overflow-wrap: anywhere;
         }
         .workbench-context-grid {
             display: grid;
@@ -730,6 +778,7 @@ def inject_global_styles() -> None:
             font-weight: 700;
             color: #203247;
             line-height: 1.25;
+            overflow-wrap: anywhere;
             word-break: break-word;
         }
         .zscore-batch-header-shell {
@@ -860,12 +909,14 @@ def inject_global_styles() -> None:
             font-weight: 800;
             line-height: 1.2;
             color: #1b3553;
+            overflow-wrap: anywhere;
         }
         .section-caption {
             margin-top: 8px;
             font-size: 13px;
             line-height: 1.6;
             color: #48627d;
+            overflow-wrap: anywhere;
         }
         .section-chip-row {
             display: flex;
@@ -885,6 +936,7 @@ def inject_global_styles() -> None:
             font-size: 12px;
             font-weight: 700;
             line-height: 1.2;
+            overflow-wrap: anywhere;
         }
         .level-summary-grid {
             display: grid;

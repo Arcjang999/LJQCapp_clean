@@ -77,11 +77,11 @@ PLOT_COLUMNS = [
     "is_preview",
 ]
 BASE_TIME = pd.Timestamp("2026-03-28 08:00:00")
-ZSCORE_PAGE_APPTEST_SCRIPT = """
+ZSCORE_PAGE_APPTEST_SCRIPT = f"""
 import sys
 from pathlib import Path
 
-ROOT = Path(r'D:\\Github\\LJQCapp_clean')
+ROOT = Path({str(PROJECT_ROOT)!r})
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -91,6 +91,7 @@ render_zscore_page()
 """
 ZSCORE_ENTRY_SAVE_BUTTON_KEY = "FormSubmitter:zscore_entry_form-\u4fdd\u5b58\u672c\u6b21\u68c0\u6d4b"
 ZSCORE_FULL_RANGE_VIEW = "\u5168\u8303\u56f4\u89c6\u56fe"
+ZSCORE_OVERLAY_VIEW = "合并视图"
 
 
 class TemporaryDatabaseContext:
@@ -1439,6 +1440,66 @@ def test_entry_save_preserves_chart_controls_after_rerun() -> None:
         assert not list(at.exception)
 
 
+def test_entry_save_preserves_overlay_view_after_rerun() -> None:
+    with TemporaryDatabaseContext():
+        project_id = create_zscore_project("Overlay AppTest Project", level_count=2, input_value_type="ct")
+        batch_id = create_zscore_batch(
+            project_id=project_id,
+            instrument="Overlay Inst",
+            reagent="Overlay Reagent",
+            qc_material="Overlay QC",
+            concentration="Normal",
+            lot_no="OVERLAY-LOT",
+            target_n=5,
+            level_1_label="S1",
+            level_2_label="S2",
+        )
+        template_id = get_template_id_for_level_count(2)
+        for hour, values in enumerate(
+            [
+                (100.0, 150.0),
+                (101.0, 151.0),
+                (99.5, 149.5),
+                (100.2, 150.2),
+                (100.1, 150.1),
+                (99.9, 149.9),
+            ],
+            start=0,
+        ):
+            create_zscore_run(
+                batch_id=batch_id,
+                test_time=BASE_TIME + pd.Timedelta(hours=hour),
+                operator=f"overlay-{hour}",
+                level_results=[
+                    {"level_id": "Level 1", "raw_value": values[0]},
+                    {"level_id": "Level 2", "raw_value": values[1]},
+                ],
+                template_id=template_id,
+                required_n=5,
+            )
+
+        at = AppTest.from_string(ZSCORE_PAGE_APPTEST_SCRIPT)
+        at.session_state["zscore_selected_project_id"] = project_id
+        at.session_state["zscore_selected_batch_id"] = batch_id
+        at.run()
+
+        at.radio(key="zscore_phase_scope_widget").set_value("all").run()
+        at.radio(key="zscore_view_mode_widget").set_value(ZSCORE_OVERLAY_VIEW).run()
+        at.radio(key="zscore_y_axis_mode_widget").set_value(ZSCORE_FULL_RANGE_VIEW).run()
+        at.text_input(key="zscore_level1_value").set_value("100.4")
+        at.text_input(key="zscore_level2_value").set_value("150.4")
+        at.selectbox(key="zscore_entry_operator").set_value("overlay-5")
+        at.button(key=ZSCORE_ENTRY_SAVE_BUTTON_KEY).click().run()
+
+        state = at.session_state.filtered_state
+        assert state["zscore_phase_scope"] == "all"
+        assert state["zscore_view_mode"] == ZSCORE_OVERLAY_VIEW
+        assert at.radio(key="zscore_view_mode_widget").value == ZSCORE_OVERLAY_VIEW
+        assert state["zscore_y_axis_mode"] == ZSCORE_FULL_RANGE_VIEW
+        assert len(get_zscore_runs(batch_id, template_id)) == 7
+        assert not list(at.exception)
+
+
 def test_plotting_all_view_visually_splits_building_and_formal_phases() -> None:
     figure = plot_zscore_single_level(
         build_mixed_phase_plot_df(),
@@ -1563,6 +1624,7 @@ def run_all_tests() -> None:
         test_overlay_manual_legend_keeps_status_phase_and_level_keys,
         test_delete_feedback_keeps_maintenance_dialog_context,
         test_entry_save_preserves_chart_controls_after_rerun,
+        test_entry_save_preserves_overlay_view_after_rerun,
         test_plotting_all_view_visually_splits_building_and_formal_phases,
         test_plotting_all_view_keeps_continuous_trajectory_and_phase_separator,
         test_plotting_handles_empty_frames,
