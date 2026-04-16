@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from io import BytesIO
 import math
+from pathlib import Path
 
 import matplotlib
 from matplotlib import font_manager
@@ -32,22 +33,60 @@ CJK_FONT_CANDIDATES = [
     "Arial Unicode MS",
 ]
 
+LINUX_CJK_FONT_FILE_CANDIDATES = [
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+]
 
-def _get_available_font_fallbacks() -> list[str]:
+
+def _append_unique_font_name(font_names: list[str], font_name: str | None) -> None:
+    resolved_name = str(font_name or "").strip()
+    if resolved_name and resolved_name not in font_names:
+        font_names.append(resolved_name)
+
+
+def _register_linux_cjk_fonts() -> list[str]:
+    registered_fonts: list[str] = []
+    for font_file in LINUX_CJK_FONT_FILE_CANDIDATES:
+        if not Path(font_file).is_file():
+            continue
+        try:
+            font_manager.fontManager.addfont(font_file)
+            registered_name = font_manager.FontProperties(fname=font_file).get_name()
+        except Exception:
+            continue
+        _append_unique_font_name(registered_fonts, registered_name)
+    return registered_fonts
+
+
+def _get_available_font_name_map() -> dict[str, str]:
     available_fonts: dict[str, str] = {}
     for font in font_manager.fontManager.ttflist:
         normalized_name = font.name.strip().lower()
-        if normalized_name not in available_fonts:
-            available_fonts[normalized_name] = font.name
+        if normalized_name and normalized_name not in available_fonts:
+            available_fonts[normalized_name] = font.name.strip()
+    return available_fonts
+
+
+def _get_available_font_fallbacks() -> list[str]:
+    registered_fonts = _register_linux_cjk_fonts()
+    available_fonts = _get_available_font_name_map()
 
     configured_fonts: list[str] = []
+    for registered_name in registered_fonts:
+        _append_unique_font_name(
+            configured_fonts,
+            available_fonts.get(registered_name.lower(), registered_name),
+        )
+
     for candidate in CJK_FONT_CANDIDATES:
         matched_font = available_fonts.get(candidate.lower())
-        if matched_font and matched_font not in configured_fonts:
-            configured_fonts.append(matched_font)
+        _append_unique_font_name(configured_fonts, matched_font)
 
-    if "DejaVu Sans" not in configured_fonts:
-        configured_fonts.append("DejaVu Sans")
+    configured_fonts = [name for name in configured_fonts if name != "DejaVu Sans"]
+    configured_fonts.append("DejaVu Sans")
     return configured_fonts
 
 

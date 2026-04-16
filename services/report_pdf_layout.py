@@ -12,9 +12,12 @@ from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.lines import Line2D
 
-from plotting import plot_lj_chart
+from plotting import CONFIGURED_FONT_FALLBACKS as PLOT_CONFIGURED_FONT_FALLBACKS, plot_lj_chart
 from zscore_logic import format_level_id_display
-from zscore_plotting import plot_zscore_single_level
+from zscore_plotting import (
+    CONFIGURED_FONT_FALLBACKS as ZSCORE_CONFIGURED_FONT_FALLBACKS,
+    plot_zscore_single_level,
+)
 
 
 MM_PER_INCH = 25.4
@@ -73,7 +76,7 @@ class _TextSectionSpec:
 def render_lj_monthly_report_pdf(package: Any, font_name: str) -> bytes:
     report = package.report
     buffer = BytesIO()
-    with plt.rc_context({"font.family": font_name, "axes.unicode_minus": False}):
+    with plt.rc_context(_build_pdf_rc_params(font_name)):
         with PdfPages(buffer) as pdf:
             metadata = pdf.infodict()
             metadata["Title"] = report.title
@@ -100,7 +103,7 @@ def render_lj_monthly_report_pdf(package: Any, font_name: str) -> bytes:
 def render_zscore_monthly_report_pdf(package: Any, font_name: str) -> bytes:
     report = package.report
     buffer = BytesIO()
-    with plt.rc_context({"font.family": font_name, "axes.unicode_minus": False}):
+    with plt.rc_context(_build_pdf_rc_params(font_name)):
         with PdfPages(buffer) as pdf:
             metadata = pdf.infodict()
             metadata["Title"] = report.title
@@ -140,6 +143,25 @@ def _write_pages(pdf, pages: list[tuple[Any, str]], report: Any) -> None:
         )
         pdf.savefig(figure)
         plt.close(figure)
+
+
+def _build_pdf_rc_params(font_name: str) -> dict[str, object]:
+    font_fallbacks: list[str] = []
+    for candidate in [
+        font_name,
+        *PLOT_CONFIGURED_FONT_FALLBACKS,
+        *ZSCORE_CONFIGURED_FONT_FALLBACKS,
+    ]:
+        resolved_name = str(candidate or "").strip()
+        if not resolved_name or resolved_name == "DejaVu Sans" or resolved_name in font_fallbacks:
+            continue
+        font_fallbacks.append(resolved_name)
+    font_fallbacks.append("DejaVu Sans")
+    return {
+        "font.family": "sans-serif",
+        "font.sans-serif": font_fallbacks,
+        "axes.unicode_minus": False,
+    }
 
 
 def _build_lj_summary_page(report: Any):

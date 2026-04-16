@@ -22,7 +22,7 @@ from database import (
     get_zscore_project,
     list_report_exports,
 )
-from plotting import plot_lj_chart
+from plotting import CONFIGURED_FONT_FALLBACKS as PLOT_CONFIGURED_FONT_FALLBACKS, plot_lj_chart
 from qc_logic import LJ_FORMAL_PHASE_LABEL, persist_lj_batch_outlier_snapshot
 from services.report_pdf_layout import (
     render_lj_monthly_report_pdf,
@@ -45,7 +45,11 @@ from zscore_logic import (
     resolve_zscore_batch_context,
     should_enable_formal_rules,
 )
-from zscore_plotting import plot_zscore_overlay, plot_zscore_single_level
+from zscore_plotting import (
+    CONFIGURED_FONT_FALLBACKS as ZSCORE_CONFIGURED_FONT_FALLBACKS,
+    plot_zscore_overlay,
+    plot_zscore_single_level,
+)
 
 
 REPORT_TYPE_LJ_MONTHLY = "lj_monthly_report"
@@ -53,10 +57,16 @@ LJ_METHOD_LABEL = "单水平（LJ法）"
 LJ_REPORT_TITLE = "单水平（LJ法）月度质控报告"
 DEFAULT_DECLARATION = DEFAULT_REPORT_STATEMENT
 PDF_FONT_CANDIDATES = [
+    "Noto Sans CJK SC",
+    "Noto Sans CJK JP",
+    "Noto Serif CJK SC",
+    "Noto Serif CJK JP",
+    "WenQuanYi Zen Hei",
+    "WenQuanYi Micro Hei",
     "Microsoft YaHei",
+    "Microsoft YaHei UI",
     "SimHei",
     "SimSun",
-    "Noto Sans CJK SC",
 ]
 ABNORMAL_TABLE_COLUMNS = ["检测时间", "检测序号", "结果值", "状态", "触发规则", "手动备注"]
 ABNORMAL_TABLE_WIDTHS = [0.19, 0.10, 0.12, 0.10, 0.14, 0.35]
@@ -1361,10 +1371,25 @@ def _format_report_period_label(report_month: str) -> str:
 
 
 def _resolve_pdf_font_name() -> str:
-    available_fonts = {font.name for font in font_manager.fontManager.ttflist}
-    for font_name in PDF_FONT_CANDIDATES:
-        if font_name in available_fonts:
-            return font_name
+    available_fonts: dict[str, str] = {}
+    for font in font_manager.fontManager.ttflist:
+        normalized_name = font.name.strip().lower()
+        if normalized_name and normalized_name not in available_fonts:
+            available_fonts[normalized_name] = font.name.strip()
+
+    resolved_candidates: list[str] = []
+    for font_name in (
+        *PDF_FONT_CANDIDATES,
+        *PLOT_CONFIGURED_FONT_FALLBACKS,
+        *ZSCORE_CONFIGURED_FONT_FALLBACKS,
+    ):
+        if font_name and font_name not in resolved_candidates:
+            resolved_candidates.append(font_name)
+
+    for font_name in resolved_candidates:
+        matched_font = available_fonts.get(font_name.lower())
+        if matched_font and matched_font != "DejaVu Sans":
+            return matched_font
     return "DejaVu Sans"
 
 
