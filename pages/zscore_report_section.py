@@ -199,7 +199,8 @@ def _render_report_preview(package: ZScoreMonthlyReportPackage) -> None:
         )
     st.dataframe(pd.DataFrame(level_rows), hide_index=True, width="stretch")
 
-    st.markdown("**异常/失控记录表**")
+    st.markdown("**异常/失控汇总表**")
+    st.caption("run级结论是最终结论；level明细仅作为触发证据展示，不替代 run 级最终判定。")
     abnormal_rows = [asdict(record) for record in report.abnormal_records]
     if not abnormal_rows:
         st.info("本月未发现警告或失控 run。")
@@ -207,9 +208,10 @@ def _render_report_preview(package: ZScoreMonthlyReportPackage) -> None:
         abnormal_df = pd.DataFrame(abnormal_rows).rename(
             columns={
                 "test_time": "检测时间",
-                "run_sequence": "run 序号",
-                "status": "状态",
+                "run_sequence": "run 编号",
+                "run_conclusion": "run级结论（最终）",
                 "rule_hits": "触发规则",
+                "level_evidence": "level明细（证据）",
                 "error_type": "误差类型",
                 "manual_note": "手动备注",
             }

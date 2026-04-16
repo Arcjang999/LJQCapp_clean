@@ -50,8 +50,8 @@ PDF_CREATOR = "邦德盛"
 
 LJ_ABNORMAL_TABLE_COLUMNS = ["检测时间", "检测序号", "结果值", "状态", "触发规则", "手动备注"]
 LJ_ABNORMAL_TABLE_WIDTHS = [0.19, 0.10, 0.12, 0.10, 0.14, 0.35]
-ZSCORE_ABNORMAL_TABLE_COLUMNS = ["检测时间", "run 序号", "状态", "触发规则", "误差类型", "手动备注"]
-ZSCORE_ABNORMAL_TABLE_WIDTHS = [0.18, 0.10, 0.10, 0.18, 0.16, 0.28]
+ZSCORE_ABNORMAL_TABLE_COLUMNS = ["检测时间", "run 编号", "run级结论（最终）", "触发规则", "level明细（证据）", "误差类型", "手动备注"]
+ZSCORE_ABNORMAL_TABLE_WIDTHS = [0.15, 0.08, 0.11, 0.13, 0.25, 0.10, 0.18]
 
 
 @dataclass
@@ -369,8 +369,9 @@ def _build_zscore_abnormal_pages(report: Any) -> list[Any]:
         [
             record.test_time,
             str(record.run_sequence),
-            record.status,
+            record.run_conclusion,
             _wrap_text(record.rule_hits, 12),
+            _wrap_text(record.level_evidence, 18),
             _wrap_text(record.error_type, 12),
             _wrap_text(record.manual_note or "未填写", 16),
         ]
@@ -381,15 +382,16 @@ def _build_zscore_abnormal_pages(report: Any) -> list[Any]:
     for chunk in chunks:
         canvas = _new_canvas(
             report_title=report.title,
-            page_title="异常/失控 run 表",
+            page_title="异常/失控汇总表",
             subtitle_lines=[
                 f"项目名称：{report.basic_info.project_name}    报告月份：{report.report_month_label}",
                 f"报告期间：{report.report_period_label}    当前规则组合：{report.statistics.template_label}",
+                "run级结论为最终结论；level明细仅作为触发证据摘要。",
             ],
         )
         _draw_table_section(
             canvas,
-            title="异常/失控 run 表",
+            title="异常/失控汇总表",
             cell_text=chunk,
             col_labels=ZSCORE_ABNORMAL_TABLE_COLUMNS,
             col_widths=ZSCORE_ABNORMAL_TABLE_WIDTHS,

@@ -88,8 +88,8 @@ ZSCORE_RULE_DISPLAY_NAMES = {
     "10_x": "10x",
     "12_x": "12x",
 }
-ZSCORE_ABNORMAL_TABLE_COLUMNS = ["检测时间", "run 序号", "状态", "触发规则", "误差类型", "手动备注"]
-ZSCORE_ABNORMAL_TABLE_WIDTHS = [0.18, 0.10, 0.10, 0.18, 0.16, 0.28]
+ZSCORE_ABNORMAL_TABLE_COLUMNS = ["检测时间", "run 编号", "run级结论（最终）", "触发规则", "level明细（证据）", "误差类型", "手动备注"]
+ZSCORE_ABNORMAL_TABLE_WIDTHS = [0.15, 0.08, 0.11, 0.13, 0.25, 0.10, 0.18]
 
 
 @dataclass(frozen=True)
@@ -247,8 +247,9 @@ class ZScoreMonthlyLevelStatistic:
 class ZScoreMonthlyAbnormalRecord:
     test_time: str
     run_sequence: int
-    status: str
+    run_conclusion: str
     rule_hits: str
+    level_evidence: str
     error_type: str
     manual_note: str
 
@@ -583,7 +584,10 @@ def build_zscore_monthly_report_package(
         level_target_profiles=level_target_profiles,
         batch=batch,
     )
-    abnormal_records = _build_zscore_abnormal_records(monthly_formal_runs)
+    abnormal_records = _build_zscore_abnormal_records(
+        monthly_formal_runs,
+        level_label_map=level_label_map,
+    )
     corrective_actions = _build_zscore_corrective_actions(abnormal_records)
     report_month_label = _format_report_month_label(normalized_month)
     report_period_label = _format_report_period_label(normalized_month)
@@ -1436,13 +1440,13 @@ def _build_abnormal_page(
     axis.text(
         0.5,
         0.945,
-        f"异常/失控记录表（第 {chunk_index}/{chunk_count} 页）｜项目：{report.basic_info.project_name}｜月份：{report.report_month_label}",
+        f"异常/失控汇总表（第 {chunk_index}/{chunk_count} 页）｜项目：{report.basic_info.project_name}｜月份：{report.report_month_label}",
         ha="center",
         va="top",
         fontsize=10,
     )
 
-    _draw_section_title(axis, 0.905, "异常/失控记录表")
+    _draw_section_title(axis, 0.905, "异常/失控汇总表")
     if not abnormal_chunk:
         axis.text(0.0, 0.865, "本月未发现警告或失控记录。", ha="left", va="top", fontsize=12)
         return figure
@@ -1693,6 +1697,8 @@ def _build_zscore_level_statistics(
 
 def _build_zscore_abnormal_records(
     monthly_formal_runs: list[dict[str, Any]],
+    *,
+    level_label_map: dict[str, str],
 ) -> list[ZScoreMonthlyAbnormalRecord]:
     records: list[ZScoreMonthlyAbnormalRecord] = []
     for run in monthly_formal_runs:
@@ -1703,8 +1709,9 @@ def _build_zscore_abnormal_records(
             ZScoreMonthlyAbnormalRecord(
                 test_time=pd.Timestamp(run["test_time"]).strftime("%Y-%m-%d %H:%M"),
                 run_sequence=int(run.get("test_sequence") or run.get("run_id") or run.get("id") or 0),
-                status=_format_zscore_run_status(run_status),
+                run_conclusion=_format_zscore_run_status(run_status),
                 rule_hits=_format_zscore_rule_hits(run.get("rule_hits_run", [])),
+                level_evidence=_format_zscore_level_evidence(run, level_label_map),
                 error_type=_format_zscore_error_type(run.get("error_type_hint")),
                 manual_note=str(run.get("manual_note", "") or "").strip(),
             )
@@ -1745,7 +1752,7 @@ def _build_zscore_abnormal_summary_text(
     has_empty_note = any(not str(record.manual_note or "").strip() for record in abnormal_records)
     summary = (
         f"本月共记录 {len(abnormal_records)} 次警告/失控 run。"
-        "以上内容按现有手动备注归并展示。"
+        "汇总表以 run级结论作为最终结论，各 level 明细仅作为触发证据摘要展示；手动备注沿用当前已保存内容。"
     )
     if has_empty_note:
         summary += " 未填写备注的异常 run 统一标记为“未填写”。"
@@ -1825,6 +1832,29 @@ def _format_zscore_rule_hits(rule_hits: Any) -> str:
         if display_name not in display_names:
             display_names.append(display_name)
     return "、".join(display_names) if display_names else "-"
+
+
+def _format_zscore_level_evidence(
+    run: dict[str, Any],
+    level_label_map: dict[str, str],
+) -> str:
+    evidence_items: list[str] = []
+    level_results = sorted(
+        list(run.get("level_results", [])),
+        key=lambda item: str(item.get("level_id") or ""),
+    )
+    for level_result in level_results:
+        level_id = str(level_result.get("level_id") or "").strip()
+        if not level_id:
+            continue
+        level_label = _format_zscore_level_label(level_id, level_label_map)
+        level_status = _format_zscore_run_status(level_result.get("status"))
+        local_rule_hits = _format_zscore_rule_hits(level_result.get("rule_hits_local", []))
+        if local_rule_hits == "-":
+            evidence_items.append(f"{level_label}：{level_status}")
+        else:
+            evidence_items.append(f"{level_label}：{level_status}（{local_rule_hits}）")
+    return "；".join(evidence_items) if evidence_items else "-"
 
 
 def _format_zscore_level_label(level_id: str, level_label_map: dict[str, str]) -> str:
@@ -2008,13 +2038,13 @@ def _build_zscore_abnormal_page(
     axis.text(
         0.5,
         0.945,
-        f"异常/失控记录表（第 {chunk_index}/{chunk_count} 页）｜项目：{report.basic_info.project_name}｜月份：{report.report_month_label}",
+        f"异常/失控汇总表（第 {chunk_index}/{chunk_count} 页）｜项目：{report.basic_info.project_name}｜月份：{report.report_month_label}",
         ha="center",
         va="top",
         fontsize=10,
     )
 
-    _draw_section_title(axis, 0.905, "异常/失控记录表")
+    _draw_section_title(axis, 0.905, "异常/失控汇总表")
     if not abnormal_chunk:
         axis.text(0.0, 0.865, "本月未发现警告或失控 run。", ha="left", va="top", fontsize=12)
         return figure
@@ -2022,14 +2052,15 @@ def _build_zscore_abnormal_page(
     cell_text = []
     for record in abnormal_chunk:
         cell_text.append(
-            [
-                record.test_time,
-                str(record.run_sequence),
-                record.status,
-                _wrap_cell_text(record.rule_hits, width=12),
-                _wrap_cell_text(record.error_type, width=12),
-                _wrap_cell_text(record.manual_note or "未填写", width=16),
-            ]
+                [
+                    record.test_time,
+                    str(record.run_sequence),
+                    record.run_conclusion,
+                    _wrap_cell_text(record.rule_hits, width=12),
+                    _wrap_cell_text(record.level_evidence, width=18),
+                    _wrap_cell_text(record.error_type, width=12),
+                    _wrap_cell_text(record.manual_note or "未填写", width=16),
+                ]
         )
     table = axis.table(
         cellText=cell_text,
