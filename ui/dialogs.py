@@ -31,7 +31,6 @@ from zscore_logic import (
     get_zscore_display_sequence,
     sort_zscore_runs_for_maintenance,
     update_saved_zscore_run,
-    update_saved_zscore_run_manual_note,
 )
 
 
@@ -211,7 +210,7 @@ def render_zscore_record_maintenance_dialog(
     input_value_type = normalize_input_value_type(batch_context["batch"]["input_value_type"])
     input_value_type_label = get_input_value_type_label(input_value_type)
     st.caption(
-        f"在此查看当前批次已保存的多水平检测记录，并维护检测时间、检测人和各水平{input_value_type_label}；保存或删除后会自动整批次重算。"
+        f"在此查看当前批次已保存的多水平检测记录。未锁定记录仍可维护检测时间、检测人和各水平{input_value_type_label}；建靶期 run 在正式期后自动转为只读，仅保留查看入口。"
     )
     if not saved_runs:
         st.info("当前批次暂无已保存的检测记录可维护。")
@@ -238,7 +237,7 @@ def render_zscore_record_maintenance_dialog(
         placeholder=run_labels[0],
     )
     selected_run_label = st.selectbox(
-        "选择需要编辑或删除的检测记录",
+        "选择需要查看或维护的检测记录",
         options=run_labels,
         key="zscore_run_selector",
     )
@@ -272,27 +271,28 @@ def render_zscore_record_maintenance_dialog(
                     f"触发规则 {format_zscore_rule_hits(selected_run.get('rule_hits_run', []))}"
                 )
                 if is_locked_for_maintenance:
-                    st.caption(f"已锁定 run 仍可补充或修改手动备注，各水平{input_value_type_label}不会被改动。")
-                    st.info("建靶期数据在正式期启用后已锁定，只可查看，不可编辑或删除。")
-
-                with st.form(f"edit_zscore_run_form_{dialog_nonce}_{int(selected_run_id)}"):
-                    edit_test_time = st.datetime_input(
+                    st.info("该建靶期 run 在正式期后已锁定为只读。可查看 run 级结论和各 level 明细证据，但不能维护、不能删除。")
+                    readonly_prefix = f"readonly_zscore_run_{dialog_nonce}_{int(selected_run_id)}"
+                    st.datetime_input(
                         "检测时间",
                         value=pd.Timestamp(selected_run["test_time"]).to_pydatetime(),
-                        disabled=is_locked_for_maintenance,
+                        disabled=True,
+                        key=f"{readonly_prefix}_test_time",
                     )
-                    edit_operator = st.text_input(
+                    st.text_input(
                         "检测人",
                         value=str(selected_run.get("operator", "") or ""),
-                        disabled=is_locked_for_maintenance,
+                        disabled=True,
+                        key=f"{readonly_prefix}_operator",
                     )
-                    edit_manual_note = st.text_area(
-                        "手动备注（可选）",
+                    st.text_area(
+                        "手动备注",
                         value=str(selected_run.get("manual_note", "") or ""),
                         height=88,
+                        disabled=True,
+                        key=f"{readonly_prefix}_manual_note",
                     )
                     st.markdown(f"**多水平{input_value_type_label}**")
-                    edited_level_values: dict[str, float] = {}
                     level_result_map = {
                         str(level_result.get("level_id")): level_result
                         for level_result in selected_run.get("level_results", [])
@@ -301,124 +301,144 @@ def render_zscore_record_maintenance_dialog(
                         display_label, level_caption = format_zscore_level_display(level_id, level_label_map)
                         current_level_result = level_result_map.get(level_id, {})
                         field_label = build_level_measurement_label(display_label, input_value_type)
-                        edited_level_values[level_id] = st.number_input(
+                        st.number_input(
                             field_label,
                             value=float(current_level_result.get("raw_value") or 0.0),
                             format="%.4f",
-                            key=f"edit_zscore_run_{dialog_nonce}_{int(selected_run_id)}_{level_id.replace(' ', '_')}",
-                            disabled=is_locked_for_maintenance,
+                            key=f"{readonly_prefix}_{level_id.replace(' ', '_')}",
+                            disabled=True,
                         )
                         if level_caption:
                             st.caption(level_caption)
-                    edit_submitted = st.form_submit_button(
-                        "保存记录修改",
-                        width="stretch",
-                    )
-
-                    if edit_submitted:
-                        validation_errors: list[str] = []
-                        cleaned_operator = edit_operator.strip()
-                        updated_level_results: list[dict[str, Any]] = []
-                        cleaned_manual_note = str(edit_manual_note or "").strip()
-
-                        if is_locked_for_maintenance:
-                            try:
-                                update_saved_zscore_run_manual_note(
-                                    run_id=int(selected_run_id),
-                                    manual_note=cleaned_manual_note,
-                                )
-                            except ValueError as exc:
-                                st.error(str(exc))
-                            else:
-                                st.session_state["show_zscore_record_maintenance_dialog"] = True
-                                st.session_state["selected_zscore_run_id"] = int(selected_run_id)
-                                st.session_state["zscore_record_maintenance_notice"] = "手动备注已保存。"
-                                bump_zscore_record_maintenance_dialog_nonce()
-                                st.rerun()
-                            return
-
-                        if edit_test_time is None:
-                            validation_errors.append("请填写检测时间。")
-                        if not cleaned_operator:
-                            validation_errors.append("请填写检测人，不能为空。")
-
+                else:
+                    with st.form(f"edit_zscore_run_form_{dialog_nonce}_{int(selected_run_id)}"):
+                        edit_test_time = st.datetime_input(
+                            "检测时间",
+                            value=pd.Timestamp(selected_run["test_time"]).to_pydatetime(),
+                        )
+                        edit_operator = st.text_input(
+                            "检测人",
+                            value=str(selected_run.get("operator", "") or ""),
+                        )
+                        edit_manual_note = st.text_area(
+                            "手动备注（可选）",
+                            value=str(selected_run.get("manual_note", "") or ""),
+                            height=88,
+                        )
+                        st.markdown(f"**多水平{input_value_type_label}**")
+                        edited_level_values: dict[str, float] = {}
+                        level_result_map = {
+                            str(level_result.get("level_id")): level_result
+                            for level_result in selected_run.get("level_results", [])
+                        }
                         for level_id in template["level_ids"]:
-                            display_level = format_zscore_level_display(level_id, level_label_map)[0]
-                            raw_value = edited_level_values[level_id]
-                            field_label = build_level_measurement_label(display_level, input_value_type)
-                            value_error = validate_project_numeric_value(
-                                raw_value,
-                                input_value_type,
-                                field_label=field_label,
+                            display_label, level_caption = format_zscore_level_display(level_id, level_label_map)
+                            current_level_result = level_result_map.get(level_id, {})
+                            field_label = build_level_measurement_label(display_label, input_value_type)
+                            edited_level_values[level_id] = st.number_input(
+                                field_label,
+                                value=float(current_level_result.get("raw_value") or 0.0),
+                                format="%.4f",
+                                key=f"edit_zscore_run_{dialog_nonce}_{int(selected_run_id)}_{level_id.replace(' ', '_')}",
                             )
-                            if value_error is not None:
-                                validation_errors.append(value_error)
-                                continue
-                            updated_level_results.append(
-                                {
-                                    "level_id": level_id,
-                                    "raw_value": float(raw_value),
-                                    "log_value": compute_legacy_log_value(float(raw_value), input_value_type),
-                                }
-                            )
+                            if level_caption:
+                                st.caption(level_caption)
+                        edit_submitted = st.form_submit_button(
+                            "保存记录修改",
+                            width="stretch",
+                        )
 
-                        if validation_errors:
-                            st.error("\n".join(dict.fromkeys(validation_errors)))
-                        else:
-                            try:
-                                rebuild_state = update_saved_zscore_run(
-                                    run_id=int(selected_run_id),
-                                    test_time=edit_test_time,
-                                    operator=cleaned_operator,
-                                    level_results=updated_level_results,
-                                    manual_note=cleaned_manual_note,
+                        if edit_submitted:
+                            validation_errors: list[str] = []
+                            cleaned_operator = edit_operator.strip()
+                            updated_level_results: list[dict[str, Any]] = []
+                            cleaned_manual_note = str(edit_manual_note or "").strip()
+
+                            if edit_test_time is None:
+                                validation_errors.append("请填写检测时间。")
+                            if not cleaned_operator:
+                                validation_errors.append("请填写检测人，不能为空。")
+
+                            for level_id in template["level_ids"]:
+                                display_level = format_zscore_level_display(level_id, level_label_map)[0]
+                                raw_value = edited_level_values[level_id]
+                                field_label = build_level_measurement_label(display_level, input_value_type)
+                                value_error = validate_project_numeric_value(
+                                    raw_value,
+                                    input_value_type,
+                                    field_label=field_label,
                                 )
-                            except ValueError as exc:
-                                st.error(str(exc))
+                                if value_error is not None:
+                                    validation_errors.append(value_error)
+                                    continue
+                                updated_level_results.append(
+                                    {
+                                        "level_id": level_id,
+                                        "raw_value": float(raw_value),
+                                        "log_value": compute_legacy_log_value(float(raw_value), input_value_type),
+                                    }
+                                )
+
+                            if validation_errors:
+                                st.error("\n".join(dict.fromkeys(validation_errors)))
                             else:
-                                dialog_state = build_zscore_maintenance_dialog_state(
-                                    action="update",
-                                    available_runs=rebuild_state.get("runs", []),
-                                    preferred_run_id=int(selected_run_id),
-                                )
-                                st.session_state["show_zscore_record_maintenance_dialog"] = bool(
-                                    dialog_state["keep_dialog_open"]
-                                )
-                                st.session_state["selected_zscore_run_id"] = dialog_state["selected_run_id"]
-                                st.session_state["zscore_record_maintenance_notice"] = dialog_state["dialog_notice"]
-                                bump_zscore_record_maintenance_dialog_nonce()
-                                st.rerun()
+                                try:
+                                    rebuild_state = update_saved_zscore_run(
+                                        run_id=int(selected_run_id),
+                                        test_time=edit_test_time,
+                                        operator=cleaned_operator,
+                                        level_results=updated_level_results,
+                                        manual_note=cleaned_manual_note,
+                                    )
+                                except ValueError as exc:
+                                    st.error(str(exc))
+                                else:
+                                    dialog_state = build_zscore_maintenance_dialog_state(
+                                        action="update",
+                                        available_runs=rebuild_state.get("runs", []),
+                                        preferred_run_id=int(selected_run_id),
+                                    )
+                                    st.session_state["show_zscore_record_maintenance_dialog"] = bool(
+                                        dialog_state["keep_dialog_open"]
+                                    )
+                                    st.session_state["selected_zscore_run_id"] = dialog_state["selected_run_id"]
+                                    st.session_state["zscore_record_maintenance_notice"] = dialog_state["dialog_notice"]
+                                    bump_zscore_record_maintenance_dialog_nonce()
+                                    st.rerun()
 
             with maintenance_right:
-                st.caption("删除后会同步重算当前批次的建靶统计、正式靶值、正式期实时统计、阶段判定、结果判读和图表基础数据。")
-                confirm_delete = st.checkbox(
-                    "我确认删除这条检测记录",
-                    key=confirm_delete_key,
-                    disabled=is_locked_for_maintenance,
-                )
-                if st.button(
-                    "删除所选记录",
-                    key=delete_button_key,
-                    width="stretch",
-                    disabled=is_locked_for_maintenance or not confirm_delete,
-                ):
-                    try:
-                        rebuild_state = delete_saved_zscore_run(int(selected_run_id))
-                    except ValueError as exc:
-                        st.error(str(exc))
-                    else:
-                        dialog_state = build_zscore_maintenance_dialog_state(
-                            action="delete",
-                            available_runs=rebuild_state.get("runs", []),
-                            preferred_run_id=int(selected_run_id),
-                        )
-                        st.session_state["show_zscore_record_maintenance_dialog"] = bool(
-                            dialog_state["keep_dialog_open"]
-                        )
-                        st.session_state["selected_zscore_run_id"] = dialog_state["selected_run_id"]
-                        st.session_state["zscore_record_maintenance_notice"] = dialog_state["dialog_notice"]
-                        bump_zscore_record_maintenance_dialog_nonce()
-                        st.rerun()
+                if is_locked_for_maintenance:
+                    st.caption("该 run 属于建靶期历史记录。正式期启用后，这里只保留查看能力。")
+                    st.info("已禁用删除、手动维护和备注修改操作。")
+                else:
+                    st.caption("删除后会同步重算当前批次的建靶统计、正式靶值、正式期实时统计、阶段判定、结果判读和图表基础数据。")
+                    confirm_delete = st.checkbox(
+                        "我确认删除这条检测记录",
+                        key=confirm_delete_key,
+                    )
+                    if st.button(
+                        "删除所选记录",
+                        key=delete_button_key,
+                        width="stretch",
+                        disabled=not confirm_delete,
+                    ):
+                        try:
+                            rebuild_state = delete_saved_zscore_run(int(selected_run_id))
+                        except ValueError as exc:
+                            st.error(str(exc))
+                        else:
+                            dialog_state = build_zscore_maintenance_dialog_state(
+                                action="delete",
+                                available_runs=rebuild_state.get("runs", []),
+                                preferred_run_id=int(selected_run_id),
+                            )
+                            st.session_state["show_zscore_record_maintenance_dialog"] = bool(
+                                dialog_state["keep_dialog_open"]
+                            )
+                            st.session_state["selected_zscore_run_id"] = dialog_state["selected_run_id"]
+                            st.session_state["zscore_record_maintenance_notice"] = dialog_state["dialog_notice"]
+                            bump_zscore_record_maintenance_dialog_nonce()
+                            st.rerun()
 
     st.divider()
     if st.button("关闭", key="close_zscore_record_dialog", width="stretch"):
@@ -557,7 +577,7 @@ def build_zscore_run_select_options(
     saved_runs: list[dict[str, Any]],
     level_label_map: dict[str, str],
 ) -> tuple[list[str], dict[str, int | None]]:
-    option_map = {"请选择需要维护的检测记录": None}
+    option_map = {"请选择需要查看或维护的检测记录": None}
     for run in saved_runs:
         option_map[build_zscore_run_label(run, level_label_map)] = int(run["run_id"])
     return list(option_map.keys()), option_map
@@ -576,7 +596,7 @@ def build_zscore_record_maintenance_dataframe(
                 "检测人": str(run.get("operator", "") or ""),
                 "阶段": str(run.get("phase_label") or get_phase_label(run.get("phase"))),
                 "判定": format_zscore_status_label(run.get("run_status", "pending")),
-                "维护状态": "已锁定" if bool(run.get("is_locked_for_maintenance")) else "可维护",
+                "维护状态": "建靶期只读" if bool(run.get("is_locked_for_maintenance")) else "可维护",
                 "水平摘要": build_zscore_run_level_summary(run.get("level_results", []), level_label_map),
                 "备注": summarize_note_for_table(run.get("manual_note", "")),
             }

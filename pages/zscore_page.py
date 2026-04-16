@@ -16,6 +16,7 @@ from pages.zscore_sections import (
     render_zscore_chart_controls,
     render_zscore_entry_section,
     render_zscore_export_import_section,
+    render_zscore_record_maintenance_entry,
     render_zscore_maintenance_section,
     render_zscore_vendor_reference_section,
 )
@@ -245,7 +246,7 @@ def _render_zscore_maintenance_summary(context: dict[str, object]) -> None:
                     f"最新检测 {latest_test_time}",
                 ],
                 "sections": [],
-                "footer": "可在此查看单 level 离群状态，并维护仍处于建靶期的水平点。",
+                "footer": "可在此查看 run 级维护概览；各 level 明细继续保留为证据，但保留/禁用/恢复改为整条 run 联动。",
             }
         ]
     )
@@ -254,7 +255,7 @@ def _render_zscore_maintenance_summary(context: dict[str, object]) -> None:
 def render_zscore_page() -> None:
     st.subheader("多水平（Z-score法）")
     st.caption(
-        "适用于 2 水平或 3 水平项目的联合判断。页面重点突出多水平摘要、图表控制、视图切换和单 level 维护。"
+        "适用于 2 水平或 3 水平项目的联合判断。页面重点突出多水平摘要、图表控制、视图切换和 run 级维护。"
     )
     projects_df, selected_project_id, batches_df, selected_batch_id = prepare_zscore_project_batch_context()
     manage_tab, work_tab, report_tab = st.tabs([TEXT["manage"], TEXT["current_batch"], "Z-score 月报"])
@@ -354,13 +355,25 @@ def render_zscore_page() -> None:
         lower_left, lower_right = st.columns([1.0, 1.0], gap="large")
         with lower_left:
             with st.container():
-                render_section_intro(
-                    title="记录维护",
-                    caption="建靶期支持按单 level 点进行维护，正式期则保留只读追溯。",
-                    tone="muted",
-                )
-                _render_zscore_maintenance_summary(context)
-                render_zscore_maintenance_section(context)
+                if context["overall_phase"] == PHASE_FORMAL_QC:
+                    render_section_intro(
+                        title="维护记录",
+                        caption="当前批次已进入正式期，建靶维护区整体隐藏。打开维护记录仍可查看 run 级结论与 level 明细证据；建靶期记录仅支持只读查看，不再提供维护或删除动作。",
+                        tone="muted",
+                    )
+                    render_zscore_record_maintenance_entry(
+                        context["history_runs"],
+                        context["batch_context"],
+                        caption_text="维护记录继续保留 run 级结论与 level 明细证据。建靶期 run 在正式期后自动锁定为只读，页面也不会恢复单 level 维护入口。",
+                    )
+                else:
+                    render_section_intro(
+                        title="记录维护",
+                        caption="建靶期保留各 level 明细作为证据，但维护动作统一按整个 run 联动；进入正式期后该维护区会整体隐藏。",
+                        tone="muted",
+                    )
+                    _render_zscore_maintenance_summary(context)
+                    render_zscore_maintenance_section(context)
         with lower_right:
             with st.container(border=True):
                 render_section_intro(

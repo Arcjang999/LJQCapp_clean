@@ -35,10 +35,10 @@ from zscore_logic import (
     PHASE_TARGET_BUILDING,
     build_zscore_plot_dataframe,
     create_zscore_run,
-    disable_zscore_level_result,
+    disable_zscore_building_run,
     get_zscore_runs,
-    keep_zscore_level_result,
-    restore_zscore_level_result,
+    keep_zscore_building_run,
+    restore_zscore_building_run,
 )
 
 
@@ -221,7 +221,7 @@ def test_lj_outlier_labels_are_clean_and_readable() -> None:
     assert get_outlier_manual_status_label("restored") == "恢复"
 
 
-def test_zscore_level_outlier_actions_recalc_and_plot_filter() -> None:
+def test_zscore_run_outlier_actions_recalc_and_plot_filter() -> None:
     with TemporaryDatabaseContext():
         project_id = create_zscore_project("Z-score Building Outlier", level_count=2, input_value_type="raw")
         batch_id = create_zscore_batch(
@@ -260,55 +260,34 @@ def test_zscore_level_outlier_actions_recalc_and_plot_filter() -> None:
             for level_result in run["level_results"]
             if level_result["level_id"] == "Level 1" and int(level_result.get("is_outlier_suspect", 0) or 0) == 1
         )
-        suspect_level_result_id = int(suspect_level_result["id"])
+        suspect_run_id = int(suspect_level_result["run_id"])
 
-        keep_state = keep_zscore_level_result(suspect_level_result_id)
-        kept_level_result = next(
-            level_result
-            for run in keep_state["runs"]
-            for level_result in run["level_results"]
-            if int(level_result["id"]) == suspect_level_result_id
-        )
-        assert kept_level_result["manual_status"] == "keep"
-        assert int(kept_level_result["is_building_included"]) == 1
+        keep_state = keep_zscore_building_run(suspect_run_id)
+        kept_run = next(run for run in keep_state["runs"] if int(run["run_id"]) == suspect_run_id)
+        assert all(level_result["manual_status"] == "keep" for level_result in kept_run["level_results"])
+        assert all(int(level_result["is_building_included"]) == 1 for level_result in kept_run["level_results"])
 
-        disable_state = disable_zscore_level_result(suspect_level_result_id)
-        disabled_level_result = next(
-            level_result
-            for run in disable_state["runs"]
-            for level_result in run["level_results"]
-            if int(level_result["id"]) == suspect_level_result_id
-        )
+        disable_state = disable_zscore_building_run(suspect_run_id)
+        disabled_run = next(run for run in disable_state["runs"] if int(run["run_id"]) == suspect_run_id)
         plot_df = build_zscore_plot_dataframe(disable_state["runs"])
         assert disable_state["overall_phase"] == PHASE_TARGET_BUILDING
         assert disable_state["target_profiles"]["Level 1"]["collected_n"] == 4
-        assert disable_state["target_profiles"]["Level 2"]["collected_n"] == 5
-        assert disabled_level_result["manual_status"] == "disabled"
-        assert int(disabled_level_result["is_building_included"]) == 0
-        assert not (
-            (plot_df["run_id"] == int(disabled_level_result["run_id"]))
-            & (plot_df["level_id"] == "Level 1")
-        ).any()
-        assert (
-            (plot_df["run_id"] == int(disabled_level_result["run_id"]))
-            & (plot_df["level_id"] == "Level 2")
-        ).any()
+        assert disable_state["target_profiles"]["Level 2"]["collected_n"] == 4
+        assert all(level_result["manual_status"] == "disabled" for level_result in disabled_run["level_results"])
+        assert all(int(level_result["is_building_included"]) == 0 for level_result in disabled_run["level_results"])
+        assert not (plot_df["run_id"] == suspect_run_id).any()
 
-        restore_state = restore_zscore_level_result(suspect_level_result_id)
-        restored_level_result = next(
-            level_result
-            for run in restore_state["runs"]
-            for level_result in run["level_results"]
-            if int(level_result["id"]) == suspect_level_result_id
-        )
+        restore_state = restore_zscore_building_run(suspect_run_id)
+        restored_run = next(run for run in restore_state["runs"] if int(run["run_id"]) == suspect_run_id)
         assert restore_state["target_profiles"]["Level 1"]["collected_n"] == 5
-        assert restored_level_result["manual_status"] == "restored"
-        assert int(restored_level_result["is_building_included"]) == 1
+        assert restore_state["target_profiles"]["Level 2"]["collected_n"] == 5
+        assert all(level_result["manual_status"] == "restored" for level_result in restored_run["level_results"])
+        assert all(int(level_result["is_building_included"]) == 1 for level_result in restored_run["level_results"])
 
 
 if __name__ == "__main__":
     test_lj_building_outlier_actions_and_plot_filter()
     test_lj_latest_analysis_switches_between_building_and_formal()
     test_lj_outlier_labels_are_clean_and_readable()
-    test_zscore_level_outlier_actions_recalc_and_plot_filter()
+    test_zscore_run_outlier_actions_recalc_and_plot_filter()
     print("building_outlier_smoke_test passed")

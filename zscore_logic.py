@@ -696,6 +696,14 @@ def get_zscore_runs(batch_id: int, template_id: str | None = None) -> list[dict[
     if runs_df.empty:
         return []
 
+    batch_context = resolve_zscore_batch_context(batch_id)
+    resolved_template_id = str(template_id or batch_context["template_id"])
+    required_level_ids = list(batch_context["required_level_ids"])
+    required_n = int(batch_context["required_n"])
+    current_phase = determine_zscore_phase(
+        get_zscore_level_targets(batch_id, resolved_template_id, required_n=required_n),
+        required_level_ids,
+    )
     level_results = get_zscore_level_results(batch_id=batch_id, template_id=template_id)
     level_results_by_run: dict[int, list[dict[str, Any]]] = {}
     for level_result in level_results:
@@ -732,7 +740,7 @@ def get_zscore_runs(batch_id: int, template_id: str | None = None) -> list[dict[
                 ),
             }
         )
-    formal_started = any(str(run.get("phase")) == PHASE_FORMAL_QC for run in runs)
+    formal_started = current_phase == PHASE_FORMAL_QC
     for run in runs:
         run["is_locked_for_maintenance"] = bool(
             formal_started and str(run.get("phase")) == PHASE_TARGET_BUILDING
@@ -1317,6 +1325,8 @@ def update_saved_zscore_run(
 
 def update_saved_zscore_run_manual_note(run_id: int, manual_note: str) -> dict[str, Any]:
     existing_run = _get_zscore_run_for_maintenance(run_id)
+    if bool(existing_run.get("is_locked_for_maintenance")):
+        raise ValueError("建靶期数据在正式期启用后已锁定，不允许编辑。")
     batch_id = int(existing_run["batch_id"])
     template_id = str(existing_run["rule_template_id"])
     db_update_zscore_run(run_id, manual_note=str(manual_note or ""))
@@ -1368,7 +1378,7 @@ def _get_zscore_level_result_for_outlier_action(level_result_id: int) -> tuple[d
         None,
     )
     if target_run is None or _normalize_run_phase(target_run.get("phase")) != PHASE_TARGET_BUILDING:
-        raise ValueError("仅建靶期的单水平点支持离群值处理。")
+        raise ValueError("仅建靶期的 run 支持离群值处理。")
 
     target_level_result = _get_level_result(target_run, str(raw_level_result["level_id"]))
     if target_level_result is None:
@@ -1376,37 +1386,82 @@ def _get_zscore_level_result_for_outlier_action(level_result_id: int) -> tuple[d
     return target_run, target_level_result, batch_id
 
 
-def disable_zscore_level_result(level_result_id: int) -> dict[str, Any]:
-    _, target_level_result, batch_id = _get_zscore_level_result_for_outlier_action(level_result_id)
-    db_set_zscore_level_result_building_state(
-        int(target_level_result["id"]),
+def _get_zscore_building_run_for_outlier_action(run_id: int) -> tuple[dict[str, Any], int]:
+    target_run = _get_zscore_run_for_maintenance(run_id)
+    batch_id = int(target_run["batch_id"])
+    template_id = str(target_run["rule_template_id"])
+    saved_runs = get_zscore_runs(batch_id, template_id)
+    if any(_normalize_run_phase(run.get("phase")) == PHASE_FORMAL_QC for run in saved_runs):
+        raise ValueError("正式期启用后不再允许调整 Z-score 建靶期离群值状态。")
+    if _normalize_run_phase(target_run.get("phase")) != PHASE_TARGET_BUILDING:
+        raise ValueError("仅建靶期的 run 支持离群值处理。")
+    if not target_run.get("level_results"):
+        raise ValueError(f"未找到 Z-score run {run_id} 的 level 明细")
+    return target_run, batch_id
+
+
+def _apply_zscore_building_run_state(
+    run_id: int,
+    *,
+    is_building_included: int,
+    manual_status: str,
+) -> dict[str, Any]:
+    target_run, batch_id = _get_zscore_building_run_for_outlier_action(run_id)
+    handled_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    updated_level_count = 0
+    for level_result in target_run.get("level_results", []):
+        level_result_id = level_result.get("id")
+        if level_result_id is None:
+            continue
+        db_set_zscore_level_result_building_state(
+            int(level_result_id),
+            is_building_included=is_building_included,
+            manual_status=manual_status,
+            handled_at=handled_at,
+        )
+        updated_level_count += 1
+    if updated_level_count == 0:
+        raise ValueError(f"未找到 Z-score run {run_id} 的 level 明细")
+    return rebuild_zscore_batch_state(batch_id)
+
+
+def disable_zscore_building_run(run_id: int) -> dict[str, Any]:
+    return _apply_zscore_building_run_state(
+        run_id,
         is_building_included=0,
         manual_status=OUTLIER_MANUAL_STATUS_DISABLED,
-        handled_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     )
-    return rebuild_zscore_batch_state(batch_id)
+
+
+def restore_zscore_building_run(run_id: int) -> dict[str, Any]:
+    return _apply_zscore_building_run_state(
+        run_id,
+        is_building_included=1,
+        manual_status=OUTLIER_MANUAL_STATUS_RESTORED,
+    )
+
+
+def keep_zscore_building_run(run_id: int) -> dict[str, Any]:
+    return _apply_zscore_building_run_state(
+        run_id,
+        is_building_included=1,
+        manual_status=OUTLIER_MANUAL_STATUS_KEEP,
+    )
+
+
+def disable_zscore_level_result(level_result_id: int) -> dict[str, Any]:
+    target_run, _, _ = _get_zscore_level_result_for_outlier_action(level_result_id)
+    return disable_zscore_building_run(int(target_run["run_id"]))
 
 
 def restore_zscore_level_result(level_result_id: int) -> dict[str, Any]:
-    _, target_level_result, batch_id = _get_zscore_level_result_for_outlier_action(level_result_id)
-    db_set_zscore_level_result_building_state(
-        int(target_level_result["id"]),
-        is_building_included=1,
-        manual_status=OUTLIER_MANUAL_STATUS_RESTORED,
-        handled_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    )
-    return rebuild_zscore_batch_state(batch_id)
+    target_run, _, _ = _get_zscore_level_result_for_outlier_action(level_result_id)
+    return restore_zscore_building_run(int(target_run["run_id"]))
 
 
 def keep_zscore_level_result(level_result_id: int) -> dict[str, Any]:
-    _, target_level_result, batch_id = _get_zscore_level_result_for_outlier_action(level_result_id)
-    db_set_zscore_level_result_building_state(
-        int(target_level_result["id"]),
-        is_building_included=1,
-        manual_status=OUTLIER_MANUAL_STATUS_KEEP,
-        handled_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    )
-    return rebuild_zscore_batch_state(batch_id)
+    target_run, _, _ = _get_zscore_level_result_for_outlier_action(level_result_id)
+    return keep_zscore_building_run(int(target_run["run_id"]))
 
 
 def evaluate_zscore_run_with_phase(

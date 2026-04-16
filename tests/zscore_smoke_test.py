@@ -50,6 +50,7 @@ from zscore_logic import (
     delete_saved_zscore_run,
     rebuild_zscore_batch_state,
     update_saved_zscore_run,
+    update_saved_zscore_run_manual_note,
     upsert_zscore_level_target,
 )
 from zscore_plotting import filter_zscore_plot_df, plot_zscore_overlay, plot_zscore_single_level
@@ -290,6 +291,54 @@ def build_mixed_phase_plot_df() -> pd.DataFrame:
     return pd.DataFrame(rows, columns=PLOT_COLUMNS)
 
 
+def build_building_only_plot_df() -> pd.DataFrame:
+    level_1_target = TEMPLATES["2_level_classic"]["default_targets"]["Level 1"]
+    level_2_target = TEMPLATES["2_level_classic"]["default_targets"]["Level 2"]
+    rows = [
+        {
+            "run_id": 1,
+            "test_sequence": 1,
+            "run_index": 1,
+            "test_time": BASE_TIME,
+            "level_id": "Level 1",
+            "zscore": 0.2,
+            "status": PHASE_TARGET_BUILDING,
+            "rule_hits": "",
+            "raw_value": 101.0,
+            "log_value": math.log10(101.0),
+            "building_reference_mean": 101.0,
+            "building_reference_sd": 1.0,
+            "formal_reference_mean": float(level_1_target["target_mean"]),
+            "formal_reference_sd": float(level_1_target["target_sd"]),
+            "phase": PHASE_TARGET_BUILDING,
+            "plot_phase": PHASE_TARGET_BUILDING,
+            "is_building_stat_point": True,
+            "is_preview": False,
+        },
+        {
+            "run_id": 1,
+            "test_sequence": 1,
+            "run_index": 1,
+            "test_time": BASE_TIME,
+            "level_id": "Level 2",
+            "zscore": -0.1,
+            "status": PHASE_TARGET_BUILDING,
+            "rule_hits": "",
+            "raw_value": 149.0,
+            "log_value": math.log10(149.0),
+            "building_reference_mean": 149.0,
+            "building_reference_sd": 1.0,
+            "formal_reference_mean": float(level_2_target["target_mean"]),
+            "formal_reference_sd": float(level_2_target["target_sd"]),
+            "phase": PHASE_TARGET_BUILDING,
+            "plot_phase": PHASE_TARGET_BUILDING,
+            "is_building_stat_point": True,
+            "is_preview": False,
+        },
+    ]
+    return pd.DataFrame(rows, columns=PLOT_COLUMNS)
+
+
 def assert_is_figure(figure: object) -> None:
     assert isinstance(figure, Figure), f"Expected matplotlib Figure, got {type(figure)!r}"
 
@@ -301,6 +350,17 @@ def collect_legend_texts(figure: Figure) -> dict[str, list[str]]:
         for legend in legends:
             legend_map[legend.get_title().get_text()] = [text.get_text() for text in legend.get_texts()]
     return legend_map
+
+
+def collect_legend_anchor_positions(figure: Figure) -> dict[str, tuple[float, float]]:
+    anchor_map: dict[str, tuple[float, float]] = {}
+    for axis in figure.axes:
+        legends = [artist for artist in axis.artists if isinstance(artist, Legend)]
+        for legend in legends:
+            bbox = legend.get_bbox_to_anchor()
+            raw_bbox = getattr(bbox, "_bbox", bbox)
+            anchor_map[legend.get_title().get_text()] = (float(raw_bbox.x0), float(raw_bbox.y0))
+    return anchor_map
 
 
 def test_template_rule_sets() -> None:
@@ -322,6 +382,17 @@ def test_2_level_1_3s_reject() -> None:
     assert "1_3s" in get_rule_ids(run)
     assert run["run_status"] == "reject"
     assert run["error_type_hint"] == "random"
+
+
+def test_run_level_final_status_preserves_level_evidence_for_two_level_trigger() -> None:
+    run = evaluate_case("2_level_classic", {"Level 1": 3.2, "Level 2": 0.1})
+    level_results = {str(level_result["level_id"]): level_result for level_result in run["level_results"]}
+
+    assert run["run_status"] == "reject"
+    assert level_results["Level 1"]["status"] == "reject"
+    assert "1_3s" in level_results["Level 1"]["rule_hits_local"]
+    assert level_results["Level 2"]["status"] == "accept"
+    assert level_results["Level 2"]["rule_hits_local"] == []
 
 
 def test_2_level_r_4s_within_run_across_level() -> None:
@@ -1209,6 +1280,55 @@ def test_building_runs_lock_after_batch_enters_formal() -> None:
             raise AssertionError("Locked building run should not be deletable")
 
 
+def test_building_runs_lock_once_batch_phase_turns_formal() -> None:
+    with TemporaryDatabaseContext():
+        project_id = create_zscore_project("Formal Ready Lock Project", level_count=2)
+        batch_id = create_zscore_batch(
+            project_id=project_id,
+            instrument="Formal Ready Inst",
+            reagent="Formal Ready Reagent",
+            qc_material="Formal Ready QC",
+            concentration="Normal",
+            lot_no="FORMAL-READY-LOCK",
+            target_n=5,
+        )
+
+        for hour, values in enumerate(
+            [
+                (100.0, 150.0),
+                (101.0, 151.0),
+                (99.5, 149.5),
+                (100.2, 150.2),
+                (100.1, 150.1),
+            ],
+            start=0,
+        ):
+            create_zscore_run(
+                batch_id=batch_id,
+                test_time=BASE_TIME + pd.Timedelta(hours=hour),
+                operator=f"formal-ready-{hour}",
+                level_results=[
+                    {"level_id": "Level 1", "raw_value": values[0]},
+                    {"level_id": "Level 2", "raw_value": values[1]},
+                ],
+                template_id="2_level_classic",
+                required_n=5,
+            )
+
+        formal_ready_runs = get_zscore_runs(batch_id, "2_level_classic")
+        assert formal_ready_runs
+        assert all(run["phase"] == PHASE_TARGET_BUILDING for run in formal_ready_runs)
+        assert all(bool(run["is_locked_for_maintenance"]) for run in formal_ready_runs)
+
+        locked_run_id = int(formal_ready_runs[0]["run_id"])
+        try:
+            update_saved_zscore_run_manual_note(locked_run_id, "should fail")
+        except ValueError as exc:
+            assert "已锁定" in str(exc)
+        else:
+            raise AssertionError("Locked building run should not allow manual note updates")
+
+
 def test_test_sequence_keeps_incrementing_and_feeds_plot_axis() -> None:
     with TemporaryDatabaseContext():
         project_id = create_zscore_project("Sequence Project", level_count=2)
@@ -1335,12 +1455,7 @@ def test_single_level_manual_legend_covers_status_phase_and_clip_marker() -> Non
     legend_map = collect_legend_texts(figure)
 
     assert legend_map["状态"] == ["正常", "警告", "失控", "超界裁切点"]
-    assert legend_map["阶段 / 样式"] == [
-        "建靶期（虚线 / 方形点）",
-        "正式期（实线 / 圆形点）",
-        "均值 / ±SD 控制线",
-        "描边点=含手动备注",
-    ]
+    assert legend_map["阶段 / 样式"] == ["正式期（实线 / 圆形点）", "均值 / ±SD 控制线", "描边点=含手动备注"]
     plt.close(figure)
 
 
@@ -1352,15 +1467,28 @@ def test_overlay_manual_legend_keeps_status_phase_and_level_keys() -> None:
         standard_sd_limit=3.0,
     )
     legend_map = collect_legend_texts(figure)
+    legend_anchor_map = collect_legend_anchor_positions(figure)
 
     assert legend_map["状态"] == ["正常", "警告", "失控"]
-    assert legend_map["阶段 / 样式"] == [
-        "建靶期（虚线 / 方形点）",
-        "正式期（实线 / 圆形点）",
-        "均值 / ±SD 控制线",
-        "描边点=含手动备注",
-    ]
+    assert legend_map["阶段 / 样式"] == ["正式期（实线 / 圆形点）", "均值 / ±SD 控制线", "描边点=含手动备注"]
     assert legend_map["水平"] == ["水平 1", "水平 2"]
+    assert legend_anchor_map["状态"][0] >= 1.0
+    assert legend_anchor_map["阶段 / 样式"][0] >= 1.0
+    assert legend_anchor_map["水平"][0] >= 1.0
+    plt.close(figure)
+
+
+def test_building_only_phase_legend_omits_formal_entry_and_control_lines() -> None:
+    figure = plot_zscore_single_level(
+        build_building_only_plot_df(),
+        "Level 1",
+        "Building Only",
+        phase_scope="building",
+    )
+    legend_map = collect_legend_texts(figure)
+
+    assert "状态" not in legend_map
+    assert legend_map["阶段 / 样式"] == ["建靶期（虚线 / 方形点）", "描边点=含手动备注"]
     plt.close(figure)
 
 
@@ -1500,6 +1628,131 @@ def test_entry_save_preserves_overlay_view_after_rerun() -> None:
         assert not list(at.exception)
 
 
+def test_building_maintenance_page_exposes_only_run_level_actions() -> None:
+    with TemporaryDatabaseContext():
+        project_id = create_zscore_project("Run Maintenance AppTest Project", level_count=2, input_value_type="raw")
+        batch_id = create_zscore_batch(
+            project_id=project_id,
+            instrument="Run Maintenance Inst",
+            reagent="Run Maintenance Reagent",
+            qc_material="Run Maintenance QC",
+            concentration="Normal",
+            lot_no="RUN-MAINT-LOT",
+            target_n=5,
+        )
+        template_id = get_template_id_for_level_count(2)
+        for hour, values in enumerate([(100.0, 150.0), (101.0, 149.8), (99.7, 150.2)], start=0):
+            create_zscore_run(
+                batch_id=batch_id,
+                test_time=BASE_TIME + pd.Timedelta(hours=hour),
+                operator=f"run-maint-{hour}",
+                level_results=[
+                    {"level_id": "Level 1", "raw_value": values[0]},
+                    {"level_id": "Level 2", "raw_value": values[1]},
+                ],
+                template_id=template_id,
+                required_n=5,
+            )
+
+        at = AppTest.from_string(ZSCORE_PAGE_APPTEST_SCRIPT)
+        at.session_state["zscore_selected_project_id"] = project_id
+        at.session_state["zscore_selected_batch_id"] = batch_id
+        at.run()
+
+        assert not list(at.exception)
+        button_labels = [str(button.label) for button in at.button]
+        caption_values = [str(item.value) for item in at.caption]
+
+        assert "保留本 run" in button_labels
+        assert "禁用本 run" in button_labels
+        assert "恢复本 run" in button_labels
+        assert "保留" not in button_labels
+        assert "禁用" not in button_labels
+        assert "恢复" not in button_labels
+        assert any("全部 level 的证据明细" in value for value in caption_values)
+        assert any("不再分别维护单个 level" in value for value in caption_values)
+
+
+def test_formal_phase_hides_building_maintenance_section_and_keeps_locked_history_read_only() -> None:
+    with TemporaryDatabaseContext():
+        project_id = create_zscore_project("Formal Hidden Maintenance Project", level_count=2, input_value_type="raw")
+        batch_id = create_zscore_batch(
+            project_id=project_id,
+            instrument="Formal Hidden Inst",
+            reagent="Formal Hidden Reagent",
+            qc_material="Formal Hidden QC",
+            concentration="Normal",
+            lot_no="FORMAL-HIDDEN-LOT",
+            target_n=5,
+        )
+        template_id = get_template_id_for_level_count(2)
+        for hour, values in enumerate(
+            [
+                (100.0, 150.0),
+                (101.0, 151.0),
+                (99.5, 149.5),
+                (100.2, 150.2),
+                (100.1, 150.1),
+            ],
+            start=0,
+        ):
+            create_zscore_run(
+                batch_id=batch_id,
+                test_time=BASE_TIME + pd.Timedelta(hours=hour),
+                operator=f"formal-hidden-{hour}",
+                level_results=[
+                    {"level_id": "Level 1", "raw_value": values[0]},
+                    {"level_id": "Level 2", "raw_value": values[1]},
+                ],
+                template_id=template_id,
+                required_n=5,
+            )
+
+        at = AppTest.from_string(ZSCORE_PAGE_APPTEST_SCRIPT)
+        at.session_state["zscore_selected_project_id"] = project_id
+        at.session_state["zscore_selected_batch_id"] = batch_id
+        at.run()
+
+        assert not list(at.exception)
+        button_labels = [str(button.label) for button in at.button]
+        caption_values = [str(item.value) for item in at.caption]
+
+        assert "打开维护记录" in button_labels
+        assert "保留本 run" not in button_labels
+        assert "禁用本 run" not in button_labels
+        assert "恢复本 run" not in button_labels
+        assert any("建靶期 run 在正式期后自动锁定为只读" in value for value in caption_values)
+
+        at.button(key="open_zscore_record_maintenance_dialog").click().run()
+
+        assert not list(at.exception)
+        maintenance_tables = [
+            dataframe.value
+            for dataframe in at.dataframe
+            if {"检测序号", "阶段", "维护状态", "水平摘要"}.issubset(set(dataframe.value.columns))
+        ]
+        assert maintenance_tables
+        maintenance_df = maintenance_tables[0]
+        assert "建靶中" in maintenance_df["阶段"].tolist()
+        assert "建靶期只读" in maintenance_df["维护状态"].tolist()
+
+        run_options = list(at.selectbox(key="zscore_run_selector").options)
+        assert len(run_options) > 1
+        at.selectbox(key="zscore_run_selector").set_value(run_options[1]).run()
+
+        assert not list(at.exception)
+        dialog_button_labels = [str(button.label) for button in at.button]
+        info_values = [str(item.value) for item in at.info]
+
+        assert "保存记录修改" not in dialog_button_labels
+        assert "删除所选记录" not in dialog_button_labels
+        assert "保留本 run" not in dialog_button_labels
+        assert "禁用本 run" not in dialog_button_labels
+        assert "恢复本 run" not in dialog_button_labels
+        assert any("只读" in value for value in info_values)
+        assert any("不能维护" in value or "不能删除" in value for value in info_values)
+
+
 def test_plotting_all_view_visually_splits_building_and_formal_phases() -> None:
     figure = plot_zscore_single_level(
         build_mixed_phase_plot_df(),
@@ -1588,6 +1841,7 @@ def run_all_tests() -> None:
         test_template_rule_sets,
         test_2_level_1_2s_warning,
         test_2_level_1_3s_reject,
+        test_run_level_final_status_preserves_level_evidence_for_two_level_trigger,
         test_2_level_r_4s_within_run_across_level,
         test_2_level_2_2s,
         test_2_level_4_1s,
@@ -1617,6 +1871,7 @@ def run_all_tests() -> None:
         test_delete_saved_run_rebuilds_batch_and_plot_points,
         test_saved_run_maintenance_respects_level_count_for_two_and_three_level_batches,
         test_building_runs_lock_after_batch_enters_formal,
+        test_building_runs_lock_once_batch_phase_turns_formal,
         test_test_sequence_keeps_incrementing_and_feeds_plot_axis,
         test_plotting_uses_raw_value_axis_and_mean_sd_reference_lines,
         test_plotting_supports_standard_and_full_range_views,
@@ -1625,6 +1880,8 @@ def run_all_tests() -> None:
         test_delete_feedback_keeps_maintenance_dialog_context,
         test_entry_save_preserves_chart_controls_after_rerun,
         test_entry_save_preserves_overlay_view_after_rerun,
+        test_building_maintenance_page_exposes_only_run_level_actions,
+        test_formal_phase_hides_building_maintenance_section_and_keeps_locked_history_read_only,
         test_plotting_all_view_visually_splits_building_and_formal_phases,
         test_plotting_all_view_keeps_continuous_trajectory_and_phase_separator,
         test_plotting_handles_empty_frames,

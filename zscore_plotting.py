@@ -171,8 +171,8 @@ def plot_zscore_single_level(
     axis.set_xlabel("检测序号")
     axis.set_ylabel(y_axis_label)
     axis.grid(True, linestyle=":", alpha=0.3)
-    _add_manual_legends(axis, display_df, show_reference_lines=show_reference_lines)
     figure.tight_layout(pad=0.7)
+    _add_manual_legends(axis, display_df, show_reference_lines=show_reference_lines)
     return figure
 
 
@@ -239,13 +239,14 @@ def plot_zscore_overlay(
     axis.set_xlabel("检测序号")
     axis.set_ylabel(y_axis_label)
     axis.grid(True, linestyle=":", alpha=0.3)
+    figure.tight_layout(rect=(0.0, 0.0, 0.76, 1.0), pad=0.7)
     _add_manual_legends(
         axis,
         display_df,
         level_ids=display_df["level_id"].drop_duplicates().tolist(),
         show_reference_lines=show_reference_lines,
+        place_outside=True,
     )
-    figure.tight_layout(pad=0.7)
     return figure
 
 
@@ -603,42 +604,78 @@ def _add_manual_legends(
     display_df: pd.DataFrame,
     level_ids: list[str] | None = None,
     show_reference_lines: bool = True,
+    place_outside: bool = False,
 ) -> None:
+    visible_phases = _collect_visible_phases(display_df)
+    legend_style = {
+        "frameon": True,
+        "framealpha": 0.94,
+        "borderpad": 0.7,
+    }
+    if place_outside:
+        status_legend_loc = {
+            "loc": "upper left",
+            "bbox_to_anchor": (1.01, 1.00),
+            "borderaxespad": 0.0,
+            "handlelength": 1.2,
+        }
+        phase_legend_loc = {
+            "loc": "upper left",
+            "bbox_to_anchor": (1.01, 0.63),
+            "borderaxespad": 0.0,
+            "handlelength": 2.0,
+        }
+        level_legend_loc = {
+            "loc": "upper left",
+            "bbox_to_anchor": (1.01, 0.30),
+            "borderaxespad": 0.0,
+            "handlelength": 2.0,
+        }
+    else:
+        status_legend_loc = {
+            "loc": "upper left",
+            "handlelength": 1.2,
+        }
+        phase_legend_loc = {
+            "loc": "upper right",
+            "handlelength": 2.0,
+        }
+        level_legend_loc = {
+            "loc": "lower left",
+            "handlelength": 2.0,
+        }
+
     status_handles = _build_status_legend_handles(display_df, _has_out_of_range_points(display_df))
     if status_handles:
         status_legend = axis.legend(
             handles=status_handles,
             title="状态",
-            loc="upper left",
-            frameon=True,
-            framealpha=0.94,
-            borderpad=0.7,
-            handlelength=1.2,
+            **legend_style,
+            **status_legend_loc,
         )
         axis.add_artist(status_legend)
 
-    phase_legend = axis.legend(
-        handles=_build_phase_legend_handles(show_reference_lines=show_reference_lines),
-        title="阶段 / 样式",
-        loc="upper right",
-        frameon=True,
-        framealpha=0.94,
-        borderpad=0.7,
-        handlelength=2.0,
+    phase_handles = _build_phase_legend_handles(
+        visible_phases=visible_phases,
+        show_reference_lines=show_reference_lines,
     )
-    axis.add_artist(phase_legend)
+    if phase_handles:
+        phase_legend = axis.legend(
+            handles=phase_handles,
+            title="阶段 / 样式",
+            **legend_style,
+            **phase_legend_loc,
+        )
+        axis.add_artist(phase_legend)
 
     resolved_level_ids = [level_id for level_id in (level_ids or []) if level_id]
     if len(resolved_level_ids) > 1:
         level_legend = axis.legend(
             handles=_build_level_legend_handles(resolved_level_ids),
             title="水平",
-            loc="lower left",
-            frameon=True,
-            framealpha=0.94,
-            borderpad=0.7,
+            **legend_style,
+            **level_legend_loc,
             ncol=min(3, len(resolved_level_ids)),
-            handlelength=2.0,
         )
         axis.add_artist(level_legend)
 
@@ -707,80 +744,45 @@ def _build_status_legend_handles(display_df: pd.DataFrame, has_out_of_range_poin
     return handles
 
 
-def _build_phase_legend_handles(*, show_reference_lines: bool) -> list[Line2D]:
+def _build_phase_legend_handles(
+    *,
+    visible_phases: list[str],
+    show_reference_lines: bool,
+) -> list[Line2D]:
     neutral_color = "#404040"
-    handles = [
-        Line2D(
-            [0],
-            [0],
-            color=neutral_color,
-            linestyle="--",
-            linewidth=1.4,
-            marker="s",
-            markerfacecolor="#4e79a7",
-            markeredgecolor="#ffffff",
-            markeredgewidth=0.9,
-            markersize=7,
-            label="建靶期（虚线 / 方形点）",
-        ),
-        Line2D(
-            [0],
-            [0],
-            color=neutral_color,
-            linestyle="-",
-            linewidth=1.4,
-            marker="o",
-            markerfacecolor="#808080",
-            markeredgecolor="#ffffff",
-            markeredgewidth=0.9,
-            markersize=7,
-            label="正式期（实线 / 圆形点）",
-        ),
-    ]
-    if show_reference_lines:
+    handles: list[Line2D] = []
+    if PHASE_TARGET_BUILDING in visible_phases:
         handles.append(
             Line2D(
                 [0],
                 [0],
-                color=REFERENCE_LINE_COLORS[0],
-                linestyle="-",
-                linewidth=1.2,
-                label="均值 / ±SD 控制线",
+                color=neutral_color,
+                linestyle="--",
+                linewidth=1.4,
+                marker="s",
+                markerfacecolor="#4e79a7",
+                markeredgecolor="#ffffff",
+                markeredgewidth=0.9,
+                markersize=7,
+                label="建靶期（虚线 / 方形点）",
             )
         )
-    return handles
-
-
-def _build_phase_legend_handles(*, show_reference_lines: bool) -> list[Line2D]:
-    neutral_color = "#404040"
-    handles = [
-        Line2D(
-            [0],
-            [0],
-            color=neutral_color,
-            linestyle="--",
-            linewidth=1.4,
-            marker="s",
-            markerfacecolor="#4e79a7",
-            markeredgecolor="#ffffff",
-            markeredgewidth=0.9,
-            markersize=7,
-            label="建靶期（虚线 / 方形点）",
-        ),
-        Line2D(
-            [0],
-            [0],
-            color=neutral_color,
-            linestyle="-",
-            linewidth=1.4,
-            marker="o",
-            markerfacecolor="#808080",
-            markeredgecolor="#ffffff",
-            markeredgewidth=0.9,
-            markersize=7,
-            label="正式期（实线 / 圆形点）",
-        ),
-    ]
+    if PHASE_FORMAL_QC in visible_phases:
+        handles.append(
+            Line2D(
+                [0],
+                [0],
+                color=neutral_color,
+                linestyle="-",
+                linewidth=1.4,
+                marker="o",
+                markerfacecolor="#808080",
+                markeredgecolor="#ffffff",
+                markeredgewidth=0.9,
+                markersize=7,
+                label="正式期（实线 / 圆形点）",
+            )
+        )
     if show_reference_lines:
         handles.append(
             Line2D(
@@ -806,6 +808,19 @@ def _build_phase_legend_handles(*, show_reference_lines: bool) -> list[Line2D]:
         )
     )
     return handles
+
+
+def _collect_visible_phases(display_df: pd.DataFrame) -> list[str]:
+    if display_df.empty:
+        return []
+    phase_column = "plot_phase" if "plot_phase" in display_df.columns else "phase"
+    if phase_column not in display_df.columns:
+        return []
+    visible_phases: list[str] = []
+    for phase in display_df[phase_column].dropna().astype(str).tolist():
+        if phase in {PHASE_TARGET_BUILDING, PHASE_FORMAL_QC} and phase not in visible_phases:
+            visible_phases.append(phase)
+    return visible_phases
 
 
 def _build_level_legend_handles(level_ids: list[str]) -> list[Line2D]:

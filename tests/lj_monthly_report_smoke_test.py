@@ -36,11 +36,11 @@ from services.settings_service import REPORT_SETTINGS_FALLBACKS, save_report_set
 from tests.report_pdf_assertions import assert_uniform_a4_pages_without_watermark
 
 
-LJ_PAGE_APPTEST_SCRIPT = """
+LJ_PAGE_APPTEST_SCRIPT = f"""
 import sys
 from pathlib import Path
 
-ROOT = Path(r'D:\\Github\\LJQCapp_clean')
+ROOT = Path({str(PROJECT_ROOT)!r})
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 

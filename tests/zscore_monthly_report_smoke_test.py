@@ -34,11 +34,11 @@ from tests.report_pdf_assertions import assert_uniform_a4_pages_without_watermar
 from zscore_logic import create_zscore_run, get_template_id_for_level_count
 
 
-ZSCORE_PAGE_APPTEST_SCRIPT = """
+ZSCORE_PAGE_APPTEST_SCRIPT = f"""
 import sys
 from pathlib import Path
 
-ROOT = Path(r'D:\\Github\\LJQCapp_clean')
+ROOT = Path({str(PROJECT_ROOT)!r})
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
