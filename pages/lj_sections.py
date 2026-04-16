@@ -35,8 +35,7 @@ from qc_logic import (
 )
 from services.outlier_service import (
     DEFAULT_GRUBBS_ALPHA,
-    get_outlier_manual_status_label,
-    get_outlier_status_label,
+    get_current_outlier_status_label,
 )
 from services.value_type_service import (
     get_input_value_type_label,
@@ -110,7 +109,10 @@ def build_lj_building_outlier_panel_data(
             "grubbs_statistic": suspect_row.get("grubbs_statistic"),
             "grubbs_threshold": suspect_row.get("grubbs_threshold"),
             "alpha": DEFAULT_GRUBBS_ALPHA,
-            "status_label": get_outlier_status_label(suspect_row.get("outlier_status")),
+            "status_label": get_current_outlier_status_label(
+                is_building_included=suspect_row.get("is_building_included", 1),
+                is_suspect=suspect_row.get("is_outlier_suspect", 0),
+            ),
         }
     return {
         "phase_label": "建靶期",
@@ -130,6 +132,13 @@ def _format_lj_stat_text(value: object, digits: int = 4, suffix: str = "") -> st
     if value is None or pd.isna(value):
         return "-"
     return f"{float(value):.{digits}f}{suffix}"
+
+
+def _get_lj_building_record_current_status_label(row: pd.Series | dict[str, object]) -> str:
+    return get_current_outlier_status_label(
+        is_building_included=row.get("is_building_included", 1),
+        is_suspect=row.get("is_outlier_suspect", 0),
+    )
 
 
 def render_lj_building_outlier_panel(
@@ -755,7 +764,7 @@ def render_lj_maintenance_section(context: dict[str, object]) -> None:
                 f"G={float(suspect_row.get('grubbs_statistic') or 0.0):.4f} | "
                 f"G临界值={float(suspect_row.get('grubbs_threshold') or 0.0):.4f} | "
                 f"alpha={DEFAULT_GRUBBS_ALPHA:.2f} | "
-                f"状态={get_outlier_status_label(suspect_row.get('outlier_status'))}"
+                f"状态={_get_lj_building_record_current_status_label(suspect_row)}"
             )
 
         if building_df.empty:
@@ -767,7 +776,7 @@ def render_lj_maintenance_section(context: dict[str, object]) -> None:
                 label = (
                     f"序号 #{int(row.get('sequence', 0) or 0)} | "
                     f"{pd.Timestamp(row['test_time']).strftime('%Y-%m-%d %H:%M')} | "
-                    f"{get_outlier_status_label(row.get('outlier_status'))}"
+                    f"{_get_lj_building_record_current_status_label(row)}"
                 )
                 option_labels.append(label)
                 option_map[label] = int(row["id"])
@@ -786,8 +795,7 @@ def render_lj_maintenance_section(context: dict[str, object]) -> None:
             if not pd.isna(selected_row.get("grubbs_threshold")):
                 threshold_text = f"{float(selected_row.get('grubbs_threshold')):.4f}"
             st.caption(
-                f"当前状态：{get_outlier_status_label(selected_row.get('outlier_status'))} | "
-                f"手工处理：{get_outlier_manual_status_label(selected_row.get('manual_status'))} | "
+                f"当前状态：{_get_lj_building_record_current_status_label(selected_row)} | "
                 f"G={statistic_text} | "
                 f"G临界值={threshold_text} | "
                 f"alpha={DEFAULT_GRUBBS_ALPHA:.2f}"

@@ -27,13 +27,13 @@ def render_lj_monthly_report_section(selected_batch_id: int) -> None:
 
     with st.container(border=True):
         render_section_intro(
-            title="单水平（LJ法）月度报告",
-            caption="当前入口只支持单水平（LJ法）月报，不支持 Z-score 月报。",
+            title="单水平（LJ法）月度质控报告",
+            caption="基于当前批次生成单水平（LJ法）月度质控报告。",
             tone="accent",
         )
         render_workbench_context_bar(
             title="LJ 月报当前选择",
-            caption="项目与批次沿用当前 LJ 工作台的选择结果。报告主统计只基于所选月份内的正式期数据。",
+            caption="项目与批次沿用当前 LJ 工作台选择；报告统计仅包含所选月份内的正式期数据。",
             items=[
                 ("方法", "单水平（LJ法）"),
                 ("项目名称", batch["project_name"]),
@@ -79,7 +79,7 @@ def render_lj_monthly_report_section(selected_batch_id: int) -> None:
                     "file_name": package.report.file_name,
                     "snapshot_id": snapshot_id,
                 }
-                st.success("已生成单水平（LJ法）月度质控报告，可预览摘要并下载 PDF。")
+                st.success("已生成单水平（LJ法）月度质控报告，可预览并下载 PDF。")
 
         preview_state = st.session_state.get(preview_key)
         if not _preview_matches(preview_state, selected_batch_id, selected_month):
@@ -99,7 +99,7 @@ def render_lj_monthly_report_section(selected_batch_id: int) -> None:
             key=f"{report_scope}_download",
             width="stretch",
         )
-        st.caption(f"已保存最小报告快照，快照编号：{preview_state['snapshot_id']}")
+        st.caption(f"已保存报告快照，编号：{preview_state['snapshot_id']}")
 
 
 def _preview_matches(
@@ -132,7 +132,7 @@ def _format_report_month_option(value: str) -> str:
 
 def _render_report_preview(package: LjMonthlyReportPackage) -> None:
     report = package.report
-    st.markdown("**报告预览摘要**")
+    st.markdown("**报告预览**")
     st.caption(
         f"报告月份：{report.report_month_label}｜报告期间：{report.report_period_label}｜生成时间：{report.generated_at}"
     )
@@ -207,5 +207,5 @@ def _render_report_preview(package: LjMonthlyReportPackage) -> None:
     st.markdown("**月度结论**")
     st.write(report.conclusion)
 
-    st.markdown("**声明区**")
+    st.markdown("**报告声明**")
     st.caption(report.declaration)

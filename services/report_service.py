@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from io import BytesIO
 import math
+import re
 import textwrap
 from typing import Any
 
@@ -88,8 +89,35 @@ ZSCORE_RULE_DISPLAY_NAMES = {
     "10_x": "10x",
     "12_x": "12x",
 }
-ZSCORE_ABNORMAL_TABLE_COLUMNS = ["检测时间", "run 编号", "run级结论（最终）", "触发规则", "level明细（证据）", "误差类型", "手动备注"]
+ZSCORE_ABNORMAL_TABLE_COLUMNS = ["检测时间", "检测序号", "本次检测结论", "触发规则", "各水平触发证据", "误差类型", "手动备注"]
 ZSCORE_ABNORMAL_TABLE_WIDTHS = [0.15, 0.08, 0.11, 0.13, 0.25, 0.10, 0.18]
+LEGACY_REPORT_TEXT_REPLACEMENTS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"建议查看\s*run\s*级规则证据", re.IGNORECASE), "建议查看本次检测规则触发证据"),
+    (re.compile(r"建议查看\s*run\s*级判定依据", re.IGNORECASE), "建议查看本次检测规则判定依据"),
+    (re.compile(r"查看\s*run\s*级规则证据", re.IGNORECASE), "查看本次检测规则触发证据"),
+    (re.compile(r"查看\s*run\s*级判定依据", re.IGNORECASE), "查看本次检测规则判定依据"),
+    (re.compile(r"run\s*级结论", re.IGNORECASE), "本次检测结论"),
+    (re.compile(r"run\s*级状态", re.IGNORECASE), "本次检测状态"),
+    (re.compile(r"run\s*级", re.IGNORECASE), "本次检测"),
+    (re.compile(r"run[- ]level", re.IGNORECASE), "本次检测层面"),
+    (re.compile(r"level evidence", re.IGNORECASE), "各水平触发证据"),
+    (re.compile(r"level\s*级", re.IGNORECASE), "水平"),
+    (re.compile(r"level\s*明细", re.IGNORECASE), "各水平明细"),
+    (re.compile(r"查看\s*run\b", re.IGNORECASE), "查看本次检测"),
+    (re.compile(r"本次\s*run\b", re.IGNORECASE), "本次检测"),
+    (re.compile(r"同一\s*run\b", re.IGNORECASE), "同一次检测"),
+    (re.compile(r"当前\s*run\s*中", re.IGNORECASE), "本次检测中"),
+    (re.compile(r"当前\s*run\b", re.IGNORECASE), "本次检测"),
+    (re.compile(r"后续\s*run\b", re.IGNORECASE), "后续检测记录"),
+    (re.compile(r"within-run", re.IGNORECASE), "本次检测内"),
+    (re.compile(r"across-run", re.IGNORECASE), "跨检测记录"),
+    (re.compile(r"within-level", re.IGNORECASE), "单水平"),
+    (re.compile(r"across-level", re.IGNORECASE), "多水平联动"),
+    (re.compile(r"\brandom\b", re.IGNORECASE), "随机"),
+    (re.compile(r"\bsystematic\b", re.IGNORECASE), "系统"),
+    (re.compile(r"\brun\b", re.IGNORECASE), "本次检测"),
+    (re.compile(r"\blevel\b", re.IGNORECASE), "水平"),
+]
 
 
 @dataclass(frozen=True)
@@ -353,6 +381,15 @@ class ReportRegenerationResult:
     pdf_bytes: bytes
 
 
+def normalize_generated_report_text(text: object) -> str:
+    normalized_text = str(text or "").strip()
+    if not normalized_text:
+        return ""
+    for pattern, replacement in LEGACY_REPORT_TEXT_REPLACEMENTS:
+        normalized_text = pattern.sub(replacement, normalized_text)
+    return normalized_text.strip()
+
+
 def list_lj_report_month_options(batch_id: int) -> list[str]:
     results_df = get_results(batch_id, include_manual_note=True)
     if results_df.empty:
@@ -430,10 +467,10 @@ def build_lj_monthly_report_package(batch_id: int, report_month: str) -> LjMonth
         statistics=statistics,
         abnormal_records=abnormal_records,
         corrective_actions=corrective_actions,
-        overview_text=overview_text,
+        overview_text=normalize_generated_report_text(overview_text),
         corrective_actions_empty_text=corrective_actions_empty_text,
-        abnormal_summary_text=abnormal_summary_text,
-        conclusion=_build_conclusion(statistics),
+        abnormal_summary_text=normalize_generated_report_text(abnormal_summary_text),
+        conclusion=normalize_generated_report_text(_build_conclusion(statistics)),
         declaration=report_settings.report_statement,
         chart_title=(
             f"{LJ_METHOD_LABEL}月度质控图\n"
@@ -641,10 +678,10 @@ def build_zscore_monthly_report_package(
         level_statistics=level_statistics,
         abnormal_records=abnormal_records,
         corrective_actions=corrective_actions,
-        overview_text=overview_text,
+        overview_text=normalize_generated_report_text(overview_text),
         corrective_actions_empty_text=corrective_actions_empty_text,
-        abnormal_summary_text=abnormal_summary_text,
-        conclusion=_build_zscore_monthly_conclusion(statistics),
+        abnormal_summary_text=normalize_generated_report_text(abnormal_summary_text),
+        conclusion=normalize_generated_report_text(_build_zscore_monthly_conclusion(statistics)),
         declaration=report_settings.report_statement,
         chart_title=(
             f"{ZSCORE_METHOD_LABEL}月度质控图\n"
@@ -735,13 +772,13 @@ def save_zscore_monthly_report_snapshot(package: ZScoreMonthlyReportPackage) -> 
 def build_zscore_monthly_preview_summary(report: ZScoreMonthlyReportData) -> list[tuple[str, str]]:
     statistics = report.statistics
     return [
-        ("正式期总 run 数", str(statistics.formal_count)),
-        ("在控 run 数", str(statistics.in_control_count)),
-        ("警告 run 数", str(statistics.warning_count)),
-        ("失控 run 数", str(statistics.out_of_control_count)),
+        ("本月正式期检测记录数", str(statistics.formal_count)),
+        ("在控检测记录数", str(statistics.in_control_count)),
+        ("警告检测记录数", str(statistics.warning_count)),
+        ("失控检测记录数", str(statistics.out_of_control_count)),
         ("当前规则组合", statistics.template_label),
         ("当前阶段", statistics.current_phase_label),
-        ("全部 level 已完成建靶", "是" if statistics.all_levels_ready else "否"),
+        ("全部水平已完成建靶", "是" if statistics.all_levels_ready else "否"),
     ]
 
 
@@ -809,13 +846,13 @@ def list_report_history_records() -> list[ReportHistoryRecord]:
                     summary_json=summary_json,
                     basic_info=basic_info,
                 ),
-                summary_text=_build_report_history_summary_text(
+                summary_text=normalize_generated_report_text(_build_report_history_summary_text(
                     report_type=report_type,
                     summary_json=summary_json,
                     statistics=statistics,
-                ),
-                overview_text=str(summary_json.get("overview_text") or "").strip(),
-                conclusion_text=str(summary_json.get("conclusion") or "").strip(),
+                )),
+                overview_text=normalize_generated_report_text(summary_json.get("overview_text")),
+                conclusion_text=normalize_generated_report_text(summary_json.get("conclusion")),
                 file_name=str(row.get("file_name") or summary_json.get("file_name") or "").strip(),
                 statistics=statistics,
                 summary_json=summary_json,
@@ -869,13 +906,13 @@ def build_report_history_statistics_summary(record: ReportHistoryRecord) -> list
     statistics = record.statistics
     if record.report_type == REPORT_TYPE_ZSCORE_MONTHLY:
         return [
-            ("正式期 run 数", str(_coerce_report_history_int(statistics.get("formal_count")))),
-            ("在控 run 数", str(_coerce_report_history_int(statistics.get("in_control_count")))),
-            ("警告 run 数", str(_coerce_report_history_int(statistics.get("warning_count")))),
-            ("失控 run 数", str(_coerce_report_history_int(statistics.get("out_of_control_count")))),
+            ("正式期检测记录数", str(_coerce_report_history_int(statistics.get("formal_count")))),
+            ("在控检测记录数", str(_coerce_report_history_int(statistics.get("in_control_count")))),
+            ("警告检测记录数", str(_coerce_report_history_int(statistics.get("warning_count")))),
+            ("失控检测记录数", str(_coerce_report_history_int(statistics.get("out_of_control_count")))),
             ("规则组合", str(statistics.get("template_label") or "-")),
             ("当前阶段", str(statistics.get("current_phase_label") or "-")),
-            ("全部 level 已完成建靶", "是" if bool(statistics.get("all_levels_ready")) else "否"),
+            ("全部水平已完成建靶", "是" if bool(statistics.get("all_levels_ready")) else "否"),
         ]
 
     return [
@@ -1030,7 +1067,7 @@ def _build_report_history_summary_text(
     statistics: dict[str, Any],
 ) -> str:
     for field_name in ["report_note", "summary_text", "note", "remark"]:
-        explicit_note = str(summary_json.get(field_name) or "").strip()
+        explicit_note = normalize_generated_report_text(summary_json.get(field_name))
         if explicit_note:
             return explicit_note
 
@@ -1039,19 +1076,21 @@ def _build_report_history_summary_text(
     warning_count = _coerce_report_history_int(statistics.get("warning_count"))
     out_of_control_count = _coerce_report_history_int(statistics.get("out_of_control_count"))
 
-    count_label = "本月正式期 run 数" if report_type == REPORT_TYPE_ZSCORE_MONTHLY else "本月正式期总记录数"
+    count_label = "本月正式期检测记录数" if report_type == REPORT_TYPE_ZSCORE_MONTHLY else "本月正式期总记录数"
     fragments = [
         f"{count_label} {formal_count}",
         f"在控 {in_control_count}，警告 {warning_count}，失控 {out_of_control_count}",
     ]
-    overview_text = str(summary_json.get("overview_text") or "").strip()
-    conclusion_text = str(summary_json.get("conclusion") or "").strip()
+    overview_text = normalize_generated_report_text(summary_json.get("overview_text"))
+    conclusion_text = normalize_generated_report_text(summary_json.get("conclusion"))
     if overview_text:
         fragments.append(overview_text)
     elif conclusion_text:
         fragments.append(f"结论：{conclusion_text}")
 
-    return textwrap.shorten("；".join(fragment for fragment in fragments if fragment), width=120, placeholder="...")
+    return normalize_generated_report_text(
+        textwrap.shorten("；".join(fragment for fragment in fragments if fragment), width=120, placeholder="...")
+    )
 
 
 def _coerce_history_timestamp(value: Any) -> pd.Timestamp | None:
@@ -1195,8 +1234,8 @@ def _build_abnormal_records(formal_df: pd.DataFrame) -> list[LjMonthlyAbnormalRe
                 sequence=sequence,
                 value=float(row["value"]),
                 status=str(row["status"] or ""),
-                rule_hits=str(row.get("rule_hits", "") or "-"),
-                manual_note=str(row.get("manual_note", "") or "").strip(),
+                rule_hits=normalize_generated_report_text(str(row.get("rule_hits", "") or "-")) or "-",
+                manual_note=normalize_generated_report_text(row.get("manual_note")),
             )
         )
     return records
@@ -1208,7 +1247,7 @@ def _build_corrective_actions(records: list[LjMonthlyAbnormalRecord]) -> list[st
     values: list[str] = []
     has_empty_note = False
     for record in records:
-        note = str(record.manual_note or "").strip()
+        note = normalize_generated_report_text(record.manual_note)
         if not note:
             has_empty_note = True
             continue
@@ -1236,7 +1275,7 @@ def _build_abnormal_summary_text(
     has_empty_note = any(not str(record.manual_note or "").strip() for record in abnormal_records)
     summary = (
         f"本月共记录 {len(abnormal_records)} 条警告/失控事件。"
-        "以上内容按现有手动备注归并展示。"
+        "原因与纠正措施按已保存手动备注汇总展示。"
     )
     if has_empty_note:
         summary += " 未填写备注的异常记录统一标记为“未填写”。"
@@ -1293,7 +1332,7 @@ def _build_report_file_name(project_name: str, lot_no: str, report_month: str) -
     project_fragment = _build_safe_name(project_name, "project")
     lot_fragment = _build_safe_name(lot_no, "lot")
     month_fragment = report_month.replace("-", "")
-    return f"{project_fragment}_{lot_fragment}_lj_monthly_report_{month_fragment}.pdf"
+    return f"{project_fragment}_{lot_fragment}_单水平月度质控报告_{month_fragment}.pdf"
 
 
 def _build_safe_name(text: str, fallback: str) -> str:
@@ -1710,10 +1749,10 @@ def _build_zscore_abnormal_records(
                 test_time=pd.Timestamp(run["test_time"]).strftime("%Y-%m-%d %H:%M"),
                 run_sequence=int(run.get("test_sequence") or run.get("run_id") or run.get("id") or 0),
                 run_conclusion=_format_zscore_run_status(run_status),
-                rule_hits=_format_zscore_rule_hits(run.get("rule_hits_run", [])),
-                level_evidence=_format_zscore_level_evidence(run, level_label_map),
+                rule_hits=normalize_generated_report_text(_format_zscore_rule_hits(run.get("rule_hits_run", []))) or "-",
+                level_evidence=normalize_generated_report_text(_format_zscore_level_evidence(run, level_label_map)) or "-",
                 error_type=_format_zscore_error_type(run.get("error_type_hint")),
-                manual_note=str(run.get("manual_note", "") or "").strip(),
+                manual_note=normalize_generated_report_text(run.get("manual_note")),
             )
         )
     return records
@@ -1725,7 +1764,7 @@ def _build_zscore_corrective_actions(records: list[ZScoreMonthlyAbnormalRecord])
     values: list[str] = []
     has_empty_note = False
     for record in records:
-        note = str(record.manual_note or "").strip()
+        note = normalize_generated_report_text(record.manual_note)
         if not note:
             has_empty_note = True
             continue
@@ -1751,16 +1790,16 @@ def _build_zscore_abnormal_summary_text(
         return corrective_actions_empty_text
     has_empty_note = any(not str(record.manual_note or "").strip() for record in abnormal_records)
     summary = (
-        f"本月共记录 {len(abnormal_records)} 次警告/失控 run。"
-        "汇总表以 run级结论作为最终结论，各 level 明细仅作为触发证据摘要展示；手动备注沿用当前已保存内容。"
+        f"本月共记录 {len(abnormal_records)} 次警告/失控检测记录。"
+        "表内本次检测结论为最终判定，各水平触发证据用于说明规则触发情况；手动备注沿用已保存内容。"
     )
     if has_empty_note:
-        summary += " 未填写备注的异常 run 统一标记为“未填写”。"
+        summary += " 未填写备注的异常检测记录统一标记为“未填写”。"
     return summary
 
 
 def _resolve_zscore_target_source() -> tuple[str, str]:
-    return ("本批次各水平建靶值", "基于本批次各 level 建靶期有效点计算。")
+    return ("本批次各水平建靶值", "基于本批次各水平建靶期有效点计算。")
 
 
 def _build_zscore_monthly_overview(
@@ -1768,24 +1807,24 @@ def _build_zscore_monthly_overview(
     template_label: str,
 ) -> str:
     summary = (
-        f"本月该 Z-score 批次正式期共纳入 {statistics.formal_count} 次 run，"
+        f"本月该 Z-score 批次正式期共纳入 {statistics.formal_count} 次检测记录，"
         f"其中在控 {statistics.in_control_count} 次、警告 {statistics.warning_count} 次、"
         f"失控 {statistics.out_of_control_count} 次，当前规则组合为{template_label}。"
     )
     if statistics.out_of_control_count > 0:
-        summary += " 本月存在失控 run，详见后续异常与纠正措施说明。"
+        summary += " 本月存在失控检测记录，详见后续异常与纠正措施说明。"
     elif statistics.warning_count > 0:
-        summary += " 本月存在警告 run，建议持续观察。"
+        summary += " 本月存在警告检测记录，建议持续观察。"
     else:
-        summary += " 本月未发现异常 run，整体运行稳定。"
+        summary += " 本月未发现异常检测记录，整体运行稳定。"
     return summary
 
 
 def _build_zscore_monthly_conclusion(statistics: ZScoreMonthlyReportStatistics) -> str:
     if statistics.out_of_control_count > 0:
-        return "本月存在失控 run，需结合原因与纠正措施复核。"
+        return "本月存在失控检测记录，需结合原因与纠正措施复核。"
     if statistics.warning_count > 0:
-        return "本月存在警告 run，建议持续观察。"
+        return "本月存在警告检测记录，建议持续观察。"
     return "本月正式期数据整体在控。"
 
 
@@ -1793,7 +1832,7 @@ def _build_zscore_report_file_name(project_name: str, lot_no: str, report_month:
     project_fragment = _build_safe_name(project_name, "project")
     lot_fragment = _build_safe_name(lot_no, "lot")
     month_fragment = report_month.replace("-", "")
-    return f"{project_fragment}_{lot_fragment}_zscore_monthly_report_{month_fragment}.pdf"
+    return f"{project_fragment}_{lot_fragment}_多水平月度质控报告_{month_fragment}.pdf"
 
 
 def _format_zscore_template_label(template: dict[str, Any] | str) -> str:
@@ -1928,7 +1967,7 @@ def _build_zscore_summary_page(report: ZScoreMonthlyReportData):
     basic_rows = [
         ["方法", report.basic_info.method_label, "输入值类型", report.basic_info.input_value_type_label],
         ["水平数", report.basic_info.level_count_label, "规则组合", report.basic_info.template_label],
-        ["各 level 说明", report.basic_info.level_summary, "质控品批号", report.basic_info.lot_no],
+        ["各水平说明", report.basic_info.level_summary, "质控品批号", report.basic_info.lot_no],
         ["仪器", report.basic_info.instrument, "试剂", report.basic_info.reagent],
         ["质控品", report.basic_info.qc_material, "浓度", report.basic_info.concentration],
         ["当前靶值来源", report.basic_info.target_source_label, "报告期间", report.report_period_label],
@@ -1954,10 +1993,10 @@ def _build_zscore_summary_page(report: ZScoreMonthlyReportData):
 
     _draw_section_title(axis, 0.425, "月度统计摘要")
     summary_rows = [
-        ["月度正式期总 run 数", str(report.statistics.formal_count), "在控 run 数", str(report.statistics.in_control_count)],
-        ["警告 run 数", str(report.statistics.warning_count), "失控 run 数", str(report.statistics.out_of_control_count)],
+        ["月度正式期检测记录数", str(report.statistics.formal_count), "在控检测记录数", str(report.statistics.in_control_count)],
+        ["警告检测记录数", str(report.statistics.warning_count), "失控检测记录数", str(report.statistics.out_of_control_count)],
         ["当前规则组合", report.statistics.template_label, "当前阶段", report.statistics.current_phase_label],
-        ["全部 level 已完成建靶", "是" if report.statistics.all_levels_ready else "否", "", ""],
+        ["全部水平已完成建靶", "是" if report.statistics.all_levels_ready else "否", "", ""],
     ]
     summary_table = axis.table(
         cellText=summary_rows,
@@ -1970,7 +2009,7 @@ def _build_zscore_summary_page(report: ZScoreMonthlyReportData):
     _draw_section_title(axis, 0.22, "月度结论")
     axis.text(0.0, 0.187, textwrap.fill(report.conclusion, width=50), ha="left", va="top", fontsize=11)
 
-    _draw_section_title(axis, 0.12, "声明区")
+    _draw_section_title(axis, 0.12, "报告声明")
     axis.text(0.0, 0.087, textwrap.fill(report.declaration, width=56), ha="left", va="top", fontsize=10)
     return figure
 
@@ -1984,13 +2023,13 @@ def _build_zscore_level_summary_page(report: ZScoreMonthlyReportData):
     axis.text(
         0.5,
         0.945,
-        f"各 level 统计摘要｜项目：{report.basic_info.project_name}｜月份：{report.report_month_label}",
+        f"各水平统计摘要｜项目：{report.basic_info.project_name}｜月份：{report.report_month_label}",
         ha="center",
         va="top",
         fontsize=10,
     )
 
-    _draw_section_title(axis, 0.905, "各 level 统计摘要")
+    _draw_section_title(axis, 0.905, "各水平统计摘要")
     cell_text = [
         [
             item.level_label,
@@ -2005,7 +2044,7 @@ def _build_zscore_level_summary_page(report: ZScoreMonthlyReportData):
     ]
     table = axis.table(
         cellText=cell_text,
-        colLabels=["Level", "月度均值", "月度 SD", "月度 CV%", "当前目标均值", "当前目标 SD", "当前 CV 要求"],
+        colLabels=["水平", "月度均值", "月度 SD", "月度 CV%", "当前目标均值", "当前目标 SD", "当前 CV 要求"],
         cellLoc="left",
         colLoc="left",
         colWidths=[0.23, 0.12, 0.15, 0.16, 0.14, 0.12, 0.08],
@@ -2015,7 +2054,7 @@ def _build_zscore_level_summary_page(report: ZScoreMonthlyReportData):
     axis.text(
         0.0,
         0.50,
-        "统计口径说明：以上各 level 月度均值、SD、CV% 基于所选月份内正式期数据计算；当前目标均值 / SD 取当前批次已生效建靶值。",
+        "统计说明：各水平月度均值、SD、CV%按所选月份内正式期数据计算；当前目标均值和目标 SD 取当前批次已生效建靶值。",
         ha="left",
         va="top",
         fontsize=10,
@@ -2046,7 +2085,7 @@ def _build_zscore_abnormal_page(
 
     _draw_section_title(axis, 0.905, "异常/失控汇总表")
     if not abnormal_chunk:
-        axis.text(0.0, 0.865, "本月未发现警告或失控 run。", ha="left", va="top", fontsize=12)
+        axis.text(0.0, 0.865, "本月未发现警告或失控检测记录。", ha="left", va="top", fontsize=12)
         return figure
 
     cell_text = []

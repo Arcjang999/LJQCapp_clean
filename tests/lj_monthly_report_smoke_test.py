@@ -179,6 +179,7 @@ def test_lj_monthly_report_builds_pdf_and_snapshot() -> None:
         assert "存在失控记录" in package.report.overview_text
         assert package.report.corrective_actions == ["复查校准状态", "未填写"]
         assert "未填写备注的异常记录统一标记为“未填写”" in package.report.abnormal_summary_text
+        assert "单水平月度质控报告" in package.report.file_name
 
         pdf_bytes = build_lj_monthly_report_pdf(package)
         assert pdf_bytes.startswith(b"%PDF")

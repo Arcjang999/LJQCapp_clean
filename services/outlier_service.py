@@ -284,6 +284,48 @@ def get_outlier_manual_status_label(status: object) -> str:
     return SAFE_OUTLIER_MANUAL_STATUS_LABELS.get(normalized_status, "未处理")
 
 
+def _coerce_outlier_flag(value: object, *, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, str):
+        normalized_value = value.strip().lower()
+        if not normalized_value:
+            return default
+        if normalized_value in {"1", "true", "yes", "y", "on"}:
+            return True
+        if normalized_value in {"0", "false", "no", "n", "off"}:
+            return False
+    try:
+        return int(value) != 0
+    except (TypeError, ValueError):
+        return bool(value)
+
+
+def derive_current_outlier_display_status(
+    *,
+    is_building_included: object,
+    is_suspect: object,
+) -> str:
+    if not _coerce_outlier_flag(is_building_included, default=True):
+        return OUTLIER_STATUS_DISABLED
+    if _coerce_outlier_flag(is_suspect, default=False):
+        return OUTLIER_STATUS_SUSPECT
+    return OUTLIER_STATUS_NORMAL
+
+
+def get_current_outlier_status_label(
+    *,
+    is_building_included: object,
+    is_suspect: object,
+) -> str:
+    return get_outlier_status_label(
+        derive_current_outlier_display_status(
+            is_building_included=is_building_included,
+            is_suspect=is_suspect,
+        )
+    )
+
+
 def derive_outlier_status(
     *,
     is_building_included: bool,

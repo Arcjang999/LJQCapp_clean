@@ -50,7 +50,7 @@ PDF_CREATOR = "邦德盛"
 
 LJ_ABNORMAL_TABLE_COLUMNS = ["检测时间", "检测序号", "结果值", "状态", "触发规则", "手动备注"]
 LJ_ABNORMAL_TABLE_WIDTHS = [0.19, 0.10, 0.12, 0.10, 0.14, 0.35]
-ZSCORE_ABNORMAL_TABLE_COLUMNS = ["检测时间", "run 编号", "run级结论（最终）", "触发规则", "level明细（证据）", "误差类型", "手动备注"]
+ZSCORE_ABNORMAL_TABLE_COLUMNS = ["检测时间", "检测序号", "本次检测结论", "触发规则", "各水平触发证据", "误差类型", "手动备注"]
 ZSCORE_ABNORMAL_TABLE_WIDTHS = [0.15, 0.08, 0.11, 0.13, 0.25, 0.10, 0.18]
 
 
@@ -114,8 +114,8 @@ def render_zscore_monthly_report_pdf(package: Any, font_name: str) -> bytes:
                 (_build_zscore_summary_page(report), "摘要页"),
             ]
             for level_index, level_id in enumerate(package.active_levels, start=1):
-                pages.append((_build_zscore_level_chart_page(package, level_id), f"单水平图页 {level_index}"))
-            pages.append((_build_zscore_level_summary_page(report), "各 level 统计页"))
+                pages.append((_build_zscore_level_chart_page(package, level_id), f"水平图页 {level_index}"))
+            pages.append((_build_zscore_level_summary_page(report), "各水平统计页"))
             if report.abnormal_records:
                 for abnormal_index, figure in enumerate(_build_zscore_abnormal_pages(report), start=1):
                     pages.append((figure, f"异常记录页 {abnormal_index}"))
@@ -267,7 +267,7 @@ def _build_zscore_summary_page(report: Any):
 
     basic_rows = [
         ["方法", report.basic_info.method_label, "输入值类型", report.basic_info.input_value_type_label],
-        ["水平数", report.basic_info.level_count_label, "各 level 说明", _wrap_text(report.basic_info.level_summary, 20)],
+        ["水平数", report.basic_info.level_count_label, "各水平说明", _wrap_text(report.basic_info.level_summary, 20)],
         ["当前规则组合", report.basic_info.template_label, "质控品批号", report.basic_info.lot_no],
         ["仪器", report.basic_info.instrument, "试剂", report.basic_info.reagent],
         ["质控品", report.basic_info.qc_material, "浓度", report.basic_info.concentration],
@@ -283,14 +283,14 @@ def _build_zscore_summary_page(report: Any):
     _draw_text_section(canvas, "本月质控概况", report.overview_text, width=58)
 
     run_summary_rows = [
-        ["本月正式期总 run 数", str(report.statistics.formal_count), "在控 run 数", str(report.statistics.in_control_count)],
-        ["警告 run 数", str(report.statistics.warning_count), "失控 run 数", str(report.statistics.out_of_control_count)],
+        ["本月正式期检测记录数", str(report.statistics.formal_count), "在控检测记录数", str(report.statistics.in_control_count)],
+        ["警告检测记录数", str(report.statistics.warning_count), "失控检测记录数", str(report.statistics.out_of_control_count)],
         ["当前规则组合", report.statistics.template_label, "当前阶段", report.statistics.current_phase_label],
-        ["全部 level 已完成建靶", "是" if report.statistics.all_levels_ready else "否", "", ""],
+        ["全部水平已完成建靶", "是" if report.statistics.all_levels_ready else "否", "", ""],
     ]
     _draw_table_section(
         canvas,
-        title="run 级统计摘要",
+        title="检测记录统计摘要",
         cell_text=run_summary_rows,
         col_widths=[0.24, 0.26, 0.24, 0.26],
         font_size=9.0,
@@ -307,7 +307,7 @@ def _build_zscore_level_chart_page(package: Any, level_id: str):
     figure = plot_zscore_single_level(
         plot_df=package.monthly_plot_df.copy(),
         level_id=level_id,
-        title=f"{level_label} 单水平月度图",
+        title=f"{level_label} 月度图",
         phase_scope="formal",
         y_axis_mode="标准视图",
         standard_sd_limit=4.0,
@@ -316,7 +316,7 @@ def _build_zscore_level_chart_page(package: Any, level_id: str):
     _decorate_chart_page(
         figure=figure,
         report_title=package.report.title,
-        page_title=f"{level_label} 单水平月度图",
+        page_title=f"{level_label} 月度图",
         subtitle_lines=[
             f"项目名称：{package.report.basic_info.project_name}    报告月份：{package.report.report_month_label}",
             f"报告期间：{package.report.report_period_label}    当前规则组合：{package.report.statistics.template_label}",
@@ -328,7 +328,7 @@ def _build_zscore_level_chart_page(package: Any, level_id: str):
 def _build_zscore_level_summary_page(report: Any):
     canvas = _new_canvas(
         report_title=report.title,
-        page_title="各 level 统计摘要",
+        page_title="各水平统计摘要",
         subtitle_lines=[
             f"项目名称：{report.basic_info.project_name}    报告月份：{report.report_month_label}",
             f"报告期间：{report.report_period_label}    水平数：{report.basic_info.level_count_label}",
@@ -349,16 +349,16 @@ def _build_zscore_level_summary_page(report: Any):
     ]
     _draw_table_section(
         canvas,
-        title="各 level 统计摘要",
+        title="各水平统计摘要",
         cell_text=cell_text,
-        col_labels=["Level", "记录数", "月度均值", "月度 SD", "月度 CV%", "目标均值", "目标 SD", "CV 要求"],
+        col_labels=["水平", "记录数", "月度均值", "月度 SD", "月度 CV%", "目标均值", "目标 SD", "CV 要求"],
         col_widths=[0.18, 0.09, 0.13, 0.13, 0.14, 0.12, 0.11, 0.10],
         font_size=8.4,
     )
     _draw_text_section(
         canvas,
-        "统计口径说明",
-        "各 level 月度均值、SD、CV% 基于所选月份内正式期数据计算；当前目标均值和目标 SD 取当前批次已生效建靶值。",
+        "统计说明",
+        "各水平月度均值、SD、CV%按所选月份内正式期数据计算；当前目标均值和目标 SD 取当前批次已生效建靶值。",
         width=60,
     )
     return canvas.figure
@@ -386,7 +386,7 @@ def _build_zscore_abnormal_pages(report: Any) -> list[Any]:
             subtitle_lines=[
                 f"项目名称：{report.basic_info.project_name}    报告月份：{report.report_month_label}",
                 f"报告期间：{report.report_period_label}    当前规则组合：{report.statistics.template_label}",
-                "run级结论为最终结论；level明细仅作为触发证据摘要。",
+                "本次检测结论为最终判定，各水平触发证据用于说明规则触发情况。",
             ],
         )
         _draw_table_section(

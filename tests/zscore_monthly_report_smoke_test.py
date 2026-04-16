@@ -84,7 +84,7 @@ def _make_three_level_results(level_1: float, level_2: float, level_3: float) ->
 
 
 def seed_zscore_batch_with_formal_monthly_data() -> tuple[int, int]:
-    project_id = create_zscore_project("Z-score Monthly Project", level_count=2, input_value_type="raw")
+    project_id = create_zscore_project("Z-score 月报项目", level_count=2, input_value_type="raw")
     batch_id = create_zscore_batch(
         project_id=project_id,
         instrument="AU5800",
@@ -93,8 +93,8 @@ def seed_zscore_batch_with_formal_monthly_data() -> tuple[int, int]:
         concentration="Normal",
         lot_no="ZS-202604",
         target_n=5,
-        level_1_label="Level 1",
-        level_2_label="Level 2",
+        level_1_label="水平 1",
+        level_2_label="水平 2",
         cv_limit=5.0,
     )
     template_id = get_template_id_for_level_count(2)
@@ -108,7 +108,7 @@ def seed_zscore_batch_with_formal_monthly_data() -> tuple[int, int]:
     ]
     formal_runs = [
         ("2026-04-01 08:00:00", (100.0, 150.0), "month starts in control"),
-        ("2026-04-02 08:00:00", (100.4, 150.0), "recheck calibration status"),
+        ("2026-04-02 08:00:00", (100.4, 150.0), "建议查看run级规则证据"),
         ("2026-04-03 08:00:00", (100.6, 150.0), ""),
     ]
 
@@ -152,7 +152,7 @@ def seed_zscore_batch_with_building_only_data() -> tuple[int, int]:
 
 
 def seed_three_level_zscore_batch_without_abnormal() -> tuple[int, int]:
-    project_id = create_zscore_project("Three-Level Z-score Project", level_count=3, input_value_type="raw")
+    project_id = create_zscore_project("三水平 Z-score 项目", level_count=3, input_value_type="raw")
     batch_id = create_zscore_batch(
         project_id=project_id,
         instrument="AU680",
@@ -161,9 +161,9 @@ def seed_three_level_zscore_batch_without_abnormal() -> tuple[int, int]:
         concentration="3 Levels",
         lot_no="ZS-3L-202604",
         target_n=5,
-        level_1_label="Level 1",
-        level_2_label="Level 2",
-        level_3_label="Level 3",
+        level_1_label="水平 1",
+        level_2_label="水平 2",
+        level_3_label="水平 3",
         cv_limit=5.0,
     )
     template_id = get_template_id_for_level_count(3)
@@ -220,12 +220,12 @@ def test_zscore_monthly_report_builds_pdf_and_snapshot() -> None:
         assert package.report.statistics.warning_count == 1
         assert package.report.statistics.out_of_control_count == 1
         assert preview_summary["当前阶段"] == "正式质控"
-        assert preview_summary["全部 level 已完成建靶"] == "是"
+        assert preview_summary["全部水平已完成建靶"] == "是"
         assert len(package.report.level_statistics) == 2
         assert all(item.monthly_count == 3 for item in package.report.level_statistics)
         assert len(package.report.abnormal_records) == 2
-        assert "run级结论作为最终结论" in package.report.abnormal_summary_text
-        assert "触发证据摘要" in package.report.abnormal_summary_text
+        assert "本次检测结论为最终判定" in package.report.abnormal_summary_text
+        assert "说明规则触发情况" in package.report.abnormal_summary_text
         for record in package.report.abnormal_records:
             source_run = abnormal_run_map[record.run_sequence]
             expected_conclusion = {
@@ -235,16 +235,26 @@ def test_zscore_monthly_report_builds_pdf_and_snapshot() -> None:
             assert record.run_conclusion == expected_conclusion
             assert "水平" in record.level_evidence
             assert record.level_evidence != record.run_conclusion
-        assert package.report.corrective_actions == ["recheck calibration status", "未填写"]
-        assert "失控 run" in package.report.overview_text
+            assert "run" not in record.level_evidence.lower()
+            assert "level" not in record.level_evidence.lower()
+        assert package.report.abnormal_records[0].manual_note == "建议查看本次检测规则触发证据"
+        assert package.report.corrective_actions == ["建议查看本次检测规则触发证据", "未填写"]
+        assert "失控检测记录" in package.report.overview_text
+        assert "多水平月度质控报告" in package.report.file_name
         assert not package.monthly_plot_df.empty
 
         pdf_bytes = build_zscore_monthly_report_pdf(package)
         assert pdf_bytes.startswith(b"%PDF")
 
         reader = assert_uniform_a4_pages_without_watermark(pdf_bytes)
+        pdf_text = "\n".join(page.extract_text() or "" for page in reader.pages).lower()
         assert len(reader.pages) == 6
         assert str(reader.metadata.get("/Subject", "")) == REPORT_TYPE_ZSCORE_MONTHLY
+        assert "run级" not in pdf_text
+        assert "level明细" not in pdf_text
+        assert "查看run" not in pdf_text
+        assert " run " not in f" {pdf_text} "
+        assert "level " not in f" {pdf_text} "
 
         snapshot_id = save_zscore_monthly_report_snapshot(package)
         assert snapshot_id > 0
@@ -263,6 +273,10 @@ def test_zscore_monthly_report_builds_pdf_and_snapshot() -> None:
         assert latest_export["summary_json"]["report_period_label"] == "2026-04-01 至 2026-04-30"
         assert latest_export["summary_json"]["abnormal_records"][0]["run_conclusion"] in {"警告", "失控"}
         assert "水平" in latest_export["summary_json"]["abnormal_records"][0]["level_evidence"]
+        assert (
+            latest_export["summary_json"]["abnormal_records"][0]["manual_note"]
+            == "建议查看本次检测规则触发证据"
+        )
 
 
 def test_zscore_monthly_report_requires_formal_data() -> None:
@@ -307,28 +321,33 @@ def test_zscore_monthly_report_page_exposes_generate_and_download_flow() -> None
         assert any(selectbox.key == f"{report_scope}_month" for selectbox in at.selectbox)
 
         at.selectbox(key=f"{report_scope}_month").set_value("2026-04").run()
-        at.button(key=f"{report_scope}_generate").click().run()
+        at.button(key=f"{report_scope}_generate").click().run(timeout=10)
 
         assert not list(at.exception)
         download_elements = at.get("download_button")
+        caption_values = [str(item.value) for item in at.caption]
         abnormal_tables = [
             dataframe.value
             for dataframe in at.dataframe
             if {
                 "检测时间",
-                "run 编号",
-                "run级结论（最终）",
-                "level明细（证据）",
+                "检测序号",
+                "本次检测结论",
+                "各水平触发证据",
                 "手动备注",
             }.issubset(set(dataframe.value.columns))
         ]
         assert any(element.label == "下载 PDF" for element in download_elements)
-        assert any("报告期间：2026-04-01 至 2026-04-30" in str(item.value) for item in at.caption)
+        assert any("报告期间：2026-04-01 至 2026-04-30" in value for value in caption_values)
+        assert not any("run" in value.lower() or "level" in value.lower() for value in caption_values)
         assert abnormal_tables
         abnormal_df = abnormal_tables[0]
         assert len(abnormal_df) == 2
-        assert set(abnormal_df["run级结论（最终）"].tolist()) == {"警告", "失控"}
-        assert all("水平" in str(value) for value in abnormal_df["level明细（证据）"].tolist())
+        assert set(abnormal_df["本次检测结论"].tolist()) == {"警告", "失控"}
+        assert all("水平" in str(value) for value in abnormal_df["各水平触发证据"].tolist())
+        assert not any("run" in str(column).lower() or "level" in str(column).lower() for column in abnormal_df.columns)
+        assert "建议查看本次检测规则触发证据" in abnormal_df["手动备注"].tolist()
+        assert not any("run" in str(value).lower() for value in abnormal_df["手动备注"].tolist())
 
 
 def test_zscore_monthly_report_reads_saved_system_settings_and_falls_back_on_empty_values() -> None:

@@ -185,7 +185,7 @@ def _render_report_history_card(record: ReportHistoryRecord) -> None:
 
         _render_record_meta_row(record)
         st.write(record.summary_text or "暂无摘要说明。")
-        st.caption(f"文件名 / 导出标识：{export_identifier}")
+        st.caption(f"导出文件：{export_identifier}")
 
         with st.expander("查看摘要", expanded=False):
             detail_rows = pd.DataFrame(
@@ -197,7 +197,7 @@ def _render_report_history_card(record: ReportHistoryRecord) -> None:
                     ("报告期间", record.report_period_label),
                     ("输入值类型", record.input_value_type_label),
                     ("生成时间", record.generated_at_label),
-                    ("文件名 / 导出标识", export_identifier),
+                    ("导出文件", export_identifier),
                 ],
                 columns=["字段", "内容"],
             )

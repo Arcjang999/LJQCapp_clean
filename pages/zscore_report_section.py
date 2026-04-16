@@ -29,12 +29,12 @@ def render_zscore_monthly_report_section(selected_batch_id: int) -> None:
     with st.container(border=True):
         render_section_intro(
             title="多水平（Z-score法）月度质控报告",
-            caption="当前入口只支持多水平（Z-score法）月报，不支持 LJ 月报混用。",
+            caption="基于当前批次生成多水平（Z-score法）月度质控报告。",
             tone="accent",
         )
         render_workbench_context_bar(
             title="Z-score 月报当前选择",
-            caption="项目与批次沿用当前 Z-score 工作台的选择结果；报告主统计只基于所选月份内的正式期 run 数据。",
+            caption="项目与批次沿用当前 Z-score 工作台选择；报告统计仅包含所选月份内的正式期检测记录。",
             items=[
                 ("方法", ZSCORE_METHOD_LABEL),
                 ("项目名称", batch["project_name"]),
@@ -79,7 +79,7 @@ def render_zscore_monthly_report_section(selected_batch_id: int) -> None:
                     "file_name": package.report.file_name,
                     "snapshot_id": snapshot_id,
                 }
-                st.success("已生成多水平（Z-score法）月度质控报告，可预览摘要并下载 PDF。")
+                st.success("已生成多水平（Z-score法）月度质控报告，可预览并下载 PDF。")
 
         preview_state = st.session_state.get(preview_key)
         if not _preview_matches(preview_state, selected_batch_id, selected_month):
@@ -99,7 +99,7 @@ def render_zscore_monthly_report_section(selected_batch_id: int) -> None:
             key=f"{report_scope}_download",
             width="stretch",
         )
-        st.caption(f"已保存最小报告快照，快照编号：{preview_state['snapshot_id']}")
+        st.caption(f"已保存报告快照，编号：{preview_state['snapshot_id']}")
 
 
 def _preview_matches(
@@ -132,7 +132,7 @@ def _format_report_month_option(value: str) -> str:
 
 def _render_report_preview(package: ZScoreMonthlyReportPackage) -> None:
     report = package.report
-    st.markdown("**报告预览摘要**")
+    st.markdown("**报告预览**")
     st.caption(
         f"报告月份：{report.report_month_label}｜报告期间：{report.report_period_label}｜生成时间：{report.generated_at}"
     )
@@ -152,7 +152,7 @@ def _render_report_preview(package: ZScoreMonthlyReportPackage) -> None:
             ("报告期间", report.report_period_label),
             ("输入值类型", report.basic_info.input_value_type_label),
             ("水平数", report.basic_info.level_count_label),
-            ("各 level 说明", report.basic_info.level_summary),
+            ("各水平说明", report.basic_info.level_summary),
             ("当前规则组合", report.basic_info.template_label),
             ("质控品批号", report.basic_info.lot_no),
             ("仪器", report.basic_info.instrument),
@@ -166,14 +166,14 @@ def _render_report_preview(package: ZScoreMonthlyReportPackage) -> None:
     )
     st.dataframe(basic_info_df, hide_index=True, width="stretch")
 
-    st.markdown("**单水平月度图**")
+    st.markdown("**各水平月度图**")
     level_label_map = {item.level_id: item.level_label for item in report.level_statistics}
     for level_id in package.active_levels:
         level_label = level_label_map.get(level_id, level_id)
         chart_figure = plot_zscore_single_level(
             plot_df=package.monthly_plot_df.copy(),
             level_id=level_id,
-            title=f"{level_label} 单水平月度图",
+            title=f"{level_label} 月度图",
             phase_scope="formal",
             y_axis_mode="标准视图",
             standard_sd_limit=4.0,
@@ -182,12 +182,12 @@ def _render_report_preview(package: ZScoreMonthlyReportPackage) -> None:
         st.pyplot(chart_figure, width="stretch")
         plt.close(chart_figure)
 
-    st.markdown("**各 level 统计摘要**")
+    st.markdown("**各水平统计摘要**")
     level_rows = []
     for item in report.level_statistics:
         level_rows.append(
             {
-                "level": item.level_label,
+                "水平": item.level_label,
                 "本月正式期记录数": item.monthly_count,
                 "月度均值": _format_optional_number(item.monthly_mean),
                 "月度 SD": _format_level_stat_text(item.monthly_count, item.monthly_sd, "sd"),
@@ -200,18 +200,18 @@ def _render_report_preview(package: ZScoreMonthlyReportPackage) -> None:
     st.dataframe(pd.DataFrame(level_rows), hide_index=True, width="stretch")
 
     st.markdown("**异常/失控汇总表**")
-    st.caption("run级结论是最终结论；level明细仅作为触发证据展示，不替代 run 级最终判定。")
+    st.caption("本次检测结论为最终判定，各水平触发证据用于说明规则触发情况。")
     abnormal_rows = [asdict(record) for record in report.abnormal_records]
     if not abnormal_rows:
-        st.info("本月未发现警告或失控 run。")
+        st.info("本月未发现警告或失控检测记录。")
     else:
         abnormal_df = pd.DataFrame(abnormal_rows).rename(
             columns={
                 "test_time": "检测时间",
-                "run_sequence": "run 编号",
-                "run_conclusion": "run级结论（最终）",
+                "run_sequence": "检测序号",
+                "run_conclusion": "本次检测结论",
                 "rule_hits": "触发规则",
-                "level_evidence": "level明细（证据）",
+                "level_evidence": "各水平触发证据",
                 "error_type": "误差类型",
                 "manual_note": "手动备注",
             }
@@ -232,7 +232,7 @@ def _render_report_preview(package: ZScoreMonthlyReportPackage) -> None:
     st.markdown("**月度结论**")
     st.write(report.conclusion)
 
-    st.markdown("**声明区**")
+    st.markdown("**报告声明**")
     st.caption(report.declaration)
 
 

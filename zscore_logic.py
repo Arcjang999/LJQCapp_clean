@@ -88,14 +88,14 @@ RULE_DEFINITIONS = {
         rule_id="1_2s",
         severity="warning",
         scope="within-run / within-level",
-        description="当前 run 单水平结果位于均值同侧且超过 ±2SD，作为警告信号。",
+        description="本次检测单个水平结果位于均值同侧且超过 ±2SD，作为警告信号。",
         error_bias="warning",
     ),
     "1_3s": ZScoreRuleDefinition(
         rule_id="1_3s",
         severity="reject",
         scope="within-run / within-level",
-        description="当前 run 单水平结果超过 ±3SD，提示明显随机误差风险。",
+        description="本次检测单个水平结果超过 ±3SD，提示明显随机误差风险。",
         error_bias="random",
     ),
     "2_2s": ZScoreRuleDefinition(
@@ -109,14 +109,14 @@ RULE_DEFINITIONS = {
         rule_id="2of3_2s",
         severity="reject",
         scope="within-run / across-level",
-        description="同一 run 内 3 个水平里有 2 个位于均值同侧且超过 ±2SD。",
+        description="同一次检测中 3 个水平里有 2 个位于均值同侧且超过 ±2SD。",
         error_bias="systematic",
     ),
     "R_4s": ZScoreRuleDefinition(
         rule_id="R_4s",
         severity="reject",
         scope="within-run / across-level",
-        description="同一 run 内至少 2 个水平相差超过 4SD 且方向相反。",
+        description="同一次检测中至少 2 个水平相差超过 4SD 且方向相反。",
         error_bias="random",
     ),
     "4_1s": ZScoreRuleDefinition(
@@ -130,7 +130,7 @@ RULE_DEFINITIONS = {
         rule_id="3_1s",
         severity="reject",
         scope="within-run / across-level",
-        description="同一 run 内 3 个水平全部位于均值同侧且超过 ±1SD。",
+        description="同一次检测中 3 个水平全部位于均值同侧且超过 ±1SD。",
         error_bias="systematic",
     ),
     "10_x": ZScoreRuleDefinition(
@@ -1362,7 +1362,7 @@ def _get_zscore_run_for_maintenance(run_id: int) -> dict[str, Any]:
     for saved_run in saved_runs:
         if int(saved_run["run_id"]) == int(run_id):
             return saved_run
-    raise ValueError(f"未找到 Z-score run {run_id}")
+    raise ValueError(f"未找到 Z-score 检测记录 {run_id}")
 
 
 def _get_zscore_level_result_for_outlier_action(level_result_id: int) -> tuple[dict[str, Any], dict[str, Any], int]:
@@ -1394,9 +1394,9 @@ def _get_zscore_building_run_for_outlier_action(run_id: int) -> tuple[dict[str, 
     if any(_normalize_run_phase(run.get("phase")) == PHASE_FORMAL_QC for run in saved_runs):
         raise ValueError("正式期启用后不再允许调整 Z-score 建靶期离群值状态。")
     if _normalize_run_phase(target_run.get("phase")) != PHASE_TARGET_BUILDING:
-        raise ValueError("仅建靶期的 run 支持离群值处理。")
+        raise ValueError("仅建靶期检测记录支持离群值处理。")
     if not target_run.get("level_results"):
-        raise ValueError(f"未找到 Z-score run {run_id} 的 level 明细")
+        raise ValueError(f"未找到 Z-score 检测记录 {run_id} 的各水平明细")
     return target_run, batch_id
 
 
@@ -1421,7 +1421,7 @@ def _apply_zscore_building_run_state(
         )
         updated_level_count += 1
     if updated_level_count == 0:
-        raise ValueError(f"未找到 Z-score run {run_id} 的 level 明细")
+        raise ValueError(f"未找到 Z-score 检测记录 {run_id} 的各水平明细")
     return rebuild_zscore_batch_state(batch_id)
 
 
@@ -1510,7 +1510,7 @@ def evaluate_zscore_run_with_phase(
         current_run["run_status"] = PHASE_TARGET_BUILDING
         current_run["rule_hits_run"] = []
         current_run["error_type_hint"] = "not_applicable"
-        current_run["analysis_prompt"] = "当前阶段为建靶中，本次 run 仅用于累计靶值，不进行正式规则判读。"
+        current_run["analysis_prompt"] = "当前处于建靶阶段，本次检测仅用于累计靶值，不进行正式规则判读。"
         for level_result in current_run["level_results"]:
             level_result["rule_hits_local"] = []
             level_result["status"] = PHASE_TARGET_BUILDING
@@ -1585,19 +1585,19 @@ def build_zscore_analysis_prompt(
     if status == "pending":
         return "请完整录入当前模板要求的所有水平结果后再进行分析。"
     if phase != PHASE_FORMAL_QC:
-        return "当前阶段为建靶中，仅用于累计靶值与观察趋势，不进行正式规则判读。"
+        return "当前处于建靶阶段，本次检测仅用于累计靶值和观察趋势，不进行正式规则判读。"
     if status == "accept":
-        return "当前 run 未触发已启用的 Z-score 规则，可继续观察后续趋势。"
+        return "本次检测未触发已启用的 Z-score 规则，可继续观察后续检测趋势。"
     if status == "warning":
         first_rule = rule_hits[0]["rule_id"] if rule_hits else "1_2s"
-        return f"当前 run 出现 {first_rule} 警告信号，建议结合后续 run 持续观察。"
+        return f"本次检测出现 {first_rule} 警告信号，建议结合后续检测记录持续观察。"
     if error_type_hint == "random":
-        return "当前 run 触发拒绝规则，偏向 random 误差，请优先检查瞬时波动、加样与操作因素。"
+        return "本次检测触发拒绝规则，偏向随机误差，请优先检查瞬时波动、加样与操作因素。"
     if error_type_hint == "systematic":
-        return "当前 run 触发拒绝规则，偏向 systematic 误差，请优先检查校准、靶值与系统漂移。"
+        return "本次检测触发拒绝规则，偏向系统误差，请优先检查校准、靶值与系统漂移。"
     if error_type_hint == "mixed":
-        return "当前 run 同时出现 random 与 systematic 信号，建议综合检查系统与操作因素。"
-    return "当前 run 触发拒绝规则，请结合规则命中情况进一步复核。"
+        return "本次检测同时出现随机误差与系统误差信号，建议综合检查系统与操作因素。"
+    return "本次检测触发拒绝规则，请结合规则命中情况进一步复核。"
 
 
 def rule_1_2s(level_results: list[dict[str, Any]], history_runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1660,9 +1660,9 @@ def rule_2of3_2s(level_results: list[dict[str, Any]], history_runs: list[dict[st
     positive_levels = [level_id for level_id, value in zscores.items() if value is not None and value >= 2]
     negative_levels = [level_id for level_id, value in zscores.items() if value is not None and value <= -2]
     if len(positive_levels) >= 2:
-        return [_make_rule_hit("2of3_2s", positive_levels, "当前 run 中 2/3 水平同侧超 2SD")]
+        return [_make_rule_hit("2of3_2s", positive_levels, "本次检测中 2/3 水平同侧超 2SD")]
     if len(negative_levels) >= 2:
-        return [_make_rule_hit("2of3_2s", negative_levels, "当前 run 中 2/3 水平同侧超 2SD")]
+        return [_make_rule_hit("2of3_2s", negative_levels, "本次检测中 2/3 水平同侧超 2SD")]
     return []
 
 
@@ -1682,7 +1682,7 @@ def rule_R_4s(level_results: list[dict[str, Any]], history_runs: list[dict[str, 
         _make_rule_hit(
             "R_4s",
             [min_result["level_id"], max_result["level_id"]],
-            f"{min_result['level_id']} / {max_result['level_id']} within-run 差值超 4SD",
+            f"{min_result['level_id']} / {max_result['level_id']} 本次检测内差值超 4SD",
         )
     ]
 
@@ -1697,7 +1697,7 @@ def rule_3_1s(level_results: list[dict[str, Any]], history_runs: list[dict[str, 
     if len(zscores) < 3 or any(zscore is None for zscore in zscores):
         return []
     if all(zscore >= 1 for zscore in zscores) or all(zscore <= -1 for zscore in zscores):
-        return [_make_rule_hit("3_1s", [level_result["level_id"] for level_result in level_results], "3 水平 within-run 同侧超 1SD")]
+        return [_make_rule_hit("3_1s", [level_result["level_id"] for level_result in level_results], "本次检测内 3 个水平同侧超 1SD")]
     return []
 
 

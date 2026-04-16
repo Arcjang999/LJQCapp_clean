@@ -61,8 +61,8 @@ from ui.dialogs import (
 )
 from services.outlier_service import (
     DEFAULT_GRUBBS_ALPHA,
+    get_current_outlier_status_label,
     get_outlier_manual_status_label,
-    get_outlier_status_label,
 )
 from zscore_logic import (
     PHASE_FORMAL_QC,
@@ -341,6 +341,43 @@ def format_zscore_level_rule_hits(rule_hit_ids: list[str]) -> str:
     return "、".join(format_rule_code(rule_id) for rule_id in ordered_rule_ids)
 
 
+def get_zscore_level_current_status_label(level_result: dict[str, Any]) -> str:
+    return get_current_outlier_status_label(
+        is_building_included=level_result.get("is_building_included", 1),
+        is_suspect=level_result.get("is_outlier_suspect", 0),
+    )
+
+
+def build_zscore_building_run_status_summary(run: dict[str, Any]) -> dict[str, Any]:
+    level_results = list(run.get("level_results", []))
+    included_flags = [
+        int(level_result.get("is_building_included", 1) or 0)
+        for level_result in level_results
+    ]
+    any_excluded = any(flag == 0 for flag in included_flags)
+    all_excluded = bool(included_flags) and all(flag == 0 for flag in included_flags)
+    has_inconsistent_status = any_excluded and not all_excluded
+    any_active_suspect = any(
+        int(level_result.get("is_building_included", 1) or 0) == 1
+        and int(level_result.get("is_outlier_suspect", 0) or 0) == 1
+        for level_result in level_results
+    )
+    if all_excluded:
+        current_status_label = "已禁用"
+    elif has_inconsistent_status:
+        current_status_label = "状态不一致"
+    elif any_active_suspect:
+        current_status_label = "疑似离群"
+    else:
+        current_status_label = "正常"
+    return {
+        "current_status_label": current_status_label,
+        "any_excluded": any_excluded,
+        "all_excluded": all_excluded,
+        "has_inconsistent_status": has_inconsistent_status,
+    }
+
+
 def build_zscore_building_run_evidence_dataframe(
     run: dict[str, Any],
     level_label_map: dict[str, str],
@@ -356,7 +393,7 @@ def build_zscore_building_run_evidence_dataframe(
             {
                 "水平": display_label,
                 input_value_type_label: format_optional_input_value(level_result.get("raw_value")),
-                "疑似离群": get_outlier_status_label(level_result.get("outlier_status")),
+                "当前状态": get_zscore_level_current_status_label(level_result),
                 "手工处理": get_outlier_manual_status_label(level_result.get("manual_status")),
                 "参与建靶统计": "是" if int(level_result.get("is_building_included", 1) or 0) == 1 else "否",
                 "G": format_optional_float(level_result.get("grubbs_statistic"), digits=4),
@@ -1479,9 +1516,11 @@ def render_zscore_maintenance_section(context: dict[str, object]) -> None:
             run_options: dict[str, int] = {}
             run_labels: list[str] = []
             for run in ordered_runs:
+                run_status_summary = build_zscore_building_run_status_summary(run)
                 label = (
                     f"第 {get_zscore_display_sequence(run)} 次检测 | "
-                    f"{pd.Timestamp(run['test_time']).strftime('%Y-%m-%d %H:%M')}"
+                    f"{pd.Timestamp(run['test_time']).strftime('%Y-%m-%d %H:%M')} | "
+                    f"{run_status_summary['current_status_label']}"
                 )
                 run_labels.append(label)
                 run_options[label] = int(run["run_id"])
@@ -1499,47 +1538,30 @@ def render_zscore_maintenance_section(context: dict[str, object]) -> None:
             selected_sequence = get_zscore_display_sequence(selected_run)
             selected_run_time = pd.Timestamp(selected_run["test_time"]).strftime("%Y-%m-%d %H:%M")
             selected_level_results = list(selected_run.get("level_results", []))
-            included_flags = [
-                int(level_result.get("is_building_included", 1) or 0)
-                for level_result in selected_level_results
-            ]
-            any_excluded = any(flag == 0 for flag in included_flags)
-            all_excluded = bool(included_flags) and all(flag == 0 for flag in included_flags)
-            manual_statuses = {
-                str(level_result.get("manual_status", "") or "")
-                for level_result in selected_level_results
-            }
+            run_status_summary = build_zscore_building_run_status_summary(selected_run)
+            any_excluded = bool(run_status_summary["any_excluded"])
+            all_excluded = bool(run_status_summary["all_excluded"])
             suspect_levels = [
                 format_zscore_level_display(str(level_result.get("level_id") or ""), level_label_map)[0]
                 for level_result in selected_level_results
                 if int(level_result.get("is_outlier_suspect", 0) or 0) == 1
             ]
-            if all_excluded:
-                run_manual_state = "本次检测已禁用"
-            elif any_excluded:
-                run_manual_state = "本次检测存在状态不一致"
-            elif manual_statuses == {"keep"}:
-                run_manual_state = "本次检测已标记为保留"
-            elif manual_statuses == {"restored"}:
-                run_manual_state = "本次检测已恢复"
-            else:
-                run_manual_state = "本次检测参与建靶统计"
 
             st.markdown("**本次检测结论**")
             st.caption(
                 f"第 {selected_sequence} 次检测 | {selected_run_time} | "
-                f"检测人：{str(selected_run.get('operator', '') or '')}"
+                f"检测人：{str(selected_run.get('operator', '') or '')} | "
+                f"当前状态：{run_status_summary['current_status_label']}"
             )
             render_compact_stat_metrics(
                 [
                     ("当前阶段", str(selected_run.get("phase_label") or get_phase_label(selected_run.get("phase")))),
-                    ("本次检测状态", str(selected_run.get("phase_label") or get_phase_label(selected_run.get("phase")))),
-                    ("维护状态", run_manual_state),
+                    ("当前状态", str(run_status_summary["current_status_label"])),
                     ("疑似离群水平", "、".join(suspect_levels) if suspect_levels else "无"),
                     ("涉及水平", f"{len(selected_level_results)} 个水平"),
                 ]
             )
-            if any_excluded and not all_excluded:
+            if bool(run_status_summary["has_inconsistent_status"]):
                 st.caption("当前记录存在历史状态不一致，建议用下方操作统一。")
 
             st.markdown("**各水平明细**")

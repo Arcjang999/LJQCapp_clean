@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from io import BytesIO
+import json
 import sqlite3
 import sys
 from pathlib import Path
@@ -126,8 +127,8 @@ def _seed_zscore_report_snapshot() -> tuple[int, int, int]:
         concentration="Normal",
         lot_no="ZS-HIST-202604",
         target_n=5,
-        level_1_label="Level 1",
-        level_2_label="Level 2",
+        level_1_label="水平 1",
+        level_2_label="水平 2",
         cv_limit=5.0,
     )
     template_id = get_template_id_for_level_count(2)
@@ -175,6 +176,11 @@ def test_report_history_lists_mixed_records_and_filters() -> None:
         assert {record.method_label for record in records} == {LJ_METHOD_LABEL, ZSCORE_METHOD_LABEL}
         assert all(record.summary_text for record in records)
         assert all(record.file_name for record in records)
+        zscore_record = next(record for record in records if record.report_type == REPORT_TYPE_ZSCORE_MONTHLY)
+        assert "检测记录" in zscore_record.summary_text
+        assert "run" not in zscore_record.summary_text.lower()
+        assert "level" not in zscore_record.summary_text.lower()
+        assert "多水平月度质控报告" in zscore_record.file_name
 
         project_filtered = filter_report_history_records(records, project_query="Hist LJ")
         assert len(project_filtered) == 1
@@ -190,6 +196,38 @@ def test_report_history_lists_mixed_records_and_filters() -> None:
 
         month_filtered = filter_report_history_records(records, report_month="2026-04")
         assert len(month_filtered) == 2
+
+
+def test_report_history_sanitizes_legacy_generated_summary_text() -> None:
+    with TemporaryDatabaseContext():
+        export_id, _project_id, _batch_id = _seed_zscore_report_snapshot()
+
+        with sqlite3.connect(database.DB_PATH) as connection:
+            row = connection.execute(
+                "SELECT summary_json FROM report_exports WHERE id = ?",
+                (export_id,),
+            ).fetchone()
+            assert row is not None
+            summary_json = json.loads(str(row[0] or "{}"))
+            summary_json["summary_text"] = "建议查看run级规则证据。"
+            summary_json["overview_text"] = "当前 run 触发拒绝规则，建议查看 run 级判定依据。"
+            summary_json["conclusion"] = "run级结论需结合 level evidence 复核。"
+            connection.execute(
+                "UPDATE report_exports SET summary_json = ? WHERE id = ?",
+                (json.dumps(summary_json, ensure_ascii=False), export_id),
+            )
+            connection.commit()
+
+        records = list_report_history_records()
+        record = next(item for item in records if item.export_id == export_id)
+
+        assert record.summary_text == "建议查看本次检测规则触发证据。"
+        assert record.overview_text == "本次检测触发拒绝规则，建议查看本次检测规则判定依据。"
+        assert record.conclusion_text == "本次检测结论需结合各水平触发证据复核。"
+        assert "run" not in record.summary_text.lower()
+        assert "run" not in record.overview_text.lower()
+        assert "run" not in record.conclusion_text.lower()
+        assert "level" not in record.conclusion_text.lower()
 
 
 def test_report_history_regenerates_lj_and_zscore_reports() -> None:

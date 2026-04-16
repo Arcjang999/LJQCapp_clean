@@ -4,6 +4,8 @@ import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from streamlit.testing.v1 import AppTest
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -30,7 +32,11 @@ from qc_logic import (
     keep_lj_building_result,
     restore_lj_building_result,
 )
-from services.outlier_service import get_outlier_manual_status_label, get_outlier_status_label
+from services.outlier_service import (
+    get_current_outlier_status_label,
+    get_outlier_manual_status_label,
+    get_outlier_status_label,
+)
 from zscore_logic import (
     PHASE_TARGET_BUILDING,
     build_zscore_plot_dataframe,
@@ -40,6 +46,19 @@ from zscore_logic import (
     keep_zscore_building_run,
     restore_zscore_building_run,
 )
+
+LJ_PAGE_APPTEST_SCRIPT = f"""
+import sys
+from pathlib import Path
+
+ROOT = Path({str(PROJECT_ROOT)!r})
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from pages.lj_page import render_lj_page
+
+render_lj_page()
+"""
 
 
 class TemporaryDatabaseContext:
@@ -113,7 +132,63 @@ def test_lj_building_outlier_actions_and_plot_filter() -> None:
         restored_row = qc_df_restored[qc_df_restored["id"] == suspect_id].iloc[0]
         assert restored_row["manual_status"] == "restored"
         assert int(restored_row["is_building_included"]) == 1
+        assert get_current_outlier_status_label(
+            is_building_included=restored_row["is_building_included"],
+            is_suspect=restored_row["is_outlier_suspect"],
+        ) == "疑似离群"
         assert stats_restored["effective_building_count"] == 5
+
+
+def test_lj_building_maintenance_shows_current_effective_status_after_restore() -> None:
+    with TemporaryDatabaseContext():
+        project_id = create_project("LJ Maintenance Status UI", input_value_type="raw")
+        batch_id = create_batch(
+            project_id=project_id,
+            instrument="Inst-LJ-UI",
+            reagent="Reagent-LJ-UI",
+            qc_material="QC-LJ-UI",
+            concentration="Normal",
+            lot_no="LOT-LJ-UI",
+            target_n=6,
+        )
+        for index, value in enumerate([100.0, 101.0, 99.0, 100.5, 120.0], start=0):
+            add_result(
+                batch_id=batch_id,
+                test_time=f"2026-04-13 12:{index:02d}:00",
+                operator=f"ui-tester-{index}",
+                value=float(value),
+                log_value=None,
+                reagent_lot_changed=0,
+                manual_note="",
+            )
+
+        qc_df, _ = calculate_qc_results(get_results(batch_id, include_manual_note=True), 6)
+        suspect_row = qc_df[qc_df["is_outlier_suspect"] == 1].iloc[0]
+        suspect_id = int(suspect_row["id"])
+
+        at = AppTest.from_string(LJ_PAGE_APPTEST_SCRIPT)
+        at.session_state["selected_project_id"] = project_id
+        at.session_state["selected_batch_id"] = batch_id
+        at.run()
+
+        initial_options = [str(option) for option in at.selectbox(key="lj_outlier_record_selector").options]
+        assert any("疑似离群" in option for option in initial_options)
+        assert not any("已恢复" in option for option in initial_options)
+
+        at.button(key=f"lj_disable_{suspect_id}").click().run()
+        disabled_captions = [str(item.value) for item in at.caption]
+        assert any("当前状态：已禁用" in value for value in disabled_captions)
+
+        at.button(key=f"lj_restore_{suspect_id}").click().run()
+        restored_options = [str(option) for option in at.selectbox(key="lj_outlier_record_selector").options]
+        restored_captions = [str(item.value) for item in at.caption]
+        success_values = [str(item.value) for item in at.success]
+
+        assert any("当前状态：疑似离群" in value for value in restored_captions)
+        assert any("疑似离群" in option for option in restored_options)
+        assert not any("已恢复" in option for option in restored_options)
+        assert not any("已恢复" in value for value in restored_captions if "当前状态：" in value)
+        assert any("建靶点已恢复" in value for value in success_values)
 
 
 def test_lj_latest_analysis_switches_between_building_and_formal() -> None:
@@ -287,6 +362,7 @@ def test_zscore_run_outlier_actions_recalc_and_plot_filter() -> None:
 
 if __name__ == "__main__":
     test_lj_building_outlier_actions_and_plot_filter()
+    test_lj_building_maintenance_shows_current_effective_status_after_restore()
     test_lj_latest_analysis_switches_between_building_and_formal()
     test_lj_outlier_labels_are_clean_and_readable()
     test_zscore_run_outlier_actions_recalc_and_plot_filter()

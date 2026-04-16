@@ -27,6 +27,7 @@ from database import (
 from zscore_logic import (
     PHASE_FORMAL_QC,
     PHASE_TARGET_BUILDING,
+    build_zscore_analysis_prompt,
     build_zscore_maintenance_dialog_state,
     build_level_target_profiles,
     build_zscore_batch_summary_items,
@@ -523,6 +524,19 @@ def test_target_building_run_does_not_trigger_formal_rules() -> None:
     assert run["run_status"] == PHASE_TARGET_BUILDING
     assert run["formal_rules_enabled"] is False
     assert run["rule_hits_run"] == []
+
+
+def test_zscore_analysis_prompt_uses_formal_chinese_wording() -> None:
+    warning_prompt = build_zscore_analysis_prompt("warning", [{"rule_id": "1_2s"}], "unknown")
+    mixed_prompt = build_zscore_analysis_prompt("reject", [{"rule_id": "1_3s"}], "mixed")
+
+    assert "本次检测" in warning_prompt
+    assert "后续检测记录" in warning_prompt
+    assert "run" not in warning_prompt.lower()
+    assert "随机误差" in mixed_prompt
+    assert "系统误差" in mixed_prompt
+    assert "random" not in mixed_prompt.lower()
+    assert "systematic" not in mixed_prompt.lower()
 
 
 def test_formal_rules_enable_only_after_all_levels_ready() -> None:
@@ -1660,10 +1674,17 @@ def test_building_maintenance_page_exposes_only_run_level_actions() -> None:
         at.run()
 
         assert not list(at.exception)
+        run_option_labels = [
+            str(option) for option in at.selectbox(key="zscore_outlier_run_selector").options
+        ]
         button_labels = [str(button.label) for button in at.button]
         caption_values = [str(item.value) for item in at.caption]
         expander_states = {str(expander.label): bool(expander.proto.expanded) for expander in at.expander}
 
+        assert run_option_labels
+        assert all(" | 正常" in label for label in run_option_labels)
+        assert not any("已恢复" in label for label in run_option_labels)
+        assert any("当前状态：正常" in value for value in caption_values)
         assert "保留本次检测" in button_labels
         assert "禁用本次检测" in button_labels
         assert "恢复本次检测" in button_labels

@@ -1,19 +1,47 @@
+# Python bytecode and tool caches
 __pycache__/
 *.py[cod]
+*.pyo
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.cache/
 
+# Coverage and local test output
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Runtime logs and temp files
+*.log
+*.tmp
+*.temp
 logs/
 .codex/*.log
 
+# Local SQLite runtime artifacts and generated demo DB
+*.db-journal
+*.db-wal
+*.db-shm
+data/demo_qc_data.db
+
+# Packaging/build output
+build/
+dist/
 packaging/build/
 packaging/dist/
-dist/
-
-.tmp_phase1_debug/
-.Rhistory
-Thumbs.db
-
 packaging/desktop_launcher/bin/
 packaging/desktop_launcher/obj/
+
+# Local editor/OS files
+.idea/
+.vscode/
+*.code-workspace
+.DS_Store
+desktop.ini
+Thumbs.db
+
+# Project-specific local scratch files
+.tmp_phase1_debug/
+.Rhistory
