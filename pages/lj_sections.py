@@ -592,7 +592,7 @@ def render_lj_entry_and_stats_section(
         if realtime_message:
             st.info(realtime_message)
         st.caption(
-            "统计口径：实时统计仅基于当前批次中判定为“在控”的正式数据计算，"
+            "统计说明：实时统计仅基于当前批次中判定为“在控”的正式数据计算，"
             "已自动排除警告和失控结果；"
             "当检测记录被修改或删除后，实时均值 / SD / CV% 会随之自动变化。"
         )
@@ -704,18 +704,17 @@ def render_lj_rule_summary_section(stats: dict[str, object]) -> None:
     st.markdown("**本批次规则汇总**")
     render_rule_summary_metrics(stats.get("rule_summary", {}))
 
-    with st.expander("Westgard规则说明（点击展开）", expanded=False):
+    with st.expander("Westgard 规则说明", expanded=False):
         st.caption(
-            "以下说明对应当前版本的 Westgard 判读口径；"
-            "建靶期仅用于参考，正式质控期才输出规则结论。"
+            "建靶期可参考，正式质控期会输出规则结论。"
         )
         for rule_id in ["1_2s", "1_3s", "2_2s", "R_4s", "4_1s", "10x"]:
             st.markdown(f"- `{format_rule_code(rule_id)}`：{format_rule_description(rule_id)}")
 
 
 def render_lj_records_section(qc_df: pd.DataFrame, input_value_type: str) -> None:
-    with st.expander("当前批次检测记录（点击折叠/展开）", expanded=True):
-        st.caption("当前批次的完整检测记录、Westgard 触发规则和分析提示都在此查看；列较多时可横向滚动查看完整内容。")
+    with st.expander("当前批次检测记录", expanded=False):
+        st.caption("查看当前批次的完整检测记录、规则触发和分析提示。")
         display_df = prepare_display_records(qc_df, input_value_type=input_value_type)
         render_records_table_impl(display_df)
 
@@ -1006,7 +1005,7 @@ def render_lj_export_import_section(
 
     st.divider()
     st.markdown("**CSV 导入**")
-    st.caption("建靶期与正式期模板、上传、审查、确认导入分开展示。")
+    st.caption("建靶期和正式期分别提供模板下载、审查和导入。")
     st.markdown("**建靶期 CSV 导入**")
     st.caption(f"先下载标准模板，再上传 CSV 审查；只有无阻断错误时，才允许确认导入当前批次建靶期{input_value_type_label}数据。")
     st.markdown("- `试剂批号变更（可选）` 在建靶期一般不填。")
@@ -1031,7 +1030,7 @@ def render_lj_export_import_section(
         type=["csv"],
         key=lj_import_uploader_key,
         disabled=lj_building_import_disabled,
-        help="请优先使用上方标准模板，当前版本仅支持 CSV。",
+        help="请优先使用上方标准模板，目前仅支持 CSV。",
     )
     uploaded_lj_building_bytes = uploaded_lj_building_csv.getvalue() if uploaded_lj_building_csv is not None else b""
     current_lj_import_signature = hashlib.sha256(uploaded_lj_building_bytes).hexdigest() if uploaded_lj_building_bytes else ""
@@ -1133,7 +1132,7 @@ def render_lj_export_import_section(
         "上传正式期 CSV",
         type=["csv"],
         key=lj_formal_import_uploader_key,
-        help="请优先使用上方标准模板，当前版本仅支持 CSV。",
+        help="请优先使用上方标准模板，目前仅支持 CSV。",
     )
     uploaded_lj_formal_bytes = uploaded_lj_formal_csv.getvalue() if uploaded_lj_formal_csv is not None else b""
     current_lj_formal_signature = (

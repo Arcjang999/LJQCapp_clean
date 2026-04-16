@@ -281,7 +281,7 @@ def _render_instant_project_batch_management(
                         f"{get_input_value_type_label(current_project['input_value_type'])}。"
                     )
                     if has_existing_batches:
-                        st.info("当前项目下已存在批次。为保持批次录入口径一致，本阶段不提供输入值类型修改。")
+                        st.info("当前项目下已存在批次，输入值类型不可修改。")
 
         with top_right:
             st.subheader("新建即时法批次")
@@ -539,7 +539,7 @@ def _render_instant_entry_and_summary_section(
             ("CV%", format_optional_float(summary["cv"], digits=2, suffix="%")),
         ]
     )
-    st.caption("统计口径：均值、SD、CV 仅基于当前有效点计算；疑似离群点在未手工禁用前仍计入有效统计。")
+    st.caption("统计说明：均值、SD、CV 仅基于当前有效点计算；疑似离群点在未手工禁用前仍计入有效统计。")
 
 
 def _render_instant_transfer_section(context: dict[str, object]) -> None:
@@ -617,7 +617,7 @@ def _render_grubbs_method_explanation(summary: dict[str, object]) -> None:
     grubbs_method_label = str(summary.get("grubbs_method_label", "双侧单异常值 Grubbs 检验"))
     grubbs_formula = str(summary.get("grubbs_formula", "G = max(|xi - x̄|) / s"))
     with st.expander("格拉布斯法说明", expanded=False):
-        st.caption("当前即时法采用固定口径的基础离群提示，本轮只做说明与追溯展示，不做自动剔除。")
+        st.caption("用于判断疑似离群点，系统只提示，不自动剔除。")
         st.markdown(
             "\n".join(
                 [
@@ -654,7 +654,7 @@ def _render_instant_chart_analysis_section(context: dict[str, object]) -> object
 
     st.divider()
     st.markdown("**最新判定区**")
-    st.caption("即时法页面的判定输出集中显示在这里，左侧累计统计区不再重复展示判定结果。")
+    st.caption("在此查看当前批次的最新判定。")
     latest_source_text = (
         f"最近记录 #{int(latest_row['sequence'])}"
         if latest_row is not None and "sequence" in latest_row
@@ -893,7 +893,7 @@ def render_instant_page() -> None:
             _render_instant_transfer_dialog(selected_batch_id)
         render_section_intro(
             title="当前动作区",
-            caption="左侧聚焦单水平录入与累计统计，右侧保留唯一的最新判定区，减少即时法页面的重复判定提示。",
+            caption="左侧用于结果录入与累计统计，右侧用于图表和最新判定。",
             badges=["即时法", "过渡方法", f"有效点 {summary['effective_count']}/{INSTANT_TRANSFER_READY_COUNT}", input_value_type_label],
             tone="accent",
         )
@@ -902,7 +902,7 @@ def render_instant_page() -> None:
             with st.container():
                 render_section_intro(
                     title="结果录入与累计统计",
-                    caption="左侧只保留结果录入和累计统计，不再混入最新判定。",
+                    caption="在此录入结果并查看累计统计。",
                     tone="accent",
                 )
                 _render_instant_entry_and_summary_section(context, selected_batch_id)
@@ -910,15 +910,15 @@ def render_instant_page() -> None:
             with st.container():
                 render_section_intro(
                     title="图表与最新判定",
-                    caption="右侧统一承载趋势图和最新判定，是当前页面唯一的判定出口。",
+                    caption="在此查看趋势图和最新判定。",
                     tone="accent",
                 )
                 _render_instant_chart_analysis_section(context)
 
         render_section_intro(
             title="历史与次要操作区",
-            caption="转入 LJ、记录表、维护区和判定口径说明统一下沉到主区下方，既保留追溯，也避免干扰主录入和最新判定。",
-            badges=["转入 LJ", "记录回顾", "维护与说明"],
+            caption="下方可查看转入 LJ、记录回顾、维护和格拉布斯法说明。",
+            badges=["转入 LJ", "记录回顾", "维护"],
             tone="muted",
         )
         with st.container(border=True):
@@ -948,9 +948,4 @@ def render_instant_page() -> None:
                 _render_instant_maintenance_section(context)
 
         with st.container(border=True):
-            render_section_intro(
-                title="判定口径说明",
-                caption="格拉布斯法说明保留在下部，避免干扰主录入和最新判定。",
-                tone="muted",
-            )
             _render_grubbs_method_explanation(summary)

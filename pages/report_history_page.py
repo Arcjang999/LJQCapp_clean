@@ -38,14 +38,14 @@ def render_report_history_page() -> None:
     records = list_report_history_records()
     render_section_intro(
         title="报告历史",
-        caption="统一查看 LJ 与 Z-score 月报记录。页面以项目名称为主词条，再用方法标签、批次、月份和生成时间辅助识别；支持查看摘要并按当前数据重新生成。",
+        caption="统一查看 LJ 与 Z-score 月报记录，可按项目、方法学、批次和月份筛选。",
         eyebrow="全局入口",
-        badges=["项目名称主词条", "摘要查看", "按当前数据重新生成"],
+        badges=["项目筛选", "摘要查看", "按当前数据重新生成"],
         tone="accent",
     )
     render_workbench_context_bar(
         title="历史记录概览",
-        caption="报告历史不拆成方法学子页，而是统一作为记录中心。项目名称是主识别字段，方法标签只作为辅助标签。",
+        caption="按项目名称快速定位，再结合方法学、批次和生成时间确认目标报告。",
         items=[
             ("历史报告数", len(records)),
             ("涉及项目数", len({record.project_name for record in records})),
@@ -54,18 +54,6 @@ def render_report_history_page() -> None:
         ],
         badges=["快照摘要", "筛选定位", "当前数据重生成"],
     )
-    with st.expander("本页说明", expanded=False):
-        st.markdown(
-            "\n".join(
-                [
-                    "- 报告历史适用于查看已生成的 LJ / Z-score 月报记录。",
-                    "- 页面以项目名称为主词条，方法学、批次、月份和生成时间用于辅助识别。",
-                    "- 历史页展示的是生成时保存的快照摘要，不是旧 PDF 原件仓库。",
-                    "- 选择“按当前数据重新生成”后，会基于当前数据库重新生成新的 PDF，内容可能与历史记录当时不同。",
-                    "- 若原始项目或批次不存在，将无法重新生成。",
-                ]
-            )
-        )
 
     if not records:
         st.info("当前还没有可展示的月度报告历史。请先在 LJ 或 Z-score 月报入口生成至少一份报告。")
@@ -74,7 +62,7 @@ def render_report_history_page() -> None:
     with st.container():
         render_section_intro(
             title="筛选条件",
-            caption="支持组合筛选项目名称、方法学、批次和报告月份，同时保留项目名称优先的浏览方式。",
+            caption="支持组合筛选项目名称、方法学、批次和报告月份。",
             badges=["可组合筛选", "组内按时间倒序"],
             tone="muted",
         )

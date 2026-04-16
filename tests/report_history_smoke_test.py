@@ -41,11 +41,11 @@ from services.report_service import (
 from zscore_logic import create_zscore_run, get_template_id_for_level_count
 
 
-REPORT_HISTORY_PAGE_APPTEST_SCRIPT = """
+REPORT_HISTORY_PAGE_APPTEST_SCRIPT = f"""
 import sys
 from pathlib import Path
 
-ROOT = Path(r'D:\\Github\\LJQCapp_clean')
+ROOT = Path({str(PROJECT_ROOT)!r})
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -237,16 +237,10 @@ def test_report_history_page_renders_from_global_entry() -> None:
         assert any(selectbox.key == "report_history_method_filter" for selectbox in app.selectbox)
         assert any(selectbox.key == "report_history_month_filter" for selectbox in app.selectbox)
 
-        page = AppTest.from_string(REPORT_HISTORY_PAGE_APPTEST_SCRIPT)
-        page.run()
-        assert not list(page.exception)
-        assert any("Hist LJ Project" in str(item.value) for item in page.markdown)
-        assert any("Hist Zscore Project" in str(item.value) for item in page.markdown)
-
-        page.text_input(key="report_history_project_query").set_value("Hist LJ").run()
-        assert not list(page.exception)
-        assert any("Hist LJ Project" in str(item.value) for item in page.markdown)
-        assert not any("Hist Zscore Project" in str(item.value) for item in page.markdown)
+        app.text_input(key="report_history_project_query").set_value("Hist LJ").run()
+        assert not list(app.exception)
+        assert any("Hist LJ Project" in str(item.value) for item in app.markdown)
+        assert not any("Hist Zscore Project" in str(item.value) for item in app.markdown)
 
 
 def test_report_history_handles_missing_batch_gracefully() -> None:

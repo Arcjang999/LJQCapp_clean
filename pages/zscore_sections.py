@@ -243,7 +243,7 @@ def render_zscore_rules_config_expander(
     overall_phase: str,
     formal_rules_enabled: bool,
 ) -> None:
-    with st.expander("规则说明与判读口径（点击展开）", expanded=False):
+    with st.expander("规则说明", expanded=False):
         template_display_name = format_zscore_template_display_name(template)
         st.caption(template["note"])
         st.markdown(f"- 当前规则组合：`{template_display_name}`")
@@ -354,15 +354,15 @@ def build_zscore_building_run_evidence_dataframe(
         )
         evidence_rows.append(
             {
-                "level 明细（证据）": display_label,
+                "水平": display_label,
                 input_value_type_label: format_optional_input_value(level_result.get("raw_value")),
                 "疑似离群": get_outlier_status_label(level_result.get("outlier_status")),
                 "手工处理": get_outlier_manual_status_label(level_result.get("manual_status")),
                 "参与建靶统计": "是" if int(level_result.get("is_building_included", 1) or 0) == 1 else "否",
                 "G": format_optional_float(level_result.get("grubbs_statistic"), digits=4),
                 "G临界值": format_optional_float(level_result.get("grubbs_threshold"), digits=4),
-                "level 判定（证据）": format_zscore_status_label(level_result.get("status", PHASE_TARGET_BUILDING)),
-                "触发规则（证据）": format_zscore_level_rule_hits(level_result.get("rule_hits_local", [])),
+                "状态": format_zscore_status_label(level_result.get("status", PHASE_TARGET_BUILDING)),
+                "触发规则": format_zscore_level_rule_hits(level_result.get("rule_hits_local", [])),
             }
         )
     return pd.DataFrame(evidence_rows)
@@ -1027,7 +1027,7 @@ def build_zscore_phase_export_dataframe(
             )
         export_columns.extend(
             [
-                "run-level 判定结果",
+            "本次检测判定结果",
                 "触发规则",
                 "误差类型",
                 "分析提示",
@@ -1062,7 +1062,7 @@ def build_zscore_phase_export_dataframe(
                     else ""
                 )
         if phase_scope == "formal":
-            row["run-level 判定结果"] = format_zscore_status_label(run.get("run_status", "pending"))
+            row["本次检测判定结果"] = format_zscore_status_label(run.get("run_status", "pending"))
             row["触发规则"] = format_zscore_rule_hits(run.get("rule_hits_run", []))
             row["误差类型"] = format_error_type_label(run.get("error_type_hint", "unknown"))
             row["分析提示"] = str(run.get("analysis_prompt", "") or "")
@@ -1466,7 +1466,7 @@ def render_zscore_maintenance_section(context: dict[str, object]) -> None:
 
     with st.container(border=True):
         if not building_runs:
-            st.info("当前批次暂无建靶期 run 可维护。")
+            st.info("当前批次暂无建靶期检测记录。")
         else:
             ordered_runs = sorted(
                 building_runs,
@@ -1480,14 +1480,15 @@ def render_zscore_maintenance_section(context: dict[str, object]) -> None:
             run_labels: list[str] = []
             for run in ordered_runs:
                 label = (
-                    f"run #{get_zscore_display_sequence(run)} | "
+                    f"第 {get_zscore_display_sequence(run)} 次检测 | "
                     f"{pd.Timestamp(run['test_time']).strftime('%Y-%m-%d %H:%M')}"
                 )
                 run_labels.append(label)
                 run_options[label] = int(run["run_id"])
 
+            st.markdown("**选择建靶期检测记录**")
             selected_run_label = st.selectbox(
-                "选择建靶期 run",
+                "检测记录",
                 options=run_labels,
                 key="zscore_outlier_run_selector",
             )
@@ -1514,43 +1515,35 @@ def render_zscore_maintenance_section(context: dict[str, object]) -> None:
                 if int(level_result.get("is_outlier_suspect", 0) or 0) == 1
             ]
             if all_excluded:
-                run_manual_state = "本 run 已整体禁用"
+                run_manual_state = "本次检测已禁用"
             elif any_excluded:
-                run_manual_state = "本 run 存在 level 建靶状态不一致"
+                run_manual_state = "本次检测存在状态不一致"
             elif manual_statuses == {"keep"}:
-                run_manual_state = "本 run 已整体标记为保留"
+                run_manual_state = "本次检测已标记为保留"
             elif manual_statuses == {"restored"}:
-                run_manual_state = "本 run 已整体恢复"
+                run_manual_state = "本次检测已恢复"
             else:
-                run_manual_state = "本 run 当前参与建靶统计"
+                run_manual_state = "本次检测参与建靶统计"
 
-            st.markdown("**run 最终状态（结论）**")
+            st.markdown("**本次检测结论**")
             st.caption(
-                f"run #{selected_sequence} | {selected_run_time} | "
+                f"第 {selected_sequence} 次检测 | {selected_run_time} | "
                 f"检测人：{str(selected_run.get('operator', '') or '')}"
             )
             render_compact_stat_metrics(
                 [
                     ("当前阶段", str(selected_run.get("phase_label") or get_phase_label(selected_run.get("phase")))),
-                    ("run 级结论", str(selected_run.get("phase_label") or get_phase_label(selected_run.get("phase")))),
-                    ("触发规则", "建靶期不启用正式规则"),
-                    ("run 级维护", run_manual_state),
-                    ("联动范围", f"{len(selected_level_results)} 个 level"),
+                    ("本次检测状态", str(selected_run.get("phase_label") or get_phase_label(selected_run.get("phase")))),
+                    ("维护状态", run_manual_state),
+                    ("疑似离群水平", "、".join(suspect_levels) if suspect_levels else "无"),
+                    ("涉及水平", f"{len(selected_level_results)} 个水平"),
                 ]
             )
-            if formal_rules_enabled:
-                st.info("正式期启用后，Z-score 建靶期 run 级维护将锁定，不再允许保留本 run、禁用本 run或恢复本 run。")
             if any_excluded and not all_excluded:
-                st.warning("当前 run 下各 level 的建靶状态不一致，可能来自旧数据；可使用下方 run 级按钮一次性统一。")
-            if suspect_levels:
-                suspect_level_text = "、".join(suspect_levels)
-                st.warning(
-                    f"run #{selected_sequence} 下存在疑似离群 level：{suspect_level_text}。"
-                )
-            st.markdown("**level 明细（证据）**")
-            st.caption(
-                f"下表保留当前 run 下全部 level 的证据明细；G / G临界值按 alpha={DEFAULT_GRUBBS_ALPHA:.2f} 展示。"
-            )
+                st.caption("当前记录存在历史状态不一致，建议用下方操作统一。")
+
+            st.markdown("**各水平明细**")
+            st.caption(f"G 与 G临界值按 alpha={DEFAULT_GRUBBS_ALPHA:.2f} 展示。")
             st.dataframe(
                 build_zscore_building_run_evidence_dataframe(
                     selected_run,
@@ -1561,45 +1554,49 @@ def render_zscore_maintenance_section(context: dict[str, object]) -> None:
                 width="stretch",
             )
 
-            st.markdown("**run 级维护操作**")
-            st.caption("以下操作会联动当前 run 下全部 level 记录，不再分别维护单个 level。")
+            st.markdown("**本次检测维护操作**")
+            if formal_rules_enabled:
+                st.caption("当前批次已满足正式期条件，建靶维护已锁定。")
+            else:
+                st.caption("以下操作会同时更新本次检测的全部水平。")
             action_cols = st.columns(3)
             keep_disabled = formal_rules_enabled
             disable_disabled = formal_rules_enabled or all_excluded
             restore_disabled = formal_rules_enabled or not any_excluded
             if action_cols[0].button(
-                "保留本 run",
+                "保留本次检测",
                 key=f"zscore_keep_run_{selected_run_id}",
                 width="stretch",
                 disabled=keep_disabled,
             ):
                 keep_zscore_building_run(int(selected_run_id))
                 st.session_state["zscore_outlier_notice"] = (
-                    f"run #{selected_sequence} 已标记为保留，并已联动更新全部 level 的建靶状态。"
+                    f"第 {selected_sequence} 次检测已标记为保留。"
                 )
                 st.rerun()
             if action_cols[1].button(
-                "禁用本 run",
+                "禁用本次检测",
                 key=f"zscore_disable_run_{selected_run_id}",
                 width="stretch",
                 disabled=disable_disabled,
             ):
                 disable_zscore_building_run(int(selected_run_id))
                 st.session_state["zscore_outlier_notice"] = (
-                    f"run #{selected_sequence} 已禁用，并已联动更新全部 level 的建靶状态。"
+                    f"第 {selected_sequence} 次检测已禁用。"
                 )
                 st.rerun()
             if action_cols[2].button(
-                "恢复本 run",
+                "恢复本次检测",
                 key=f"zscore_restore_run_{selected_run_id}",
                 width="stretch",
                 disabled=restore_disabled,
             ):
                 restore_zscore_building_run(int(selected_run_id))
                 st.session_state["zscore_outlier_notice"] = (
-                    f"run #{selected_sequence} 已恢复，并已联动更新全部 level 的建靶状态。"
+                    f"第 {selected_sequence} 次检测已恢复。"
                 )
                 st.rerun()
+        st.markdown("**维护记录**")
         render_zscore_record_maintenance_entry(history_runs, batch_context)
 
 
@@ -1751,7 +1748,7 @@ def render_zscore_export_import_section(
     )
 
     st.markdown("**CSV 导入**")
-    st.caption("建靶期与正式期模板、上传、审查、确认导入分开展示。")
+    st.caption("建靶期和正式期分别提供模板下载、审查和导入。")
     st.markdown("**建靶期 CSV 导入**")
     st.caption(
         f"先下载当前批次标准模板，再上传 CSV 审查；只有无阻断错误时，才允许确认导入当前批次建靶期{input_value_type_label}检测记录。"
@@ -1774,7 +1771,7 @@ def render_zscore_export_import_section(
         type=["csv"],
         key=zscore_building_import_uploader_key,
         disabled=zscore_building_import_disabled,
-        help="模板会按当前批次的 2 水平 / 3 水平自动生成，当前版本仅支持 CSV。",
+        help="模板会按当前批次的 2 水平 / 3 水平自动生成，目前仅支持 CSV。",
     )
     uploaded_zscore_building_bytes = (
         uploaded_zscore_building_csv.getvalue() if uploaded_zscore_building_csv is not None else b""
@@ -1900,7 +1897,7 @@ def render_zscore_export_import_section(
         "上传正式期 CSV",
         type=["csv"],
         key=zscore_formal_import_uploader_key,
-        help="模板会按当前批次的 2 水平 / 3 水平自动生成，当前版本仅支持 CSV。",
+        help="模板会按当前批次的 2 水平 / 3 水平自动生成，目前仅支持 CSV。",
     )
     uploaded_zscore_formal_bytes = (
         uploaded_zscore_formal_csv.getvalue() if uploaded_zscore_formal_csv is not None else b""

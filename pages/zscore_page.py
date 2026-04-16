@@ -198,7 +198,7 @@ def _render_zscore_level_summary_cards_section(context: dict[str, object]) -> No
         tone="muted",
     )
     if range_text is not None:
-        st.caption(f"正式期实时统计按时间范围筛选：{range_text}。统计口径仍为正式期内在控数据。")
+        st.caption(f"正式期实时统计按时间范围筛选：{range_text}，仅包含正式期内在控数据。")
     else:
         st.caption("当前批次还没有正式期数据，正式期实时统计暂为空。")
     render_level_summary_cards(_build_zscore_level_cards(context, realtime_profiles=realtime_profiles))
@@ -246,7 +246,7 @@ def _render_zscore_maintenance_summary(context: dict[str, object]) -> None:
                     f"最新检测 {latest_test_time}",
                 ],
                 "sections": [],
-                "footer": "可在此查看 run 级维护概览；各 level 明细继续保留为证据，但保留/禁用/恢复改为整条 run 联动。",
+                "footer": "",
             }
         ]
     )
@@ -254,9 +254,7 @@ def _render_zscore_maintenance_summary(context: dict[str, object]) -> None:
 
 def render_zscore_page() -> None:
     st.subheader("多水平（Z-score法）")
-    st.caption(
-        "适用于 2 水平或 3 水平项目的联合判断。页面重点突出多水平摘要、图表控制、视图切换和 run 级维护。"
-    )
+    st.caption("适用于 2 水平或 3 水平项目的联合判断。")
     projects_df, selected_project_id, batches_df, selected_batch_id = prepare_zscore_project_batch_context()
     manage_tab, work_tab, report_tab = st.tabs([TEXT["manage"], TEXT["current_batch"], "Z-score 月报"])
     render_zscore_project_batch_management(
@@ -299,7 +297,7 @@ def render_zscore_page() -> None:
 
         render_section_intro(
             title="当前动作区",
-            caption="左侧聚焦本次多水平录入，右侧聚焦图表控制、视图切换与最新分析，突出多水平联合判断主区。",
+            caption="左侧用于结果录入，右侧用于查看图表、视图切换和最新分析。",
             badges=["多水平（Z-score法）", f"{level_count} 水平", context["overall_phase_label"], input_value_type_label],
             tone="accent",
         )
@@ -331,14 +329,14 @@ def render_zscore_page() -> None:
             with st.container():
                 render_section_intro(
                     title="本次检测录入",
-                    caption=f"请填写检测时间、检测人与各水平{input_value_type_label}，并结合 level 摘要判断当前阶段。",
+                    caption=f"请填写检测时间、检测人与各水平{input_value_type_label}。",
                     tone="accent",
                 )
                 render_zscore_entry_section(context, selected_batch_id)
 
         render_section_intro(
             title="历史与次要操作区",
-            caption="各水平摘要、厂家参考、维护区和导入导出统一放在主区下方，让图表控制与最新分析更集中。",
+            caption="下方可查看各水平摘要、厂家参考、维护和导入导出。",
             badges=["水平摘要", "维护", "导入导出"],
             tone="muted",
         )
@@ -357,31 +355,23 @@ def render_zscore_page() -> None:
             with st.container():
                 if context["overall_phase"] == PHASE_FORMAL_QC:
                     render_section_intro(
-                        title="维护记录",
-                        caption="当前批次已进入正式期，建靶维护区整体隐藏。打开维护记录仍可查看 run 级结论与 level 明细证据；建靶期记录仅支持只读查看，不再提供维护或删除动作。",
+                        title="检测记录维护",
+                        caption="建靶记录已锁定，可在维护记录中查看。",
                         tone="muted",
                     )
-                    render_zscore_record_maintenance_entry(
-                        context["history_runs"],
-                        context["batch_context"],
-                        caption_text="维护记录继续保留 run 级结论与 level 明细证据。建靶期 run 在正式期后自动锁定为只读，页面也不会恢复单 level 维护入口。",
-                    )
+                    render_zscore_record_maintenance_entry(context["history_runs"], context["batch_context"])
                 else:
                     render_section_intro(
-                        title="记录维护",
-                        caption="建靶期保留各 level 明细作为证据，但维护动作统一按整个 run 联动；进入正式期后该维护区会整体隐藏。",
+                        title="检测记录维护",
+                        caption="先看结论，再看各水平明细，再执行维护操作。",
                         tone="muted",
                     )
                     _render_zscore_maintenance_summary(context)
                     render_zscore_maintenance_section(context)
         with lower_right:
             with st.container(border=True):
-                render_section_intro(
-                    title="导出与导入",
-                    caption="导出当前批次数据与图表，并按模板导入 CSV。",
-                    tone="muted",
-                )
-                render_zscore_export_import_section(context, selected_batch_id, chart_panel_state)
+                with st.expander("导出与导入", expanded=False):
+                    render_zscore_export_import_section(context, selected_batch_id, chart_panel_state)
 
     with report_tab:
         render_zscore_monthly_report_section(selected_batch_id)

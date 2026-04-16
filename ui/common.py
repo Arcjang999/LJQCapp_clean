@@ -1387,7 +1387,7 @@ def format_rule_code(rule_id: str) -> str:
 
 def format_rule_description(rule_id: str) -> str:
     normalized_rule_id = str(rule_id or "").strip()
-    return RULE_DESCRIPTION_MAP.get(normalized_rule_id, "当前版本已启用该规则，请结合本页判读说明使用。")
+    return RULE_DESCRIPTION_MAP.get(normalized_rule_id, "该规则已启用，请结合页面说明判读。")
 
 def format_zscore_status_label(status: Any) -> str:
     normalized_status = str(status or "").strip()

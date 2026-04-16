@@ -1662,15 +1662,22 @@ def test_building_maintenance_page_exposes_only_run_level_actions() -> None:
         assert not list(at.exception)
         button_labels = [str(button.label) for button in at.button]
         caption_values = [str(item.value) for item in at.caption]
+        expander_states = {str(expander.label): bool(expander.proto.expanded) for expander in at.expander}
 
-        assert "保留本 run" in button_labels
-        assert "禁用本 run" in button_labels
-        assert "恢复本 run" in button_labels
+        assert "保留本次检测" in button_labels
+        assert "禁用本次检测" in button_labels
+        assert "恢复本次检测" in button_labels
         assert "保留" not in button_labels
         assert "禁用" not in button_labels
         assert "恢复" not in button_labels
-        assert any("全部 level 的证据明细" in value for value in caption_values)
-        assert any("不再分别维护单个 level" in value for value in caption_values)
+        assert any("以下操作会同时更新本次检测的全部水平" in value for value in caption_values)
+        static_caption_values = [
+            value
+            for value in caption_values
+            if "项目：" not in value and "检测人：" not in value
+        ]
+        assert not any("run" in value.lower() or "level" in value.lower() for value in static_caption_values)
+        assert expander_states["导出与导入"] is False
 
 
 def test_formal_phase_hides_building_maintenance_section_and_keeps_locked_history_read_only() -> None:
@@ -1716,12 +1723,13 @@ def test_formal_phase_hides_building_maintenance_section_and_keeps_locked_histor
         assert not list(at.exception)
         button_labels = [str(button.label) for button in at.button]
         caption_values = [str(item.value) for item in at.caption]
+        expander_states = {str(expander.label): bool(expander.proto.expanded) for expander in at.expander}
 
         assert "打开维护记录" in button_labels
-        assert "保留本 run" not in button_labels
-        assert "禁用本 run" not in button_labels
-        assert "恢复本 run" not in button_labels
-        assert any("建靶期 run 在正式期后自动锁定为只读" in value for value in caption_values)
+        assert "保留本次检测" not in button_labels
+        assert "禁用本次检测" not in button_labels
+        assert "恢复本次检测" not in button_labels
+        assert expander_states["导出与导入"] is False
 
         at.button(key="open_zscore_record_maintenance_dialog").click().run()
 
@@ -1746,11 +1754,11 @@ def test_formal_phase_hides_building_maintenance_section_and_keeps_locked_histor
 
         assert "保存记录修改" not in dialog_button_labels
         assert "删除所选记录" not in dialog_button_labels
-        assert "保留本 run" not in dialog_button_labels
-        assert "禁用本 run" not in dialog_button_labels
-        assert "恢复本 run" not in dialog_button_labels
+        assert "保留本次检测" not in dialog_button_labels
+        assert "禁用本次检测" not in dialog_button_labels
+        assert "恢复本次检测" not in dialog_button_labels
         assert any("只读" in value for value in info_values)
-        assert any("不能维护" in value or "不能删除" in value for value in info_values)
+        assert any("不能修改" in value or "不能删除" in value for value in info_values)
 
 
 def test_plotting_all_view_visually_splits_building_and_formal_phases() -> None:

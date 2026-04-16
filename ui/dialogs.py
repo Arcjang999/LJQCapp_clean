@@ -198,7 +198,7 @@ def close_zscore_record_maintenance_dialog() -> None:
     bump_zscore_record_maintenance_dialog_nonce()
 
 
-@st.dialog("Z-score 记录维护", width="large", on_dismiss=close_zscore_record_maintenance_dialog)
+@st.dialog("检测记录维护", width="large", on_dismiss=close_zscore_record_maintenance_dialog)
 def render_zscore_record_maintenance_dialog(
     saved_runs: list[dict[str, Any]],
     batch_context: dict[str, Any],
@@ -210,7 +210,7 @@ def render_zscore_record_maintenance_dialog(
     input_value_type = normalize_input_value_type(batch_context["batch"]["input_value_type"])
     input_value_type_label = get_input_value_type_label(input_value_type)
     st.caption(
-        f"在此查看当前批次已保存的多水平检测记录。未锁定记录仍可维护检测时间、检测人和各水平{input_value_type_label}；建靶期 run 在正式期后自动转为只读，仅保留查看入口。"
+        f"在此查看当前批次已保存的检测记录。未锁定记录仍可维护检测时间、检测人和各水平{input_value_type_label}；建靶期记录在正式期后仅支持查看。"
     )
     if not saved_runs:
         st.info("当前批次暂无已保存的检测记录可维护。")
@@ -265,13 +265,13 @@ def render_zscore_record_maintenance_dialog(
 
             with maintenance_left:
                 st.caption(
-                    f"当前选中：检测序号 {sequence_number} | "
+                    f"当前选中：第 {sequence_number} 次检测 | "
                     f"{pd.Timestamp(selected_run['test_time']).strftime('%Y-%m-%d %H:%M:%S')} | "
                     f"阶段 {selected_run.get('phase_label')} | 判定 {format_zscore_status_label(selected_run.get('run_status'))} | "
                     f"触发规则 {format_zscore_rule_hits(selected_run.get('rule_hits_run', []))}"
                 )
                 if is_locked_for_maintenance:
-                    st.info("该建靶期 run 在正式期后已锁定为只读。可查看 run 级结论和各 level 明细证据，但不能维护、不能删除。")
+                    st.info("该建靶期检测记录已锁定为只读，可查看，但不能修改或删除。")
                     readonly_prefix = f"readonly_zscore_run_{dialog_nonce}_{int(selected_run_id)}"
                     st.datetime_input(
                         "检测时间",
@@ -292,7 +292,7 @@ def render_zscore_record_maintenance_dialog(
                         disabled=True,
                         key=f"{readonly_prefix}_manual_note",
                     )
-                    st.markdown(f"**多水平{input_value_type_label}**")
+                    st.markdown(f"**各水平{input_value_type_label}**")
                     level_result_map = {
                         str(level_result.get("level_id")): level_result
                         for level_result in selected_run.get("level_results", [])
@@ -325,7 +325,7 @@ def render_zscore_record_maintenance_dialog(
                             value=str(selected_run.get("manual_note", "") or ""),
                             height=88,
                         )
-                        st.markdown(f"**多水平{input_value_type_label}**")
+                        st.markdown(f"**各水平{input_value_type_label}**")
                         edited_level_values: dict[str, float] = {}
                         level_result_map = {
                             str(level_result.get("level_id")): level_result
@@ -408,10 +408,9 @@ def render_zscore_record_maintenance_dialog(
 
             with maintenance_right:
                 if is_locked_for_maintenance:
-                    st.caption("该 run 属于建靶期历史记录。正式期启用后，这里只保留查看能力。")
-                    st.info("已禁用删除、手动维护和备注修改操作。")
+                    st.caption("该记录为建靶期历史记录，删除和编辑均已禁用。")
                 else:
-                    st.caption("删除后会同步重算当前批次的建靶统计、正式靶值、正式期实时统计、阶段判定、结果判读和图表基础数据。")
+                    st.caption("删除后会同步重算当前批次统计和图表数据。")
                     confirm_delete = st.checkbox(
                         "我确认删除这条检测记录",
                         key=confirm_delete_key,
@@ -570,14 +569,14 @@ def build_zscore_run_label(run: dict[str, Any], level_label_map: dict[str, str])
     test_time = pd.Timestamp(run["test_time"]).strftime("%Y-%m-%d %H:%M:%S")
     level_summary = build_zscore_run_level_summary(run.get("level_results", []), level_label_map)
     test_sequence = get_zscore_display_sequence(run)
-    return f"序号 {test_sequence} | {test_time} | {run.get('operator', '')} | {level_summary}"
+    return f"第 {test_sequence} 次检测 | {test_time} | {run.get('operator', '')} | {level_summary}"
 
 
 def build_zscore_run_select_options(
     saved_runs: list[dict[str, Any]],
     level_label_map: dict[str, str],
 ) -> tuple[list[str], dict[str, int | None]]:
-    option_map = {"请选择需要查看或维护的检测记录": None}
+    option_map = {"请选择检测记录": None}
     for run in saved_runs:
         option_map[build_zscore_run_label(run, level_label_map)] = int(run["run_id"])
     return list(option_map.keys()), option_map

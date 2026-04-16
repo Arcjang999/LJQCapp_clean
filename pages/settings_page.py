@@ -73,14 +73,14 @@ def render_settings_page() -> None:
 
     render_section_intro(
         title="系统设置",
-        caption="系统设置属于全局功能，用于维护报告默认信息，以及数据存储、迁移、备份和恢复入口。",
+        caption="用于维护报告默认信息，以及数据存储、迁移、备份和恢复。",
         eyebrow="全局入口",
-        badges=["报告默认信息", "数据存储与备份", "危险操作分区"],
+        badges=["报告默认信息", "数据存储与备份", "迁移与恢复"],
         tone="accent",
     )
     render_workbench_context_bar(
         title="当前配置摘要",
-        caption="LJ 月报与 Z-score 月报都会优先读取此处保存的默认信息；数据库迁移、备份与恢复属于全局入口，不进入方法学导航。",
+        caption="后续新生成的 LJ 与 Z-score 月报会优先读取这里的默认信息。",
         items=[
             ("实验室名称", current_settings.lab_name or "未填写"),
             ("科室名称", current_settings.department_name or "未填写"),
@@ -90,23 +90,11 @@ def render_settings_page() -> None:
         ],
         badges=["全局功能", "影响后续新报告"],
     )
-    with st.expander("本页说明", expanded=False):
-        st.markdown(
-            "\n".join(
-                [
-                    "- 系统设置属于全局功能，不属于某一种方法学。",
-                    "- 可维护实验室名称、科室名称、质控负责人、审核人和固定声明。",
-                    "- 可查看当前数据库位置，并在本页完成数据库迁移、立即备份和从备份恢复。",
-                    "- 数据库迁移和恢复成功后需重启应用生效。",
-                    "- 迁移和恢复均通过系统原生目录或文件选择窗口完成，不需手工输入路径。",
-                ]
-            )
-        )
 
     with st.container():
         render_section_intro(
             title="报告默认信息",
-            caption="集中维护实验室、科室、报告责任人和默认声明，让后续新生成月报的默认信息来源更清晰。",
+            caption="集中维护实验室、科室、报告责任人和默认声明。",
             badges=["常规配置", "影响 LJ / Z-score 月报"],
             tone="accent",
         )
@@ -155,7 +143,7 @@ def render_settings_page() -> None:
     with st.container():
         render_section_intro(
             title="数据存储与备份",
-            caption="数据库位置、迁移、备份和恢复继续保留在设置页中；迁移和恢复通过系统选择窗口完成，恢复操作单独做高风险提示。",
+            caption="在此查看数据库位置，并完成迁移、备份和恢复。",
             badges=["数据库迁移", "备份恢复", "重启后生效"],
             tone="muted",
         )

@@ -105,7 +105,7 @@ def _render_instruction_module(
 ) -> None:
     _render_instruction_block("适用场景", scene_items)
     _render_instruction_block("操作流程", flow_items)
-    _render_instruction_block("统计口径", statistics_items)
+    _render_instruction_block("统计说明", statistics_items)
     _render_instruction_block("判定方法", judgment_items)
     _render_instruction_block("注意事项", note_items)
 
@@ -151,24 +151,24 @@ def _render_usage_guide_tabs() -> None:
         _render_instruction_module(
             scene_items=[
                 "适用于 2 水平或 3 水平项目的联合判断场景。",
-                "适合需要同时查看各 level 摘要、图表和 run 级判定的多水平质控流程。",
+                "适合需要同时查看各水平摘要、图表和本次检测结论的多水平质控流程。",
             ],
             flow_items=[
                 "新建项目并确定水平数 → 新建批次 → 多水平建靶 → 全部水平满足条件后进入正式期 → 图表分析 → 月报。",
-                "在“当前批次”页可切换单水平视图或合并视图，并继续进行 level 维护。",
+                "在“当前批次”页可切换单水平视图或合并视图，并查看建靶维护与历史记录。",
             ],
             statistics_items=[
-                "建靶统计按 level 分别计算。",
-                "禁用粒度是单 level 点，不是整条 run。",
-                "月报统计仅基于所选月份正式期 run。",
+                "建靶统计按各水平分别累计。",
+                "本次检测维护按整次检测处理。",
+                "月报统计仅基于所选月份正式期检测记录。",
             ],
             judgment_items=[
-                "建靶期重点查看离群值与 level 摘要。",
-                "正式期按当前规则组合输出 run 级警告或失控。",
+                "建靶期重点查看离群提示和各水平情况。",
+                "正式期按当前规则给出本次检测结论。",
             ],
             note_items=[
                 "全部水平达到建靶条件后才进入正式期。",
-                "进入正式期后建靶期数据锁定。",
+                "进入正式期后建靶记录锁定，仅保留查看。",
             ],
         )
 
@@ -215,7 +215,7 @@ def _render_usage_guide_tabs() -> None:
                 "选择“按当前数据重新生成”后，会调用对应月报生成逻辑并按当前数据重新计算。",
             ],
             note_items=[
-                "项目名称是主词条，方法学是辅助标签。",
+                "可先按项目名称定位，再结合方法学和时间确认报告。",
                 "若原始项目或批次不存在，无法重新生成。",
             ],
         )
@@ -231,7 +231,7 @@ def _render_usage_guide_tabs() -> None:
                 "查看当前数据库位置 → 迁移数据库 / 立即备份 / 从备份恢复。",
             ],
             statistics_items=[
-                "本页不参与质控统计，也不改变报告统计口径。",
+                "本页不参与质控统计，也不影响报告统计结果。",
                 "保存后的默认信息会用于后续新生成的月报。",
             ],
             judgment_items=[
@@ -280,7 +280,7 @@ def render_main_entry_page() -> None:
 
     render_section_intro(
         title="方法入口",
-        caption="按方法学进入对应工作台。首页只保留方法定位、适用场景和核心动作，不再堆叠冗长说明文字。",
+        caption="按方法学进入对应工作台，并查看对应的主要使用场景。",
         badges=[LJ_ENTRY_LABEL, ZSCORE_ENTRY_LABEL, INSTANT_ENTRY_LABEL],
         tone="accent",
     )
@@ -305,11 +305,11 @@ def render_main_entry_page() -> None:
         _render_method_card(
             eyebrow="多水平",
             title="Z-score 法",
-            caption="适用于 2 水平或 3 水平联合判断，页面重点突出 level 摘要、图表控制和最新分析。",
+            caption="适用于 2 水平或 3 水平联合判断，重点查看各水平摘要、图表和本次检测结论。",
             bullet_points=[
                 "支持单水平视图与合并视图切换。",
-                "建靶统计按 level 分别计算，维护粒度也是单 level 点。",
-                "图表、level 摘要、维护区和月报入口分层清晰。",
+                "建靶统计按各水平分别累计，维护按本次检测处理。",
+                "图表、各水平摘要、维护区和月报入口分区清晰。",
             ],
             tags=["多水平", "2 水平 / 3 水平", "联合判断"],
         )
@@ -342,7 +342,7 @@ def render_main_entry_page() -> None:
         _render_method_card(
             eyebrow="全局功能",
             title="报告历史",
-            caption="统一查看 LJ 与 Z-score 月报记录，以项目名称为主词条，支持查看摘要和按当前数据重新生成。",
+            caption="统一查看 LJ 与 Z-score 月报记录，支持查看摘要和按当前数据重新生成。",
             bullet_points=[
                 "支持项目名称、方法学、批次和月份筛选。",
                 "摘要区可帮助快速确认是否为目标报告。",
@@ -357,7 +357,7 @@ def render_main_entry_page() -> None:
         _render_method_card(
             eyebrow="全局功能",
             title="系统设置",
-            caption="集中维护报告默认信息，以及数据库迁移、备份和恢复入口，避免打断方法学工作流。",
+            caption="集中维护报告默认信息，以及数据库迁移、备份和恢复入口。",
             bullet_points=[
                 "可维护实验室名称、科室名称、质控负责人、审核人和固定声明。",
                 "迁移数据库、立即备份和从备份恢复都在这里完成。",
@@ -370,8 +370,8 @@ def render_main_entry_page() -> None:
 
     render_section_intro(
         title="使用说明",
-        caption="使用说明按方法学和全局功能拆分，统一写明适用场景、操作流程、统计口径、判定方法和注意事项，方便首次上手和复查。",
-        badges=["适用场景", "统计口径", "判定方法", "注意事项"],
+        caption="按方法学和全局功能查看主要流程、统计说明和注意事项。",
+        badges=["适用场景", "统计说明", "判定方法", "注意事项"],
         tone="default",
     )
     _render_usage_guide_tabs()

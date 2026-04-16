@@ -397,7 +397,7 @@ def render_project_batch_management(
                             )
                             if has_existing_batches:
                                 st.info(
-                                    "当前项目下已存在批次。为避免批次口径与历史数据不一致，输入值类型已锁定为只读显示。"
+                                    "当前项目下已存在批次，输入值类型已锁定，不能修改。"
                                 )
                             edit_project_submitted = st.form_submit_button(
                                 "保存项目修改",
@@ -649,7 +649,7 @@ def render_zscore_project_batch_management(
                             )
                             if has_existing_batches:
                                 st.info(
-                                    "当前项目下已存在批次。为避免已建批次的录入、模板和图表口径被动变化，输入值类型已锁定。"
+                                    "当前项目下已存在批次，输入值类型已锁定，不能修改。"
                                 )
                             edit_project_submitted = st.form_submit_button("保存项目修改", width="stretch")
                             if edit_project_submitted:

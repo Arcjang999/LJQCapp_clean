@@ -38,11 +38,11 @@ from services.instant_service import (
 
 
 BASE_TIME = "2026-04-13 08:{:02d}:00"
-INSTANT_PAGE_APPTEST_SCRIPT = """
+INSTANT_PAGE_APPTEST_SCRIPT = f"""
 import sys
 from pathlib import Path
 
-ROOT = Path(r'D:\\Github\\LJQCapp_clean')
+ROOT = Path({str(PROJECT_ROOT)!r})
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -51,11 +51,11 @@ from pages.instant_page import render_instant_page
 render_instant_page()
 """
 
-LJ_PAGE_APPTEST_SCRIPT = """
+LJ_PAGE_APPTEST_SCRIPT = f"""
 import sys
 from pathlib import Path
 
-ROOT = Path(r'D:\\Github\\LJQCapp_clean')
+ROOT = Path({str(PROJECT_ROOT)!r})
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -64,11 +64,11 @@ from pages.lj_page import render_lj_page
 render_lj_page()
 """
 
-ZSCORE_PAGE_APPTEST_SCRIPT = """
+ZSCORE_PAGE_APPTEST_SCRIPT = f"""
 import sys
 from pathlib import Path
 
-ROOT = Path(r'D:\\Github\\LJQCapp_clean')
+ROOT = Path({str(PROJECT_ROOT)!r})
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -618,6 +618,9 @@ def test_lj_page_uses_business_labels_and_marks_instant_origin() -> None:
         assert "普通创建" in project_table["来源"].tolist()
         assert batch_table["来源"].tolist() == ["由即时法转入"]
         assert any("来源：即时法" in str(item.value) for item in at.info)
+        expander_states = {str(expander.label): bool(expander.proto.expanded) for expander in at.expander}
+        assert expander_states["当前批次检测记录"] is False
+        assert expander_states["导出与导入"] is False
 
 
 def test_zscore_page_uses_business_labels_in_management_and_context() -> None:

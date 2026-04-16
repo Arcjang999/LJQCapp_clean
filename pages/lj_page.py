@@ -154,7 +154,7 @@ def render_lj_work_tab(
 
         render_section_intro(
             title="当前动作区",
-            caption="左侧聚焦本次录入与当前统计，右侧聚焦图表与最新分析；单水平页面只保留当前阶段最需要的判断信息。",
+            caption="左侧用于结果录入与统计，右侧用于查看图表和最新分析。",
             badges=["单水平（LJ法）", phase_label, input_value_type_label],
             tone="accent",
         )
@@ -178,7 +178,7 @@ def render_lj_work_tab(
 
         render_section_intro(
             title="历史与次要操作区",
-            caption="规则回顾、记录表、维护区和导入导出统一放在页面下部，避免主操作区被次级信息打断。",
+            caption="下方可查看规则回顾、检测记录、维护和导入导出。",
             badges=["记录回顾", "维护", "导入导出"],
             tone="muted",
         )
@@ -197,16 +197,12 @@ def render_lj_work_tab(
             with st.container():
                 render_section_intro(
                     title="检测记录维护",
-                    caption="集中处理建靶期离群点与历史记录维护，避免主区重复提示。",
+                    caption="在此处理建靶期离群点和历史记录维护。",
                     tone="muted",
                 )
                 _render_lj_maintenance_summary(qc_df)
                 render_lj_maintenance_section(context)
         with lower_right:
             with st.container(border=True):
-                render_section_intro(
-                    title="导出与导入",
-                    caption="导出当前批次数据和图表，并按模板导入 CSV。",
-                    tone="muted",
-                )
-                render_lj_export_import_section(context, selected_batch_id, figure, chart_state)
+                with st.expander("导出与导入", expanded=False):
+                    render_lj_export_import_section(context, selected_batch_id, figure, chart_state)
