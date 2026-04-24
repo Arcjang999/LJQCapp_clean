@@ -605,6 +605,8 @@ def _render_instant_transfer_section(context: dict[str, object]) -> None:
 def _resolve_instant_tone_key(status: str) -> str | None:
     if status == "疑似离群":
         return "warning"
+    if status == "警告":
+        return "warning"
     if status == "有效点":
         return "accept"
     if status == "继续累计":
@@ -612,22 +614,25 @@ def _resolve_instant_tone_key(status: str) -> str | None:
     return None
 
 
-def _render_grubbs_method_explanation(summary: dict[str, object]) -> None:
-    alpha_value = float(summary.get("grubbs_alpha", 0.05) or 0.05)
-    grubbs_method_label = str(summary.get("grubbs_method_label", "双侧单异常值 Grubbs 检验"))
-    grubbs_formula = str(summary.get("grubbs_formula", "G = max(|xi - x̄|) / s"))
-    with st.expander("格拉布斯法说明", expanded=False):
-        st.caption("用于判断疑似离群点，系统只提示，不自动剔除。")
+def _render_instant_si_method_explanation(summary: dict[str, object]) -> None:
+    method_label = str(summary.get("instant_method_label", "即刻法 SI 值判定"))
+    formula = str(
+        summary.get(
+            "instant_method_formula",
+            "SI上限 = (X最大值 - x̄) / s；SI下限 = (x̄ - X最小值) / s",
+        )
+    )
+    with st.expander("即刻法 SI 值说明", expanded=False):
+        st.caption("用于前 20 个有效点内的即时质控提示，系统只提示，不自动剔除。")
         st.markdown(
             "\n".join(
                 [
-                    f"- 当前采用：`{grubbs_method_label}`。",
-                    "- 判定范围：基于当前有效点集合进行检查。",
+                    f"- 当前采用：`{method_label}`。",
+                    "- 判定范围：同一批外部质控品的当前有效点集合。",
                     "- 起判条件：有效点数 `n < 3` 时不判定，`n >= 3` 时开始判定。",
-                    f"- 显著性水平：`alpha = {alpha_value:.0%}`。",
-                    f"- 统计量：`{grubbs_formula}`，其中 `s` 使用样本标准差。",
-                    "- 当前阶段：只做单次提示，不做迭代反复剔除。",
-                    "- 判定结果：超过阈值时标记为“疑似离群”。",
+                    "- 使用范围：即刻法 SI 表仅用于前 20 个有效点，超过后应转入 LJ 法。",
+                    f"- 公式：`{formula}`，其中 `s` 使用样本标准差。",
+                    "- 判定阈值：SI上限和 SI下限均不超过 n2s 为在控；超过 n2s 但不超过 n3s 为警告；超过 n3s 为疑似离群。",
                     "- 处理方式：系统不自动禁用，保留 / 禁用 / 恢复由用户手工处理。",
                 ]
             )
@@ -684,6 +689,17 @@ def _build_instant_display_dataframe(
         lambda value: "" if pd.isna(value) else str(int(value))
     )
     display_df["is_outlier_suspect"] = display_df["is_outlier_suspect"].map(lambda flag: "是" if int(flag) == 1 else "否")
+    for column_name in ["si_upper", "si_lower"]:
+        display_df[column_name] = display_df[column_name].map(
+            lambda value: "-" if value is None or pd.isna(value) else f"{float(value):.4f}"
+        )
+    for column_name in ["si_n2s", "si_n3s"]:
+        display_df[column_name] = display_df[column_name].map(
+            lambda value: "-" if value is None or pd.isna(value) else f"{float(value):.2f}"
+        )
+    display_df["si_trigger_side"] = display_df["si_trigger_side"].map(
+        lambda value: {"max": "最大值", "min": "最小值"}.get(str(value or ""), "-")
+    )
     display_df["grubbs_statistic"] = display_df["grubbs_statistic"].map(
         lambda value: "-" if value is None or pd.isna(value) else f"{float(value):.4f}"
     )
@@ -700,8 +716,11 @@ def _build_instant_display_dataframe(
         "status",
         "manual_status",
         "is_outlier_suspect",
-        "grubbs_statistic",
-        "grubbs_threshold",
+        "si_upper",
+        "si_lower",
+        "si_n2s",
+        "si_n3s",
+        "si_trigger_side",
     ]
     return display_df[ordered_columns].rename(
         columns={
@@ -713,8 +732,11 @@ def _build_instant_display_dataframe(
             "status": "状态",
             "manual_status": "手工处理状态",
             "is_outlier_suspect": "疑似离群",
-            "grubbs_statistic": "Grubbs G",
-            "grubbs_threshold": "G临界值",
+            "si_upper": "SI上限",
+            "si_lower": "SI下限",
+            "si_n2s": "n2s",
+            "si_n3s": "n3s",
+            "si_trigger_side": "触发方向",
         }
     )
 
@@ -777,8 +799,10 @@ def _render_instant_maintenance_section(context: dict[str, object]) -> None:
         [
             ("当前状态", str(selected_row["status"])),
             ("手工处理", get_instant_manual_status_label(selected_row["manual_status"])),
-            ("Grubbs G", format_optional_float(selected_row["grubbs_statistic"])),
-            ("G临界值", format_optional_float(selected_row["grubbs_threshold"])),
+            ("SI上限", format_optional_float(selected_row["si_upper"])),
+            ("SI下限", format_optional_float(selected_row["si_lower"])),
+            ("n2s", format_optional_float(selected_row["si_n2s"], digits=2)),
+            ("n3s", format_optional_float(selected_row["si_n3s"], digits=2)),
         ]
     )
     st.caption("禁用后原始记录不会删除，只是不再参与即时法统计和图表默认展示。")
@@ -826,7 +850,7 @@ def render_instant_page() -> None:
     st.subheader("即时法")
     st.caption(
         "即时法是面向单水平项目的过渡方法，适用于短期内难以快速累积 20 个点的场景；"
-        "页面重点突出有效点累计、格拉布斯法提示和确认转入 LJ 法。"
+        "页面重点突出有效点累计、即刻法 SI 值提示和确认转入 LJ 法。"
     )
     projects_df, selected_project_id, batches_df, selected_batch_id = prepare_instant_project_batch_context()
     manage_tab, work_tab = st.tabs([TEXT["manage"], TEXT["current_batch"]])
@@ -863,7 +887,7 @@ def render_instant_page() -> None:
         ]
         context_caption = (
             f"当前项目：{batch['project_name']}。请确认输入值类型（{input_value_type_label}）后再录入结果。"
-            "达到 3 个有效点后开始格拉布斯法提示，满足条件后可执行“确认转入 LJ 法”。"
+            "达到 3 个有效点后开始即刻法 SI 判定，满足条件后可执行“确认转入 LJ 法”。"
         )
         if transfer_state.get("is_transferred"):
             context_items.extend(
@@ -917,7 +941,7 @@ def render_instant_page() -> None:
 
         render_section_intro(
             title="历史与次要操作区",
-            caption="下方可查看转入 LJ、记录回顾、维护和格拉布斯法说明。",
+            caption="下方可查看转入 LJ、记录回顾、维护和即刻法 SI 值说明。",
             badges=["转入 LJ", "记录回顾", "维护"],
             tone="muted",
         )
@@ -948,4 +972,4 @@ def render_instant_page() -> None:
                 _render_instant_maintenance_section(context)
 
         with st.container(border=True):
-            _render_grubbs_method_explanation(summary)
+            _render_instant_si_method_explanation(summary)

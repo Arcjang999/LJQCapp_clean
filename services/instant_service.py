@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from datetime import datetime
-from typing import Any
+from typing import Any, Sequence
 
 import pandas as pd
 
@@ -16,18 +16,34 @@ from database import (
     save_instant_result_analysis_snapshot,
     set_instant_result_effective_state,
 )
-from services.outlier_service import (
-    DEFAULT_GRUBBS_ALPHA,
-    GRUBBS_FORMULA_TEXT,
-    GRUBBS_METHOD_NAME,
-    GRUBBS_METHOD_LABEL,
-    MIN_GRUBBS_SAMPLE_SIZE,
-    calculate_grubbs_test,
-)
 from services.value_type_service import get_input_value_type_label, normalize_input_value_type
 
 
 INSTANT_TRANSFER_READY_COUNT = 20
+INSTANT_SI_MIN_SAMPLE_SIZE = 3
+INSTANT_SI_METHOD_NAME = "Instant SI"
+INSTANT_SI_METHOD_LABEL = "即刻法 SI 值判定"
+INSTANT_SI_FORMULA_TEXT = "SI上限 = (X最大值 - x̄) / s；SI下限 = (x̄ - X最小值) / s"
+INSTANT_SI_LIMITS: dict[int, dict[str, float]] = {
+    3: {"n2s": 1.15, "n3s": 1.16},
+    4: {"n2s": 1.46, "n3s": 1.49},
+    5: {"n2s": 1.67, "n3s": 1.75},
+    6: {"n2s": 1.82, "n3s": 1.94},
+    7: {"n2s": 1.94, "n3s": 2.10},
+    8: {"n2s": 2.03, "n3s": 2.22},
+    9: {"n2s": 2.11, "n3s": 2.32},
+    10: {"n2s": 2.18, "n3s": 2.41},
+    11: {"n2s": 2.23, "n3s": 2.48},
+    12: {"n2s": 2.29, "n3s": 2.55},
+    13: {"n2s": 2.33, "n3s": 2.61},
+    14: {"n2s": 2.37, "n3s": 2.66},
+    15: {"n2s": 2.41, "n3s": 2.71},
+    16: {"n2s": 2.44, "n3s": 2.75},
+    17: {"n2s": 2.47, "n3s": 2.79},
+    18: {"n2s": 2.50, "n3s": 2.82},
+    19: {"n2s": 2.53, "n3s": 2.85},
+    20: {"n2s": 2.56, "n3s": 2.88},
+}
 INSTANT_MANUAL_STATUS_NORMAL = "normal"
 INSTANT_MANUAL_STATUS_PENDING_REVIEW = "pending_review"
 INSTANT_MANUAL_STATUS_KEEP = "keep"
@@ -101,6 +117,82 @@ def _format_float_for_meta(value: Any, digits: int = 4) -> str:
     return f"{numeric:.{digits}f}"
 
 
+def calculate_instant_si_test(values: Sequence[float]) -> dict[str, object]:
+    cleaned_values = [float(value) for value in values if _safe_float_or_none(value) is not None]
+    sample_size = len(cleaned_values)
+    result: dict[str, object] = {
+        "method_name": INSTANT_SI_METHOD_NAME,
+        "method_label": INSTANT_SI_METHOD_LABEL,
+        "formula": INSTANT_SI_FORMULA_TEXT,
+        "sample_size": sample_size,
+        "evaluation_ready": INSTANT_SI_MIN_SAMPLE_SIZE <= sample_size <= INSTANT_TRANSFER_READY_COUNT,
+        "reason": "ok",
+        "mean": None,
+        "sd": None,
+        "si_upper": None,
+        "si_lower": None,
+        "n2s": None,
+        "n3s": None,
+        "status": "pending",
+        "is_warning": False,
+        "is_suspect": False,
+        "trigger_side": None,
+        "suspected_index": None,
+        "suspected_value": None,
+    }
+    if sample_size == 0:
+        result.update({"reason": "no_points", "status": "no_data"})
+        return result
+    mean_value = float(pd.Series(cleaned_values).mean())
+    result["mean"] = mean_value
+    if sample_size < INSTANT_SI_MIN_SAMPLE_SIZE:
+        result.update({"reason": "insufficient_points", "status": "accumulating", "evaluation_ready": False})
+        return result
+    if sample_size > INSTANT_TRANSFER_READY_COUNT:
+        result.update({"reason": "over_table_limit", "status": "over_limit", "evaluation_ready": False})
+        return result
+
+    limits = INSTANT_SI_LIMITS[sample_size]
+    result.update({"n2s": limits["n2s"], "n3s": limits["n3s"]})
+    sd_value = float(pd.Series(cleaned_values).std(ddof=1))
+    result["sd"] = sd_value
+    if math.isclose(sd_value, 0.0, abs_tol=1e-12):
+        result.update({"reason": "zero_variation", "status": "in_control"})
+        return result
+
+    maximum_value = max(cleaned_values)
+    minimum_value = min(cleaned_values)
+    si_upper = float((maximum_value - mean_value) / sd_value)
+    si_lower = float((mean_value - minimum_value) / sd_value)
+    result.update({"si_upper": si_upper, "si_lower": si_lower})
+
+    n2s = float(limits["n2s"])
+    n3s = float(limits["n3s"])
+    upper_reject = si_upper > n3s
+    lower_reject = si_lower > n3s
+    if upper_reject or lower_reject:
+        trigger_side = "max" if si_upper >= si_lower else "min"
+        suspected_value = maximum_value if trigger_side == "max" else minimum_value
+        suspected_index = cleaned_values.index(suspected_value)
+        result.update(
+            {
+                "status": "reject",
+                "is_suspect": True,
+                "trigger_side": trigger_side,
+                "suspected_index": suspected_index,
+                "suspected_value": suspected_value,
+            }
+        )
+        return result
+
+    if si_upper <= n2s and si_lower <= n2s:
+        result.update({"status": "in_control"})
+        return result
+
+    result.update({"status": "warning", "is_warning": True})
+    return result
+
+
 def _build_empty_analysis_dataframe(results_df: pd.DataFrame | None = None) -> pd.DataFrame:
     base = results_df.copy() if results_df is not None else pd.DataFrame()
     default_columns = [
@@ -116,6 +208,12 @@ def _build_empty_analysis_dataframe(results_df: pd.DataFrame | None = None) -> p
         "outlier_method",
         "grubbs_statistic",
         "grubbs_threshold",
+        "si_upper",
+        "si_lower",
+        "si_n2s",
+        "si_n3s",
+        "si_trigger_side",
+        "instant_method_label",
         "manual_status",
         "manual_note",
         "created_at",
@@ -152,9 +250,25 @@ def analyze_instant_results(results_df: pd.DataFrame) -> tuple[pd.DataFrame, dic
         "mean": None,
         "sd": None,
         "cv": None,
-        "grubbs_method_label": GRUBBS_METHOD_LABEL,
-        "grubbs_formula": GRUBBS_FORMULA_TEXT,
-        "grubbs_alpha": DEFAULT_GRUBBS_ALPHA,
+        "instant_method_label": INSTANT_SI_METHOD_LABEL,
+        "instant_method_formula": INSTANT_SI_FORMULA_TEXT,
+        "si_ready": False,
+        "si_sample_size": 0,
+        "si_mean": None,
+        "si_sd": None,
+        "si_upper": None,
+        "si_lower": None,
+        "si_n2s": None,
+        "si_n3s": None,
+        "si_trigger_side": None,
+        "si_suspected_result_id": None,
+        "si_suspected_effective_sequence": None,
+        "si_suspected_value": None,
+        "si_status": "no_data",
+        "si_reason": "no_points",
+        "grubbs_method_label": INSTANT_SI_METHOD_LABEL,
+        "grubbs_formula": INSTANT_SI_FORMULA_TEXT,
+        "grubbs_alpha": None,
         "grubbs_sample_size": 0,
         "grubbs_mean": None,
         "grubbs_sd": None,
@@ -187,10 +301,16 @@ def analyze_instant_results(results_df: pd.DataFrame) -> tuple[pd.DataFrame, dic
     analysis_df["outlier_method"] = analysis_df["outlier_method"].fillna("")
     analysis_df["grubbs_statistic"] = analysis_df["grubbs_statistic"].apply(_safe_float_or_none)
     analysis_df["grubbs_threshold"] = analysis_df["grubbs_threshold"].apply(_safe_float_or_none)
+    analysis_df["si_upper"] = None
+    analysis_df["si_lower"] = None
+    analysis_df["si_n2s"] = None
+    analysis_df["si_n3s"] = None
+    analysis_df["si_trigger_side"] = None
+    analysis_df["instant_method_label"] = INSTANT_SI_METHOD_LABEL
 
     disabled_mask = analysis_df["is_effective"] != 1
     analysis_df.loc[disabled_mask, "status"] = "已禁用"
-    analysis_df.loc[disabled_mask, "analysis_prompt"] = "该记录已手工禁用，不参与即时法有效点统计与格拉布斯法判定。"
+    analysis_df.loc[disabled_mask, "analysis_prompt"] = "该记录已手工禁用，不参与即时法有效点统计与 SI 判定。"
 
     effective_indices = analysis_df.index[analysis_df["is_effective"] == 1].tolist()
     for position, dataframe_index in enumerate(effective_indices, start=1):
@@ -212,58 +332,84 @@ def analyze_instant_results(results_df: pd.DataFrame) -> tuple[pd.DataFrame, dic
         if mean_value is not None and not math.isclose(mean_value, 0.0, abs_tol=1e-12):
             cv_value = float(sd_value / mean_value * 100.0)
 
-    grubbs_result = calculate_grubbs_test(effective_values, alpha=DEFAULT_GRUBBS_ALPHA)
-    grubbs_ready = effective_count >= MIN_GRUBBS_SAMPLE_SIZE
+    si_result = calculate_instant_si_test(effective_values)
+    si_ready = bool(si_result.get("evaluation_ready"))
+    si_upper = _safe_float_or_none(si_result.get("si_upper"))
+    si_lower = _safe_float_or_none(si_result.get("si_lower"))
+    si_n2s = _safe_float_or_none(si_result.get("n2s"))
+    si_n3s = _safe_float_or_none(si_result.get("n3s"))
+    si_statistic = max(
+        [value for value in [si_upper, si_lower] if value is not None],
+        default=None,
+    )
     suspected_result_id = None
     suspected_effective_sequence = None
+    suspected_value = _safe_float_or_none(si_result.get("suspected_value"))
+    trigger_side = str(si_result.get("trigger_side") or "").strip() or None
+
+    if effective_indices:
+        analysis_df.loc[analysis_df["is_effective"] == 1, "outlier_method"] = (
+            INSTANT_SI_METHOD_NAME if si_ready else ""
+        )
+        analysis_df.loc[analysis_df["is_effective"] == 1, "grubbs_statistic"] = si_statistic
+        analysis_df.loc[analysis_df["is_effective"] == 1, "grubbs_threshold"] = si_n3s
+        analysis_df.loc[analysis_df["is_effective"] == 1, "si_upper"] = si_upper
+        analysis_df.loc[analysis_df["is_effective"] == 1, "si_lower"] = si_lower
+        analysis_df.loc[analysis_df["is_effective"] == 1, "si_n2s"] = si_n2s
+        analysis_df.loc[analysis_df["is_effective"] == 1, "si_n3s"] = si_n3s
+        analysis_df.loc[analysis_df["is_effective"] == 1, "si_trigger_side"] = trigger_side
 
     if effective_count == 0:
         latest_status = "暂无数据"
         latest_message = "当前批次还没有有效点，请先录入检测结果。"
-    elif effective_count < MIN_GRUBBS_SAMPLE_SIZE:
+    elif effective_count < INSTANT_SI_MIN_SAMPLE_SIZE:
         accumulation_message = (
-            f"当前仅有 {effective_count} 个有效点，达到 {MIN_GRUBBS_SAMPLE_SIZE} 个有效点后才开始格拉布斯法提示。"
+            f"当前仅有 {effective_count} 个有效点，达到 {INSTANT_SI_MIN_SAMPLE_SIZE} 个有效点后开始即刻法 SI 判定。"
         )
         analysis_df.loc[analysis_df["is_effective"] == 1, "status"] = "继续累计"
         analysis_df.loc[analysis_df["is_effective"] == 1, "analysis_prompt"] = accumulation_message
         latest_status = "继续累计"
         latest_message = accumulation_message
+    elif effective_count > INSTANT_TRANSFER_READY_COUNT:
+        over_limit_message = (
+            "当前有效点已超过 20 个，即刻法 SI 表不再继续判定；请确认转入 LJ 法或在 LJ 法中继续质控。"
+        )
+        analysis_df.loc[analysis_df["is_effective"] == 1, "status"] = "有效点"
+        analysis_df.loc[analysis_df["is_effective"] == 1, "analysis_prompt"] = over_limit_message
+        analysis_df.loc[analysis_df["is_effective"] == 1, "is_outlier_suspect"] = 0
+        latest_status = "有效点"
+        latest_message = over_limit_message
     else:
-        shared_statistic = _safe_float_or_none(grubbs_result.get("statistic"))
-        shared_threshold = _safe_float_or_none(grubbs_result.get("threshold"))
-        if grubbs_result.get("evaluation_ready"):
-            analysis_df.loc[analysis_df["is_effective"] == 1, "outlier_method"] = GRUBBS_METHOD_NAME
-            analysis_df.loc[analysis_df["is_effective"] == 1, "grubbs_statistic"] = shared_statistic
-            analysis_df.loc[analysis_df["is_effective"] == 1, "grubbs_threshold"] = shared_threshold
-        else:
-            analysis_df.loc[analysis_df["is_effective"] == 1, "outlier_method"] = ""
-            analysis_df.loc[analysis_df["is_effective"] == 1, "grubbs_statistic"] = None
-            analysis_df.loc[analysis_df["is_effective"] == 1, "grubbs_threshold"] = None
-
-        if grubbs_result.get("evaluation_ready") and grubbs_result.get("is_suspect"):
-            suspected_position = int(grubbs_result["suspected_index"])
+        if si_ready and si_result.get("is_suspect"):
+            suspected_position = int(si_result["suspected_index"])
             suspected_dataframe_index = effective_indices[suspected_position]
             suspected_result_id = int(analysis_df.at[suspected_dataframe_index, "id"])
             suspected_effective_sequence = int(analysis_df.at[suspected_dataframe_index, "effective_sequence"])
+            trigger_side_label = "最大值" if trigger_side == "max" else "最小值"
             analysis_df.loc[analysis_df["is_effective"] == 1, "status"] = "有效点"
             analysis_df.loc[analysis_df["is_effective"] == 1, "analysis_prompt"] = (
-                f"当前样本已出现疑似离群点（有效序号 #{suspected_effective_sequence}），"
+                f"即刻法 SI 判定提示{trigger_side_label}方向疑似离群（有效序号 #{suspected_effective_sequence}），"
                 "请到记录维护区人工确认是否禁用。"
             )
             analysis_df.loc[analysis_df["is_effective"] == 1, "is_outlier_suspect"] = 0
             analysis_df.at[suspected_dataframe_index, "status"] = "疑似离群"
             analysis_df.at[suspected_dataframe_index, "analysis_prompt"] = (
-                "系统提示该点疑似离群，请结合复测与业务判断后手工确认。"
+                "系统按即刻法 SI 值提示该点疑似离群，请结合复测与业务判断后手工确认。"
             )
             analysis_df.at[suspected_dataframe_index, "is_outlier_suspect"] = 1
-        elif grubbs_result.get("reason") == "zero_variation":
-            zero_variation_message = "当前有效点波动为 0，格拉布斯统计量暂无法形成有效离群提示。"
+        elif si_result.get("reason") == "zero_variation":
+            zero_variation_message = "当前有效点波动为 0，SI 值暂无法形成异常提示。"
             analysis_df.loc[analysis_df["is_effective"] == 1, "status"] = "有效点"
             analysis_df.loc[analysis_df["is_effective"] == 1, "analysis_prompt"] = zero_variation_message
+        elif si_result.get("status") == "warning":
+            warning_message = "即刻法 SI 值超过 n2s 但未超过 n3s，当前判定为警告；系统不自动禁用记录。"
+            analysis_df.loc[analysis_df["is_effective"] == 1, "status"] = "警告"
+            analysis_df.loc[analysis_df["is_effective"] == 1, "analysis_prompt"] = warning_message
+            analysis_df.loc[analysis_df["is_effective"] == 1, "is_outlier_suspect"] = 0
         else:
             analysis_df.loc[analysis_df["is_effective"] == 1, "status"] = "有效点"
             analysis_df.loc[analysis_df["is_effective"] == 1, "analysis_prompt"] = (
-                "已按格拉布斯法检查，当前未见疑似离群。"
+                "已按即刻法 SI 值判定，当前在控。"
             )
             analysis_df.loc[analysis_df["is_effective"] == 1, "is_outlier_suspect"] = 0
 
@@ -275,7 +421,7 @@ def analyze_instant_results(results_df: pd.DataFrame) -> tuple[pd.DataFrame, dic
             else "已完成即时法基础判定。"
         )
 
-    if effective_count > 0 and effective_count < MIN_GRUBBS_SAMPLE_SIZE:
+    if effective_count > 0 and effective_count < INSTANT_SI_MIN_SAMPLE_SIZE:
         latest_row = get_latest_instant_row(analysis_df)
         latest_status = str(latest_row.get("status", "继续累计")) if latest_row is not None else "继续累计"
         latest_message = (
@@ -283,7 +429,7 @@ def analyze_instant_results(results_df: pd.DataFrame) -> tuple[pd.DataFrame, dic
             if latest_row is not None
             else latest_message
         )
-    elif effective_count > 0 and effective_count >= MIN_GRUBBS_SAMPLE_SIZE:
+    elif effective_count > 0 and effective_count >= INSTANT_SI_MIN_SAMPLE_SIZE:
         latest_row = get_latest_instant_row(analysis_df)
         latest_status = str(latest_row.get("status", latest_status)) if latest_row is not None else latest_status
         latest_message = (
@@ -331,7 +477,7 @@ def analyze_instant_results(results_df: pd.DataFrame) -> tuple[pd.DataFrame, dic
     latest_meta = [
         ("总记录数", total_count),
         ("有效点数", effective_count),
-        ("判定方法", GRUBBS_METHOD_LABEL),
+        ("判定方法", INSTANT_SI_METHOD_LABEL),
     ]
     if latest_row is not None:
         latest_meta.append(("检测序号", f"#{int(latest_row['sequence'])}"))
@@ -344,11 +490,19 @@ def analyze_instant_results(results_df: pd.DataFrame) -> tuple[pd.DataFrame, dic
                 ("n", effective_count),
                 ("均值", _format_float_for_meta(mean_value)),
                 ("SD", _format_float_for_meta(sd_value)),
-                ("Grubbs G", _format_float_for_meta(grubbs_result.get("statistic"))),
-                ("G临界值", _format_float_for_meta(grubbs_result.get("threshold"))),
-                ("alpha", f"{float(grubbs_result.get('alpha', DEFAULT_GRUBBS_ALPHA)):.0%}"),
             ]
         )
+    if si_ready:
+        latest_meta.extend(
+            [
+                ("SI上限", _format_float_for_meta(si_upper)),
+                ("SI下限", _format_float_for_meta(si_lower)),
+                ("n2s", _format_float_for_meta(si_n2s, digits=2)),
+                ("n3s", _format_float_for_meta(si_n3s, digits=2)),
+            ]
+        )
+    elif effective_count > INSTANT_TRANSFER_READY_COUNT:
+        latest_meta.append(("SI判定", "超过 20 个有效点后不再使用 SI 表"))
     latest_meta.append(
         ("手工状态", get_instant_manual_status_label(latest_row.get("manual_status")) if latest_row is not None else "-")
     )
@@ -366,18 +520,34 @@ def analyze_instant_results(results_df: pd.DataFrame) -> tuple[pd.DataFrame, dic
             "mean": mean_value,
             "sd": sd_value,
             "cv": cv_value,
-            "grubbs_method_label": GRUBBS_METHOD_LABEL,
-            "grubbs_formula": GRUBBS_FORMULA_TEXT,
-            "grubbs_alpha": float(grubbs_result.get("alpha", DEFAULT_GRUBBS_ALPHA)),
+            "instant_method_label": INSTANT_SI_METHOD_LABEL,
+            "instant_method_formula": INSTANT_SI_FORMULA_TEXT,
+            "si_ready": si_ready,
+            "si_sample_size": effective_count,
+            "si_mean": mean_value,
+            "si_sd": sd_value,
+            "si_upper": si_upper,
+            "si_lower": si_lower,
+            "si_n2s": si_n2s,
+            "si_n3s": si_n3s,
+            "si_trigger_side": trigger_side,
+            "si_suspected_result_id": suspected_result_id,
+            "si_suspected_effective_sequence": suspected_effective_sequence,
+            "si_suspected_value": suspected_value,
+            "si_status": str(si_result.get("status") or ""),
+            "si_reason": str(si_result.get("reason") or ""),
+            "grubbs_method_label": INSTANT_SI_METHOD_LABEL,
+            "grubbs_formula": INSTANT_SI_FORMULA_TEXT,
+            "grubbs_alpha": None,
             "grubbs_sample_size": effective_count,
             "grubbs_mean": mean_value,
             "grubbs_sd": sd_value,
-            "grubbs_ready": grubbs_ready,
-            "grubbs_statistic": _safe_float_or_none(grubbs_result.get("statistic")),
-            "grubbs_threshold": _safe_float_or_none(grubbs_result.get("threshold")),
+            "grubbs_ready": si_ready,
+            "grubbs_statistic": si_statistic,
+            "grubbs_threshold": si_n3s,
             "grubbs_suspected_result_id": suspected_result_id,
             "grubbs_suspected_effective_sequence": suspected_effective_sequence,
-            "grubbs_suspected_value": _safe_float_or_none(grubbs_result.get("suspected_value")),
+            "grubbs_suspected_value": suspected_value,
             "transfer_ready": transfer_ready,
             "transfer_message": "已达到 20 个有效点，可确认转入 LJ 法。" if transfer_ready else "",
             "transfer_status": INSTANT_TRANSFER_STATUS_NOT_TRANSFERRED,

@@ -179,7 +179,7 @@ def _render_usage_guide_tabs() -> None:
                 "作为过渡方法使用，满足条件后由人工确认转入 LJ 法。",
             ],
             flow_items=[
-                "新建项目 → 新建批次 → 逐步录入 → 格拉布斯法判断 → 处理疑似离群点 → 达到 20 个有效点后确认转入 LJ 法。",
+                "新建项目 → 新建批次 → 逐步录入 → 即刻法 SI 判定 → 处理疑似离群点 → 达到 20 个有效点后确认转入 LJ 法。",
                 "转入后继续到对应 LJ 批次完成后续建靶和正式质控。",
             ],
             statistics_items=[
@@ -187,8 +187,8 @@ def _render_usage_guide_tabs() -> None:
                 "禁用点不参与均值、SD、CV。",
             ],
             judgment_items=[
-                "采用格拉布斯法。",
-                "n < 3 不判定，n >= 3 开始提示疑似离群。",
+                "采用即刻法 SI 值判定。",
+                "n < 3 不判定，3 <= n <= 20 按 SI 表提示在控、警告或疑似离群。",
             ],
             note_items=[
                 "确认转入 LJ 法后源批次冻结为只读。",
@@ -322,11 +322,11 @@ def render_main_entry_page() -> None:
             title="即时法",
             caption="适用于短期内难以快速累积 20 个点的单水平项目，满足条件后可人工确认转入 LJ 法。",
             bullet_points=[
-                "3 个有效点后开始格拉布斯法提示。",
+                "3 个有效点后开始即刻法 SI 值提示。",
                 "累计到 20 个有效点后可确认转入 LJ 法。",
                 "转入后源批次冻结为只读，去向 LJ 项目和批次可追溯。",
             ],
-            tags=["单水平", "格拉布斯法", "转入 LJ"],
+            tags=["单水平", "即刻法 SI", "转入 LJ"],
         )
         if st.button("打开即时法", key="open_main_instant_card", width="stretch"):
             switch_top_level_method(INSTANT_ENTRY_LABEL)

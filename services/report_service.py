@@ -100,7 +100,8 @@ ZSCORE_RULE_DISPLAY_NAMES = {
     "12_x": "12x",
 }
 ZSCORE_ABNORMAL_TABLE_COLUMNS = ["检测时间", "检测序号", "本次检测结论", "触发规则", "各水平触发证据", "误差类型", "手动备注"]
-ZSCORE_ABNORMAL_TABLE_WIDTHS = [0.15, 0.08, 0.11, 0.13, 0.25, 0.10, 0.18]
+ZSCORE_ABNORMAL_TABLE_WIDTHS = [0.135, 0.065, 0.095, 0.105, 0.335, 0.090, 0.170]
+ZSCORE_ABNORMAL_WRAP_WIDTHS = [10, 4, 5, 10, 15, 6, 9]
 LEGACY_REPORT_TEXT_REPLACEMENTS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"建议查看\s*run\s*级规则证据", re.IGNORECASE), "建议查看本次检测规则触发证据"),
     (re.compile(r"建议查看\s*run\s*级判定依据", re.IGNORECASE), "建议查看本次检测规则判定依据"),
@@ -1621,6 +1622,20 @@ def _wrap_cell_text(text: str, width: int) -> str:
     return textwrap.fill(compact, width=width)
 
 
+def _format_zscore_abnormal_time_cell(value: Any) -> str:
+    try:
+        timestamp = pd.Timestamp(value)
+        if not pd.isna(timestamp):
+            return timestamp.strftime("%Y-%m-%d\n%H:%M")
+    except (TypeError, ValueError):
+        pass
+    text = str(value or "").strip()
+    if " " in text:
+        date_part, time_part = text.split(" ", 1)
+        return f"{date_part}\n{time_part[:5]}"
+    return text or "未填写"
+
+
 def _format_monthly_stat_text(
     statistics: LjMonthlyReportStatistics,
     metric: str,
@@ -2115,16 +2130,20 @@ def _build_zscore_abnormal_page(
 
     cell_text = []
     for record in abnormal_chunk:
+        raw_cells = [
+            _format_zscore_abnormal_time_cell(record.test_time),
+            str(record.run_sequence),
+            record.run_conclusion,
+            record.rule_hits,
+            record.level_evidence,
+            record.error_type,
+            record.manual_note or "未填写",
+        ]
         cell_text.append(
-                [
-                    record.test_time,
-                    str(record.run_sequence),
-                    record.run_conclusion,
-                    _wrap_cell_text(record.rule_hits, width=12),
-                    _wrap_cell_text(record.level_evidence, width=18),
-                    _wrap_cell_text(record.error_type, width=12),
-                    _wrap_cell_text(record.manual_note or "未填写", width=16),
-                ]
+            [
+                _wrap_cell_text(cell, width=width)
+                for cell, width in zip(raw_cells, ZSCORE_ABNORMAL_WRAP_WIDTHS, strict=True)
+            ]
         )
     table = axis.table(
         cellText=cell_text,
@@ -2134,7 +2153,7 @@ def _build_zscore_abnormal_page(
         colWidths=ZSCORE_ABNORMAL_TABLE_WIDTHS,
         bbox=[0.0, 0.10, 1.0, 0.76],
     )
-    _style_table(table, header_rows=1, font_size=8.5)
+    _style_table(table, header_rows=1, font_size=7.4)
     return figure
 
 

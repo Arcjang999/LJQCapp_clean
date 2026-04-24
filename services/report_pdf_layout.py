@@ -54,7 +54,8 @@ PDF_CREATOR = "邦德盛"
 LJ_ABNORMAL_TABLE_COLUMNS = ["检测时间", "检测序号", "结果值", "状态", "触发规则", "手动备注"]
 LJ_ABNORMAL_TABLE_WIDTHS = [0.19, 0.10, 0.12, 0.10, 0.14, 0.35]
 ZSCORE_ABNORMAL_TABLE_COLUMNS = ["检测时间", "检测序号", "本次检测结论", "触发规则", "各水平触发证据", "误差类型", "手动备注"]
-ZSCORE_ABNORMAL_TABLE_WIDTHS = [0.15, 0.08, 0.11, 0.13, 0.25, 0.10, 0.18]
+ZSCORE_ABNORMAL_TABLE_WIDTHS = [0.135, 0.065, 0.095, 0.105, 0.335, 0.090, 0.170]
+ZSCORE_ABNORMAL_WRAP_WIDTHS = [10, 4, 5, 10, 15, 6, 9]
 
 
 @dataclass
@@ -386,17 +387,39 @@ def _build_zscore_level_summary_page(report: Any):
     return canvas.figure
 
 
+def _format_zscore_abnormal_time(value: Any) -> str:
+    try:
+        timestamp = pd.Timestamp(value)
+        if not pd.isna(timestamp):
+            return timestamp.strftime("%Y-%m-%d\n%H:%M")
+    except (TypeError, ValueError):
+        pass
+    text = str(value or "").strip()
+    if " " in text:
+        date_part, time_part = text.split(" ", 1)
+        return f"{date_part}\n{time_part[:5]}"
+    return text or "-"
+
+
+def _build_zscore_abnormal_row(record: Any) -> list[str]:
+    raw_cells = [
+        _format_zscore_abnormal_time(record.test_time),
+        str(record.run_sequence),
+        record.run_conclusion,
+        record.rule_hits,
+        record.level_evidence,
+        record.error_type,
+        record.manual_note or "未填写",
+    ]
+    return [
+        _wrap_text(cell, width)
+        for cell, width in zip(raw_cells, ZSCORE_ABNORMAL_WRAP_WIDTHS, strict=True)
+    ]
+
+
 def _build_zscore_abnormal_pages(report: Any) -> list[Any]:
     rows = [
-        [
-            record.test_time,
-            str(record.run_sequence),
-            record.run_conclusion,
-            _wrap_text(record.rule_hits, 12),
-            _wrap_text(record.level_evidence, 18),
-            _wrap_text(record.error_type, 12),
-            _wrap_text(record.manual_note or "未填写", 16),
-        ]
+        _build_zscore_abnormal_row(record)
         for record in report.abnormal_records
     ]
     chunks = _chunk_rows_by_height(rows, max_height=_full_page_table_max_height(), include_header=True)
@@ -417,7 +440,7 @@ def _build_zscore_abnormal_pages(report: Any) -> list[Any]:
             cell_text=chunk,
             col_labels=ZSCORE_ABNORMAL_TABLE_COLUMNS,
             col_widths=ZSCORE_ABNORMAL_TABLE_WIDTHS,
-            font_size=8.3,
+            font_size=7.4,
         )
         pages.append(canvas.figure)
     return pages
@@ -598,9 +621,13 @@ def _chunk_rows_by_height(
     if not rows:
         return [[]]
 
+    split_rows: list[list[str]] = []
+    for row in rows:
+        split_rows.extend(_split_row_to_fit_height(row, max_height=max_height, include_header=include_header))
+
     chunks: list[list[list[str]]] = []
     current_chunk: list[list[str]] = []
-    for row in rows:
+    for row in split_rows:
         candidate_chunk = current_chunk + [row]
         candidate_units = _build_row_units(candidate_chunk, include_header=include_header)
         if current_chunk and _estimate_table_height(candidate_units) > max_height:
@@ -611,6 +638,44 @@ def _chunk_rows_by_height(
     if current_chunk:
         chunks.append(current_chunk)
     return chunks
+
+
+def _split_row_to_fit_height(
+    row: list[str],
+    *,
+    max_height: float,
+    include_header: bool,
+) -> list[list[str]]:
+    max_lines = _max_data_row_lines_for_height(max_height, include_header=include_header)
+    cell_lines = [(str(cell or "-").split("\n") or ["-"]) for cell in row]
+    longest_cell_lines = max((len(lines) for lines in cell_lines), default=1)
+    if longest_cell_lines <= max_lines:
+        return [row]
+
+    pieces: list[list[str]] = []
+    for start in range(0, longest_cell_lines, max_lines):
+        end = start + max_lines
+        piece: list[str] = []
+        for column_index, lines in enumerate(cell_lines):
+            segment = lines[start:end]
+            if segment:
+                piece.append("\n".join(segment))
+            elif start > 0 and column_index < min(3, len(row)):
+                piece.append(str(row[column_index] or ""))
+            else:
+                piece.append("")
+        pieces.append(piece)
+    return pieces
+
+
+def _max_data_row_lines_for_height(max_height: float, *, include_header: bool) -> int:
+    available_units = max_height / TABLE_UNIT_HEIGHT
+    if include_header:
+        available_units -= TABLE_HEADER_UNITS
+    if available_units <= TABLE_ROW_BASE_UNITS:
+        return 1
+    extra_line_capacity = (available_units - TABLE_ROW_BASE_UNITS) / TABLE_EXTRA_LINE_UNITS
+    return max(1, int(math.floor(extra_line_capacity)) + 1)
 
 
 def _build_text_pages(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import math
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -29,6 +30,7 @@ from pages.lj_sections import build_lj_workbench_context
 from plotting import plot_instant_chart
 from services.instant_service import (
     build_instant_workbench_context,
+    calculate_instant_si_test,
     confirm_instant_transfer_to_lj,
     disable_instant_result,
     keep_instant_result,
@@ -132,7 +134,7 @@ def seed_instant_results(
         )
 
 
-def test_grubbs_starts_after_third_effective_point() -> None:
+def test_instant_si_starts_after_third_effective_point() -> None:
     with TemporaryDatabaseContext():
         _, batch_id = bootstrap_batch(project_name="Instant Raw Project", input_value_type="raw")
         save_instant_result(
@@ -153,7 +155,7 @@ def test_grubbs_starts_after_third_effective_point() -> None:
         context = build_instant_workbench_context(batch_id)
         assert context["summary"]["effective_count"] == 2
         assert context["summary"]["latest_status"] == "继续累计"
-        assert context["summary"]["grubbs_ready"] is False
+        assert context["summary"]["si_ready"] is False
 
         save_instant_result(
             batch_id=batch_id,
@@ -164,13 +166,57 @@ def test_grubbs_starts_after_third_effective_point() -> None:
         )
         context = build_instant_workbench_context(batch_id)
         assert context["summary"]["effective_count"] == 3
-        assert context["summary"]["grubbs_ready"] is True
-        assert context["summary"]["grubbs_statistic"] is not None
-        persisted_df = get_instant_results(batch_id)
-        assert persisted_df["grubbs_threshold"].notna().all()
+        assert context["summary"]["si_ready"] is True
+        assert context["summary"]["si_upper"] == 1.0
+        assert context["summary"]["si_lower"] == 1.0
+        assert context["summary"]["si_n2s"] == 1.15
+        assert context["summary"]["si_n3s"] == 1.16
+        assert context["summary"]["latest_status"] == "有效点"
+        analysis_df = context["analysis_df"]
+        assert analysis_df["si_n3s"].notna().all()
 
 
-def test_instant_summary_exposes_grubbs_method_and_parameters() -> None:
+def test_calculate_instant_si_test_cases() -> None:
+    early = calculate_instant_si_test([100, 101])
+    assert early["evaluation_ready"] is False
+    assert early["status"] == "accumulating"
+
+    in_control = calculate_instant_si_test([100, 101, 102])
+    assert in_control["evaluation_ready"] is True
+    assert in_control["mean"] == 101.0
+    assert in_control["sd"] == 1.0
+    assert in_control["si_upper"] == 1.0
+    assert in_control["si_lower"] == 1.0
+    assert in_control["n2s"] == 1.15
+    assert in_control["n3s"] == 1.16
+    assert in_control["status"] == "in_control"
+
+    warning = calculate_instant_si_test([95, 95, 96, 100])
+    assert math.isclose(float(warning["si_upper"]), 1.4703, rel_tol=1e-4)
+    assert warning["n2s"] == 1.46
+    assert warning["n3s"] == 1.49
+    assert warning["status"] == "warning"
+
+    high_reject = calculate_instant_si_test([100, 100, 100, 120])
+    assert high_reject["status"] == "reject"
+    assert high_reject["trigger_side"] == "max"
+    assert high_reject["is_suspect"] is True
+    assert high_reject["si_upper"] == 1.5
+
+    low_reject = calculate_instant_si_test([80, 100, 100, 100])
+    assert low_reject["status"] == "reject"
+    assert low_reject["trigger_side"] == "min"
+    assert low_reject["is_suspect"] is True
+    assert low_reject["si_lower"] == 1.5
+
+    over_table = calculate_instant_si_test([100 + index for index in range(21)])
+    assert over_table["evaluation_ready"] is False
+    assert over_table["reason"] == "over_table_limit"
+    assert over_table["n2s"] is None
+    assert over_table["n3s"] is None
+
+
+def test_instant_summary_exposes_si_method_and_parameters() -> None:
     with TemporaryDatabaseContext():
         _, batch_id = bootstrap_batch(project_name="Instant Meta Project", input_value_type="raw")
         for minute, value in enumerate([100.0, 101.5, 103.0], start=0):
@@ -184,11 +230,11 @@ def test_instant_summary_exposes_grubbs_method_and_parameters() -> None:
 
         context = build_instant_workbench_context(batch_id)
         summary = context["summary"]
-        assert summary["grubbs_method_label"] == "双侧单异常值 Grubbs 检验"
-        assert summary["grubbs_formula"] == "G = max(|xi - x̄|) / s"
-        assert summary["grubbs_alpha"] == 0.05
+        assert summary["instant_method_label"] == "即刻法 SI 值判定"
+        assert summary["instant_method_formula"] == "SI上限 = (X最大值 - x̄) / s；SI下限 = (x̄ - X最小值) / s"
+        assert summary["si_ready"] is True
         meta_labels = [label for label, _ in summary["latest_meta"]]
-        for required_label in ["n", "均值", "SD", "Grubbs G", "G临界值", "alpha"]:
+        for required_label in ["n", "均值", "SD", "SI上限", "SI下限", "n2s", "n3s"]:
             assert required_label in meta_labels
 
 
@@ -476,7 +522,7 @@ def test_instant_page_entry_save_round_trip() -> None:
         at.session_state["instant_selected_project_id"] = project_id
         at.session_state["instant_selected_batch_id"] = batch_id
         at.run()
-        assert any(expander.label == "格拉布斯法说明" for expander in at.expander)
+        assert any(expander.label == "即刻法 SI 值说明" for expander in at.expander)
 
         at.selectbox(key="instant_entry_operator").set_value("seed-user").run()
         at.text_input(key="instant_entry_value").set_value("123.456").run()
@@ -665,8 +711,9 @@ def test_zscore_page_uses_business_labels_in_management_and_context() -> None:
 
 def run_all_tests() -> None:
     test_functions = [
-        test_grubbs_starts_after_third_effective_point,
-        test_instant_summary_exposes_grubbs_method_and_parameters,
+        test_instant_si_starts_after_third_effective_point,
+        test_calculate_instant_si_test_cases,
+        test_instant_summary_exposes_si_method_and_parameters,
         test_ct_label_and_chart_axis_follow_project_value_type,
         test_disable_restore_and_transfer_hint,
         test_name_validation_scopes_are_method_and_project_local,

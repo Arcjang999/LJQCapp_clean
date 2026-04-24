@@ -153,7 +153,7 @@ INSTANT_DATASET = DatasetIdentity(
     method_scope=INSTANT_METHOD_SCOPE,
     project_base_name="[DEMO] Instant 演示",
     lot_no="DEMO-INSTANT-BUILD-202604",
-    usage="用于测试即时法页面、Grubbs 提示、累计点数与接近转入 LJ 的状态。",
+    usage="用于测试即时法页面、即刻法 SI 提示、累计点数与接近转入 LJ 的状态。",
 )
 
 
