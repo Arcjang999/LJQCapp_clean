@@ -13,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
 APP_NAME = os.environ.get("LJQCAPP_APP_NAME", "LJQCAppService").strip() or "LJQCAppService"
 BUNDLE_MODE = os.environ.get("LJQCAPP_BUNDLE_MODE", "onedir").strip().lower() or "onedir"
 CONSOLE = os.environ.get("LJQCAPP_CONSOLE", "false").strip().lower() == "true"
+APP_ICON = str(PROJECT_ROOT / "assets" / "app_icon.ico")
 
 PROJECT_MODULE_FILES = [
     "app.py",
@@ -102,6 +103,7 @@ if BUNDLE_MODE == "onefile":
         strip=False,
         upx=True,
         console=CONSOLE,
+        icon=APP_ICON,
         disable_windowed_traceback=False,
         argv_emulation=False,
         target_arch=None,
@@ -120,6 +122,7 @@ else:
         strip=False,
         upx=True,
         console=CONSOLE,
+        icon=APP_ICON,
         disable_windowed_traceback=False,
         argv_emulation=False,
         target_arch=None,

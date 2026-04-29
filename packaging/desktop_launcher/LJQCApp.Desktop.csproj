@@ -7,6 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <EnableDefaultEmbeddedResourceItems>false</EnableDefaultEmbeddedResourceItems>
+    <ApplicationIcon>..\..\assets\app_icon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(EmbeddedServicePath)' != '' and Exists('$(EmbeddedServicePath)')">
