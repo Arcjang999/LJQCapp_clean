@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from plotting import close_figure
 from pages.management import (
     guard_work_tab_selection,
     prepare_zscore_project_batch_context,
@@ -372,6 +373,7 @@ def render_zscore_page() -> None:
             with st.container(border=True):
                 with st.expander("导出与导入", expanded=False):
                     render_zscore_export_import_section(context, selected_batch_id, chart_panel_state)
+        close_figure(chart_panel_state.get("figure"))
 
     with report_tab:
         render_zscore_monthly_report_section(selected_batch_id)

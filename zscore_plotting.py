@@ -13,6 +13,7 @@ import pandas as pd
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+from services.profiling import profile_timer
 from zscore_logic import format_level_id_display
 
 
@@ -153,7 +154,7 @@ def filter_zscore_plot_df(plot_df: pd.DataFrame, phase_scope: str) -> pd.DataFra
     return scoped_df
 
 
-def plot_zscore_single_level(
+def _plot_zscore_single_level_impl(
     plot_df: pd.DataFrame,
     level_id: str,
     title: str,
@@ -216,7 +217,34 @@ def plot_zscore_single_level(
     return figure
 
 
-def plot_zscore_overlay(
+def plot_zscore_single_level(
+    plot_df: pd.DataFrame,
+    level_id: str,
+    title: str,
+    phase_scope: str = "all",
+    y_axis_mode: str = "\u6807\u51c6\u89c6\u56fe",
+    standard_sd_limit: float = 4.0,
+    y_axis_label: str = "\u68c0\u6d4b\u503c",
+):
+    with profile_timer(
+        "plot_zscore_single_level",
+        rows=0 if plot_df is None else len(plot_df),
+        level_id=level_id,
+        phase_scope=phase_scope,
+        y_axis_mode=y_axis_mode,
+    ):
+        return _plot_zscore_single_level_impl(
+            plot_df=plot_df,
+            level_id=level_id,
+            title=title,
+            phase_scope=phase_scope,
+            y_axis_mode=y_axis_mode,
+            standard_sd_limit=standard_sd_limit,
+            y_axis_label=y_axis_label,
+        )
+
+
+def _plot_zscore_overlay_impl(
     plot_df: pd.DataFrame,
     title: str,
     active_levels: list[str] | None = None,
@@ -288,6 +316,33 @@ def plot_zscore_overlay(
         place_outside=True,
     )
     return figure
+
+
+def plot_zscore_overlay(
+    plot_df: pd.DataFrame,
+    title: str,
+    active_levels: list[str] | None = None,
+    phase_scope: str = "all",
+    y_axis_mode: str = "\u6807\u51c6\u89c6\u56fe",
+    standard_sd_limit: float = 4.0,
+    y_axis_label: str = "\u68c0\u6d4b\u503c",
+):
+    with profile_timer(
+        "plot_zscore_overlay",
+        rows=0 if plot_df is None else len(plot_df),
+        phase_scope=phase_scope,
+        y_axis_mode=y_axis_mode,
+        level_count=0 if active_levels is None else len(active_levels),
+    ):
+        return _plot_zscore_overlay_impl(
+            plot_df=plot_df,
+            title=title,
+            active_levels=active_levels,
+            phase_scope=phase_scope,
+            y_axis_mode=y_axis_mode,
+            standard_sd_limit=standard_sd_limit,
+            y_axis_label=y_axis_label,
+        )
 
 
 def _prepare_plot_dataframe(plot_df: pd.DataFrame) -> pd.DataFrame:

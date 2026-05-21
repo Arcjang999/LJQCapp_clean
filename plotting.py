@@ -9,6 +9,7 @@ from matplotlib import font_manager
 from matplotlib.lines import Line2D
 from matplotlib.ticker import FixedLocator
 import pandas as pd
+from services.profiling import profile_timer
 
 
 matplotlib.use("Agg")
@@ -113,59 +114,65 @@ def plot_lj_chart(
     standard_sd_limit: float = 4.0,
     y_axis_label: str = "检测值",
 ):
-    figure, axis = plt.subplots(figsize=(9.4, 5.9), dpi=150)
-    plot_df = _filter_view_data(qc_df, view_mode)
+    with profile_timer(
+        "plot_lj_chart",
+        rows=0 if qc_df is None else len(qc_df),
+        view_mode=view_mode,
+        y_axis_mode=y_axis_mode,
+    ):
+        figure, axis = plt.subplots(figsize=(9.4, 5.9), dpi=150)
+        plot_df = _filter_view_data(qc_df, view_mode)
 
-    if plot_df.empty:
+        if plot_df.empty:
+            axis.set_title(title, pad=10)
+            axis.text(
+                0.5,
+                0.5,
+                "\u6682\u65e0\u6570\u636e",
+                ha="center",
+                va="center",
+                transform=axis.transAxes,
+            )
+            axis.set_axis_off()
+            figure.tight_layout(pad=0.7)
+            return figure
+
+        y_limits = _get_y_limits(plot_df, stats, y_axis_mode, standard_sd_limit)
+        display_df = _build_display_dataframe(plot_df, y_limits)
+        x_values = display_df["sequence"]
+        y_values = display_df["display_value"]
+        axis.plot(x_values, y_values, color="#4e79a7", linewidth=1.2, alpha=0.8)
+
+        target_df = display_df[display_df["phase"] == "\u5efa\u9776\u6570\u636e"]
+        if not target_df.empty:
+            axis.scatter(
+                target_df["sequence"],
+                target_df["display_value"],
+                color="#4e79a7",
+                s=42,
+                label="\u5efa\u9776\u6570\u636e",
+                zorder=3,
+            )
+
+        formal_df = display_df[display_df["phase"] == "\u6b63\u5f0f\u6570\u636e"]
+        _plot_status_points(axis, formal_df)
+        _plot_reagent_change_lines(axis, display_df)
+
+        if stats.get("target_ready"):
+            _plot_control_lines(axis, stats["mean"], stats["sd"])
+        if y_limits is not None:
+            axis.set_ylim(y_limits)
+            _plot_out_of_range_markers(axis, display_df, y_limits)
+        _plot_manual_note_highlights(axis, display_df)
+
         axis.set_title(title, pad=10)
-        axis.text(
-            0.5,
-            0.5,
-            "\u6682\u65e0\u6570\u636e",
-            ha="center",
-            va="center",
-            transform=axis.transAxes,
-        )
-        axis.set_axis_off()
+        axis.set_xlabel("\u68c0\u6d4b\u5e8f\u53f7")
+        axis.set_ylabel(y_axis_label)
+        _configure_x_axis(axis, display_df)
+        axis.grid(True, linestyle=":", alpha=0.35)
+        _add_lj_legend(axis)
         figure.tight_layout(pad=0.7)
         return figure
-
-    y_limits = _get_y_limits(plot_df, stats, y_axis_mode, standard_sd_limit)
-    display_df = _build_display_dataframe(plot_df, y_limits)
-    x_values = display_df["sequence"]
-    y_values = display_df["display_value"]
-    axis.plot(x_values, y_values, color="#4e79a7", linewidth=1.2, alpha=0.8)
-
-    target_df = display_df[display_df["phase"] == "\u5efa\u9776\u6570\u636e"]
-    if not target_df.empty:
-        axis.scatter(
-            target_df["sequence"],
-            target_df["display_value"],
-            color="#4e79a7",
-            s=42,
-            label="\u5efa\u9776\u6570\u636e",
-            zorder=3,
-        )
-
-    formal_df = display_df[display_df["phase"] == "\u6b63\u5f0f\u6570\u636e"]
-    _plot_status_points(axis, formal_df)
-    _plot_reagent_change_lines(axis, display_df)
-
-    if stats.get("target_ready"):
-        _plot_control_lines(axis, stats["mean"], stats["sd"])
-    if y_limits is not None:
-        axis.set_ylim(y_limits)
-        _plot_out_of_range_markers(axis, display_df, y_limits)
-    _plot_manual_note_highlights(axis, display_df)
-
-    axis.set_title(title, pad=10)
-    axis.set_xlabel("\u68c0\u6d4b\u5e8f\u53f7")
-    axis.set_ylabel(y_axis_label)
-    _configure_x_axis(axis, display_df)
-    axis.grid(True, linestyle=":", alpha=0.35)
-    _add_lj_legend(axis)
-    figure.tight_layout(pad=0.7)
-    return figure
 
 
 def _plot_status_points(axis, formal_df: pd.DataFrame) -> None:
@@ -575,8 +582,17 @@ def _configure_instant_x_axis(axis, plot_df: pd.DataFrame) -> None:
     axis.set_xticklabels(tick_labels)
 
 
-def figure_to_png_bytes(figure) -> bytes:
+def figure_to_png_bytes(figure, *, close: bool = False) -> bytes:
     buffer = BytesIO()
-    figure.savefig(buffer, format="png", bbox_inches="tight")
-    buffer.seek(0)
-    return buffer.getvalue()
+    try:
+        figure.savefig(buffer, format="png", bbox_inches="tight")
+        buffer.seek(0)
+        return buffer.getvalue()
+    finally:
+        if close:
+            plt.close(figure)
+
+
+def close_figure(figure) -> None:
+    if figure is not None:
+        plt.close(figure)

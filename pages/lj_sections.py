@@ -2,11 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime
 import hashlib
-from html import escape as html_escape
-from io import BytesIO
-import math
-from string import ascii_uppercase
-from zipfile import ZIP_DEFLATED, ZipFile
 
 import pandas as pd
 import streamlit as st
@@ -37,6 +32,11 @@ from services.outlier_service import (
     DEFAULT_GRUBBS_ALPHA,
     get_current_outlier_status_label,
 )
+from services.export_utils import (
+    dataframe_to_csv_bytes,
+    dataframe_to_xlsx_bytes as shared_dataframe_to_xlsx_bytes,
+)
+from services.profiling import profile_timer
 from services.value_type_service import (
     get_input_value_type_label,
     get_measurement_label,
@@ -224,132 +224,7 @@ def render_lj_abnormal_note_quick_entry(latest_row: pd.Series | None) -> None:
             )
             st.rerun()
 
-def _excel_column_name(index: int) -> str:
-    result = ""
-    current = index
-    while current > 0:
-        current, remainder = divmod(current - 1, 26)
-        result = ascii_uppercase[remainder] + result
-    return result
 
-def dataframe_to_xlsx_bytes(dataframe: pd.DataFrame) -> bytes:
-    output = BytesIO()
-    rows = [list(dataframe.columns)] + dataframe.fillna("").astype(object).values.tolist()
-    shared_strings: list[str] = []
-    shared_lookup: dict[str, int] = {}
-    worksheet_rows: list[str] = []
-
-    for row_index, row_values in enumerate(rows, start=1):
-        cells: list[str] = []
-        for column_index, value in enumerate(row_values, start=1):
-            cell_reference = f"{_excel_column_name(column_index)}{row_index}"
-            if isinstance(value, bool):
-                cell_value = "1" if value else "0"
-                cells.append(f'<c r="{cell_reference}" t="b"><v>{cell_value}</v></c>')
-                continue
-
-            if isinstance(value, (int, float)) and not isinstance(value, bool):
-                if math.isfinite(float(value)):
-                    cells.append(f'<c r="{cell_reference}"><v>{value}</v></c>')
-                    continue
-
-            text = str(value)
-            if text not in shared_lookup:
-                shared_lookup[text] = len(shared_strings)
-                shared_strings.append(text)
-            shared_index = shared_lookup[text]
-            cells.append(f'<c r="{cell_reference}" t="s"><v>{shared_index}</v></c>')
-
-        worksheet_rows.append(f'<row r="{row_index}">{"".join(cells)}</row>')
-
-    shared_xml_items = "".join(
-        f"<si><t>{html_escape(text)}</t></si>" for text in shared_strings
-    )
-    worksheet_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-    <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-        <sheetData>{''.join(worksheet_rows)}</sheetData>
-    </worksheet>
-    """
-    shared_strings_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-    <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="{len(shared_strings)}" uniqueCount="{len(shared_strings)}">
-        {shared_xml_items}
-    </sst>
-    """
-    workbook_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-    <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
-      xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-      <sheets>
-        <sheet name="质控数据" sheetId="1" r:id="rId1"/>
-      </sheets>
-    </workbook>
-    """
-    workbook_rels_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-    <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-      <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-      <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
-      <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
-    </Relationships>
-    """
-    root_rels_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-    <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-      <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
-      <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
-      <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
-    </Relationships>
-    """
-    content_types_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-    <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-      <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-      <Default Extension="xml" ContentType="application/xml"/>
-      <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
-      <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
-      <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
-      <Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>
-      <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
-      <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
-    </Types>
-    """
-    styles_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-    <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-      <fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>
-      <fills count="1"><fill><patternFill patternType="none"/></fill></fills>
-      <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
-      <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-      <cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>
-      <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
-    </styleSheet>
-    """
-    core_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-    <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"
-      xmlns:dc="http://purl.org/dc/elements/1.1/"
-      xmlns:dcterms="http://purl.org/dc/terms/"
-      xmlns:dcmitype="http://purl.org/dc/dcmitype/"
-      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-      <dc:creator>LJQCApp</dc:creator>
-      <cp:lastModifiedBy>LJQCApp</cp:lastModifiedBy>
-      <dcterms:created xsi:type="dcterms:W3CDTF">2026-03-24T00:00:00Z</dcterms:created>
-      <dcterms:modified xsi:type="dcterms:W3CDTF">2026-03-24T00:00:00Z</dcterms:modified>
-    </cp:coreProperties>
-    """
-    app_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-    <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"
-      xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
-      <Application>LJQCApp</Application>
-    </Properties>
-    """
-
-    with ZipFile(output, "w", ZIP_DEFLATED) as workbook:
-        workbook.writestr("[Content_Types].xml", content_types_xml)
-        workbook.writestr("_rels/.rels", root_rels_xml)
-        workbook.writestr("docProps/core.xml", core_xml)
-        workbook.writestr("docProps/app.xml", app_xml)
-        workbook.writestr("xl/workbook.xml", workbook_xml)
-        workbook.writestr("xl/_rels/workbook.xml.rels", workbook_rels_xml)
-        workbook.writestr("xl/styles.xml", styles_xml)
-        workbook.writestr("xl/sharedStrings.xml", shared_strings_xml)
-        workbook.writestr("xl/worksheets/sheet1.xml", worksheet_xml)
-
-    return output.getvalue()
 
 def build_monthly_export_dataframe(
     qc_df: pd.DataFrame,
@@ -382,28 +257,91 @@ def build_monthly_chart_title(batch, start_date, end_date) -> str:
         f"{start_date.strftime('%Y-%m-%d')} \u81f3 {end_date.strftime('%Y-%m-%d')}"
     )
 
+
+def _dataframe_signature(dataframe: pd.DataFrame) -> tuple:
+    if dataframe.empty:
+        return (0, None, None)
+    max_id = int(dataframe["id"].max()) if "id" in dataframe.columns else len(dataframe)
+    max_time = str(pd.to_datetime(dataframe["test_time"]).max()) if "test_time" in dataframe.columns else ""
+    return (len(dataframe), max_id, max_time)
+
+
+def _clear_stale_download_payload(state_key: str, signature: tuple) -> dict[str, object] | None:
+    payload = st.session_state.get(state_key)
+    if payload is None:
+        return None
+    if payload.get("signature") != signature:
+        st.session_state.pop(state_key, None)
+        return None
+    return payload
+
+
+def _render_prepared_download(
+    container,
+    *,
+    label: str,
+    prepare_label: str,
+    state_key: str,
+    signature: tuple,
+    file_name: str,
+    mime: str,
+    disabled: bool,
+    build_bytes,
+) -> None:
+    payload = _clear_stale_download_payload(state_key, signature)
+    if container.button(
+        prepare_label,
+        key=f"{state_key}_prepare",
+        width="stretch",
+        disabled=disabled,
+    ):
+        payload = {
+            "signature": signature,
+            "data": build_bytes(),
+        }
+        st.session_state[state_key] = payload
+    container.download_button(
+        label=label,
+        data=payload["data"] if payload is not None else b"",
+        file_name=file_name,
+        mime=mime,
+        width="stretch",
+        disabled=disabled or payload is None,
+    )
+
+
 def build_lj_workbench_context(selected_batch_id: int) -> dict[str, object]:
-    batch = get_batch(selected_batch_id)
-    qc_df, stats = persist_lj_batch_outlier_snapshot(selected_batch_id)
-    results_df = get_results(selected_batch_id, include_manual_note=True)
-    latest_status, latest_status_message = get_latest_status_context(qc_df)
-    latest_rule_hits, latest_compact_message = get_latest_result_panel_content(qc_df, latest_status_message)
-    return {
-        "batch": batch,
-        "input_value_type": normalize_input_value_type(batch["input_value_type"]),
-        "input_value_type_label": get_input_value_type_label(batch["input_value_type"]),
-        "cv_limit": get_saved_batch_cv_limit(batch),
-        "results_df": results_df,
-        "qc_df": qc_df,
-        "stats": stats,
-        "building_cv_hint": calculate_target_building_cv_hint(results_df, int(batch["target_n"])),
-        "latest_status": latest_status,
-        "latest_status_message": latest_status_message,
-        "latest_rule_hits": latest_rule_hits,
-        "latest_compact_message": latest_compact_message,
-        "latest_row": get_latest_qc_row(qc_df),
-        "operator_options": build_operator_options(results_df),
-    }
+    with profile_timer("build_lj_workbench_context", batch_id=selected_batch_id):
+        batch = get_batch(selected_batch_id)
+        results_df = get_results(selected_batch_id, include_manual_note=True)
+        qc_df, stats = persist_lj_batch_outlier_snapshot(
+            selected_batch_id,
+            batch=batch,
+            results_df=results_df,
+        )
+        latest_status, latest_status_message = get_latest_status_context(qc_df)
+        latest_rule_hits, latest_compact_message = get_latest_result_panel_content(qc_df, latest_status_message)
+        return {
+            "batch": batch,
+            "input_value_type": normalize_input_value_type(batch["input_value_type"]),
+            "input_value_type_label": get_input_value_type_label(batch["input_value_type"]),
+            "cv_limit": get_saved_batch_cv_limit(batch),
+            "results_df": results_df,
+            "qc_df": qc_df,
+            "stats": stats,
+            "building_cv_hint": calculate_target_building_cv_hint(
+                results_df,
+                int(batch["target_n"]),
+                qc_df=qc_df,
+                stats=stats,
+            ),
+            "latest_status": latest_status,
+            "latest_status_message": latest_status_message,
+            "latest_rule_hits": latest_rule_hits,
+            "latest_compact_message": latest_compact_message,
+            "latest_row": get_latest_qc_row(qc_df),
+            "operator_options": build_operator_options(results_df),
+        }
 
 
 def _build_lj_chart_title(batch, view_mode: str) -> str:
@@ -451,6 +389,7 @@ def render_lj_entry_and_stats_section(
     building_cv_hint = context["building_cv_hint"]
     cv_limit = context["cv_limit"]
     results_df = context["results_df"]
+    qc_df = context["qc_df"]
 
     if st.session_state.get("entry_batch_id") != selected_batch_id:
         st.session_state["entry_batch_id"] = selected_batch_id
@@ -590,6 +529,7 @@ def render_lj_entry_and_stats_section(
             target_n=int(batch["target_n"]),
             start_time=pd.Timestamp(realtime_start),
             end_time=end_timestamp,
+            qc_df=qc_df,
         )
         render_compact_stat_metrics(
             [
@@ -834,7 +774,7 @@ def render_lj_maintenance_section(context: dict[str, object]) -> None:
         render_record_maintenance_dialog_impl(qc_df, input_value_type=input_value_type)
 
 
-def render_lj_export_import_section(
+def _render_lj_export_import_section_impl(
     context: dict[str, object],
     selected_batch_id: int,
     figure,
@@ -847,13 +787,17 @@ def render_lj_export_import_section(
     stats = context["stats"]
     results_df = context["results_df"]
 
-    building_export_df = export_batch_results_for_phase(batch, qc_df, "building")
-    formal_export_df = export_batch_results_for_phase(batch, qc_df, "formal")
-    building_csv_bytes = building_export_df.to_csv(index=False).encode("utf-8-sig")
-    building_xlsx_bytes = dataframe_to_xlsx_bytes(building_export_df)
-    formal_csv_bytes = formal_export_df.to_csv(index=False).encode("utf-8-sig")
-    formal_xlsx_bytes = dataframe_to_xlsx_bytes(formal_export_df)
-    png_bytes = figure_to_png_bytes(figure)
+    building_export_empty = (
+        qc_df.empty
+        or "phase" not in qc_df.columns
+        or qc_df[qc_df["phase"] == "建靶数据"].empty
+    )
+    formal_export_empty = (
+        qc_df.empty
+        or "phase" not in qc_df.columns
+        or qc_df[qc_df["phase"] == "正式数据"].empty
+    )
+    export_data_signature = (selected_batch_id, _dataframe_signature(qc_df))
     project_name_fragment = build_safe_export_name(
         batch["project_name"] if "project_name" in batch.keys() else None,
         "project",
@@ -894,6 +838,53 @@ def render_lj_export_import_section(
         horizontal=True,
         key="export_format",
     )
+    building_payload_key = f"lj_building_export_payload_{selected_batch_id}"
+    formal_payload_key = f"lj_formal_export_payload_{selected_batch_id}"
+    png_payload_key = f"lj_current_chart_payload_{selected_batch_id}"
+    building_signature = (*export_data_signature, "building", export_format)
+    formal_signature = (*export_data_signature, "formal", export_format)
+    png_signature = (*export_data_signature, "current_png", tuple(sorted(chart_state.items())))
+    building_payload = _clear_stale_download_payload(building_payload_key, building_signature)
+    formal_payload = _clear_stale_download_payload(formal_payload_key, formal_signature)
+    png_payload = _clear_stale_download_payload(png_payload_key, png_signature)
+
+    prepare_cols = st.columns(3)
+    if prepare_cols[0].button("生成建靶期导出文件", width="stretch", disabled=building_export_empty):
+        building_export_df_for_payload = export_batch_results_for_phase(batch, qc_df, "building")
+        building_payload = {
+            "signature": building_signature,
+            "data": (
+                shared_dataframe_to_xlsx_bytes(building_export_df_for_payload)
+                if export_format == "Excel (.xlsx)"
+                else dataframe_to_csv_bytes(building_export_df_for_payload)
+            ),
+        }
+        st.session_state[building_payload_key] = building_payload
+    if prepare_cols[1].button("生成正式期导出文件", width="stretch", disabled=formal_export_empty):
+        formal_export_df_for_payload = export_batch_results_for_phase(batch, qc_df, "formal")
+        formal_payload = {
+            "signature": formal_signature,
+            "data": (
+                shared_dataframe_to_xlsx_bytes(formal_export_df_for_payload)
+                if export_format == "Excel (.xlsx)"
+                else dataframe_to_csv_bytes(formal_export_df_for_payload)
+            ),
+        }
+        st.session_state[formal_payload_key] = formal_payload
+    if prepare_cols[2].button("生成当前图 PNG", width="stretch"):
+        png_payload = {
+            "signature": png_signature,
+            "data": figure_to_png_bytes(figure),
+        }
+        st.session_state[png_payload_key] = png_payload
+
+    building_export_df = pd.DataFrame({"prepared": [1]}) if building_payload is not None else pd.DataFrame()
+    formal_export_df = pd.DataFrame({"prepared": [1]}) if formal_payload is not None else pd.DataFrame()
+    building_csv_bytes = building_payload["data"] if building_payload is not None and export_format != "Excel (.xlsx)" else b""
+    building_xlsx_bytes = building_payload["data"] if building_payload is not None and export_format == "Excel (.xlsx)" else b""
+    formal_csv_bytes = formal_payload["data"] if formal_payload is not None and export_format != "Excel (.xlsx)" else b""
+    formal_xlsx_bytes = formal_payload["data"] if formal_payload is not None and export_format == "Excel (.xlsx)" else b""
+    png_bytes = png_payload["data"] if png_payload is not None else b""
     phase_export_cols = st.columns(2)
     phase_export_cols[0].download_button(
         label="导出建靶期数据",
@@ -936,6 +927,7 @@ def render_lj_export_import_section(
         ),
         mime="image/png",
         width="stretch",
+        disabled=png_payload is None,
     )
 
     st.divider()
@@ -966,10 +958,9 @@ def render_lj_export_import_section(
         elif day_span > 30:
             monthly_error = "月度质控图导出范围最长为30天，请重新选择日期范围。"
 
-        monthly_png_bytes = None
-        monthly_file_name = None
         if monthly_error:
             st.warning(monthly_error)
+            st.session_state.pop(f"lj_monthly_png_payload_{selected_batch_id}", None)
         else:
             monthly_qc_df = build_monthly_export_dataframe(
                 qc_df=qc_df,
@@ -978,38 +969,63 @@ def render_lj_export_import_section(
             )
             if monthly_qc_df.empty:
                 st.info("所选日期范围内没有正式质控数据，无法导出月度质控图。")
+                st.session_state.pop(f"lj_monthly_png_payload_{selected_batch_id}", None)
             else:
-                monthly_title = build_monthly_chart_title(
-                    batch=batch,
-                    start_date=monthly_start,
-                    end_date=monthly_end,
+                monthly_payload_key = f"lj_monthly_png_payload_{selected_batch_id}"
+                monthly_signature = (
+                    "monthly_png",
+                    _dataframe_signature(monthly_qc_df),
+                    str(monthly_start),
+                    str(monthly_end),
+                    chart_state["y_axis_mode"],
+                    float(st.session_state.get("chart_standard_sd_limit", 4.0)),
                 )
-                monthly_figure = plot_lj_chart(
-                    qc_df=monthly_qc_df,
-                    stats=stats,
-                    title=monthly_title,
-                    view_mode="正式质控图",
-                    y_axis_mode=chart_state["y_axis_mode"],
-                    standard_sd_limit=float(st.session_state.get("chart_standard_sd_limit", 4.0)),
-                    y_axis_label=input_value_type_label,
+                monthly_payload = _clear_stale_download_payload(
+                    monthly_payload_key,
+                    monthly_signature,
                 )
-                monthly_png_bytes = figure_to_png_bytes(monthly_figure)
                 monthly_file_name = (
                     f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_monthly_qc_"
                     f"{monthly_start.strftime('%Y-%m-%d')}_to_{monthly_end.strftime('%Y-%m-%d')}.png"
                 )
+                if st.button(
+                    "生成月度质控图 PNG",
+                    key=f"generate_lj_monthly_png_{selected_batch_id}",
+                    width="stretch",
+                ):
+                    monthly_title = build_monthly_chart_title(
+                        batch=batch,
+                        start_date=monthly_start,
+                        end_date=monthly_end,
+                    )
+                    monthly_figure = plot_lj_chart(
+                        qc_df=monthly_qc_df,
+                        stats=stats,
+                        title=monthly_title,
+                        view_mode="正式质控图",
+                        y_axis_mode=chart_state["y_axis_mode"],
+                        standard_sd_limit=float(st.session_state.get("chart_standard_sd_limit", 4.0)),
+                        y_axis_label=input_value_type_label,
+                    )
+                    monthly_payload = {
+                        "data": figure_to_png_bytes(monthly_figure, close=True),
+                        "file_name": monthly_file_name,
+                        "signature": monthly_signature,
+                    }
+                    st.session_state[monthly_payload_key] = monthly_payload
 
-        st.download_button(
-            label="导出月度质控图 PNG",
-            data=monthly_png_bytes if monthly_png_bytes is not None else b"",
-            file_name=(
-                monthly_file_name
-                or f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_monthly_qc.png"
-            ),
-            mime="image/png",
-            width="stretch",
-            disabled=monthly_png_bytes is None,
-        )
+                st.download_button(
+                    label="导出月度质控图 PNG",
+                    data=monthly_payload["data"] if monthly_payload is not None else b"",
+                    file_name=(
+                        monthly_payload["file_name"]
+                        if monthly_payload is not None
+                        else monthly_file_name
+                    ),
+                    mime="image/png",
+                    width="stretch",
+                    disabled=monthly_payload is None,
+                )
 
     st.divider()
     st.markdown("**CSV 导入**")
@@ -1225,3 +1241,13 @@ def render_lj_export_import_section(
             f"已追加导入 {imported_formal_row_count} 条正式期记录，并自动刷新 LJ 图、最新结果分析和规则统计。"
         )
         st.rerun()
+
+
+def render_lj_export_import_section(
+    context: dict[str, object],
+    selected_batch_id: int,
+    figure,
+    chart_state: dict[str, object],
+) -> None:
+    with profile_timer("render_lj_export_import_section", batch_id=selected_batch_id):
+        _render_lj_export_import_section_impl(context, selected_batch_id, figure, chart_state)

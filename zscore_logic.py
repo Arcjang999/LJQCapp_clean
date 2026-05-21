@@ -20,8 +20,8 @@ from database import (
     get_zscore_level_results_df,
     get_zscore_level_targets_df,
     get_zscore_run_with_levels as db_get_zscore_run_with_levels,
-    get_zscore_runs_df,
     get_zscore_runs_with_levels_for_batch as db_get_zscore_runs_with_levels_for_batch,
+    save_zscore_level_outlier_snapshot as db_save_zscore_level_outlier_snapshot,
     set_zscore_level_result_building_state as db_set_zscore_level_result_building_state,
     update_zscore_batch_effective_building_count as db_update_zscore_batch_effective_building_count,
     update_zscore_level_results as db_update_zscore_level_results,
@@ -39,6 +39,7 @@ from services.outlier_service import (
     derive_outlier_status,
     normalize_outlier_manual_status,
 )
+from services.profiling import profile_timer
 
 
 PHASE_TARGET_BUILDING = "target_building"
@@ -408,7 +409,7 @@ def build_zscore_maintenance_dialog_state(
     }
 
 
-def build_zscore_plot_dataframe(
+def _build_zscore_plot_dataframe_impl(
     saved_runs: list[dict[str, Any]],
     draft_run: dict[str, Any] | None = None,
     display_phase: str | None = None,
@@ -530,6 +531,24 @@ def build_zscore_plot_dataframe(
                 )
 
     return pd.DataFrame(rows, columns=expected_columns)
+
+
+def build_zscore_plot_dataframe(
+    saved_runs: list[dict[str, Any]],
+    draft_run: dict[str, Any] | None = None,
+    display_phase: str | None = None,
+) -> pd.DataFrame:
+    with profile_timer(
+        "build_zscore_plot_dataframe",
+        runs=0 if saved_runs is None else len(saved_runs),
+        display_phase=display_phase,
+        has_draft=bool(draft_run),
+    ):
+        return _build_zscore_plot_dataframe_impl(
+            saved_runs=saved_runs,
+            draft_run=draft_run,
+            display_phase=display_phase,
+        )
 
 
 def _build_plot_reference_map(
@@ -692,66 +711,85 @@ def get_zscore_level_results(
 
 
 def get_zscore_runs(batch_id: int, template_id: str | None = None) -> list[dict[str, Any]]:
-    runs_df = get_zscore_runs_df(batch_id, rule_template_id=template_id, include_manual_note=True)
-    if runs_df.empty:
-        return []
-
-    batch_context = resolve_zscore_batch_context(batch_id)
-    resolved_template_id = str(template_id or batch_context["template_id"])
-    required_level_ids = list(batch_context["required_level_ids"])
-    required_n = int(batch_context["required_n"])
-    current_phase = determine_zscore_phase(
-        get_zscore_level_targets(batch_id, resolved_template_id, required_n=required_n),
-        required_level_ids,
-    )
-    level_results = get_zscore_level_results(batch_id=batch_id, template_id=template_id)
-    level_results_by_run: dict[int, list[dict[str, Any]]] = {}
-    for level_result in level_results:
-        level_results_by_run.setdefault(int(level_result["run_id"]), []).append(level_result)
-
-    runs: list[dict[str, Any]] = []
-    for record in runs_df.to_dict(orient="records"):
-        run_id = int(record["id"])
-        phase = _normalize_run_phase(record.get("phase"))
-        runs.append(
-            {
-                "run_id": run_id,
-                "id": run_id,
-                "test_sequence": int(record["test_sequence"]) if pd.notna(record.get("test_sequence")) else run_id,
-                "batch_id": int(record["batch_id"]),
-                "project_id": int(record["project_id"]),
-                "project_name": record.get("project_name"),
-                "test_time": record.get("test_time"),
-                "operator": str(record.get("operator", "") or ""),
-                "level_count": int(record.get("level_count", 0) or 0),
-                "phase": phase,
-                "phase_label": get_phase_label(phase),
-                "run_status": str(record.get("run_status", "pending")),
-                "rule_template_id": str(record.get("rule_template_id", "")),
-                "rule_hits_run": _parse_json_list(record.get("rule_hits_run")),
-                "error_type_hint": str(record.get("error_type_hint", "unknown")),
-                "analysis_prompt": str(record.get("analysis_prompt", "") or ""),
-                "manual_note": str(record.get("manual_note", "") or ""),
-                "created_at": record.get("created_at"),
-                "formal_rules_enabled": phase == PHASE_FORMAL_QC,
-                "level_results": sorted(
-                    deepcopy(level_results_by_run.get(run_id, [])),
-                    key=lambda item: item["level_id"],
-                ),
-            }
+    with profile_timer("get_zscore_runs", batch_id=batch_id, template_id=template_id):
+        batch_context = resolve_zscore_batch_context(batch_id)
+        batch = batch_context["batch"]
+        resolved_template_id = str(template_id or batch_context["template_id"])
+        required_level_ids = list(batch_context["required_level_ids"])
+        required_n = int(batch_context["required_n"])
+        current_phase = determine_zscore_phase(
+            get_zscore_level_targets(batch_id, resolved_template_id, required_n=required_n),
+            required_level_ids,
         )
-    formal_started = current_phase == PHASE_FORMAL_QC
-    for run in runs:
-        run["is_locked_for_maintenance"] = bool(
-            formal_started and str(run.get("phase")) == PHASE_TARGET_BUILDING
+        raw_runs = [
+            run
+            for run in db_get_zscore_runs_with_levels_for_batch(batch_id)
+            if str(run.get("rule_template_id") or resolved_template_id) == resolved_template_id
+        ]
+        if not raw_runs:
+            return []
+
+        runs: list[dict[str, Any]] = []
+        for record in raw_runs:
+            run_id = int(record["id"])
+            phase = _normalize_run_phase(record.get("phase"))
+            level_results = []
+            for level_result in record.get("level_results", []):
+                level_results.append(
+                    _normalize_level_outlier_fields(
+                        {
+                            **deepcopy(level_result),
+                            "status": str(
+                                level_result.get(
+                                    "status",
+                                    level_result.get("level_status", "pending"),
+                                )
+                            ),
+                            "phase": phase,
+                            "run_status": str(record.get("run_status", "pending")),
+                            "rule_template_id": str(record.get("rule_template_id", "")),
+                            "test_time": pd.to_datetime(record.get("test_time")),
+                        }
+                    )
+                )
+            runs.append(
+                {
+                    "run_id": run_id,
+                    "id": run_id,
+                    "test_sequence": (
+                        int(record["test_sequence"]) if record.get("test_sequence") is not None else run_id
+                    ),
+                    "batch_id": int(record["batch_id"]),
+                    "project_id": int(record["project_id"]),
+                    "project_name": batch["project_name"] if "project_name" in batch.keys() else None,
+                    "test_time": pd.to_datetime(record.get("test_time")),
+                    "operator": str(record.get("operator", "") or ""),
+                    "level_count": int(record.get("level_count", 0) or 0),
+                    "phase": phase,
+                    "phase_label": get_phase_label(phase),
+                    "run_status": str(record.get("run_status", "pending")),
+                    "rule_template_id": str(record.get("rule_template_id", "")),
+                    "rule_hits_run": _parse_json_list(record.get("rule_hits_run")),
+                    "error_type_hint": str(record.get("error_type_hint", "unknown")),
+                    "analysis_prompt": str(record.get("analysis_prompt", "") or ""),
+                    "manual_note": str(record.get("manual_note", "") or ""),
+                    "created_at": pd.to_datetime(record.get("created_at")),
+                    "formal_rules_enabled": phase == PHASE_FORMAL_QC,
+                    "level_results": sorted(level_results, key=lambda item: item["level_id"]),
+                }
+            )
+        formal_started = current_phase == PHASE_FORMAL_QC
+        for run in runs:
+            run["is_locked_for_maintenance"] = bool(
+                formal_started and str(run.get("phase")) == PHASE_TARGET_BUILDING
+            )
+        return sorted(
+            runs,
+            key=lambda run: (
+                get_zscore_display_sequence(run),
+                int(run.get("run_id") or run.get("id") or 0),
+            ),
         )
-    return sorted(
-        runs,
-        key=lambda run: (
-            get_zscore_display_sequence(run),
-            int(run.get("run_id") or run.get("id") or 0),
-        ),
-    )
 
 
 def get_zscore_level_targets(
@@ -947,6 +985,96 @@ def calculate_formal_realtime_stats(
     return realtime_profiles
 
 
+def _merge_persisted_zscore_run(
+    current_run: dict[str, Any],
+    persisted_run: dict[str, Any],
+    batch,
+    template_id: str,
+) -> dict[str, Any]:
+    merged_run = deepcopy(current_run)
+    run_id = int(persisted_run["id"])
+    merged_run["run_id"] = run_id
+    merged_run["id"] = run_id
+    merged_run["batch_id"] = int(persisted_run["batch_id"])
+    merged_run["project_id"] = int(persisted_run.get("project_id") or batch["project_id"])
+    merged_run["project_name"] = batch["project_name"] if "project_name" in batch.keys() else None
+    merged_run["rule_template_id"] = template_id
+    merged_run["test_sequence"] = (
+        int(persisted_run["test_sequence"])
+        if persisted_run.get("test_sequence") is not None
+        else run_id
+    )
+    merged_run["test_time"] = pd.to_datetime(persisted_run.get("test_time"))
+    merged_run["created_at"] = pd.to_datetime(persisted_run.get("created_at"))
+    merged_run["manual_note"] = str(persisted_run.get("manual_note", "") or "")
+
+    persisted_levels = {
+        str(level_result.get("level_id")): level_result
+        for level_result in persisted_run.get("level_results", [])
+    }
+    for level_result in merged_run.get("level_results", []):
+        persisted_level = persisted_levels.get(str(level_result.get("level_id")), {})
+        if persisted_level.get("id") is not None:
+            level_result["id"] = int(persisted_level["id"])
+        level_result["run_id"] = run_id
+        level_result.update(
+            _normalize_level_outlier_fields(
+                {
+                    **level_result,
+                    "is_building_included": persisted_level.get(
+                        "is_building_included",
+                        level_result.get("is_building_included", 1),
+                    ),
+                    "is_outlier_suspect": persisted_level.get(
+                        "is_outlier_suspect",
+                        level_result.get("is_outlier_suspect", 0),
+                    ),
+                    "outlier_status": persisted_level.get(
+                        "outlier_status",
+                        level_result.get("outlier_status"),
+                    ),
+                    "outlier_method": persisted_level.get(
+                        "outlier_method",
+                        level_result.get("outlier_method", ""),
+                    ),
+                    "grubbs_statistic": persisted_level.get(
+                        "grubbs_statistic",
+                        level_result.get("grubbs_statistic"),
+                    ),
+                    "grubbs_threshold": persisted_level.get(
+                        "grubbs_threshold",
+                        level_result.get("grubbs_threshold"),
+                    ),
+                    "manual_status": persisted_level.get(
+                        "manual_status",
+                        level_result.get("manual_status"),
+                    ),
+                    "handled_at": persisted_level.get("handled_at", level_result.get("handled_at")),
+                }
+            )
+        )
+    return merged_run
+
+
+def _persist_zscore_building_outlier_snapshots(batch_id: int, runs: list[dict[str, Any]]) -> None:
+    snapshot_rows: list[dict[str, object]] = []
+    for run in runs:
+        for level_result in run.get("level_results", []):
+            if level_result.get("id") is None:
+                continue
+            snapshot_rows.append(
+                {
+                    "id": int(level_result["id"]),
+                    "is_outlier_suspect": level_result.get("is_outlier_suspect", 0),
+                    "outlier_status": level_result.get("outlier_status"),
+                    "outlier_method": level_result.get("outlier_method", ""),
+                    "grubbs_statistic": level_result.get("grubbs_statistic"),
+                    "grubbs_threshold": level_result.get("grubbs_threshold"),
+                }
+            )
+    db_save_zscore_level_outlier_snapshot(batch_id, snapshot_rows)
+
+
 def create_zscore_run(
     batch_id: int,
     test_time: Any,
@@ -1006,8 +1134,22 @@ def create_zscore_run(
             is_realtime_accepted_run and level_result.get("status") == "accept"
         )
 
+    if current_phase == PHASE_FORMAL_QC:
+        realtime_profiles = calculate_formal_realtime_stats(
+            [*history_runs, current_run],
+            template["level_ids"],
+        )
+        for level_id in template["level_ids"]:
+            updated_profiles[level_id]["realtime_mean"] = realtime_profiles[level_id]["realtime_mean"]
+            updated_profiles[level_id]["realtime_sd"] = realtime_profiles[level_id]["realtime_sd"]
+            updated_profiles[level_id]["realtime_cv"] = realtime_profiles[level_id]["realtime_cv"]
+
     for level_id in template["level_ids"]:
         _persist_target_profile(batch_id, level_id, updated_profiles[level_id], target_n)
+    db_update_zscore_batch_effective_building_count(
+        batch_id,
+        get_effective_building_run_count(updated_profiles, template["level_ids"]),
+    )
 
     run_id = db_add_zscore_run(
         batch_id=batch_id,
@@ -1025,10 +1167,24 @@ def create_zscore_run(
         manual_note=current_run["manual_note"],
     )
     db_add_zscore_level_results(run_id, current_run["level_results"])
-    rebuild_state = rebuild_zscore_batch_state(batch_id)
-    latest_run = deepcopy(rebuild_state["latest_run"]) if rebuild_state.get("latest_run") is not None else {}
-    if latest_run:
-        latest_run["target_profiles"] = deepcopy(rebuild_state["target_profiles"])
+    latest_run = _merge_persisted_zscore_run(
+        current_run,
+        db_get_zscore_run_with_levels(run_id),
+        batch,
+        template_id,
+    )
+    if current_phase == PHASE_TARGET_BUILDING:
+        combined_runs = [deepcopy(run) for run in history_runs]
+        combined_runs.append(latest_run)
+        _apply_zscore_building_outlier_snapshots(combined_runs, template["level_ids"])
+        _persist_zscore_building_outlier_snapshots(batch_id, combined_runs)
+        latest_run = combined_runs[-1]
+
+    latest_run["target_profiles"] = deepcopy(updated_profiles)
+    latest_run["is_locked_for_maintenance"] = bool(
+        determine_zscore_phase(updated_profiles, template["level_ids"]) == PHASE_FORMAL_QC
+        and str(latest_run.get("phase")) == PHASE_TARGET_BUILDING
+    )
     return latest_run
 
 
@@ -1102,7 +1258,7 @@ def _apply_zscore_building_outlier_snapshots(
             )
 
 
-def rebuild_zscore_batch_state(batch_id: int) -> dict[str, Any]:
+def _rebuild_zscore_batch_state_impl(batch_id: int) -> dict[str, Any]:
     batch_context = resolve_zscore_batch_context(batch_id)
     batch = batch_context["batch"]
     template_id = str(batch_context["template_id"])
@@ -1278,6 +1434,11 @@ def rebuild_zscore_batch_state(batch_id: int) -> dict[str, Any]:
         "overall_phase": determine_zscore_phase(persisted_targets, level_ids),
         "latest_run": deepcopy(persisted_runs[-1]) if persisted_runs else None,
     }
+
+
+def rebuild_zscore_batch_state(batch_id: int) -> dict[str, Any]:
+    with profile_timer("rebuild_zscore_batch_state", batch_id=batch_id):
+        return _rebuild_zscore_batch_state_impl(batch_id)
 
 
 def update_saved_zscore_run(

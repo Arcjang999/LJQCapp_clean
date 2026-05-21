@@ -3,13 +3,9 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import datetime
 import hashlib
-from html import escape as html_escape
-from io import BytesIO
 import math
-from string import ascii_uppercase
 from textwrap import dedent
 from typing import Any
-from zipfile import ZIP_DEFLATED, ZipFile
 
 import pandas as pd
 import streamlit as st
@@ -64,6 +60,11 @@ from services.outlier_service import (
     get_current_outlier_status_label,
     get_outlier_manual_status_label,
 )
+from services.export_utils import (
+    dataframe_to_csv_bytes,
+    dataframe_to_xlsx_bytes as shared_dataframe_to_xlsx_bytes,
+)
+from services.profiling import profile_timer
 from zscore_logic import (
     PHASE_FORMAL_QC,
     PHASE_TARGET_BUILDING,
@@ -163,11 +164,17 @@ def build_zscore_plot_dataframe(
     draft_run: dict[str, Any] | None = None,
     display_phase: str | None = None,
 ) -> pd.DataFrame:
-    return build_zscore_plot_dataframe_logic(
-        saved_runs=saved_runs,
-        draft_run=draft_run,
+    with profile_timer(
+        "pages.build_zscore_plot_dataframe",
+        runs=0 if saved_runs is None else len(saved_runs),
         display_phase=display_phase,
-    )
+        has_draft=bool(draft_run),
+    ):
+        return build_zscore_plot_dataframe_logic(
+            saved_runs=saved_runs,
+            draft_run=draft_run,
+            display_phase=display_phase,
+        )
 
 def render_zscore_latest_analysis_panel(
     latest_run: dict[str, Any] | None,
@@ -831,132 +838,6 @@ def sync_zscore_workbench_state(
     if should_force_widget_sync:
         st.session_state["zscore_chart_controls_force_sync"] = True
 
-def _excel_column_name(index: int) -> str:
-    result = ""
-    current = index
-    while current > 0:
-        current, remainder = divmod(current - 1, 26)
-        result = ascii_uppercase[remainder] + result
-    return result
-
-def dataframe_to_xlsx_bytes(dataframe: pd.DataFrame) -> bytes:
-    output = BytesIO()
-    rows = [list(dataframe.columns)] + dataframe.fillna("").astype(object).values.tolist()
-    shared_strings: list[str] = []
-    shared_lookup: dict[str, int] = {}
-    worksheet_rows: list[str] = []
-
-    for row_index, row_values in enumerate(rows, start=1):
-        cells: list[str] = []
-        for column_index, value in enumerate(row_values, start=1):
-            cell_reference = f"{_excel_column_name(column_index)}{row_index}"
-            if isinstance(value, bool):
-                cell_value = "1" if value else "0"
-                cells.append(f'<c r="{cell_reference}" t="b"><v>{cell_value}</v></c>')
-                continue
-
-            if isinstance(value, (int, float)) and not isinstance(value, bool):
-                if math.isfinite(float(value)):
-                    cells.append(f'<c r="{cell_reference}"><v>{value}</v></c>')
-                    continue
-
-            text = str(value)
-            if text not in shared_lookup:
-                shared_lookup[text] = len(shared_strings)
-                shared_strings.append(text)
-            shared_index = shared_lookup[text]
-            cells.append(f'<c r="{cell_reference}" t="s"><v>{shared_index}</v></c>')
-
-        worksheet_rows.append(f'<row r="{row_index}">{"".join(cells)}</row>')
-
-    shared_xml_items = "".join(
-        f"<si><t>{html_escape(text)}</t></si>" for text in shared_strings
-    )
-    worksheet_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-    <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-        <sheetData>{''.join(worksheet_rows)}</sheetData>
-    </worksheet>
-    """
-    shared_strings_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-    <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="{len(shared_strings)}" uniqueCount="{len(shared_strings)}">
-        {shared_xml_items}
-    </sst>
-    """
-    workbook_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-    <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
-      xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-      <sheets>
-        <sheet name="质控数据" sheetId="1" r:id="rId1"/>
-      </sheets>
-    </workbook>
-    """
-    workbook_rels_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-    <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-      <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-      <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
-      <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
-    </Relationships>
-    """
-    root_rels_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-    <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-      <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
-      <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
-      <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
-    </Relationships>
-    """
-    content_types_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-    <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-      <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-      <Default Extension="xml" ContentType="application/xml"/>
-      <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
-      <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
-      <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
-      <Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>
-      <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
-      <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
-    </Types>
-    """
-    styles_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-    <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-      <fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>
-      <fills count="1"><fill><patternFill patternType="none"/></fill></fills>
-      <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
-      <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-      <cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>
-      <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
-    </styleSheet>
-    """
-    core_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-    <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"
-      xmlns:dc="http://purl.org/dc/elements/1.1/"
-      xmlns:dcterms="http://purl.org/dc/terms/"
-      xmlns:dcmitype="http://purl.org/dc/dcmitype/"
-      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-      <dc:creator>LJQCApp</dc:creator>
-      <cp:lastModifiedBy>LJQCApp</cp:lastModifiedBy>
-      <dcterms:created xsi:type="dcterms:W3CDTF">2026-03-24T00:00:00Z</dcterms:created>
-      <dcterms:modified xsi:type="dcterms:W3CDTF">2026-03-24T00:00:00Z</dcterms:modified>
-    </cp:coreProperties>
-    """
-    app_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-    <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"
-      xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
-      <Application>LJQCApp</Application>
-    </Properties>
-    """
-
-    with ZipFile(output, "w", ZIP_DEFLATED) as workbook:
-        workbook.writestr("[Content_Types].xml", content_types_xml)
-        workbook.writestr("_rels/.rels", root_rels_xml)
-        workbook.writestr("docProps/core.xml", core_xml)
-        workbook.writestr("docProps/app.xml", app_xml)
-        workbook.writestr("xl/workbook.xml", workbook_xml)
-        workbook.writestr("xl/_rels/workbook.xml.rels", workbook_rels_xml)
-        workbook.writestr("xl/styles.xml", styles_xml)
-        workbook.writestr("xl/sharedStrings.xml", shared_strings_xml)
-        workbook.writestr("xl/worksheets/sheet1.xml", worksheet_xml)
-
-    return output.getvalue()
 
 def build_zscore_monthly_export_plot_dataframe(
     plot_df: pd.DataFrame,
@@ -1109,6 +990,26 @@ def build_zscore_phase_export_dataframe(
 
     return pd.DataFrame(rows, columns=export_columns)
 
+
+def _dataframe_signature(dataframe: pd.DataFrame) -> tuple:
+    if dataframe.empty:
+        return (0, None, None)
+    id_column = "run_id" if "run_id" in dataframe.columns else "id"
+    max_id = int(dataframe[id_column].max()) if id_column in dataframe.columns else len(dataframe)
+    max_time = str(pd.to_datetime(dataframe["test_time"]).max()) if "test_time" in dataframe.columns else ""
+    return (len(dataframe), max_id, max_time)
+
+
+def _clear_stale_download_payload(state_key: str, signature: tuple) -> dict[str, object] | None:
+    payload = st.session_state.get(state_key)
+    if payload is None:
+        return None
+    if payload.get("signature") != signature:
+        st.session_state.pop(state_key, None)
+        return None
+    return payload
+
+
 def _ensure_zscore_workbench_session_defaults() -> None:
     if "zscore_entry_test_time" not in st.session_state:
         st.session_state["zscore_entry_test_time"] = datetime.now()
@@ -1131,47 +1032,48 @@ def _ensure_zscore_workbench_session_defaults() -> None:
 
 
 def build_zscore_workbench_context(selected_batch_id: int) -> dict[str, object]:
-    _ensure_zscore_workbench_session_defaults()
-    batch_context = resolve_zscore_batch_context(selected_batch_id)
-    batch = batch_context["batch"]
-    input_value_type = normalize_input_value_type(batch["input_value_type"])
-    cv_limit = get_saved_batch_cv_limit(batch)
-    level_count = int(batch_context["level_count"])
-    template_id = str(batch_context["template_id"])
-    template = batch_context["template"]
-    required_level_ids = list(batch_context["required_level_ids"])
-    level_label_map = dict(batch_context["level_label_map"])
-    history_runs = get_zscore_runs(selected_batch_id, template_id)
-    operator_options = build_zscore_operator_options(history_runs)
-    required_n = int(batch_context["required_n"])
-    level_target_profiles = get_zscore_level_targets(selected_batch_id, template_id, required_n=required_n)
-    overall_phase = determine_zscore_phase(level_target_profiles, required_level_ids)
-    overall_phase_label = get_phase_label(overall_phase)
-    formal_rules_enabled = should_enable_formal_rules(level_target_profiles, required_level_ids)
-    default_phase_scope = "building" if overall_phase == PHASE_TARGET_BUILDING else "formal"
-    sync_zscore_workbench_state(selected_batch_id, template, default_phase_scope)
-    return {
-        "batch_context": batch_context,
-        "batch": batch,
-        "input_value_type": input_value_type,
-        "input_value_type_label": get_input_value_type_label(input_value_type),
-        "cv_limit": cv_limit,
-        "level_count": level_count,
-        "template_id": template_id,
-        "template": template,
-        "required_level_ids": required_level_ids,
-        "level_label_map": level_label_map,
-        "history_runs": history_runs,
-        "operator_options": operator_options,
-        "required_n": required_n,
-        "level_target_profiles": level_target_profiles,
-        "overall_phase": overall_phase,
-        "overall_phase_label": overall_phase_label,
-        "formal_rules_enabled": formal_rules_enabled,
-        "default_phase_scope": default_phase_scope,
-        "plot_df": build_zscore_plot_dataframe(history_runs, None, display_phase=None),
-        "latest_run": get_latest_zscore_run_for_display(history_runs),
-    }
+    with profile_timer("build_zscore_workbench_context", batch_id=selected_batch_id):
+        _ensure_zscore_workbench_session_defaults()
+        batch_context = resolve_zscore_batch_context(selected_batch_id)
+        batch = batch_context["batch"]
+        input_value_type = normalize_input_value_type(batch["input_value_type"])
+        cv_limit = get_saved_batch_cv_limit(batch)
+        level_count = int(batch_context["level_count"])
+        template_id = str(batch_context["template_id"])
+        template = batch_context["template"]
+        required_level_ids = list(batch_context["required_level_ids"])
+        level_label_map = dict(batch_context["level_label_map"])
+        history_runs = get_zscore_runs(selected_batch_id, template_id)
+        operator_options = build_zscore_operator_options(history_runs)
+        required_n = int(batch_context["required_n"])
+        level_target_profiles = get_zscore_level_targets(selected_batch_id, template_id, required_n=required_n)
+        overall_phase = determine_zscore_phase(level_target_profiles, required_level_ids)
+        overall_phase_label = get_phase_label(overall_phase)
+        formal_rules_enabled = should_enable_formal_rules(level_target_profiles, required_level_ids)
+        default_phase_scope = "building" if overall_phase == PHASE_TARGET_BUILDING else "formal"
+        sync_zscore_workbench_state(selected_batch_id, template, default_phase_scope)
+        return {
+            "batch_context": batch_context,
+            "batch": batch,
+            "input_value_type": input_value_type,
+            "input_value_type_label": get_input_value_type_label(input_value_type),
+            "cv_limit": cv_limit,
+            "level_count": level_count,
+            "template_id": template_id,
+            "template": template,
+            "required_level_ids": required_level_ids,
+            "level_label_map": level_label_map,
+            "history_runs": history_runs,
+            "operator_options": operator_options,
+            "required_n": required_n,
+            "level_target_profiles": level_target_profiles,
+            "overall_phase": overall_phase,
+            "overall_phase_label": overall_phase_label,
+            "formal_rules_enabled": formal_rules_enabled,
+            "default_phase_scope": default_phase_scope,
+            "plot_df": build_zscore_plot_dataframe(history_runs, None, display_phase=None),
+            "latest_run": get_latest_zscore_run_for_display(history_runs),
+        }
 
 
 def render_zscore_entry_section(
@@ -1473,7 +1375,7 @@ def render_zscore_chart_analysis_section(
     current_view_fragment = build_safe_export_name(current_view_label, "chart")
     return {
         "figure": figure,
-        "current_png_bytes": figure_to_png_bytes(figure),
+        "current_png_bytes": b"",
         "project_name_fragment": project_name_fragment,
         "lot_no_fragment": lot_no_fragment,
         "phase_scope_fragment": phase_scope_fragment,
@@ -1622,7 +1524,7 @@ def render_zscore_maintenance_section(context: dict[str, object]) -> None:
         render_zscore_record_maintenance_entry(history_runs, batch_context)
 
 
-def render_zscore_export_import_section(
+def _render_zscore_export_import_section_impl(
     context: dict[str, object],
     selected_batch_id: int,
     chart_panel_state: dict[str, object],
@@ -1649,6 +1551,28 @@ def render_zscore_export_import_section(
     selected_level = chart_panel_state["selected_level"]
     y_axis_mode = chart_panel_state["y_axis_mode"]
     standard_sd_limit = chart_panel_state["standard_sd_limit"]
+    current_png_payload_key = f"zscore_current_chart_payload_{selected_batch_id}"
+    current_png_signature = (
+        selected_batch_id,
+        "current_png",
+        len(history_runs),
+        max((int(run.get("run_id") or 0) for run in history_runs), default=0),
+        phase_scope,
+        view_mode,
+        selected_level,
+        y_axis_mode,
+        float(standard_sd_limit),
+    )
+    current_png_payload = _clear_stale_download_payload(current_png_payload_key, current_png_signature)
+    if st.button("生成当前图 PNG", key=f"{current_png_payload_key}_prepare", width="stretch"):
+        current_png_payload = {
+            "signature": current_png_signature,
+            "data": figure_to_png_bytes(chart_panel_state["figure"]),
+        }
+        st.session_state[current_png_payload_key] = current_png_payload
+    chart_panel_state["current_png_bytes"] = (
+        current_png_payload["data"] if current_png_payload is not None else b""
+    )
 
     zscore_building_template_df = build_zscore_building_template_dataframe(
         level_count,
@@ -1709,22 +1633,18 @@ def render_zscore_export_import_section(
     if zscore_formal_import_success_message:
         st.success(zscore_formal_import_success_message)
 
-    building_export_df = build_zscore_phase_export_dataframe(
-        history_runs,
-        required_level_ids,
-        "building",
-        input_value_type,
+    building_export_empty = not any(
+        str(run.get("phase") or "") == PHASE_TARGET_BUILDING for run in history_runs
     )
-    formal_export_df = build_zscore_phase_export_dataframe(
-        history_runs,
-        required_level_ids,
-        "formal",
-        input_value_type,
+    formal_export_empty = not any(
+        str(run.get("phase") or "") == PHASE_FORMAL_QC for run in history_runs
     )
-    building_csv_bytes = building_export_df.to_csv(index=False).encode("utf-8-sig")
-    building_xlsx_bytes = dataframe_to_xlsx_bytes(building_export_df)
-    formal_csv_bytes = formal_export_df.to_csv(index=False).encode("utf-8-sig")
-    formal_xlsx_bytes = dataframe_to_xlsx_bytes(formal_export_df)
+    export_data_signature = (
+        selected_batch_id,
+        len(history_runs),
+        max((int(run.get("run_id") or 0) for run in history_runs), default=0),
+        str(max((pd.Timestamp(run["test_time"]) for run in history_runs if run.get("test_time") is not None), default="")),
+    )
 
     st.caption(f"导出当前批次数据与图表，并按模板导入 CSV；各水平主值列统一为“{input_value_type_label}”。")
     st.markdown("**导出**")
@@ -1735,6 +1655,53 @@ def render_zscore_export_import_section(
         horizontal=True,
         key="zscore_export_format",
     )
+    building_payload_key = f"zscore_building_export_payload_{selected_batch_id}"
+    formal_payload_key = f"zscore_formal_export_payload_{selected_batch_id}"
+    building_signature = (*export_data_signature, "building", zscore_export_format)
+    formal_signature = (*export_data_signature, "formal", zscore_export_format)
+    building_payload = _clear_stale_download_payload(building_payload_key, building_signature)
+    formal_payload = _clear_stale_download_payload(formal_payload_key, formal_signature)
+
+    prepare_cols = st.columns(2)
+    if prepare_cols[0].button("生成建靶期导出文件", width="stretch", disabled=building_export_empty):
+        building_export_df_for_payload = build_zscore_phase_export_dataframe(
+            history_runs,
+            required_level_ids,
+            "building",
+            input_value_type,
+        )
+        building_payload = {
+            "signature": building_signature,
+            "data": (
+                shared_dataframe_to_xlsx_bytes(building_export_df_for_payload)
+                if zscore_export_format == "Excel (.xlsx)"
+                else dataframe_to_csv_bytes(building_export_df_for_payload)
+            ),
+        }
+        st.session_state[building_payload_key] = building_payload
+    if prepare_cols[1].button("生成正式期导出文件", width="stretch", disabled=formal_export_empty):
+        formal_export_df_for_payload = build_zscore_phase_export_dataframe(
+            history_runs,
+            required_level_ids,
+            "formal",
+            input_value_type,
+        )
+        formal_payload = {
+            "signature": formal_signature,
+            "data": (
+                shared_dataframe_to_xlsx_bytes(formal_export_df_for_payload)
+                if zscore_export_format == "Excel (.xlsx)"
+                else dataframe_to_csv_bytes(formal_export_df_for_payload)
+            ),
+        }
+        st.session_state[formal_payload_key] = formal_payload
+
+    building_export_df = pd.DataFrame({"prepared": [1]}) if building_payload is not None else pd.DataFrame()
+    formal_export_df = pd.DataFrame({"prepared": [1]}) if formal_payload is not None else pd.DataFrame()
+    building_csv_bytes = building_payload["data"] if building_payload is not None and zscore_export_format != "Excel (.xlsx)" else b""
+    building_xlsx_bytes = building_payload["data"] if building_payload is not None and zscore_export_format == "Excel (.xlsx)" else b""
+    formal_csv_bytes = formal_payload["data"] if formal_payload is not None and zscore_export_format != "Excel (.xlsx)" else b""
+    formal_xlsx_bytes = formal_payload["data"] if formal_payload is not None and zscore_export_format == "Excel (.xlsx)" else b""
     zscore_data_export_cols = st.columns(2)
     zscore_data_export_cols[0].download_button(
         label="导出建靶期数据",
@@ -2036,6 +2003,7 @@ def render_zscore_export_import_section(
         ),
         mime="image/png",
         width="stretch",
+        disabled=current_png_payload is None,
     )
     st.caption("月度图固定只导正式期，日期范围最长 30 天；单水平视图导出单水平月度图，合并视图导出合并月度图。")
     formal_plot_df = plot_df[plot_df["phase"] == PHASE_FORMAL_QC].copy() if "phase" in plot_df.columns else pd.DataFrame()
@@ -2063,10 +2031,9 @@ def render_zscore_export_import_section(
         elif day_span > 30:
             monthly_error = "月度质控图导出范围最长为 30 天，请重新选择日期范围。"
 
-        monthly_png_bytes = None
-        monthly_file_name = None
         if monthly_error:
             st.warning(monthly_error)
+            st.session_state.pop(f"zscore_monthly_png_payload_{selected_batch_id}", None)
         else:
             monthly_plot_df = build_zscore_monthly_export_plot_dataframe(
                 plot_df=plot_df,
@@ -2075,47 +2042,84 @@ def render_zscore_export_import_section(
             )
             if monthly_plot_df.empty:
                 st.info("所选日期范围内没有正式质控数据，无法导出月度图。")
+                st.session_state.pop(f"zscore_monthly_png_payload_{selected_batch_id}", None)
             else:
-                monthly_title = (
-                    f"月度质控图 - 质控批号 {batch['lot_no']} - {batch['instrument']} - {batch['reagent']} - "
-                    f"{batch['qc_material']} - {batch['concentration']}\n"
-                    f"正式期｜{current_view_label}｜{monthly_start.strftime('%Y-%m-%d')} 至 {monthly_end.strftime('%Y-%m-%d')}"
+                monthly_payload_key = f"zscore_monthly_png_payload_{selected_batch_id}"
+                monthly_signature = (
+                    "monthly_png",
+                    _dataframe_signature(monthly_plot_df),
+                    str(monthly_start),
+                    str(monthly_end),
+                    view_mode,
+                    selected_level,
+                    tuple(required_level_ids),
+                    y_axis_mode,
+                    float(standard_sd_limit),
                 )
-                if view_mode == "单水平视图":
-                    monthly_figure = plot_zscore_single_level(
-                        plot_df=monthly_plot_df,
-                        level_id=selected_level,
-                        title=monthly_title,
-                        phase_scope="formal",
-                        y_axis_mode=y_axis_mode,
-                        standard_sd_limit=standard_sd_limit,
-                        y_axis_label=input_value_type_label,
-                    )
-                else:
-                    monthly_figure = plot_zscore_overlay(
-                        plot_df=monthly_plot_df,
-                        title=monthly_title,
-                        active_levels=required_level_ids,
-                        phase_scope="formal",
-                        y_axis_mode=y_axis_mode,
-                        standard_sd_limit=standard_sd_limit,
-                        y_axis_label=input_value_type_label,
-                    )
-                monthly_png_bytes = figure_to_png_bytes(monthly_figure)
+                monthly_payload = _clear_stale_download_payload(
+                    monthly_payload_key,
+                    monthly_signature,
+                )
                 monthly_file_name = (
                     f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_"
                     f"zscore_monthly_formal_{current_view_fragment}_"
                     f"{monthly_start.strftime('%Y-%m-%d')}_to_{monthly_end.strftime('%Y-%m-%d')}.png"
                 )
+                if st.button(
+                    "生成月度图 PNG",
+                    key=f"generate_zscore_monthly_png_{selected_batch_id}",
+                    width="stretch",
+                ):
+                    monthly_title = (
+                        f"月度质控图 - 质控批号 {batch['lot_no']} - {batch['instrument']} - {batch['reagent']} - "
+                        f"{batch['qc_material']} - {batch['concentration']}\n"
+                        f"正式期｜{current_view_label}｜{monthly_start.strftime('%Y-%m-%d')} 至 {monthly_end.strftime('%Y-%m-%d')}"
+                    )
+                    if view_mode == "单水平视图":
+                        monthly_figure = plot_zscore_single_level(
+                            plot_df=monthly_plot_df,
+                            level_id=selected_level,
+                            title=monthly_title,
+                            phase_scope="formal",
+                            y_axis_mode=y_axis_mode,
+                            standard_sd_limit=standard_sd_limit,
+                            y_axis_label=input_value_type_label,
+                        )
+                    else:
+                        monthly_figure = plot_zscore_overlay(
+                            plot_df=monthly_plot_df,
+                            title=monthly_title,
+                            active_levels=required_level_ids,
+                            phase_scope="formal",
+                            y_axis_mode=y_axis_mode,
+                            standard_sd_limit=standard_sd_limit,
+                            y_axis_label=input_value_type_label,
+                        )
+                    monthly_payload = {
+                        "data": figure_to_png_bytes(monthly_figure, close=True),
+                        "file_name": monthly_file_name,
+                        "signature": monthly_signature,
+                    }
+                    st.session_state[monthly_payload_key] = monthly_payload
 
-        st.download_button(
-            label="导出月度图 PNG",
-            data=monthly_png_bytes if monthly_png_bytes is not None else b"",
-            file_name=(
-                monthly_file_name
-                or f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_zscore_monthly_formal.png"
-            ),
-            mime="image/png",
-            width="stretch",
-            disabled=monthly_png_bytes is None,
-        )
+                st.download_button(
+                    label="导出月度图 PNG",
+                    data=monthly_payload["data"] if monthly_payload is not None else b"",
+                    file_name=(
+                        monthly_payload["file_name"]
+                        if monthly_payload is not None
+                        else monthly_file_name
+                    ),
+                    mime="image/png",
+                    width="stretch",
+                    disabled=monthly_payload is None,
+                )
+
+
+def render_zscore_export_import_section(
+    context: dict[str, object],
+    selected_batch_id: int,
+    chart_panel_state: dict[str, object],
+) -> None:
+    with profile_timer("render_zscore_export_import_section", batch_id=selected_batch_id):
+        _render_zscore_export_import_section_impl(context, selected_batch_id, chart_panel_state)

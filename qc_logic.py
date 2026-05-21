@@ -23,6 +23,7 @@ from services.outlier_service import (
     OUTLIER_MANUAL_STATUS_NORMAL,
     OUTLIER_MANUAL_STATUS_RESTORED,
 )
+from services.profiling import profile_timer
 
 
 LJ_BUILDING_PHASE_LABEL = "建靶数据"
@@ -296,7 +297,7 @@ def _apply_lj_building_outlier_snapshot(
     return dataframe, stats
 
 
-def calculate_qc_results(results_df: pd.DataFrame, target_count: int) -> tuple[pd.DataFrame, dict]:
+def _calculate_qc_results_impl(results_df: pd.DataFrame, target_count: int) -> tuple[pd.DataFrame, dict]:
     stats = _empty_lj_stats(target_count)
     if results_df.empty:
         return _empty_qc_dataframe(results_df), stats
@@ -331,7 +332,21 @@ def calculate_qc_results(results_df: pd.DataFrame, target_count: int) -> tuple[p
     return dataframe, stats
 
 
-def calculate_target_building_cv_hint(results_df: pd.DataFrame, target_count: int) -> dict:
+def calculate_qc_results(results_df: pd.DataFrame, target_count: int) -> tuple[pd.DataFrame, dict]:
+    with profile_timer(
+        "calculate_qc_results",
+        rows=0 if results_df is None else len(results_df),
+        target_count=target_count,
+    ):
+        return _calculate_qc_results_impl(results_df, target_count)
+
+
+def calculate_target_building_cv_hint(
+    results_df: pd.DataFrame,
+    target_count: int,
+    qc_df: pd.DataFrame | None = None,
+    stats: dict | None = None,
+) -> dict:
     # This helper is only for build-stage CV reminders and must not affect existing判读逻辑.
     empty_hint = {
         "collected_n": 0,
@@ -347,7 +362,8 @@ def calculate_target_building_cv_hint(results_df: pd.DataFrame, target_count: in
     if results_df.empty:
         return empty_hint
 
-    qc_df, stats = calculate_qc_results(results_df, target_count)
+    if qc_df is None or stats is None:
+        qc_df, stats = calculate_qc_results(results_df, target_count)
     building_df = qc_df[qc_df["phase"] == LJ_BUILDING_PHASE_LABEL].copy()
     effective_building_df = building_df[building_df["is_building_included"] == 1].copy()
     return {
@@ -385,12 +401,14 @@ def calculate_realtime_stats(
     target_n: int,
     start_time=None,
     end_time=None,
+    qc_df: pd.DataFrame | None = None,
 ) -> tuple[dict, str]:
     empty_stats = {"mean": None, "sd": None, "cv": None}
     if results_df.empty:
         return empty_stats, "\u6682\u65e0\u6570\u636e\uff0c\u65e0\u6cd5\u8ba1\u7b97\u5b9e\u65f6\u7edf\u8ba1\u3002"
 
-    qc_df, _ = calculate_qc_results(results_df, target_n)
+    if qc_df is None:
+        qc_df, _ = calculate_qc_results(results_df, target_n)
     formal_df = qc_df[qc_df["phase"] == LJ_FORMAL_PHASE_LABEL].copy()
     if formal_df.empty:
         return empty_stats, "\u6682\u65e0\u6b63\u5f0f\u8d28\u63a7\u6570\u636e\uff0c\u65e0\u6cd5\u8ba1\u7b97\u5b9e\u65f6\u7edf\u8ba1\u3002"
@@ -421,27 +439,36 @@ def calculate_realtime_stats(
     return {"mean": mean, "sd": sd, "cv": cv}, ""
 
 
-def persist_lj_batch_outlier_snapshot(batch_id: int) -> tuple[pd.DataFrame, dict]:
-    batch = get_batch(batch_id)
-    results_df = get_results(batch_id, include_manual_note=True)
-    if results_df.empty:
-        return _empty_qc_dataframe(results_df), _empty_lj_stats(int(batch["target_n"]))
+def persist_lj_batch_outlier_snapshot(
+    batch_id: int,
+    batch=None,
+    results_df: pd.DataFrame | None = None,
+) -> tuple[pd.DataFrame, dict]:
+    with profile_timer("persist_lj_batch_outlier_snapshot", batch_id=batch_id):
+        batch = get_batch(batch_id) if batch is None else batch
+        results_df = (
+            get_results(batch_id, include_manual_note=True)
+            if results_df is None
+            else results_df
+        )
+        if results_df.empty:
+            return _empty_qc_dataframe(results_df), _empty_lj_stats(int(batch["target_n"]))
 
-    qc_df, stats = calculate_qc_results(results_df, int(batch["target_n"]))
-    save_result_outlier_snapshot(
-        batch_id,
-        qc_df[
-            [
-                "id",
-                "is_outlier_suspect",
-                "outlier_status",
-                "outlier_method",
-                "grubbs_statistic",
-                "grubbs_threshold",
-            ]
-        ].to_dict(orient="records"),
-    )
-    return qc_df, stats
+        qc_df, stats = calculate_qc_results(results_df, int(batch["target_n"]))
+        save_result_outlier_snapshot(
+            batch_id,
+            qc_df[
+                [
+                    "id",
+                    "is_outlier_suspect",
+                    "outlier_status",
+                    "outlier_method",
+                    "grubbs_statistic",
+                    "grubbs_threshold",
+                ]
+            ].to_dict(orient="records"),
+        )
+        return qc_df, stats
 
 
 def _get_lj_building_row_for_action(result_id: int) -> tuple[pd.Series, dict]:

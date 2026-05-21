@@ -2440,29 +2440,164 @@ def set_result_building_inclusion_state(
             raise ValueError(f"未找到检测记录 {result_id}")
 
 
+def _normalize_snapshot_float(value) -> float | None:
+    if value is None:
+        return None
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric_value if math.isfinite(numeric_value) else None
+
+
+def _snapshot_float_equal(left, right) -> bool:
+    left_value = _normalize_snapshot_float(left)
+    right_value = _normalize_snapshot_float(right)
+    if left_value is None or right_value is None:
+        return left_value is None and right_value is None
+    return math.isclose(left_value, right_value, rel_tol=1e-12, abs_tol=1e-12)
+
+
 def save_result_outlier_snapshot(batch_id: int, analysis_rows: list[dict[str, object]]) -> None:
+    if not analysis_rows:
+        return
+
     with get_connection() as connection:
+        current_rows = connection.execute(
+            """
+            SELECT id,
+                   is_outlier_suspect,
+                   outlier_status,
+                   outlier_method,
+                   grubbs_statistic,
+                   grubbs_threshold
+            FROM results
+            WHERE batch_id = ?
+            """,
+            (int(batch_id),),
+        ).fetchall()
+        current_by_id = {int(row["id"]): row for row in current_rows}
+
+        update_rows = []
         for analysis_row in analysis_rows:
-            connection.execute(
-                """
-                UPDATE results
-                SET is_outlier_suspect = ?,
-                    outlier_status = ?,
-                    outlier_method = ?,
-                    grubbs_statistic = ?,
-                    grubbs_threshold = ?
-                WHERE id = ? AND batch_id = ?
-                """,
+            result_id = int(analysis_row["id"])
+            current_row = current_by_id.get(result_id)
+            if current_row is None:
+                continue
+
+            next_is_suspect = int(analysis_row.get("is_outlier_suspect", 0) or 0)
+            next_status = normalize_outlier_status(analysis_row.get("outlier_status"))
+            next_method = str(analysis_row.get("outlier_method", "") or "")
+            next_statistic = _normalize_snapshot_float(analysis_row.get("grubbs_statistic"))
+            next_threshold = _normalize_snapshot_float(analysis_row.get("grubbs_threshold"))
+
+            if (
+                int(current_row["is_outlier_suspect"] or 0) == next_is_suspect
+                and normalize_outlier_status(current_row["outlier_status"]) == next_status
+                and str(current_row["outlier_method"] or "") == next_method
+                and _snapshot_float_equal(current_row["grubbs_statistic"], next_statistic)
+                and _snapshot_float_equal(current_row["grubbs_threshold"], next_threshold)
+            ):
+                continue
+
+            update_rows.append(
                 (
-                    int(analysis_row.get("is_outlier_suspect", 0) or 0),
-                    normalize_outlier_status(analysis_row.get("outlier_status")),
-                    str(analysis_row.get("outlier_method", "") or ""),
-                    analysis_row.get("grubbs_statistic"),
-                    analysis_row.get("grubbs_threshold"),
-                    int(analysis_row["id"]),
+                    next_is_suspect,
+                    next_status,
+                    next_method,
+                    next_statistic,
+                    next_threshold,
+                    result_id,
                     int(batch_id),
-                ),
+                )
             )
+
+        if not update_rows:
+            return
+
+        connection.executemany(
+            """
+            UPDATE results
+            SET is_outlier_suspect = ?,
+                outlier_status = ?,
+                outlier_method = ?,
+                grubbs_statistic = ?,
+                grubbs_threshold = ?
+            WHERE id = ? AND batch_id = ?
+            """,
+            update_rows,
+        )
+
+
+def save_zscore_level_outlier_snapshot(batch_id: int, analysis_rows: list[dict[str, object]]) -> None:
+    if not analysis_rows:
+        return
+
+    with get_connection() as connection:
+        current_rows = connection.execute(
+            """
+            SELECT level_results.id,
+                   level_results.is_outlier_suspect,
+                   level_results.outlier_status,
+                   level_results.outlier_method,
+                   level_results.grubbs_statistic,
+                   level_results.grubbs_threshold
+            FROM zscore_level_results AS level_results
+            INNER JOIN zscore_runs AS runs ON runs.id = level_results.run_id
+            WHERE runs.batch_id = ?
+            """,
+            (int(batch_id),),
+        ).fetchall()
+        current_by_id = {int(row["id"]): row for row in current_rows}
+
+        update_rows = []
+        for analysis_row in analysis_rows:
+            level_result_id = int(analysis_row["id"])
+            current_row = current_by_id.get(level_result_id)
+            if current_row is None:
+                continue
+
+            next_is_suspect = int(analysis_row.get("is_outlier_suspect", 0) or 0)
+            next_status = normalize_outlier_status(analysis_row.get("outlier_status"))
+            next_method = str(analysis_row.get("outlier_method", "") or "")
+            next_statistic = _normalize_snapshot_float(analysis_row.get("grubbs_statistic"))
+            next_threshold = _normalize_snapshot_float(analysis_row.get("grubbs_threshold"))
+
+            if (
+                int(current_row["is_outlier_suspect"] or 0) == next_is_suspect
+                and normalize_outlier_status(current_row["outlier_status"]) == next_status
+                and str(current_row["outlier_method"] or "") == next_method
+                and _snapshot_float_equal(current_row["grubbs_statistic"], next_statistic)
+                and _snapshot_float_equal(current_row["grubbs_threshold"], next_threshold)
+            ):
+                continue
+
+            update_rows.append(
+                (
+                    next_is_suspect,
+                    next_status,
+                    next_method,
+                    next_statistic,
+                    next_threshold,
+                    level_result_id,
+                )
+            )
+
+        if not update_rows:
+            return
+
+        connection.executemany(
+            """
+            UPDATE zscore_level_results
+            SET is_outlier_suspect = ?,
+                outlier_status = ?,
+                outlier_method = ?,
+                grubbs_statistic = ?,
+                grubbs_threshold = ?
+            WHERE id = ?
+            """,
+            update_rows,
+        )
 
 
 def add_instant_result(

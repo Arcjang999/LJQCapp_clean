@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from plotting import close_figure
 from pages.lj_report_section import render_lj_monthly_report_section
 from pages.lj_sections import (
     build_lj_workbench_context,
@@ -206,3 +207,4 @@ def render_lj_work_tab(
             with st.container(border=True):
                 with st.expander("导出与导入", expanded=False):
                     render_lj_export_import_section(context, selected_batch_id, figure, chart_state)
+        close_figure(figure)
