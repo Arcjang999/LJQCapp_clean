@@ -32,16 +32,17 @@ if not defined PYTHON_CMD (
   exit /b 1
 )
 
-echo [LJQCApp] Reset database...
+echo [LJQCApp] Seed demo data...
 echo.
 
 pushd "%SCRIPT_DIR%"
-"%PYTHON_CMD%" %PYTHON_ARG% "%SCRIPT_DIR%run_app.py" --reset-db --yes
+"%PYTHON_CMD%" %PYTHON_ARG% "%SCRIPT_DIR%run_app.py" --seed-demo --profile full --replace-demo
 set "RUN_EXIT_CODE=%ERRORLEVEL%"
 popd
 
 if not "%RUN_EXIT_CODE%"=="0" (
   echo [FAILED] Command failed. Exit code: %RUN_EXIT_CODE%
+  echo Install dependencies with: "%PYTHON_CMD%" %PYTHON_ARG% -m pip install -r requirements.txt
   pause
   exit /b %RUN_EXIT_CODE%
 )

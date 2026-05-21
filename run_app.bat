@@ -4,52 +4,52 @@ chcp 65001 >nul
 
 set "SCRIPT_DIR=%~dp0"
 set "APP_PORT=8506"
-set "PYTHON_EXE="
-set "PYTHON_ARGS="
+set "PYTHON_CMD="
+set "PYTHON_ARG="
 
 if exist "%SCRIPT_DIR%.venv\Scripts\python.exe" (
-    set "PYTHON_EXE=%SCRIPT_DIR%.venv\Scripts\python.exe"
-)
-if not defined PYTHON_EXE (
-    py -3 --version >nul 2>nul
-    if not errorlevel 1 (
-        set "PYTHON_EXE=py"
-        set "PYTHON_ARGS=-3"
-    )
-)
-if not defined PYTHON_EXE (
-    python --version >nul 2>nul
-    if not errorlevel 1 set "PYTHON_EXE=python"
+  set "PYTHON_CMD=%SCRIPT_DIR%.venv\Scripts\python.exe"
 )
 
-if not defined PYTHON_EXE (
-    echo [ERROR] 未找到可用的 Python。
-    echo.
-    echo 请先安装 Python 3，或在项目目录创建 .venv 后重试。
-    echo 探测顺序：.venv\Scripts\python.exe ^> py -3 ^> python
-    echo.
-    pause
-    exit /b 1
+if not defined PYTHON_CMD (
+  py -3 --version >nul 2>nul
+  if not errorlevel 1 (
+    set "PYTHON_CMD=py"
+    set "PYTHON_ARG=-3"
+  )
+)
+
+if not defined PYTHON_CMD (
+  python --version >nul 2>nul
+  if not errorlevel 1 (
+    set "PYTHON_CMD=python"
+  )
+)
+
+if not defined PYTHON_CMD (
+  echo [ERROR] Python was not found.
+  echo Tried: .venv\Scripts\python.exe, py -3, python
+  pause
+  exit /b 1
 )
 
 echo [LJQCApp] Starting app...
-echo Python: "%PYTHON_EXE%" %PYTHON_ARGS%
-echo Local URL: http://127.0.0.1:%APP_PORT%
+echo URL: http://127.0.0.1:%APP_PORT%
 echo.
 
 pushd "%SCRIPT_DIR%"
-"%PYTHON_EXE%" %PYTHON_ARGS% "%SCRIPT_DIR%run_app.py" --port %APP_PORT%
+"%PYTHON_CMD%" %PYTHON_ARG% "%SCRIPT_DIR%run_app.py" --port %APP_PORT%
 set "RUN_EXIT_CODE=%ERRORLEVEL%"
 popd
 
 if not "%RUN_EXIT_CODE%"=="0" (
-    echo.
-    echo [FAILED] 应用退出，错误码：%RUN_EXIT_CODE%
-    echo 请确认依赖已安装："%PYTHON_EXE%" %PYTHON_ARGS% -m pip install -r requirements.txt
-    echo.
-    pause
-    exit /b %RUN_EXIT_CODE%
+  echo [FAILED] Command failed. Exit code: %RUN_EXIT_CODE%
+  echo Install dependencies with: "%PYTHON_CMD%" %PYTHON_ARG% -m pip install -r requirements.txt
+  pause
+  exit /b %RUN_EXIT_CODE%
 )
 
+echo [OK] Done.
 pause
 exit /b 0
+
