@@ -63,6 +63,13 @@ CONFIGURED_FONT_FALLBACKS = configure_matplotlib_fonts()
 print(f"[plotting] CONFIGURED_FONT_FALLBACKS={CONFIGURED_FONT_FALLBACKS}")
 
 MANUAL_NOTE_EDGE_COLOR = "#2f4858"
+LJ_FIGSIZE = (12.8, 6.4)
+INSTANT_FIGSIZE = (12.8, 6.2)
+CHART_DPI = 140
+
+
+def _apply_chart_layout(figure, *, right: float = 0.88, top: float = 0.88) -> None:
+    figure.subplots_adjust(left=0.07, right=right, top=top, bottom=0.14)
 
 
 def plot_lj_chart(
@@ -74,11 +81,11 @@ def plot_lj_chart(
     standard_sd_limit: float = 4.0,
     y_axis_label: str = "检测值",
 ):
-    figure, axis = plt.subplots(figsize=(9.4, 5.9), dpi=150)
+    figure, axis = plt.subplots(figsize=LJ_FIGSIZE, dpi=CHART_DPI)
     plot_df = _filter_view_data(qc_df, view_mode)
 
     if plot_df.empty:
-        axis.set_title(title, pad=10)
+        axis.set_title(title, pad=8, fontsize=12)
         axis.text(
             0.5,
             0.5,
@@ -88,7 +95,7 @@ def plot_lj_chart(
             transform=axis.transAxes,
         )
         axis.set_axis_off()
-        figure.tight_layout(pad=0.7)
+        _apply_chart_layout(figure)
         return figure
 
     y_limits = _get_y_limits(plot_df, stats, y_axis_mode, standard_sd_limit)
@@ -119,13 +126,13 @@ def plot_lj_chart(
         _plot_out_of_range_markers(axis, display_df, y_limits)
     _plot_manual_note_highlights(axis, display_df)
 
-    axis.set_title(title, pad=10)
+    axis.set_title(title, pad=8, fontsize=12)
     axis.set_xlabel("\u68c0\u6d4b\u5e8f\u53f7")
     axis.set_ylabel(y_axis_label)
     _configure_x_axis(axis, display_df)
     axis.grid(True, linestyle=":", alpha=0.35)
     _add_lj_legend(axis)
-    figure.tight_layout(pad=0.7)
+    _apply_chart_layout(figure)
     return figure
 
 
@@ -392,9 +399,9 @@ def plot_instant_chart(
     *,
     y_axis_label: str = "检测值",
 ):
-    figure, axis = plt.subplots(figsize=(9.2, 5.6), dpi=150)
+    figure, axis = plt.subplots(figsize=INSTANT_FIGSIZE, dpi=CHART_DPI)
     if analysis_df.empty:
-        axis.set_title(title, pad=10)
+        axis.set_title(title, pad=8, fontsize=12)
         axis.text(
             0.5,
             0.5,
@@ -404,13 +411,13 @@ def plot_instant_chart(
             transform=axis.transAxes,
         )
         axis.set_axis_off()
-        figure.tight_layout(pad=0.7)
+        _apply_chart_layout(figure)
         return figure
 
     plot_df = analysis_df[analysis_df["is_effective"] == 1].copy()
     plot_df = plot_df.sort_values(["test_time", "id"]).reset_index(drop=True)
     if plot_df.empty:
-        axis.set_title(title, pad=10)
+        axis.set_title(title, pad=8, fontsize=12)
         axis.text(
             0.5,
             0.5,
@@ -420,7 +427,7 @@ def plot_instant_chart(
             transform=axis.transAxes,
         )
         axis.set_axis_off()
-        figure.tight_layout(pad=0.7)
+        _apply_chart_layout(figure)
         return figure
 
     if "effective_sequence" not in plot_df.columns or plot_df["effective_sequence"].isna().all():
@@ -497,7 +504,7 @@ def plot_instant_chart(
             axis.axhline(lower, color="#76b7b2", linewidth=1.0, linestyle="--", label="-1SD")
 
     _configure_instant_x_axis(axis, plot_df)
-    axis.set_title(title, pad=10)
+    axis.set_title(title, pad=8, fontsize=12)
     axis.set_xlabel("有效点序号")
     axis.set_ylabel(y_axis_label)
     axis.grid(True, linestyle=":", alpha=0.35)
@@ -511,7 +518,7 @@ def plot_instant_chart(
         unique_handles.append(handle)
         unique_labels.append(label)
     axis.legend(unique_handles, unique_labels, loc="best")
-    figure.tight_layout(pad=0.7)
+    _apply_chart_layout(figure)
     return figure
 
 

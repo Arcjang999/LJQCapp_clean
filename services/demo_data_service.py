@@ -78,6 +78,20 @@ FULL_DATASETS: tuple[DemoDatasetSpec, ...] = (
 BASIC_KEYS = {"instant_01", "lj_01", "lj_02", "lj_03", "z2_01", "z3_02"}
 SPEC_BY_KEY = {spec.key: spec for spec in FULL_DATASETS}
 SPEC_BY_NAME = {spec.name: spec for spec in FULL_DATASETS}
+DEMO_LOT_NUMBERS = {
+    "instant_01": "INSTANT-01-DEMO",
+    "instant_02": "INSTANT-02-DEMO",
+    "lj_01": "LJ-01-DEMO",
+    "lj_02": "LJ-02-DEMO",
+    "lj_03": "LJ-03-DEMO",
+    "lj_04": "LJ-04-DEMO",
+    "z2_01": "Z2-01-DEMO",
+    "z2_02": "Z2-02-DEMO",
+    "z2_03": "Z2-03-DEMO",
+    "z3_01": "Z3-01-DEMO",
+    "z3_02": "Z3-02-DEMO",
+    "z3_03": "Z3-03-DEMO",
+}
 
 BUILDING_Z_OFFSETS = [
     -0.72,
@@ -120,7 +134,7 @@ def _specs_for_profile(profile: str | None) -> list[DemoDatasetSpec]:
 
 
 def _demo_lot_no(spec: DemoDatasetSpec) -> str:
-    return f"{spec.name} 批次-{DEMO_NOTICE}"
+    return DEMO_LOT_NUMBERS.get(spec.key, f"{spec.key.upper()}-DEMO")
 
 
 def _operator(index: int) -> str:
@@ -444,9 +458,9 @@ def _create_lj_dataset(spec: DemoDatasetSpec) -> dict[str, Any]:
     project_id = create_project(spec.name, input_value_type="raw")
     batch_id = create_batch(
         project_id=project_id,
-        instrument=f"{DEMO_PREFIX} 全自动分析仪-{DEMO_NOTICE}",
-        reagent=f"{DEMO_PREFIX} LJ演示试剂",
-        qc_material=f"{DEMO_PREFIX} LJ演示质控品",
+        instrument="演示仪器",
+        reagent="演示试剂",
+        qc_material="演示质控品",
         concentration="单水平",
         lot_no=_demo_lot_no(spec),
         target_n=20,
@@ -560,9 +574,9 @@ def _create_instant_dataset(spec: DemoDatasetSpec) -> dict[str, Any]:
     project_id = create_instant_project(spec.name, input_value_type="ct")
     batch_id = create_instant_batch(
         project_id=project_id,
-        instrument=f"{DEMO_PREFIX} PCR仪-{DEMO_NOTICE}",
-        reagent=f"{DEMO_PREFIX} Instant演示试剂",
-        qc_material=f"{DEMO_PREFIX} Instant演示质控品",
+        instrument="演示仪器",
+        reagent="演示试剂",
+        qc_material="演示质控品",
         concentration="单水平",
         lot_no=_demo_lot_no(spec),
     )
@@ -676,10 +690,10 @@ def _create_zscore_dataset(spec: DemoDatasetSpec) -> dict[str, Any]:
     project_id = create_zscore_project(spec.name, level_count=spec.level_count, input_value_type="raw")
     batch_id = create_zscore_batch(
         project_id=project_id,
-        instrument=f"{DEMO_PREFIX} 多水平分析仪-{DEMO_NOTICE}",
-        reagent=f"{DEMO_PREFIX} Z-score演示试剂",
-        qc_material=f"{DEMO_PREFIX} Z-score演示质控品",
-        concentration=f"{spec.level_count}水平",
+        instrument="演示仪器",
+        reagent="演示试剂",
+        qc_material="演示质控品",
+        concentration="双水平" if spec.level_count == 2 else "三水平",
         lot_no=_demo_lot_no(spec),
         target_n=20,
         level_1_label="Level 1",
@@ -910,7 +924,6 @@ def _validate_lj_dataset(spec: DemoDatasetSpec, project_row: sqlite3.Row, checks
     _add_check(checks, f"{spec.key}: 存在 LJ 批次", batch_row is not None, spec.name)
     if batch_row is None:
         return
-    _add_check(checks, f"{spec.key}: 批次名以【演示】开头", str(batch_row["lot_no"]).startswith(DEMO_PREFIX), str(batch_row["lot_no"]))
     _add_check(checks, f"{spec.key}: target_n=20", int(batch_row["target_n"]) == 20, f"target_n={batch_row['target_n']}")
     results_df = get_results(int(batch_row["id"]), include_manual_note=True)
     qc_df, stats = calculate_qc_results(results_df, int(batch_row["target_n"]))
@@ -954,7 +967,6 @@ def _validate_zscore_dataset(spec: DemoDatasetSpec, project_row: sqlite3.Row, ch
     if batch_row is None:
         return
     batch = get_batch(int(batch_row["id"]))
-    _add_check(checks, f"{spec.key}: 批次名以【演示】开头", str(batch["lot_no"]).startswith(DEMO_PREFIX), str(batch["lot_no"]))
     _add_check(checks, f"{spec.key}: target_n=20", int(batch["target_n"]) == 20, f"target_n={batch['target_n']}")
     template_id = get_template_id_for_level_count(spec.level_count)
     runs = get_zscore_runs(int(batch["id"]), template_id)
@@ -1012,7 +1024,6 @@ def _validate_instant_dataset(spec: DemoDatasetSpec, project_row: sqlite3.Row, c
     _add_check(checks, f"{spec.key}: 存在 Instant 批次", batch_row is not None, spec.name)
     if batch_row is None:
         return
-    _add_check(checks, f"{spec.key}: 批次名以【演示】开头", str(batch_row["lot_no"]).startswith(DEMO_PREFIX), str(batch_row["lot_no"]))
     results_df = get_instant_results(int(batch_row["id"]), include_manual_note=True)
     context = build_instant_workbench_context(int(batch_row["id"]))
     summary = context["summary"]
