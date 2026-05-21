@@ -32,16 +32,18 @@ if not defined PYTHON_CMD (
   exit /b 1
 )
 
-echo [LJQCApp] Reset database...
+echo [LJQCApp] Reset database and seed demo data...
+echo [WARNING] This clears the whole database.
 echo.
 
 pushd "%SCRIPT_DIR%"
-"%PYTHON_CMD%" %PYTHON_ARG% "%SCRIPT_DIR%run_app.py" --reset-db --yes
+"%PYTHON_CMD%" %PYTHON_ARG% "%SCRIPT_DIR%run_app.py" --reset-and-seed-demo --profile full --yes
 set "RUN_EXIT_CODE=%ERRORLEVEL%"
 popd
 
 if not "%RUN_EXIT_CODE%"=="0" (
   echo [FAILED] Command failed. Exit code: %RUN_EXIT_CODE%
+  echo Close the running app and try again.
   pause
   exit /b %RUN_EXIT_CODE%
 )

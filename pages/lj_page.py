@@ -159,7 +159,7 @@ def render_lj_work_tab(
             badges=["单水平（LJ法）", phase_label, input_value_type_label],
             tone="accent",
         )
-        entry_col, chart_col = st.columns([1.0, 1.18], gap="large")
+        entry_col, chart_col = st.columns([0.78, 1.6], gap="large")
         with entry_col:
             with st.container():
                 render_section_intro(

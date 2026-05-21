@@ -33,8 +33,11 @@ from ui.common import (
     TEXT,
     ZSCORE_PHASE_VIEW_OPTIONS,
     ZSCORE_Y_AXIS_OPTIONS,
+    build_compact_chart_title,
     build_safe_export_name,
     build_zscore_operator_options,
+    compact_project_chart_name,
+    compact_text,
     format_error_type_label,
     format_optional_float,
     format_optional_input_value,
@@ -44,6 +47,7 @@ from ui.common import (
     format_zscore_template_display_name,
     get_saved_batch_cv_limit,
     parse_numeric_input,
+    render_chart_figure,
     render_compact_stat_metrics,
     render_cv_limit_hint,
     render_html_block,
@@ -119,6 +123,28 @@ def format_zscore_level_display(level_id: str, level_label_map: dict[str, str]) 
     if level_label == level_id:
         return default_level_label, None
     return level_label, default_level_label
+
+
+def _build_zscore_chart_title(
+    batch,
+    phase_title: str,
+    view_mode: str,
+    selected_level_display: str,
+    template_display_name: str,
+) -> str:
+    batch_dict = dict(batch)
+    view_fragment = selected_level_display if view_mode == "单水平视图" else "合并视图"
+    lot_no = compact_text(batch_dict.get("lot_no"), max_chars=18) or "当前批次"
+    project_name = compact_project_chart_name(batch_dict.get("project_name"), max_chars=18) or compact_text(
+        template_display_name,
+        max_chars=18,
+    )
+    return build_compact_chart_title(
+        [phase_title, view_fragment, lot_no, project_name],
+        max_line_chars=42,
+        max_lines=2,
+    )
+
 
 def build_zscore_current_level_results(
     template: dict[str, Any],
@@ -1329,11 +1355,20 @@ def render_zscore_chart_analysis_section(
         "formal": "正式质控图",
         "all": "全图",
     }[phase_scope]
+    selected_level_display = format_zscore_level_display(selected_level, level_label_map)[0]
+    template_display_name = format_zscore_template_display_name(template)
+    chart_title = _build_zscore_chart_title(
+        batch,
+        phase_title,
+        view_mode,
+        selected_level_display,
+        template_display_name,
+    )
     if view_mode == "单水平视图":
         figure = plot_zscore_single_level(
             plot_df=plot_df,
             level_id=selected_level,
-            title=f"{phase_title} | {format_zscore_level_display(selected_level, level_label_map)[0]}",
+            title=chart_title,
             phase_scope=phase_scope,
             y_axis_mode=y_axis_mode,
             standard_sd_limit=standard_sd_limit,
@@ -1342,7 +1377,7 @@ def render_zscore_chart_analysis_section(
     else:
         figure = plot_zscore_overlay(
             plot_df=plot_df,
-            title=f"{phase_title} | {format_zscore_template_display_name(template)}",
+            title=chart_title,
             active_levels=required_level_ids,
             phase_scope=phase_scope,
             y_axis_mode=y_axis_mode,
@@ -1351,7 +1386,7 @@ def render_zscore_chart_analysis_section(
         )
     with st.container(border=True):
         st.markdown("**质控图**")
-        st.pyplot(figure, clear_figure=False, width="stretch")
+        render_chart_figure(figure)
     with st.container(border=True):
         render_zscore_latest_analysis_panel(latest_run, overall_phase, formal_rules_enabled)
     render_zscore_abnormal_note_quick_entry(latest_run)
@@ -1369,7 +1404,6 @@ def render_zscore_chart_analysis_section(
         ZSCORE_PHASE_VIEW_OPTIONS.get(phase_scope, phase_scope),
         "all",
     )
-    template_display_name = format_zscore_template_display_name(template)
     selected_level_display, _ = format_zscore_level_display(selected_level, level_label_map)
     current_view_label = selected_level_display if view_mode == "单水平视图" else template_display_name
     current_view_fragment = build_safe_export_name(current_view_label, "chart")

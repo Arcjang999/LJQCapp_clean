@@ -32,11 +32,11 @@ if not defined PYTHON_CMD (
   exit /b 1
 )
 
-echo [LJQCApp] Reset database...
+echo [LJQCApp] Delete demo data...
 echo.
 
 pushd "%SCRIPT_DIR%"
-"%PYTHON_CMD%" %PYTHON_ARG% "%SCRIPT_DIR%run_app.py" --reset-db --yes
+"%PYTHON_CMD%" %PYTHON_ARG% "%SCRIPT_DIR%run_app.py" --delete-demo
 set "RUN_EXIT_CODE=%ERRORLEVEL%"
 popd
 

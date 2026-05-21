@@ -34,8 +34,12 @@ from services.value_type_service import (
 )
 from ui.common import (
     TEXT,
+    build_compact_chart_title,
+    compact_project_chart_name,
+    compact_text,
     format_datetime_column,
     format_optional_float,
+    render_chart_figure,
     render_compact_stat_metrics,
     render_latest_analysis_card,
     render_section_intro,
@@ -184,6 +188,13 @@ def _build_instant_batch_summary(batch: dict[str, object] | pd.Series | object) 
     if concentration:
         parts.append(concentration)
     return _join_instant_display_parts(parts) or "当前批次"
+
+
+def _build_instant_chart_title(batch: dict[str, object] | pd.Series | object) -> str:
+    batch_dict = dict(batch)
+    lot_no = compact_text(batch_dict.get("lot_no"), max_chars=18) or "当前批次"
+    project_name = compact_project_chart_name(batch_dict.get("project_name"), max_chars=18)
+    return build_compact_chart_title(["即时法趋势图", lot_no, project_name])
 
 
 def _format_instant_datetime_text(value: object) -> str:
@@ -648,14 +659,12 @@ def _render_instant_chart_analysis_section(context: dict[str, object]) -> object
     figure = plot_instant_chart(
         analysis_df,
         summary,
-        title=(
-            f"即时法趋势图 - {_build_instant_batch_summary(batch)}"
-        ),
+        title=_build_instant_chart_title(batch),
         y_axis_label=input_value_type_label,
     )
 
     st.markdown("**即时法质控图**")
-    st.pyplot(figure, clear_figure=False, width="stretch")
+    render_chart_figure(figure)
 
     st.divider()
     st.markdown("**最新判定区**")
@@ -921,7 +930,7 @@ def render_instant_page() -> None:
             badges=["即时法", "过渡方法", f"有效点 {summary['effective_count']}/{INSTANT_TRANSFER_READY_COUNT}", input_value_type_label],
             tone="accent",
         )
-        entry_col, chart_col = st.columns([0.98, 1.12], gap="large")
+        entry_col, chart_col = st.columns([0.78, 1.6], gap="large")
         with entry_col:
             with st.container():
                 render_section_intro(
