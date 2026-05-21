@@ -5,9 +5,10 @@ param(
 $ErrorActionPreference = "Stop"
 
 $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$script:PythonExe = "C:\Users\gao_h\AppData\Local\Python\bin\python.exe"
 $script:SpecFile = Join-Path $RepoRoot "packaging\LJQCApp.spec"
 $script:LauncherProject = Join-Path $RepoRoot "packaging\desktop_launcher\LJQCApp.Desktop.csproj"
+$script:PythonExe = $null
+$script:PythonBaseArgs = @()
 
 $buildRoot = Join-Path $OutputRoot "build"
 $distRoot = Join-Path $OutputRoot "dist"
@@ -22,6 +23,51 @@ $launcherObjRoot = Join-Path $buildRoot "launcher_obj"
 $launcherOnedirOutput = Join-Path $distRoot "LJQCApp"
 $launcherOnefileOutput = $releaseRoot
 $rootEntryExe = Join-Path $OutputRoot "LJQCApp.exe"
+
+function Resolve-PythonCommand {
+    $venvPython = Join-Path $RepoRoot ".venv\Scripts\python.exe"
+    if (Test-Path -LiteralPath $venvPython) {
+        return @{
+            Executable = $venvPython
+            BaseArgs = @()
+            Display = $venvPython
+        }
+    }
+
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        & py -3 --version | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            return @{
+                Executable = "py"
+                BaseArgs = @("-3")
+                Display = "py -3"
+            }
+        }
+    }
+
+    if (Get-Command python -ErrorAction SilentlyContinue) {
+        & python --version | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            return @{
+                Executable = "python"
+                BaseArgs = @()
+                Display = "python"
+            }
+        }
+    }
+
+    throw "Python executable not found. Tried .venv\Scripts\python.exe, py -3, and python."
+}
+
+function Invoke-Python {
+    param(
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [string[]]$Arguments
+    )
+
+    $baseArgs = $script:PythonBaseArgs
+    & $script:PythonExe @baseArgs @Arguments
+}
 
 function Remove-Safely {
     param([string]$TargetPath)
@@ -62,7 +108,7 @@ function Invoke-PyInstallerBuild {
         $env:LJQCAPP_APP_NAME = $AppName
         $env:LJQCAPP_CONSOLE = "false"
 
-        & $PythonExe -m PyInstaller --clean -y --distpath $DistPath --workpath $WorkPath $SpecFile
+        Invoke-Python -m PyInstaller --clean -y --distpath $DistPath --workpath $WorkPath $SpecFile
         if ($LASTEXITCODE -ne 0) {
             throw "PyInstaller build failed for $AppName ($BundleMode)."
         }
@@ -109,9 +155,10 @@ function Invoke-DotnetPublish {
     }
 }
 
-if (-not (Test-Path -LiteralPath $PythonExe)) {
-    throw "Python executable not found: $PythonExe"
-}
+$pythonCommand = Resolve-PythonCommand
+$script:PythonExe = $pythonCommand.Executable
+$script:PythonBaseArgs = $pythonCommand.BaseArgs
+Write-Output "PYTHON=$($pythonCommand.Display)"
 
 if (-not (Test-Path -LiteralPath $SpecFile)) {
     throw "Spec file not found: $SpecFile"

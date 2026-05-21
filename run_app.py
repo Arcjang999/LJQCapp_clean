@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 DEFAULT_SERVER_ADDRESS = "0.0.0.0"
-DEFAULT_SERVER_PORT = int(os.environ.get("LJQCAPP_PORT", "8501"))
+DEFAULT_SERVER_PORT = int(os.environ.get("LJQCAPP_PORT", "8506"))
 
 
 def _get_log_path() -> Path:
@@ -74,6 +74,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the packaged LJQCApp Streamlit service.")
     parser.add_argument("--port", type=int, default=DEFAULT_SERVER_PORT)
     parser.add_argument("--address", default=DEFAULT_SERVER_ADDRESS)
+    parser.add_argument("--seed-demo", action="store_true", help="导入演示数据。")
+    parser.add_argument("--delete-demo", action="store_true", help="只删除【演示】前缀的演示数据。")
+    parser.add_argument("--reset-db", action="store_true", help="重置整个数据库，必须配合 --yes。")
+    parser.add_argument("--reset-and-seed-demo", action="store_true", help="重置整个数据库后导入演示数据，必须配合 --yes。")
+    parser.add_argument("--profile", choices=("basic", "full"), default="full", help="演示数据规模，默认 full。")
+    parser.add_argument("--replace-demo", action="store_true", help="导入前先删除旧演示数据，不影响真实数据。")
+    parser.add_argument("--yes", action="store_true", help="确认执行重置数据库等破坏性操作。")
+    parser.add_argument("--dry-run", action="store_true", help="只打印计划，不写入数据库。")
     return parser.parse_args(argv)
 
 
@@ -115,8 +123,125 @@ def run_streamlit_service(*, port: int, address: str) -> int:
         return 1
 
 
+def _has_demo_operation(args: argparse.Namespace) -> bool:
+    return any(
+        [
+            bool(args.seed_demo),
+            bool(args.delete_demo),
+            bool(args.reset_db),
+            bool(args.reset_and_seed_demo),
+            bool(args.replace_demo),
+        ]
+    )
+
+
+def _validate_operation_args(args: argparse.Namespace) -> str | None:
+    selected = [
+        name
+        for name, enabled in [
+            ("--seed-demo", args.seed_demo),
+            ("--delete-demo", args.delete_demo),
+            ("--reset-db", args.reset_db),
+            ("--reset-and-seed-demo", args.reset_and_seed_demo),
+        ]
+        if enabled
+    ]
+    if len(selected) > 1:
+        return "一次只能执行一个演示/运维操作：" + ", ".join(selected)
+    if args.replace_demo and (args.delete_demo or args.reset_db or args.reset_and_seed_demo):
+        return "--replace-demo 只能与 --seed-demo 一起使用，或单独作为“替换演示数据”使用。"
+    if args.reset_db and not args.yes:
+        return "--reset-db 会清空整个数据库，必须增加 --yes 才会执行。"
+    if args.reset_and_seed_demo and not args.yes:
+        return "--reset-and-seed-demo 会清空整个数据库，必须增加 --yes 才会执行。"
+    return None
+
+
+def run_demo_cli(args: argparse.Namespace) -> int:
+    from database import get_db_path, init_db, reset_database
+    from services.demo_data_service import (
+        delete_demo_data,
+        format_operation_summary,
+        seed_demo_data,
+        validate_demo_data,
+    )
+
+    validation_error = _validate_operation_args(args)
+    if validation_error:
+        print(f"[拒绝执行] {validation_error}")
+        print("如需重置数据库，请确认已备份重要数据后重新运行并添加 --yes。")
+        return 2
+
+    try:
+        if args.delete_demo:
+            result = delete_demo_data(dry_run=bool(args.dry_run))
+            print(format_operation_summary(result))
+            return 0
+
+        if args.reset_db:
+            db_path = get_db_path()
+            if args.dry_run:
+                print("操作：reset-db")
+                print(f"数据库：{db_path}")
+                print("dry-run：True")
+                print("将重置整个数据库；本次未执行任何写入。")
+                print("创建项目数：0")
+                print("创建批次数：0")
+                print("创建记录数：0")
+                print("规则验证：未执行")
+                return 0
+            reset_database()
+            init_db()
+            print("操作：reset-db")
+            print(f"数据库：{db_path}")
+            print("已重置整个数据库并重新初始化表结构。")
+            print("创建项目数：0")
+            print("创建批次数：0")
+            print("创建记录数：0")
+            print("规则验证：未执行")
+            return 0
+
+        if args.reset_and_seed_demo:
+            result = seed_demo_data(
+                profile=args.profile,
+                replace_demo=False,
+                reset_all=True,
+                dry_run=bool(args.dry_run),
+            )
+            print(format_operation_summary(result))
+            return 0 if (result.get("validation") or {}).get("ok", True) else 1
+
+        if args.seed_demo or args.replace_demo:
+            result = seed_demo_data(
+                profile=args.profile,
+                replace_demo=bool(args.replace_demo),
+                reset_all=False,
+                dry_run=bool(args.dry_run),
+            )
+            print(format_operation_summary(result))
+            return 0 if (result.get("validation") or {}).get("ok", True) else 1
+
+        validation = validate_demo_data(profile=args.profile)
+        print(f"数据库：{validation.get('db_path', get_db_path())}")
+        print(f"演示数据验证：{'通过' if validation.get('ok') else '失败'}")
+        if validation.get("failed"):
+            print("失败项：")
+            for failed in validation["failed"]:
+                print(f"- {failed['name']}：{failed['detail']}")
+        return 0 if validation.get("ok") else 1
+    except Exception:
+        error_trace = traceback.format_exc()
+        print("[ERROR] 演示/运维操作失败：")
+        print(error_trace)
+        _write_log("Demo CLI failed:")
+        _write_log(error_trace)
+        return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if _has_demo_operation(args):
+        return run_demo_cli(args)
     return run_streamlit_service(port=args.port, address=args.address)
 
 

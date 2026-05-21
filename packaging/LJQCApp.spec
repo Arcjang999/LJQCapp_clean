@@ -7,7 +7,8 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 
-PROJECT_ROOT = Path(SPECPATH).resolve().parent
+SPEC_DIR = Path(SPECPATH).resolve().parent
+PROJECT_ROOT = SPEC_DIR.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 APP_NAME = os.environ.get("LJQCAPP_APP_NAME", "LJQCAppService").strip() or "LJQCAppService"
@@ -25,6 +26,7 @@ PROJECT_MODULE_FILES = [
 ]
 PROJECT_PACKAGES = [
     "pages",
+    "services",
     "ui",
 ]
 
@@ -54,6 +56,7 @@ hiddenimports = list(
         + collect_submodules("pyarrow")
         + collect_submodules("altair")
         + collect_submodules("pages")
+        + collect_submodules("services")
         + collect_submodules("ui")
         + [
             "database",
@@ -74,6 +77,7 @@ a = Analysis(
     pathex=[
         str(PROJECT_ROOT),
         str(PROJECT_ROOT / "pages"),
+        str(PROJECT_ROOT / "services"),
         str(PROJECT_ROOT / "ui"),
     ],
     binaries=[],

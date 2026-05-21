@@ -3,7 +3,6 @@ setlocal
 chcp 65001 >nul
 
 set "SCRIPT_DIR=%~dp0"
-set "APP_PORT=8506"
 set "PYTHON_EXE="
 set "PYTHON_ARGS="
 
@@ -24,32 +23,30 @@ if not defined PYTHON_EXE (
 
 if not defined PYTHON_EXE (
     echo [ERROR] 未找到可用的 Python。
-    echo.
     echo 请先安装 Python 3，或在项目目录创建 .venv 后重试。
-    echo 探测顺序：.venv\Scripts\python.exe ^> py -3 ^> python
-    echo.
     pause
     exit /b 1
 )
 
-echo [LJQCApp] Starting app...
-echo Python: "%PYTHON_EXE%" %PYTHON_ARGS%
-echo Local URL: http://127.0.0.1:%APP_PORT%
+echo [LJQCApp] 只删除【演示】数据...
+echo 真实数据不会被删除。
 echo.
 
 pushd "%SCRIPT_DIR%"
-"%PYTHON_EXE%" %PYTHON_ARGS% "%SCRIPT_DIR%run_app.py" --port %APP_PORT%
+"%PYTHON_EXE%" %PYTHON_ARGS% "%SCRIPT_DIR%tools\seed_demo_data.py" --delete-demo
 set "RUN_EXIT_CODE=%ERRORLEVEL%"
 popd
 
 if not "%RUN_EXIT_CODE%"=="0" (
     echo.
-    echo [FAILED] 应用退出，错误码：%RUN_EXIT_CODE%
-    echo 请确认依赖已安装："%PYTHON_EXE%" %PYTHON_ARGS% -m pip install -r requirements.txt
+    echo [FAILED] 删除演示数据失败，错误码：%RUN_EXIT_CODE%
     echo.
     pause
     exit /b %RUN_EXIT_CODE%
 )
 
+echo.
+echo [OK] 演示数据已删除。
+echo.
 pause
 exit /b 0

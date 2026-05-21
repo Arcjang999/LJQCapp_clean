@@ -3,7 +3,6 @@ setlocal
 chcp 65001 >nul
 
 set "SCRIPT_DIR=%~dp0"
-set "APP_PORT=8506"
 set "PYTHON_EXE="
 set "PYTHON_ARGS="
 
@@ -24,32 +23,37 @@ if not defined PYTHON_EXE (
 
 if not defined PYTHON_EXE (
     echo [ERROR] 未找到可用的 Python。
-    echo.
     echo 请先安装 Python 3，或在项目目录创建 .venv 后重试。
-    echo 探测顺序：.venv\Scripts\python.exe ^> py -3 ^> python
-    echo.
     pause
     exit /b 1
 )
 
-echo [LJQCApp] Starting app...
-echo Python: "%PYTHON_EXE%" %PYTHON_ARGS%
-echo Local URL: http://127.0.0.1:%APP_PORT%
+echo [危险操作] 这会清空整个数据库，然后导入标准 full profile 演示数据。
+echo 真实质控数据也会被删除。
 echo.
+set /p CONFIRM=如已备份并确认继续，请输入 YES 后回车：
+if /i not "%CONFIRM%"=="YES" (
+    echo 已取消。
+    pause
+    exit /b 0
+)
 
 pushd "%SCRIPT_DIR%"
-"%PYTHON_EXE%" %PYTHON_ARGS% "%SCRIPT_DIR%run_app.py" --port %APP_PORT%
+"%PYTHON_EXE%" %PYTHON_ARGS% "%SCRIPT_DIR%tools\seed_demo_data.py" --reset-all --yes --profile full
 set "RUN_EXIT_CODE=%ERRORLEVEL%"
 popd
 
 if not "%RUN_EXIT_CODE%"=="0" (
     echo.
-    echo [FAILED] 应用退出，错误码：%RUN_EXIT_CODE%
-    echo 请确认依赖已安装："%PYTHON_EXE%" %PYTHON_ARGS% -m pip install -r requirements.txt
+    echo [FAILED] 重置并导入演示数据失败，错误码：%RUN_EXIT_CODE%
+    echo 请确认已关闭正在运行的应用，并确认依赖已安装。
     echo.
     pause
     exit /b %RUN_EXIT_CODE%
 )
 
+echo.
+echo [OK] 数据库已恢复为标准演示状态。
+echo.
 pause
 exit /b 0
