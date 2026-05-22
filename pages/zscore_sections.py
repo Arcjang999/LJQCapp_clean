@@ -336,7 +336,15 @@ def render_zscore_vendor_reference_editor(
 def format_zscore_rule_hits(rule_hits: list[dict[str, Any]]) -> str:
     if not rule_hits:
         return "无"
-    ordered_rule_ids = list(dict.fromkeys(hit["rule_id"] for hit in rule_hits))
+    ordered_rule_ids = list(
+        dict.fromkeys(
+            rule_id
+            for rule_id in (_extract_zscore_rule_id(hit) for hit in rule_hits)
+            if rule_id
+        )
+    )
+    if not ordered_rule_ids:
+        return "无"
     return "、".join(format_rule_code(rule_id) for rule_id in ordered_rule_ids)
 
 
@@ -410,6 +418,193 @@ def build_zscore_building_run_evidence_dataframe(
             }
         )
     return pd.DataFrame(evidence_rows)
+
+
+def _extract_zscore_rule_id(rule_hit: Any) -> str:
+    if isinstance(rule_hit, dict):
+        return str(rule_hit.get("rule_id") or "").strip()
+    return str(rule_hit or "").strip()
+
+
+def _build_zscore_rule_summary(
+    formal_runs: list[dict[str, Any]],
+    rule_ids: list[str],
+) -> dict[str, int]:
+    summary = {rule_id: 0 for rule_id in rule_ids}
+    summary["warning_count"] = 0
+    summary["reject_count"] = 0
+    for run in formal_runs:
+        run_status = str(run.get("run_status") or "").strip()
+        if run_status == "warning":
+            summary["warning_count"] += 1
+        elif run_status == "reject":
+            summary["reject_count"] += 1
+
+        hit_rule_ids = {
+            rule_id
+            for rule_id in (
+                _extract_zscore_rule_id(rule_hit)
+                for rule_hit in run.get("rule_hits_run", []) or []
+            )
+            if rule_id
+        }
+        for rule_id in hit_rule_ids:
+            if rule_id in summary:
+                summary[rule_id] += 1
+    return summary
+
+
+def _format_zscore_level_result_summary(
+    run: dict[str, Any],
+    level_label_map: dict[str, str],
+) -> str:
+    summary_parts: list[str] = []
+    for level_result in sorted(
+        run.get("level_results", []),
+        key=lambda item: str(item.get("level_id") or ""),
+    ):
+        level_label, _ = format_zscore_level_display(
+            str(level_result.get("level_id") or ""),
+            level_label_map,
+        )
+        value_text = format_optional_input_value(level_result.get("raw_value"))
+        zscore_text = format_optional_float(level_result.get("zscore"))
+        status_text = format_zscore_status_label(level_result.get("status", "pending"))
+        summary_parts.append(
+            f"{level_label}: 值={value_text}, Z={zscore_text}, 状态={status_text}"
+        )
+    return "\n".join(summary_parts)
+
+
+def _build_zscore_abnormal_records_dataframe(
+    formal_runs: list[dict[str, Any]],
+    level_label_map: dict[str, str],
+) -> pd.DataFrame:
+    abnormal_rows: list[dict[str, Any]] = []
+    for run in formal_runs:
+        if str(run.get("run_status") or "") not in {"warning", "reject"}:
+            continue
+        abnormal_rows.append(
+            {
+                "检测序号": get_zscore_display_sequence(run),
+                "检测时间": _format_zscore_export_datetime(run.get("test_time")),
+                "检测人": str(run.get("operator", "") or ""),
+                "本次判定结果": format_zscore_status_label(run.get("run_status", "pending")),
+                "触发规则": format_zscore_rule_hits(run.get("rule_hits_run", [])),
+                "误差类型": format_error_type_label(run.get("error_type_hint", "unknown")),
+                "分析提示": str(run.get("analysis_prompt", "") or ""),
+                "手动备注": str(run.get("manual_note", "") or ""),
+                "各水平结果摘要": _format_zscore_level_result_summary(run, level_label_map),
+            }
+        )
+    return pd.DataFrame(abnormal_rows)
+
+
+def _build_zscore_run_records_dataframe(
+    history_runs: list[dict[str, Any]],
+    required_level_ids: list[str],
+) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    for run in history_runs:
+        level_results_by_id = {
+            str(level_result.get("level_id")): level_result
+            for level_result in run.get("level_results", [])
+        }
+        row: dict[str, Any] = {
+            "检测序号": get_zscore_display_sequence(run),
+            "阶段": str(run.get("phase_label") or get_phase_label(run.get("phase"))),
+            "检测时间": _format_zscore_export_datetime(run.get("test_time")),
+            "检测人": str(run.get("operator", "") or ""),
+            "本次判定结果": format_zscore_status_label(run.get("run_status", "pending")),
+            "触发规则": format_zscore_rule_hits(run.get("rule_hits_run", [])),
+            "误差类型": format_error_type_label(run.get("error_type_hint", "unknown")),
+            "分析提示": str(run.get("analysis_prompt", "") or ""),
+            "备注": str(run.get("manual_note", "") or ""),
+        }
+        for level_id in required_level_ids:
+            level_prefix = _build_zscore_export_level_prefix(level_id)
+            level_result = level_results_by_id.get(level_id, {})
+            row[f"{level_prefix} 值"] = _format_zscore_export_numeric(level_result.get("raw_value"))
+            row[f"{level_prefix} Z值"] = _format_zscore_export_numeric(level_result.get("zscore"))
+            row[f"{level_prefix} 状态"] = (
+                format_zscore_status_label(level_result.get("status", "pending"))
+                if level_result
+                else ""
+            )
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def render_zscore_rule_records_overview_section(context: dict[str, object]) -> None:
+    history_runs = list(context["history_runs"])
+    template = context["template"]
+    required_level_ids = list(context["required_level_ids"])
+    level_label_map = dict(context["level_label_map"])
+    overall_phase = str(context["overall_phase"])
+    formal_rules_enabled = bool(context["formal_rules_enabled"])
+    formal_runs = [
+        run for run in history_runs if str(run.get("phase") or "") == PHASE_FORMAL_QC
+    ]
+    rule_ids = list(template["rule_ids"])
+    rule_summary = _build_zscore_rule_summary(formal_runs, rule_ids)
+    abnormal_records_df = _build_zscore_abnormal_records_dataframe(
+        formal_runs,
+        level_label_map,
+    )
+    run_records_df = _build_zscore_run_records_dataframe(
+        history_runs,
+        required_level_ids,
+    )
+
+    with st.container(border=True):
+        st.markdown("**规则与记录概览**")
+        st.caption(
+            "正式期重点查看多水平规则命中、警告 / 失控记录和完整检测记录；"
+            "建靶期重点查看各水平建靶状态。"
+        )
+
+        st.markdown("**本批次规则汇总**")
+        render_compact_stat_metrics(
+            [
+                *[
+                    (format_rule_code(rule_id), str(rule_summary.get(rule_id, 0)))
+                    for rule_id in rule_ids
+                ],
+                ("警告次数", str(rule_summary.get("warning_count", 0))),
+                ("失控次数", str(rule_summary.get("reject_count", 0))),
+            ]
+        )
+        rule_rows = [
+            {
+                "规则": format_rule_code(rule_id),
+                "命中次数": rule_summary.get(rule_id, 0),
+                "规则说明": format_rule_description(rule_id),
+            }
+            for rule_id in rule_ids
+        ]
+        st.dataframe(pd.DataFrame(rule_rows), hide_index=True, width="stretch")
+
+        with st.expander(
+            "警告 / 失控记录",
+            expanded=not abnormal_records_df.empty,
+        ):
+            if abnormal_records_df.empty:
+                st.info("当前正式期暂无警告或失控记录。")
+            else:
+                st.dataframe(abnormal_records_df, hide_index=True, width="stretch")
+
+        with st.expander("当前批次检测记录", expanded=False):
+            st.caption("查看当前批次建靶期与正式期的完整检测记录。")
+            if run_records_df.empty:
+                st.info("当前批次暂无检测记录。")
+            else:
+                st.dataframe(run_records_df, hide_index=True, width="stretch")
+
+        render_zscore_rules_config_expander(
+            template,
+            overall_phase,
+            formal_rules_enabled,
+        )
 
 
 def render_zscore_record_maintenance_entry(
@@ -1010,6 +1205,27 @@ def _clear_stale_download_payload(state_key: str, signature: tuple) -> dict[str,
     return payload
 
 
+def _ensure_download_payload(
+    state_key: str,
+    signature: tuple,
+    build_bytes,
+    *,
+    disabled: bool = False,
+) -> dict[str, object] | None:
+    if disabled:
+        st.session_state.pop(state_key, None)
+        return None
+
+    payload = _clear_stale_download_payload(state_key, signature)
+    if payload is None:
+        payload = {
+            "signature": signature,
+            "data": build_bytes(),
+        }
+        st.session_state[state_key] = payload
+    return payload
+
+
 def _ensure_zscore_workbench_session_defaults() -> None:
     if "zscore_entry_test_time" not in st.session_state:
         st.session_state["zscore_entry_test_time"] = datetime.now()
@@ -1355,7 +1571,6 @@ def render_zscore_chart_analysis_section(
     with st.container(border=True):
         render_zscore_latest_analysis_panel(latest_run, overall_phase, formal_rules_enabled)
     render_zscore_abnormal_note_quick_entry(latest_run)
-    render_zscore_rules_config_expander(template, overall_phase, formal_rules_enabled)
 
     project_name_fragment = build_safe_export_name(
         batch["project_name"] if "project_name" in batch.keys() else None,
@@ -1563,13 +1778,11 @@ def _render_zscore_export_import_section_impl(
         y_axis_mode,
         float(standard_sd_limit),
     )
-    current_png_payload = _clear_stale_download_payload(current_png_payload_key, current_png_signature)
-    if st.button("生成当前图 PNG", key=f"{current_png_payload_key}_prepare", width="stretch"):
-        current_png_payload = {
-            "signature": current_png_signature,
-            "data": figure_to_png_bytes(chart_panel_state["figure"]),
-        }
-        st.session_state[current_png_payload_key] = current_png_payload
+    current_png_payload = _ensure_download_payload(
+        current_png_payload_key,
+        current_png_signature,
+        lambda: figure_to_png_bytes(chart_panel_state["figure"]),
+    )
     chart_panel_state["current_png_bytes"] = (
         current_png_payload["data"] if current_png_payload is not None else b""
     )
@@ -1659,42 +1872,44 @@ def _render_zscore_export_import_section_impl(
     formal_payload_key = f"zscore_formal_export_payload_{selected_batch_id}"
     building_signature = (*export_data_signature, "building", zscore_export_format)
     formal_signature = (*export_data_signature, "formal", zscore_export_format)
-    building_payload = _clear_stale_download_payload(building_payload_key, building_signature)
-    formal_payload = _clear_stale_download_payload(formal_payload_key, formal_signature)
-
-    prepare_cols = st.columns(2)
-    if prepare_cols[0].button("生成建靶期导出文件", width="stretch", disabled=building_export_empty):
+    def _build_building_export_bytes() -> bytes:
         building_export_df_for_payload = build_zscore_phase_export_dataframe(
             history_runs,
             required_level_ids,
             "building",
             input_value_type,
         )
-        building_payload = {
-            "signature": building_signature,
-            "data": (
-                shared_dataframe_to_xlsx_bytes(building_export_df_for_payload)
-                if zscore_export_format == "Excel (.xlsx)"
-                else dataframe_to_csv_bytes(building_export_df_for_payload)
-            ),
-        }
-        st.session_state[building_payload_key] = building_payload
-    if prepare_cols[1].button("生成正式期导出文件", width="stretch", disabled=formal_export_empty):
+        return (
+            shared_dataframe_to_xlsx_bytes(building_export_df_for_payload)
+            if zscore_export_format == "Excel (.xlsx)"
+            else dataframe_to_csv_bytes(building_export_df_for_payload)
+        )
+
+    def _build_formal_export_bytes() -> bytes:
         formal_export_df_for_payload = build_zscore_phase_export_dataframe(
             history_runs,
             required_level_ids,
             "formal",
             input_value_type,
         )
-        formal_payload = {
-            "signature": formal_signature,
-            "data": (
-                shared_dataframe_to_xlsx_bytes(formal_export_df_for_payload)
-                if zscore_export_format == "Excel (.xlsx)"
-                else dataframe_to_csv_bytes(formal_export_df_for_payload)
-            ),
-        }
-        st.session_state[formal_payload_key] = formal_payload
+        return (
+            shared_dataframe_to_xlsx_bytes(formal_export_df_for_payload)
+            if zscore_export_format == "Excel (.xlsx)"
+            else dataframe_to_csv_bytes(formal_export_df_for_payload)
+        )
+
+    building_payload = _ensure_download_payload(
+        building_payload_key,
+        building_signature,
+        _build_building_export_bytes,
+        disabled=building_export_empty,
+    )
+    formal_payload = _ensure_download_payload(
+        formal_payload_key,
+        formal_signature,
+        _build_formal_export_bytes,
+        disabled=formal_export_empty,
+    )
 
     building_export_df = pd.DataFrame({"prepared": [1]}) if building_payload is not None else pd.DataFrame()
     formal_export_df = pd.DataFrame({"prepared": [1]}) if formal_payload is not None else pd.DataFrame()
@@ -1995,7 +2210,7 @@ def _render_zscore_export_import_section_impl(
 
     st.markdown("**图导出**")
     st.download_button(
-        label="导出当前图 PNG",
+        label="导出当前 Z-score 图 PNG",
         data=chart_panel_state["current_png_bytes"],
         file_name=(
             f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_"

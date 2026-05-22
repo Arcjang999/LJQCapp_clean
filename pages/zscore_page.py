@@ -19,6 +19,7 @@ from pages.zscore_sections import (
     render_zscore_export_import_section,
     render_zscore_record_maintenance_entry,
     render_zscore_maintenance_section,
+    render_zscore_rule_records_overview_section,
     render_zscore_vendor_reference_section,
 )
 from ui.common import (
@@ -221,6 +222,71 @@ def _render_zscore_level_summary_cards_section(context: dict[str, object]) -> No
             st.warning(range_warning)
 
 
+def _render_zscore_level_summary_compact_section(context: dict[str, object]) -> None:
+    realtime_profiles, range_text, start_date, end_date, has_formal_data, range_warning = _build_filtered_realtime_profiles(context)
+    batch_id = int(context["batch"]["id"])
+    level_label_map = context["level_label_map"]
+    level_target_profiles = context["level_target_profiles"]
+    required_level_ids = context["required_level_ids"]
+    building_summary = _build_level_building_summary(context)
+
+    rows: list[dict[str, object]] = []
+    for level_id in required_level_ids:
+        profile = level_target_profiles[level_id]
+        realtime_profile = realtime_profiles.get(level_id, {})
+        summary_item = building_summary.get(level_id, {})
+        display_label, _ = format_zscore_level_display(level_id, level_label_map)
+        building_mean = profile.get("final_target_mean") if profile.get("is_ready") else profile.get("provisional_mean")
+        building_sd = profile.get("final_target_sd") if profile.get("is_ready") else profile.get("provisional_sd")
+        building_cv = profile.get("final_target_cv") if profile.get("is_ready") else profile.get("provisional_cv")
+        rows.append(
+            {
+                "水平": display_label,
+                "建靶点": int(summary_item.get("effective_n", 0) or 0),
+                "禁用": int(summary_item.get("disabled_n", 0) or 0),
+                "阶段": str(profile.get("phase_label") or "-"),
+                "靶均值": format_optional_float(building_mean),
+                "靶SD": format_optional_float(building_sd),
+                "靶CV%": format_optional_float(building_cv, digits=2, suffix="%"),
+                "实时均值": format_optional_float(realtime_profile.get("realtime_mean")),
+                "实时SD": format_optional_float(realtime_profile.get("realtime_sd")),
+                "实时CV%": format_optional_float(realtime_profile.get("realtime_cv"), digits=2, suffix="%"),
+            }
+        )
+
+    with st.container(border=True):
+        st.markdown("**各水平统计摘要**")
+        st.caption("建靶统计与正式期实时统计压缩展示。")
+        if range_text is not None:
+            st.caption(f"正式期实时统计范围：{range_text}，仅包含正式期内在控数据。")
+        else:
+            st.info("当前批次还没有正式期数据，正式期实时统计暂为空。")
+
+        st.dataframe(
+            pd.DataFrame(rows),
+            hide_index=True,
+            width="stretch",
+            height=112 + max(len(rows), 1) * 36,
+        )
+
+        if has_formal_data:
+            with st.expander("正式期实时统计时间范围", expanded=False):
+                range_cols = st.columns(2)
+                range_cols[0].date_input(
+                    "开始日期",
+                    value=start_date,
+                    key=f"zscore_level_summary_start_{batch_id}",
+                )
+                range_cols[1].date_input(
+                    "结束日期",
+                    value=end_date,
+                    key=f"zscore_level_summary_end_{batch_id}",
+                )
+                st.caption("开始日期 / 结束日期会影响正式期实时统计数据。按日期统计，结束日期包含当日全部记录。")
+                if range_warning:
+                    st.warning(range_warning)
+
+
 def _render_zscore_maintenance_summary(context: dict[str, object]) -> None:
     history_runs = context["history_runs"]
     latest_run = context["latest_run"]
@@ -334,14 +400,14 @@ def render_zscore_page() -> None:
                     tone="accent",
                 )
                 render_zscore_entry_section(context, selected_batch_id)
+                _render_zscore_level_summary_compact_section(context)
 
         render_section_intro(
             title="历史与次要操作区",
-            caption="下方可查看各水平摘要、厂家参考、维护和导入导出。",
-            badges=["水平摘要", "维护", "导入导出"],
+            caption="下方可查看规则记录、厂家参考、维护和导入导出。",
             tone="muted",
         )
-        _render_zscore_level_summary_cards_section(context)
+        render_zscore_rule_records_overview_section(context)
 
         with st.container(border=True):
             render_section_intro(
