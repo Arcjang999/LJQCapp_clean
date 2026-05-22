@@ -19,6 +19,7 @@ from pages.zscore_sections import (
     render_zscore_export_import_section,
     render_zscore_record_maintenance_entry,
     render_zscore_maintenance_section,
+    render_zscore_rule_records_overview_section,
     render_zscore_vendor_reference_section,
 )
 from ui.common import (
@@ -337,10 +338,10 @@ def render_zscore_page() -> None:
 
         render_section_intro(
             title="历史与次要操作区",
-            caption="下方可查看各水平摘要、厂家参考、维护和导入导出。",
-            badges=["水平摘要", "维护", "导入导出"],
+            caption="下方可查看规则记录、各水平摘要、厂家参考、维护和导入导出。",
             tone="muted",
         )
+        render_zscore_rule_records_overview_section(context)
         _render_zscore_level_summary_cards_section(context)
 
         with st.container(border=True):

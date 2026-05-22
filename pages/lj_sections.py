@@ -276,38 +276,25 @@ def _clear_stale_download_payload(state_key: str, signature: tuple) -> dict[str,
     return payload
 
 
-def _render_prepared_download(
-    container,
-    *,
-    label: str,
-    prepare_label: str,
+def _ensure_download_payload(
     state_key: str,
     signature: tuple,
-    file_name: str,
-    mime: str,
-    disabled: bool,
     build_bytes,
-) -> None:
+    *,
+    disabled: bool = False,
+) -> dict[str, object] | None:
+    if disabled:
+        st.session_state.pop(state_key, None)
+        return None
+
     payload = _clear_stale_download_payload(state_key, signature)
-    if container.button(
-        prepare_label,
-        key=f"{state_key}_prepare",
-        width="stretch",
-        disabled=disabled,
-    ):
+    if payload is None:
         payload = {
             "signature": signature,
             "data": build_bytes(),
         }
         st.session_state[state_key] = payload
-    container.download_button(
-        label=label,
-        data=payload["data"] if payload is not None else b"",
-        file_name=file_name,
-        mime=mime,
-        width="stretch",
-        disabled=disabled or payload is None,
-    )
+    return payload
 
 
 def build_lj_workbench_context(selected_batch_id: int) -> dict[str, object]:
@@ -844,39 +831,39 @@ def _render_lj_export_import_section_impl(
     building_signature = (*export_data_signature, "building", export_format)
     formal_signature = (*export_data_signature, "formal", export_format)
     png_signature = (*export_data_signature, "current_png", tuple(sorted(chart_state.items())))
-    building_payload = _clear_stale_download_payload(building_payload_key, building_signature)
-    formal_payload = _clear_stale_download_payload(formal_payload_key, formal_signature)
-    png_payload = _clear_stale_download_payload(png_payload_key, png_signature)
-
-    prepare_cols = st.columns(3)
-    if prepare_cols[0].button("生成建靶期导出文件", width="stretch", disabled=building_export_empty):
+    def _build_building_export_bytes() -> bytes:
         building_export_df_for_payload = export_batch_results_for_phase(batch, qc_df, "building")
-        building_payload = {
-            "signature": building_signature,
-            "data": (
-                shared_dataframe_to_xlsx_bytes(building_export_df_for_payload)
-                if export_format == "Excel (.xlsx)"
-                else dataframe_to_csv_bytes(building_export_df_for_payload)
-            ),
-        }
-        st.session_state[building_payload_key] = building_payload
-    if prepare_cols[1].button("生成正式期导出文件", width="stretch", disabled=formal_export_empty):
+        return (
+            shared_dataframe_to_xlsx_bytes(building_export_df_for_payload)
+            if export_format == "Excel (.xlsx)"
+            else dataframe_to_csv_bytes(building_export_df_for_payload)
+        )
+
+    def _build_formal_export_bytes() -> bytes:
         formal_export_df_for_payload = export_batch_results_for_phase(batch, qc_df, "formal")
-        formal_payload = {
-            "signature": formal_signature,
-            "data": (
-                shared_dataframe_to_xlsx_bytes(formal_export_df_for_payload)
-                if export_format == "Excel (.xlsx)"
-                else dataframe_to_csv_bytes(formal_export_df_for_payload)
-            ),
-        }
-        st.session_state[formal_payload_key] = formal_payload
-    if prepare_cols[2].button("生成当前图 PNG", width="stretch"):
-        png_payload = {
-            "signature": png_signature,
-            "data": figure_to_png_bytes(figure),
-        }
-        st.session_state[png_payload_key] = png_payload
+        return (
+            shared_dataframe_to_xlsx_bytes(formal_export_df_for_payload)
+            if export_format == "Excel (.xlsx)"
+            else dataframe_to_csv_bytes(formal_export_df_for_payload)
+        )
+
+    building_payload = _ensure_download_payload(
+        building_payload_key,
+        building_signature,
+        _build_building_export_bytes,
+        disabled=building_export_empty,
+    )
+    formal_payload = _ensure_download_payload(
+        formal_payload_key,
+        formal_signature,
+        _build_formal_export_bytes,
+        disabled=formal_export_empty,
+    )
+    png_payload = _ensure_download_payload(
+        png_payload_key,
+        png_signature,
+        lambda: figure_to_png_bytes(figure),
+    )
 
     building_export_df = pd.DataFrame({"prepared": [1]}) if building_payload is not None else pd.DataFrame()
     formal_export_df = pd.DataFrame({"prepared": [1]}) if formal_payload is not None else pd.DataFrame()
