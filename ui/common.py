@@ -116,91 +116,6 @@ GLOBAL_PAGE_WATERMARK_FILL_OPACITY = 0.18
 GLOBAL_PAGE_WATERMARK_TILE_WIDTH_PX = 760
 GLOBAL_PAGE_WATERMARK_TILE_HEIGHT_PX = 260
 GLOBAL_PAGE_WATERMARK_LAYER_Z_INDEX = 1000
-DEMO_CHART_NOTICE_TEXT = "仅演示，请勿用于真实质控"
-
-
-def _normalize_chart_text(value: Any) -> str:
-    cleaned = " ".join(str(value or "").replace("\n", " ").split()).strip()
-    if not cleaned:
-        return ""
-    cleaned = cleaned.replace(DEMO_CHART_NOTICE_TEXT, "")
-    cleaned = cleaned.replace("仅演示，请勿用于真实质控。", "")
-    cleaned = cleaned.replace("仅演示，请勿用于真实质控；", "")
-    cleaned = cleaned.strip(" -｜|，,；;")
-    return " ".join(cleaned.split()).strip()
-
-
-def compact_text(value: Any, max_chars: int = 18) -> str:
-    cleaned = _normalize_chart_text(value)
-    if max_chars <= 0 or len(cleaned) <= max_chars:
-        return cleaned
-    if max_chars <= 1:
-        return cleaned[:max_chars]
-    return f"{cleaned[: max_chars - 1]}…"
-
-
-def compact_project_chart_name(value: Any, max_chars: int = 18) -> str:
-    cleaned = _normalize_chart_text(value)
-    if cleaned.startswith("【演示】"):
-        cleaned = cleaned[len("【演示】") :].strip()
-    demo_fragments = [
-        ("SI疑似离群", "SI疑似离群"),
-        ("可转入LJ", "可转入LJ"),
-        ("系统误差规则", "系统误差规则"),
-        ("随机误差规则", "随机误差规则"),
-        ("双水平", "双水平规则触发") if "正式期规则" in cleaned else ("", ""),
-        ("三水平", "三水平规则触发") if "正式期规则" in cleaned else ("", ""),
-        ("正式期在控", "正式期在控"),
-        ("待正式期", "待正式期"),
-        ("建靶离群处理", "建靶离群处理"),
-    ]
-    for marker, label in demo_fragments:
-        if marker and marker in cleaned:
-            return compact_text(label, max_chars=max_chars)
-    if "-" in cleaned:
-        cleaned = cleaned.rsplit("-", 1)[-1].strip()
-    if "：" in cleaned:
-        cleaned = cleaned.split("：", 1)[0].strip()
-    return compact_text(cleaned, max_chars=max_chars)
-
-
-def build_compact_chart_title(
-    parts: list[Any] | tuple[Any, ...],
-    max_line_chars: int = 42,
-    max_lines: int = 2,
-) -> str:
-    cleaned_parts = [
-        compact_text(part, max_chars=min(22, max(8, max_line_chars // 2)))
-        for part in parts
-    ]
-    cleaned_parts = [part for part in cleaned_parts if part]
-    if not cleaned_parts:
-        return ""
-
-    lines: list[str] = []
-    current_line = ""
-    for part in cleaned_parts:
-        candidate = part if not current_line else f"{current_line}｜{part}"
-        if len(candidate) <= max_line_chars or not current_line:
-            current_line = candidate
-            continue
-        lines.append(current_line)
-        current_line = part
-    if current_line:
-        lines.append(current_line)
-
-    if len(lines) > max_lines:
-        overflow = "｜".join(lines[max_lines - 1 :])
-        lines = [*lines[: max_lines - 1], compact_text(overflow, max_chars=max_line_chars)]
-    return "\n".join(lines[:max_lines])
-
-
-def render_chart_figure(figure, *, close: bool = False) -> None:
-    st.pyplot(figure, clear_figure=False, width="stretch")
-    if close:
-        import matplotlib.pyplot as plt
-
-        plt.close(figure)
 
 
 def _build_global_watermark_data_uri() -> str:
@@ -300,13 +215,6 @@ def inject_global_styles() -> None:
             overflow: hidden;
             background: #ffffff;
             box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
-        }
-        div[data-testid="stImage"] {
-            width: 100% !important;
-        }
-        div[data-testid="stImage"] img {
-            max-width: 100% !important;
-            height: auto !important;
         }
         div[data-testid="stAlert"] {
             border-radius: 14px;

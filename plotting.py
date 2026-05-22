@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from io import BytesIO
 import math
+from pathlib import Path
 
 import matplotlib
 from matplotlib import font_manager
 from matplotlib.lines import Line2D
 from matplotlib.ticker import FixedLocator
 import pandas as pd
+from services.profiling import profile_timer
 
 
 matplotlib.use("Agg")
@@ -32,22 +34,60 @@ CJK_FONT_CANDIDATES = [
     "Arial Unicode MS",
 ]
 
+LINUX_CJK_FONT_FILE_CANDIDATES = [
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+]
 
-def _get_available_font_fallbacks() -> list[str]:
+
+def _append_unique_font_name(font_names: list[str], font_name: str | None) -> None:
+    resolved_name = str(font_name or "").strip()
+    if resolved_name and resolved_name not in font_names:
+        font_names.append(resolved_name)
+
+
+def _register_linux_cjk_fonts() -> list[str]:
+    registered_fonts: list[str] = []
+    for font_file in LINUX_CJK_FONT_FILE_CANDIDATES:
+        if not Path(font_file).is_file():
+            continue
+        try:
+            font_manager.fontManager.addfont(font_file)
+            registered_name = font_manager.FontProperties(fname=font_file).get_name()
+        except Exception:
+            continue
+        _append_unique_font_name(registered_fonts, registered_name)
+    return registered_fonts
+
+
+def _get_available_font_name_map() -> dict[str, str]:
     available_fonts: dict[str, str] = {}
     for font in font_manager.fontManager.ttflist:
         normalized_name = font.name.strip().lower()
-        if normalized_name not in available_fonts:
-            available_fonts[normalized_name] = font.name
+        if normalized_name and normalized_name not in available_fonts:
+            available_fonts[normalized_name] = font.name.strip()
+    return available_fonts
+
+
+def _get_available_font_fallbacks() -> list[str]:
+    registered_fonts = _register_linux_cjk_fonts()
+    available_fonts = _get_available_font_name_map()
 
     configured_fonts: list[str] = []
+    for registered_name in registered_fonts:
+        _append_unique_font_name(
+            configured_fonts,
+            available_fonts.get(registered_name.lower(), registered_name),
+        )
+
     for candidate in CJK_FONT_CANDIDATES:
         matched_font = available_fonts.get(candidate.lower())
-        if matched_font and matched_font not in configured_fonts:
-            configured_fonts.append(matched_font)
+        _append_unique_font_name(configured_fonts, matched_font)
 
-    if "DejaVu Sans" not in configured_fonts:
-        configured_fonts.append("DejaVu Sans")
+    configured_fonts = [name for name in configured_fonts if name != "DejaVu Sans"]
+    configured_fonts.append("DejaVu Sans")
     return configured_fonts
 
 
@@ -63,13 +103,6 @@ CONFIGURED_FONT_FALLBACKS = configure_matplotlib_fonts()
 print(f"[plotting] CONFIGURED_FONT_FALLBACKS={CONFIGURED_FONT_FALLBACKS}")
 
 MANUAL_NOTE_EDGE_COLOR = "#2f4858"
-LJ_FIGSIZE = (12.8, 6.4)
-INSTANT_FIGSIZE = (12.8, 6.2)
-CHART_DPI = 140
-
-
-def _apply_chart_layout(figure, *, right: float = 0.88, top: float = 0.88) -> None:
-    figure.subplots_adjust(left=0.07, right=right, top=top, bottom=0.14)
 
 
 def plot_lj_chart(
@@ -81,11 +114,12 @@ def plot_lj_chart(
     standard_sd_limit: float = 4.0,
     y_axis_label: str = "检测值",
 ):
-    figure, axis = plt.subplots(figsize=LJ_FIGSIZE, dpi=CHART_DPI)
+<<<<<<< HEAD
+    figure, axis = plt.subplots(figsize=(9.4, 5.9), dpi=150)
     plot_df = _filter_view_data(qc_df, view_mode)
 
     if plot_df.empty:
-        axis.set_title(title, pad=8, fontsize=12)
+        axis.set_title(title, pad=10)
         axis.text(
             0.5,
             0.5,
@@ -95,7 +129,7 @@ def plot_lj_chart(
             transform=axis.transAxes,
         )
         axis.set_axis_off()
-        _apply_chart_layout(figure)
+        figure.tight_layout(pad=0.7)
         return figure
 
     y_limits = _get_y_limits(plot_df, stats, y_axis_mode, standard_sd_limit)
@@ -126,15 +160,77 @@ def plot_lj_chart(
         _plot_out_of_range_markers(axis, display_df, y_limits)
     _plot_manual_note_highlights(axis, display_df)
 
-    axis.set_title(title, pad=8, fontsize=12)
+    axis.set_title(title, pad=10)
     axis.set_xlabel("\u68c0\u6d4b\u5e8f\u53f7")
     axis.set_ylabel(y_axis_label)
     _configure_x_axis(axis, display_df)
     axis.grid(True, linestyle=":", alpha=0.35)
     _add_lj_legend(axis)
-    _apply_chart_layout(figure)
+    figure.tight_layout(pad=0.7)
     return figure
 
+=======
+    with profile_timer(
+        "plot_lj_chart",
+        rows=0 if qc_df is None else len(qc_df),
+        view_mode=view_mode,
+        y_axis_mode=y_axis_mode,
+    ):
+        figure, axis = plt.subplots(figsize=(9.4, 5.9), dpi=150)
+        plot_df = _filter_view_data(qc_df, view_mode)
+
+        if plot_df.empty:
+            axis.set_title(title, pad=10)
+            axis.text(
+                0.5,
+                0.5,
+                "\u6682\u65e0\u6570\u636e",
+                ha="center",
+                va="center",
+                transform=axis.transAxes,
+            )
+            axis.set_axis_off()
+            figure.tight_layout(pad=0.7)
+            return figure
+
+        y_limits = _get_y_limits(plot_df, stats, y_axis_mode, standard_sd_limit)
+        display_df = _build_display_dataframe(plot_df, y_limits)
+        x_values = display_df["sequence"]
+        y_values = display_df["display_value"]
+        axis.plot(x_values, y_values, color="#4e79a7", linewidth=1.2, alpha=0.8)
+
+        target_df = display_df[display_df["phase"] == "\u5efa\u9776\u6570\u636e"]
+        if not target_df.empty:
+            axis.scatter(
+                target_df["sequence"],
+                target_df["display_value"],
+                color="#4e79a7",
+                s=42,
+                label="\u5efa\u9776\u6570\u636e",
+                zorder=3,
+            )
+
+        formal_df = display_df[display_df["phase"] == "\u6b63\u5f0f\u6570\u636e"]
+        _plot_status_points(axis, formal_df)
+        _plot_reagent_change_lines(axis, display_df)
+
+        if stats.get("target_ready"):
+            _plot_control_lines(axis, stats["mean"], stats["sd"])
+        if y_limits is not None:
+            axis.set_ylim(y_limits)
+            _plot_out_of_range_markers(axis, display_df, y_limits)
+        _plot_manual_note_highlights(axis, display_df)
+
+        axis.set_title(title, pad=10)
+        axis.set_xlabel("\u68c0\u6d4b\u5e8f\u53f7")
+        axis.set_ylabel(y_axis_label)
+        _configure_x_axis(axis, display_df)
+        axis.grid(True, linestyle=":", alpha=0.35)
+        _add_lj_legend(axis)
+        figure.tight_layout(pad=0.7)
+        return figure
+
+>>>>>>> parent of 7854a75 (Merge branch 'V1-debug')
 
 def _plot_status_points(axis, formal_df: pd.DataFrame) -> None:
     if formal_df.empty:
@@ -399,9 +495,9 @@ def plot_instant_chart(
     *,
     y_axis_label: str = "检测值",
 ):
-    figure, axis = plt.subplots(figsize=INSTANT_FIGSIZE, dpi=CHART_DPI)
+    figure, axis = plt.subplots(figsize=(9.2, 5.6), dpi=150)
     if analysis_df.empty:
-        axis.set_title(title, pad=8, fontsize=12)
+        axis.set_title(title, pad=10)
         axis.text(
             0.5,
             0.5,
@@ -411,13 +507,13 @@ def plot_instant_chart(
             transform=axis.transAxes,
         )
         axis.set_axis_off()
-        _apply_chart_layout(figure)
+        figure.tight_layout(pad=0.7)
         return figure
 
     plot_df = analysis_df[analysis_df["is_effective"] == 1].copy()
     plot_df = plot_df.sort_values(["test_time", "id"]).reset_index(drop=True)
     if plot_df.empty:
-        axis.set_title(title, pad=8, fontsize=12)
+        axis.set_title(title, pad=10)
         axis.text(
             0.5,
             0.5,
@@ -427,7 +523,7 @@ def plot_instant_chart(
             transform=axis.transAxes,
         )
         axis.set_axis_off()
-        _apply_chart_layout(figure)
+        figure.tight_layout(pad=0.7)
         return figure
 
     if "effective_sequence" not in plot_df.columns or plot_df["effective_sequence"].isna().all():
@@ -504,7 +600,7 @@ def plot_instant_chart(
             axis.axhline(lower, color="#76b7b2", linewidth=1.0, linestyle="--", label="-1SD")
 
     _configure_instant_x_axis(axis, plot_df)
-    axis.set_title(title, pad=8, fontsize=12)
+    axis.set_title(title, pad=10)
     axis.set_xlabel("有效点序号")
     axis.set_ylabel(y_axis_label)
     axis.grid(True, linestyle=":", alpha=0.35)
@@ -518,7 +614,7 @@ def plot_instant_chart(
         unique_handles.append(handle)
         unique_labels.append(label)
     axis.legend(unique_handles, unique_labels, loc="best")
-    _apply_chart_layout(figure)
+    figure.tight_layout(pad=0.7)
     return figure
 
 
@@ -543,8 +639,17 @@ def _configure_instant_x_axis(axis, plot_df: pd.DataFrame) -> None:
     axis.set_xticklabels(tick_labels)
 
 
-def figure_to_png_bytes(figure) -> bytes:
+def figure_to_png_bytes(figure, *, close: bool = False) -> bytes:
     buffer = BytesIO()
-    figure.savefig(buffer, format="png", bbox_inches="tight")
-    buffer.seek(0)
-    return buffer.getvalue()
+    try:
+        figure.savefig(buffer, format="png", bbox_inches="tight")
+        buffer.seek(0)
+        return buffer.getvalue()
+    finally:
+        if close:
+            plt.close(figure)
+
+
+def close_figure(figure) -> None:
+    if figure is not None:
+        plt.close(figure)

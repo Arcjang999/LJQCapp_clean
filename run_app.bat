@@ -2,54 +2,34 @@
 setlocal
 chcp 65001 >nul
 
+set "PYTHON_EXE=C:\Users\gao_h\AppData\Local\Python\bin\python.exe"
 set "SCRIPT_DIR=%~dp0"
 set "APP_PORT=8506"
-set "PYTHON_CMD="
-set "PYTHON_ARG="
-
-if exist "%SCRIPT_DIR%.venv\Scripts\python.exe" (
-  set "PYTHON_CMD=%SCRIPT_DIR%.venv\Scripts\python.exe"
-)
-
-if not defined PYTHON_CMD (
-  py -3 --version >nul 2>nul
-  if not errorlevel 1 (
-    set "PYTHON_CMD=py"
-    set "PYTHON_ARG=-3"
-  )
-)
-
-if not defined PYTHON_CMD (
-  python --version >nul 2>nul
-  if not errorlevel 1 (
-    set "PYTHON_CMD=python"
-  )
-)
-
-if not defined PYTHON_CMD (
-  echo [ERROR] Python was not found.
-  echo Tried: .venv\Scripts\python.exe, py -3, python
-  pause
-  exit /b 1
-)
 
 echo [LJQCApp] Starting app...
-echo URL: http://127.0.0.1:%APP_PORT%
+echo Local URL: http://127.0.0.1:%APP_PORT%
 echo.
 
+if not exist "%PYTHON_EXE%" (
+    echo [ERROR] Python interpreter not found:
+    echo %PYTHON_EXE%
+    echo.
+    pause
+    exit /b 1
+)
+
 pushd "%SCRIPT_DIR%"
-"%PYTHON_CMD%" %PYTHON_ARG% "%SCRIPT_DIR%run_app.py" --port %APP_PORT%
+"%PYTHON_EXE%" -m streamlit run "app.py" --server.headless true --server.port %APP_PORT%
 set "RUN_EXIT_CODE=%ERRORLEVEL%"
 popd
 
 if not "%RUN_EXIT_CODE%"=="0" (
-  echo [FAILED] Command failed. Exit code: %RUN_EXIT_CODE%
-  echo Install dependencies with: "%PYTHON_CMD%" %PYTHON_ARG% -m pip install -r requirements.txt
-  pause
-  exit /b %RUN_EXIT_CODE%
+    echo.
+    echo [INFO] App exited with code: %RUN_EXIT_CODE%
+    echo.
+    pause
+    exit /b %RUN_EXIT_CODE%
 )
 
-echo [OK] Done.
 pause
 exit /b 0
-

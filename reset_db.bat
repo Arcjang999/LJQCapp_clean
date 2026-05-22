@@ -2,51 +2,35 @@
 setlocal
 chcp 65001 >nul
 
+set "PYTHON_EXE=C:\Users\gao_h\AppData\Local\Python\bin\python.exe"
 set "SCRIPT_DIR=%~dp0"
-set "PYTHON_CMD="
-set "PYTHON_ARG="
 
-if exist "%SCRIPT_DIR%.venv\Scripts\python.exe" (
-  set "PYTHON_CMD=%SCRIPT_DIR%.venv\Scripts\python.exe"
-)
-
-if not defined PYTHON_CMD (
-  py -3 --version >nul 2>nul
-  if not errorlevel 1 (
-    set "PYTHON_CMD=py"
-    set "PYTHON_ARG=-3"
-  )
-)
-
-if not defined PYTHON_CMD (
-  python --version >nul 2>nul
-  if not errorlevel 1 (
-    set "PYTHON_CMD=python"
-  )
-)
-
-if not defined PYTHON_CMD (
-  echo [ERROR] Python was not found.
-  echo Tried: .venv\Scripts\python.exe, py -3, python
-  pause
-  exit /b 1
-)
-
-echo [LJQCApp] Reset database...
+echo [LJQCApp] Resetting database...
 echo.
 
-pushd "%SCRIPT_DIR%"
-"%PYTHON_CMD%" %PYTHON_ARG% "%SCRIPT_DIR%run_app.py" --reset-db --yes
-set "RUN_EXIT_CODE=%ERRORLEVEL%"
-popd
-
-if not "%RUN_EXIT_CODE%"=="0" (
-  echo [FAILED] Command failed. Exit code: %RUN_EXIT_CODE%
-  pause
-  exit /b %RUN_EXIT_CODE%
+if not exist "%PYTHON_EXE%" (
+    echo [ERROR] Python interpreter not found:
+    echo %PYTHON_EXE%
+    echo.
+    echo Please check whether Python is installed correctly.
+    echo.
+    pause
+    exit /b 1
 )
 
-echo [OK] Done.
+"%PYTHON_EXE%" "%SCRIPT_DIR%reset_db.py"
+if errorlevel 1 (
+    echo.
+    echo [FAILED] Database reset did not complete.
+    echo Please close the running app and try again.
+    echo.
+    pause
+    exit /b 1
+)
+
+echo.
+echo [OK] Database reset complete.
+echo Please restart the app.
+echo.
 pause
 exit /b 0
-

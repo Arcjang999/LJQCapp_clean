@@ -46,16 +46,12 @@ from services.value_type_service import (
 from ui.common import (
     TEXT,
     build_chart_control_title,
-    build_compact_chart_title,
     build_operator_options,
     build_safe_export_name,
-    compact_project_chart_name,
-    compact_text,
     format_rule_code,
     format_rule_description,
     get_saved_batch_cv_limit,
     prepare_display_records,
-    render_chart_figure,
     render_compact_stat_metrics,
     render_cv_limit_hint,
     render_import_review_summary,
@@ -350,9 +346,12 @@ def build_lj_workbench_context(selected_batch_id: int) -> dict[str, object]:
 
 def _build_lj_chart_title(batch, view_mode: str) -> str:
     batch_dict = dict(batch)
-    lot_no = compact_text(batch_dict.get("lot_no"), max_chars=18) or "当前批次"
-    project_name = compact_project_chart_name(batch_dict.get("project_name"), max_chars=18)
-    return build_compact_chart_title([view_mode, lot_no, project_name])
+    lot_no = str(batch_dict.get("lot_no", "") or "").strip()
+    batch_label = f"质控批号 {lot_no}" if lot_no else "当前批次"
+    return (
+        f"{view_mode} - {batch_label} - {batch['instrument']} - "
+        f"{batch['reagent']} - {batch['qc_material']} - {batch['concentration']}"
+    )
 
 
 def _get_lj_chart_state(batch) -> dict[str, object]:
@@ -623,7 +622,7 @@ def render_lj_chart_and_analysis_section(
             standard_sd_limit=chart_standard_sd_limit,
             y_axis_label=input_value_type_label,
         )
-        render_chart_figure(figure)
+        st.pyplot(figure, clear_figure=False, width="stretch")
 
     with st.container(border=True):
         st.markdown("**最新结果分析**")

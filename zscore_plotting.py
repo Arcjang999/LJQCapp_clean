@@ -67,18 +67,6 @@ REFERENCE_LINE_COLORS = {
 }
 
 MANUAL_NOTE_EDGE_COLOR = "#2f4858"
-ZSCORE_SINGLE_FIGSIZE = (12.8, 6.4)
-ZSCORE_OVERLAY_FIGSIZE = (13.8, 6.6)
-ZSCORE_DPI = 140
-
-
-def _apply_zscore_chart_layout(
-    figure,
-    *,
-    right: float = 0.94,
-    top: float = 0.88,
-) -> None:
-    figure.subplots_adjust(left=0.07, right=right, top=top, bottom=0.14)
 
 
 def _append_unique_font_name(font_names: list[str], font_name: str | None) -> None:
@@ -181,7 +169,7 @@ def _plot_zscore_single_level_impl(
     if not _can_plot_zscore_frame(scoped_df):
         return _build_empty_zscore_figure(title, "暂无可绘制数据", "请先录入当前批次的 Z-score 结果。")
 
-    figure, axis = plt.subplots(figsize=ZSCORE_SINGLE_FIGSIZE, dpi=ZSCORE_DPI)
+    figure, axis = plt.subplots(figsize=(9.4, 5.9), dpi=150)
     level_df = scoped_df[scoped_df["level_id"] == level_id].sort_values("run_index").copy()
     if level_df.empty:
         plt.close(figure)
@@ -220,11 +208,11 @@ def _plot_zscore_single_level_impl(
         _plot_out_of_range_markers(axis, display_df, y_limits)
     _plot_manual_note_highlights(axis, display_df)
     _configure_x_axis(axis, display_df)
-    axis.set_title(title, pad=8, fontsize=12)
+    axis.set_title(title, pad=10)
     axis.set_xlabel("检测序号")
     axis.set_ylabel(y_axis_label)
     axis.grid(True, linestyle=":", alpha=0.3)
-    _apply_zscore_chart_layout(figure, right=0.94)
+    figure.tight_layout(pad=0.7)
     _add_manual_legends(axis, display_df, show_reference_lines=show_reference_lines)
     return figure
 
@@ -271,7 +259,7 @@ def _plot_zscore_overlay_impl(
     if not _can_plot_zscore_frame(scoped_df):
         return _build_empty_zscore_figure(title, "暂无可绘制数据", "请先录入当前批次的 Z-score 结果。")
 
-    figure, axis = plt.subplots(figsize=ZSCORE_OVERLAY_FIGSIZE, dpi=ZSCORE_DPI)
+    figure, axis = plt.subplots(figsize=(9.4, 5.9), dpi=150)
     overlay_df = scoped_df.copy()
     if active_levels:
         overlay_df = overlay_df[overlay_df["level_id"].isin(active_levels)].copy()
@@ -315,11 +303,11 @@ def _plot_zscore_overlay_impl(
         _plot_out_of_range_markers(axis, display_df, y_limits)
     _plot_manual_note_highlights(axis, display_df)
     _configure_x_axis(axis, display_df)
-    axis.set_title(title, pad=8, fontsize=12)
+    axis.set_title(title, pad=10)
     axis.set_xlabel("检测序号")
     axis.set_ylabel(y_axis_label)
     axis.grid(True, linestyle=":", alpha=0.3)
-    _apply_zscore_chart_layout(figure, right=0.80)
+    figure.tight_layout(rect=(0.0, 0.0, 0.76, 1.0), pad=0.7)
     _add_manual_legends(
         axis,
         display_df,
@@ -965,8 +953,8 @@ def _can_plot_zscore_frame(plot_df: pd.DataFrame | None) -> bool:
 
 
 def _build_empty_zscore_figure(title: str, message: str, subtitle: str = ""):
-    figure, axis = plt.subplots(figsize=ZSCORE_SINGLE_FIGSIZE, dpi=ZSCORE_DPI)
-    axis.set_title(title, pad=8, fontsize=12)
+    figure, axis = plt.subplots(figsize=(9.4, 5.9), dpi=150)
+    axis.set_title(title, pad=10)
     axis.text(0.5, 0.54, message, ha="center", va="center", transform=axis.transAxes, fontsize=12)
     if subtitle:
         axis.text(
@@ -980,7 +968,7 @@ def _build_empty_zscore_figure(title: str, message: str, subtitle: str = ""):
             color="#66768a",
         )
     axis.set_axis_off()
-    _apply_zscore_chart_layout(figure, right=0.94)
+    figure.tight_layout(pad=0.7)
     return figure
 
 

@@ -302,7 +302,7 @@ def render_zscore_page() -> None:
             badges=["多水平（Z-score法）", f"{level_count} 水平", context["overall_phase_label"], input_value_type_label],
             tone="accent",
         )
-        entry_col, chart_col = st.columns([0.74, 1.64], gap="large")
+        entry_col, chart_col = st.columns([0.94, 1.24], gap="large")
 
         with chart_col:
             with st.container():

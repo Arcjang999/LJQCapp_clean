@@ -151,37 +151,6 @@ python reset_db.py
 
 - `reset_db.bat`
 
-## 演示数据
-
-用于同事外出演示或培训时，可直接使用根目录快捷脚本生成标准演示库：
-
-- 双击 `导入演示数据.bat`：导入 full profile，并先替换旧的“【演示】”数据，不删除真实数据。
-- 双击 `重置并导入演示数据.bat`：清空整个数据库后导入 full profile，脚本会要求输入 `YES` 二次确认。
-- 双击 `只删除演示数据.bat`：只删除项目名以“【演示】”开头的 LJ / Z-score / Instant 演示数据，不动真实项目。
-- 双击 `重置数据库.bat` 或 `reset_db.bat`：只清空数据库，不导入演示数据。
-
-所有演示项目和批次均以“【演示】”开头，并带有“仅演示，请勿用于真实质控”提示。演示数据仅供培训、展示和流程熟悉，不可用于真实室内质控。
-
-演示数据默认按 20 个有效建靶点生成：LJ 已完成建靶批次为 20 个有效建靶点，Z-score 双水平为每个水平各 20 个有效建靶值，三水平为 Level 1 / Level 2 / Level 3 各 20 个有效建靶值；Instant 演示批次也按 20 个有效点设计。
-
-源码版也可以使用 CLI：
-
-```powershell
-py tools\seed_demo_data.py --profile full --replace-demo
-py tools\seed_demo_data.py --profile basic --replace-demo
-py tools\seed_demo_data.py --validate-only
-py tools\seed_demo_data.py --reset-all --yes --profile full
-```
-
-封装版可通过同一入口执行：
-
-```powershell
-LJQCApp.exe --seed-demo --profile full --replace-demo
-LJQCApp.exe --delete-demo
-LJQCApp.exe --reset-and-seed-demo --yes --profile full
-LJQCApp.exe --reset-db --yes
-```
-
 ## 使用说明摘要
 
 ### LJ
@@ -268,5 +237,3 @@ python tests/zscore_smoke_test.py
 - `packaging/LJQCApp.spec`：PyInstaller 配置
 - `run_app.py` / `run_app.bat`：应用启动脚本
 - `reset_db.py` / `reset_db.bat`：数据库重置脚本
-- `tools/seed_demo_data.py`：演示数据导入、替换、验证脚本
-- `导入演示数据.bat` / `只删除演示数据.bat` / `重置并导入演示数据.bat`：外出演示快捷入口
