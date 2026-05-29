@@ -402,11 +402,15 @@ def normalize_generated_report_text(text: object) -> str:
 
 
 def list_lj_report_month_options(batch_id: int) -> list[str]:
-    results_df = get_results(batch_id, include_manual_note=True)
-    if results_df.empty:
+    qc_df, _ = persist_lj_batch_outlier_snapshot(batch_id)
+    if qc_df.empty:
         return []
+    formal_df = qc_df[qc_df["phase"] == LJ_FORMAL_PHASE_LABEL].copy()
+    if formal_df.empty:
+        return []
+    formal_df["test_time"] = pd.to_datetime(formal_df["test_time"], errors="coerce")
     months = (
-        results_df["test_time"]
+        formal_df["test_time"]
         .dropna()
         .dt.to_period("M")
         .astype(str)
@@ -586,7 +590,7 @@ def list_zscore_report_month_options(batch_id: int) -> list[str]:
     run_times = [
         pd.Timestamp(run["test_time"])
         for run in history_runs
-        if run.get("test_time") is not None
+        if run.get("test_time") is not None and str(run.get("phase")) == PHASE_FORMAL_QC
     ]
     if not run_times:
         return []

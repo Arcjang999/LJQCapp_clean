@@ -13,7 +13,9 @@ if str(PROJECT_ROOT) not in sys.path:
 import database
 from database import create_project, get_connection, init_db
 from services.demo_data_service import (
+    BUILDING_RECORD_COUNT,
     DEMO_PREFIX,
+    FORMAL_RECORDS_PER_MONTH,
     delete_demo_data,
     seed_demo_data,
     validate_demo_data,
@@ -21,6 +23,8 @@ from services.demo_data_service import (
 from services.report_service import (
     build_lj_monthly_report_package,
     build_zscore_monthly_report_package,
+    list_lj_report_month_options,
+    list_zscore_report_month_options,
 )
 
 
@@ -66,6 +70,24 @@ def _table_count(table_name: str) -> int:
     return int(row["count_value"])
 
 
+def _batch_result_count(batch_id: int) -> int:
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT COUNT(1) AS count_value FROM results WHERE batch_id = ?",
+            (int(batch_id),),
+        ).fetchone()
+    return int(row["count_value"])
+
+
+def _batch_zscore_run_count(batch_id: int) -> int:
+    with get_connection() as connection:
+        row = connection.execute(
+            "SELECT COUNT(1) AS count_value FROM zscore_runs WHERE batch_id = ?",
+            (int(batch_id),),
+        ).fetchone()
+    return int(row["count_value"])
+
+
 def _demo_project_count() -> int:
     with get_connection() as connection:
         project_count = connection.execute(
@@ -80,8 +102,10 @@ def _demo_project_count() -> int:
 
 
 def _assert_lj_report(project_name: str, month: str, *, abnormal_expected: bool) -> None:
-    package = build_lj_monthly_report_package(_find_batch_id(project_name), month)
-    assert package.report.statistics.formal_count == 20
+    batch_id = _find_batch_id(project_name)
+    package = build_lj_monthly_report_package(batch_id, month)
+    assert package.report.statistics.formal_count == FORMAL_RECORDS_PER_MONTH
+    assert set(list_lj_report_month_options(batch_id)) == {"2026-04", "2026-05"}
     if abnormal_expected:
         assert package.report.abnormal_records
         assert all(record.manual_note.strip() for record in package.report.abnormal_records)
@@ -90,13 +114,27 @@ def _assert_lj_report(project_name: str, month: str, *, abnormal_expected: bool)
 
 
 def _assert_zscore_report(project_name: str, month: str, *, abnormal_expected: bool) -> None:
-    package = build_zscore_monthly_report_package(_find_batch_id(project_name), month)
-    assert package.report.statistics.formal_count == 20
+    batch_id = _find_batch_id(project_name)
+    package = build_zscore_monthly_report_package(batch_id, month)
+    assert package.report.statistics.formal_count == FORMAL_RECORDS_PER_MONTH
+    assert set(list_zscore_report_month_options(batch_id)) == {"2026-04", "2026-05"}
     if abnormal_expected:
         assert package.report.abnormal_records
         assert all(record.manual_note.strip() for record in package.report.abnormal_records)
         assert package.report.corrective_actions
         assert "未填写" not in "\n".join(package.report.corrective_actions)
+
+
+def _assert_lj_demo_total(project_name: str) -> None:
+    batch_id = _find_batch_id(project_name)
+    assert _batch_result_count(batch_id) == BUILDING_RECORD_COUNT + FORMAL_RECORDS_PER_MONTH * 2
+    assert "2026-03" not in list_lj_report_month_options(batch_id)
+
+
+def _assert_zscore_demo_total(project_name: str) -> None:
+    batch_id = _find_batch_id(project_name)
+    assert _batch_zscore_run_count(batch_id) == BUILDING_RECORD_COUNT + FORMAL_RECORDS_PER_MONTH * 2
+    assert "2026-03" not in list_zscore_report_month_options(batch_id)
 
 
 def test_full_profile_monthly_report_demo_data() -> None:
@@ -109,6 +147,19 @@ def test_full_profile_monthly_report_demo_data() -> None:
         assert validation.checked_datasets == 8
         assert validation.checked_report_packages == 12
         assert validation.checked_pdf_bytes > 0
+
+        for project_name in [
+            "【演示】LJ-MR-01 两个月月报-稳定运行",
+            "【演示】LJ-MR-02 两个月月报-含失控与纠正措施",
+        ]:
+            _assert_lj_demo_total(project_name)
+        for project_name in [
+            "【演示】Z2-MR-01 双水平两个月月报-稳定运行",
+            "【演示】Z2-MR-02 双水平两个月月报-含失控与纠正措施",
+            "【演示】Z3-MR-01 三水平两个月月报-稳定运行",
+            "【演示】Z3-MR-02 三水平两个月月报-含失控与纠正措施",
+        ]:
+            _assert_zscore_demo_total(project_name)
 
         for month in ["2026-04", "2026-05"]:
             _assert_lj_report("【演示】LJ-MR-01 两个月月报-稳定运行", month, abnormal_expected=False)

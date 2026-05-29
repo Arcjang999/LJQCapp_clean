@@ -53,7 +53,8 @@ DEMO_NOTICE = "仅演示，请勿用于真实质控"
 BUILDING_START_DATE = date(2026, 3, 1)
 APRIL_START_DATE = date(2026, 4, 1)
 MAY_START_DATE = date(2026, 5, 1)
-MONTHLY_RECORD_COUNT = 20
+BUILDING_RECORD_COUNT = 20
+FORMAL_RECORDS_PER_MONTH = 30
 TARGET_N = 20
 REPORT_MONTHS = ("2026-04", "2026-05")
 PROFILE_FULL = "full"
@@ -175,7 +176,7 @@ DEMO_DATASETS: tuple[DemoDatasetPlan, ...] = (
         method="lj",
         project_name="【演示】LJ-MR-01 两个月月报-稳定运行",
         lot_no="DEMO-LJ-MR-01-202603",
-        description="20 个建靶点，2026-04 与 2026-05 各 20 条正式期记录，整体在控。",
+        description="20 个建靶点，2026-04 与 2026-05 各 30 条正式期记录，整体在控。",
         profiles=(PROFILE_BASIC, PROFILE_FULL),
     ),
     DemoDatasetPlan(
@@ -192,7 +193,7 @@ DEMO_DATASETS: tuple[DemoDatasetPlan, ...] = (
         method="zscore",
         project_name="【演示】Z2-MR-01 双水平两个月月报-稳定运行",
         lot_no="DEMO-Z2-MR-01-202603",
-        description="双水平各 20 个有效建靶值，2026-04 与 2026-05 各 20 次正式期 run。",
+        description="双水平各 20 个有效建靶值，2026-04 与 2026-05 各 30 次正式期 run。",
         profiles=(PROFILE_BASIC, PROFILE_FULL),
         level_count=2,
     ),
@@ -211,7 +212,7 @@ DEMO_DATASETS: tuple[DemoDatasetPlan, ...] = (
         method="zscore",
         project_name="【演示】Z3-MR-01 三水平两个月月报-稳定运行",
         lot_no="DEMO-Z3-MR-01-202603",
-        description="三水平各 20 个有效建靶值，2026-04 与 2026-05 各 20 次正式期 run。",
+        description="三水平各 20 个有效建靶值，2026-04 与 2026-05 各 30 次正式期 run。",
         profiles=(PROFILE_BASIC, PROFILE_FULL),
         level_count=3,
     ),
@@ -392,14 +393,14 @@ def _normalize_profile(profile: str) -> str:
 def _dry_run_summary(plan: DemoDatasetPlan) -> DemoDatasetSummary:
     formal_by_month = {}
     if plan.method in {"lj", "zscore"}:
-        formal_by_month = {month: MONTHLY_RECORD_COUNT for month in REPORT_MONTHS}
+        formal_by_month = {month: FORMAL_RECORDS_PER_MONTH for month in REPORT_MONTHS}
     return DemoDatasetSummary(
         key=plan.key,
         method=plan.method,
         project_name=plan.project_name,
         lot_no=plan.lot_no,
-        building_records=TARGET_N if plan.method in {"lj", "zscore"} else 20,
-        effective_building_records=TARGET_N if plan.method in {"lj", "zscore"} else 20,
+        building_records=BUILDING_RECORD_COUNT if plan.method in {"lj", "zscore"} else 20,
+        effective_building_records=BUILDING_RECORD_COUNT if plan.method in {"lj", "zscore"} else 20,
         formal_records_by_month=formal_by_month,
     )
 
@@ -487,7 +488,7 @@ def _seed_lj_dataset(plan: DemoDatasetPlan) -> DemoDatasetSummary:
     base_sd = 1.4 if plan.abnormal else 1.1
     for index, (timestamp, value) in enumerate(
         zip(
-            _build_schedule(BUILDING_START_DATE, TARGET_N),
+            _build_schedule(BUILDING_START_DATE, BUILDING_RECORD_COUNT),
             _values_from_zscores(base_mean, base_sd, _building_zscores()),
             strict=True,
         ),
@@ -532,7 +533,7 @@ def _seed_zscore_dataset(plan: DemoDatasetPlan) -> DemoDatasetSummary:
     base_targets = _zscore_base_targets(level_count, abnormal=plan.abnormal)
     building_maps = _building_zscore_maps(level_ids)
     for index, (timestamp, z_map) in enumerate(
-        zip(_build_schedule(BUILDING_START_DATE, TARGET_N), building_maps, strict=True),
+        zip(_build_schedule(BUILDING_START_DATE, BUILDING_RECORD_COUNT), building_maps, strict=True),
         start=1,
     ):
         create_zscore_run(
@@ -750,14 +751,22 @@ def _validate_lj_dataset(plan: DemoDatasetPlan, batch_id: int) -> None:
     _assert(len(building_df) == TARGET_N, f"{plan.key} LJ 建靶期必须有 20 条建靶数据。")
     _assert(len(effective_building_df) == TARGET_N, f"{plan.key} LJ 建靶期必须有 20 个有效建靶点。")
     _assert(bool(stats.get("target_ready")), f"{plan.key} LJ 建靶应已完成。")
+    _assert(_month_phase_count(qc_df, "2026-03", LJ_FORMAL_PHASE_LABEL) == 0, f"{plan.key} 2026-03 不应包含正式期数据。")
     options = set(list_lj_report_month_options(batch_id))
     _assert(set(REPORT_MONTHS).issubset(options), f"{plan.key} LJ 月报月份选项缺少 2026-04 或 2026-05。")
+    _assert("2026-03" not in options, f"{plan.key} LJ 月报月份选项不应包含建靶期 2026-03。")
     formal_counts = _lj_formal_counts_by_month(qc_df)
     for report_month in REPORT_MONTHS:
         _assert(
-            formal_counts.get(report_month, 0) == MONTHLY_RECORD_COUNT,
-            f"{plan.key} {report_month} LJ 正式期记录数应为 20。",
+            formal_counts.get(report_month, 0) == FORMAL_RECORDS_PER_MONTH,
+            f"{plan.key} {report_month} LJ 正式期记录数应为 30。",
         )
+        package = build_lj_monthly_report_package(batch_id, report_month)
+        _assert(
+            package.report.statistics.formal_count == FORMAL_RECORDS_PER_MONTH,
+            f"{plan.key} {report_month} LJ 月报 formal_count 应为 30。",
+        )
+    _validate_lj_formal_notes_are_abnormal(plan, qc_df)
 
 
 def _validate_zscore_dataset(plan: DemoDatasetPlan, batch_id: int) -> None:
@@ -767,6 +776,10 @@ def _validate_zscore_dataset(plan: DemoDatasetPlan, batch_id: int) -> None:
     runs = get_zscore_runs(batch_id, template_id)
     building_runs = [run for run in runs if str(run.get("phase")) == PHASE_TARGET_BUILDING]
     _assert(len(building_runs) == TARGET_N, f"{plan.key} Z-score 建靶期必须有 20 次 run。")
+    _assert(
+        _zscore_month_phase_count(runs, "2026-03", PHASE_FORMAL_QC) == 0,
+        f"{plan.key} 2026-03 不应包含正式期 run。",
+    )
     for level_id in level_ids:
         count = sum(
             1
@@ -784,12 +797,19 @@ def _validate_zscore_dataset(plan: DemoDatasetPlan, batch_id: int) -> None:
         )
     options = set(list_zscore_report_month_options(batch_id))
     _assert(set(REPORT_MONTHS).issubset(options), f"{plan.key} Z-score 月报月份选项缺少 2026-04 或 2026-05。")
+    _assert("2026-03" not in options, f"{plan.key} Z-score 月报月份选项不应包含建靶期 2026-03。")
     formal_counts = _zscore_formal_counts_by_month(runs)
     for report_month in REPORT_MONTHS:
         _assert(
-            formal_counts.get(report_month, 0) == MONTHLY_RECORD_COUNT,
-            f"{plan.key} {report_month} Z-score 正式期 run 数应为 20。",
+            formal_counts.get(report_month, 0) == FORMAL_RECORDS_PER_MONTH,
+            f"{plan.key} {report_month} Z-score 正式期 run 数应为 30。",
         )
+        package = build_zscore_monthly_report_package(batch_id, report_month)
+        _assert(
+            package.report.statistics.formal_count == FORMAL_RECORDS_PER_MONTH,
+            f"{plan.key} {report_month} Z-score 月报 formal_count 应为 30。",
+        )
+    _validate_zscore_formal_notes_are_abnormal(plan, runs)
 
 
 def _validate_report_actions(abnormal_records: list[Any], corrective_actions: list[str]) -> None:
@@ -828,6 +848,57 @@ def _zscore_abnormal_counts_by_month(runs: list[dict[str, Any]]) -> dict[str, in
             if str(run.get("phase")) == PHASE_FORMAL_QC
             and str(run.get("run_status")) in {"warning", "reject"}
         ]
+    )
+
+
+def _month_phase_count(qc_df: pd.DataFrame, report_month: str, phase_label: str) -> int:
+    if qc_df.empty:
+        return 0
+    dataframe = qc_df.copy()
+    dataframe["test_time"] = pd.to_datetime(dataframe["test_time"], errors="coerce")
+    return int(
+        (
+            (dataframe["phase"] == phase_label)
+            & (dataframe["test_time"].dt.to_period("M").astype(str) == report_month)
+        ).sum()
+    )
+
+
+def _zscore_month_phase_count(runs: list[dict[str, Any]], report_month: str, phase: str) -> int:
+    count = 0
+    for run in runs:
+        if str(run.get("phase")) != phase:
+            continue
+        if pd.Timestamp(run["test_time"]).to_period("M").strftime("%Y-%m") == report_month:
+            count += 1
+    return count
+
+
+def _validate_lj_formal_notes_are_abnormal(plan: DemoDatasetPlan, qc_df: pd.DataFrame) -> None:
+    if qc_df.empty or "manual_note" not in qc_df.columns:
+        return
+    formal_df = qc_df[qc_df["phase"] == LJ_FORMAL_PHASE_LABEL].copy()
+    noted_non_abnormal = formal_df[
+        formal_df["manual_note"].fillna("").astype(str).str.strip().ne("")
+        & ~formal_df["status"].isin(["警告", "失控"])
+    ]
+    _assert(
+        noted_non_abnormal.empty,
+        f"{plan.key} 存在 manual_note 写在非警告/失控正式期记录上的情况。",
+    )
+
+
+def _validate_zscore_formal_notes_are_abnormal(plan: DemoDatasetPlan, runs: list[dict[str, Any]]) -> None:
+    noted_non_abnormal = [
+        run
+        for run in runs
+        if str(run.get("phase")) == PHASE_FORMAL_QC
+        and str(run.get("manual_note", "") or "").strip()
+        and str(run.get("run_status")) not in {"warning", "reject"}
+    ]
+    _assert(
+        not noted_non_abnormal,
+        f"{plan.key} 存在 manual_note 写在非 warning/reject 正式期 run 上的情况。",
     )
 
 
@@ -879,10 +950,16 @@ def _building_zscores() -> list[float]:
 
 
 def _stable_single_level_months() -> dict[str, list[dict[str, Any]]]:
-    april = [-0.42, 0.31, -0.18, 0.46, -0.35, 0.22, -0.51, 0.39, -0.26, 0.58,
-             -0.44, 0.16, -0.62, 0.47, -0.21, 0.33, -0.37, 0.52, -0.12, 0.28]
-    may = [0.25, -0.36, 0.43, -0.18, 0.51, -0.47, 0.12, -0.28, 0.61, -0.39,
-           0.18, -0.55, 0.34, -0.22, 0.48, -0.31, 0.07, -0.45, 0.53, -0.16]
+    april = [
+        -0.42, 0.31, -0.18, 0.46, -0.35, 0.22, -0.51, 0.39, -0.26, 0.58,
+        -0.44, 0.16, -0.62, 0.47, -0.21, 0.33, -0.37, 0.52, -0.12, 0.28,
+        -0.49, 0.41, -0.23, 0.36, -0.57, 0.19, -0.31, 0.48, -0.15, 0.27,
+    ]
+    may = [
+        0.25, -0.36, 0.43, -0.18, 0.51, -0.47, 0.12, -0.28, 0.61, -0.39,
+        0.18, -0.55, 0.34, -0.22, 0.48, -0.31, 0.07, -0.45, 0.53, -0.16,
+        0.29, -0.52, 0.37, -0.24, 0.44, -0.33, 0.14, -0.41, 0.56, -0.21,
+    ]
     return {
         "2026-04": [{"z": value} for value in april],
         "2026-05": [{"z": value} for value in may],
@@ -890,16 +967,22 @@ def _stable_single_level_months() -> dict[str, list[dict[str, Any]]]:
 
 
 def _lj_abnormal_zscores() -> dict[str, list[dict[str, Any]]]:
-    april = [-0.35, 0.41, -0.22, 0.18, -0.47, 3.25, 0.36, -0.28, 0.19, -0.41,
-             0.52, -0.33, 2.18, -0.24, 0.44, -0.52, 0.21, -0.37, 0.58, -0.18]
-    may = [0.42, 0.78, 1.18, 1.36, 2.18, 2.36, -0.32, 0.28, -0.47, 0.39,
-           -0.25, 0.51, -0.36, 0.17, -0.58, 0.22, -0.41, 0.49, -0.19, 0.31]
+    april = [
+        -0.35, 0.41, -0.22, 0.18, -0.47, 0.33, -0.26, 3.25, 0.36, -0.28,
+        0.19, -0.41, 0.52, -0.33, 2.18, -0.24, 0.44, -0.52, 0.21, -0.37,
+        0.58, -0.18, -0.46, 0.32, -0.29, 0.49, -0.15, 0.25, -0.39, 0.43,
+    ]
+    may = [
+        -0.42, 0.38, -0.31, 0.27, -0.44, 0.36, -0.22, 2.18, 2.36, 0.28,
+        -0.47, 0.39, -0.25, 0.51, -0.36, 0.17, -0.58, 0.22, -0.41, 0.49,
+        -0.19, 0.31, -0.52, 0.24, -0.33, 0.46, -0.27, 0.35, -0.18, 0.42,
+    ]
     april_items = [{"z": value} for value in april]
     may_items = [{"z": value} for value in may]
-    april_items[5]["manual_note"] = NOTE_LJ_13S
-    april_items[12]["manual_note"] = NOTE_LJ_ENV
-    may_items[4]["manual_note"] = NOTE_LJ_SHIFT
-    may_items[5]["manual_note"] = NOTE_LJ_SHIFT
+    april_items[7]["manual_note"] = NOTE_LJ_13S
+    april_items[14]["manual_note"] = NOTE_LJ_ENV
+    may_items[7]["manual_note"] = NOTE_LJ_SHIFT
+    may_items[8]["manual_note"] = NOTE_LJ_SHIFT
     return {"2026-04": april_items, "2026-05": may_items}
 
 
@@ -945,24 +1028,22 @@ def _zscore_abnormal_zmaps(level_count: int) -> dict[str, list[dict[str, Any]]]:
     if level_count == 2:
         april = stable["2026-04"]
         may = stable["2026-05"]
-        april[5] = {"z": {"Level 1": 3.18, "Level 2": -0.42}, "manual_note": NOTE_ZS_RANDOM}
-        may[2] = {"z": {"Level 1": 1.22, "Level 2": -0.34}}
-        may[3] = {"z": {"Level 1": 2.16, "Level 2": 0.28}, "manual_note": NOTE_ZS_SYSTEM}
-        may[4] = {"z": {"Level 1": 2.31, "Level 2": -0.22}, "manual_note": NOTE_ZS_SYSTEM}
-        may[5] = {"z": {"Level 1": 1.42, "Level 2": 0.31}, "manual_note": NOTE_ZS_SYSTEM}
+        april[7] = {"z": {"Level 1": 3.18, "Level 2": -0.42}, "manual_note": NOTE_ZS_RANDOM}
+        may[7] = {"z": {"Level 1": 2.16, "Level 2": 0.28}, "manual_note": NOTE_ZS_SYSTEM}
+        may[8] = {"z": {"Level 1": 2.31, "Level 2": -0.22}, "manual_note": NOTE_ZS_SYSTEM}
         return {"2026-04": april, "2026-05": may}
 
     april = stable["2026-04"]
     may = stable["2026-05"]
-    april[5] = {
+    april[7] = {
         "z": {"Level 1": 2.28, "Level 2": 2.18, "Level 3": 0.26},
         "manual_note": NOTE_ZS_2OF3,
     }
-    may[3] = {
+    may[7] = {
         "z": {"Level 1": 1.24, "Level 2": 1.31, "Level 3": 1.18},
         "manual_note": NOTE_ZS_SYSTEM,
     }
-    may[9] = {
+    may[14] = {
         "z": {"Level 1": -2.24, "Level 2": 2.18, "Level 3": -0.18},
         "manual_note": NOTE_ZS_RANDOM,
     }
