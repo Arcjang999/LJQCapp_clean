@@ -1,0 +1,15 @@
+D:\LJQCapp_stock\LJQCapp_clean\build\launcher_obj_icon\bin\Release\net8.0-windows\win-x64\runtimes\win-x64\native\WebView2Loader.dll
+D:\LJQCapp_stock\LJQCapp_clean\build\launcher_obj_icon\bin\Release\net8.0-windows\win-x64\LJQCApp.exe
+D:\LJQCapp_stock\LJQCapp_clean\build\launcher_obj_icon\bin\Release\net8.0-windows\win-x64\LJQCApp.deps.json
+D:\LJQCapp_stock\LJQCapp_clean\build\launcher_obj_icon\bin\Release\net8.0-windows\win-x64\LJQCApp.runtimeconfig.json
+D:\LJQCapp_stock\LJQCapp_clean\build\launcher_obj_icon\bin\Release\net8.0-windows\win-x64\LJQCApp.dll
+D:\LJQCapp_stock\LJQCapp_clean\build\launcher_obj_icon\obj\LJQCApp.Desktop.csproj.AssemblyReference.cache
+D:\LJQCapp_stock\LJQCapp_clean\build\launcher_obj_icon\obj\LJQCApp.Desktop.GeneratedMSBuildEditorConfig.editorconfig
+D:\LJQCapp_stock\LJQCapp_clean\build\launcher_obj_icon\obj\LJQCApp.Desktop.AssemblyInfoInputs.cache
+D:\LJQCapp_stock\LJQCapp_clean\build\launcher_obj_icon\obj\LJQCApp.Desktop.AssemblyInfo.cs
+D:\LJQCapp_stock\LJQCapp_clean\build\launcher_obj_icon\obj\LJQCApp.Desktop.csproj.CoreCompileInputs.cache
+D:\LJQCapp_stock\LJQCapp_clean\build\launcher_obj_icon\obj\LJQCApp..D29AFE22.Up2Date
+D:\LJQCapp_stock\LJQCapp_clean\build\launcher_obj_icon\obj\LJQCApp.dll
+D:\LJQCapp_stock\LJQCapp_clean\build\launcher_obj_icon\obj\refint\LJQCApp.dll
+D:\LJQCapp_stock\LJQCapp_clean\build\launcher_obj_icon\obj\LJQCApp.Desktop.genruntimeconfig.cache
+D:\LJQCapp_stock\LJQCapp_clean\build\launcher_obj_icon\obj\ref\LJQCApp.dll
