@@ -1,11 +1,22 @@
 param(
-    [string]$OutputRoot = "D:\LJQCappdemo"
+    [string]$OutputRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
 
 $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$script:PythonExe = "C:\Users\gao_h\AppData\Local\Python\bin\python.exe"
+$script:PythonExe = Join-Path $RepoRoot ".venv\Scripts\python.exe"
+if (-not (Test-Path -LiteralPath $PythonExe)) {
+    $pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+    if ($null -eq $pythonCommand) {
+        throw "Python executable not found. Create .venv or add Python to PATH."
+    }
+    $script:PythonExe = $pythonCommand.Source
+}
+if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
+    $OutputRoot = Join-Path ([Environment]::GetFolderPath("LocalApplicationData")) "LJQCApp\demo_build"
+}
+$OutputRoot = [IO.Path]::GetFullPath($OutputRoot)
 $script:SpecFile = Join-Path $RepoRoot "packaging\LJQCApp.spec"
 $script:LauncherProject = Join-Path $RepoRoot "packaging\desktop_launcher\LJQCApp.Desktop.csproj"
 
@@ -107,10 +118,6 @@ function Invoke-DotnetPublish {
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet publish failed for $OutputPath"
     }
-}
-
-if (-not (Test-Path -LiteralPath $PythonExe)) {
-    throw "Python executable not found: $PythonExe"
 }
 
 if (-not (Test-Path -LiteralPath $SpecFile)) {

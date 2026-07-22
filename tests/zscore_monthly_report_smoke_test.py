@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from io import BytesIO
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-import pypdf
 import pandas as pd
 from streamlit.testing.v1 import AppTest
 
@@ -283,7 +281,7 @@ def test_zscore_monthly_report_requires_formal_data() -> None:
     with TemporaryDatabaseContext():
         _project_id, batch_id = seed_zscore_batch_with_building_only_data()
         month_options = list_zscore_report_month_options(batch_id)
-        assert month_options == ["2026-04"]
+        assert month_options == []
         try:
             build_zscore_monthly_report_package(batch_id, "2026-04")
         except ValueError as exc:

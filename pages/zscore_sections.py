@@ -4,7 +4,6 @@ from copy import deepcopy
 from datetime import datetime
 import hashlib
 import math
-from textwrap import dedent
 from typing import Any
 
 import pandas as pd
@@ -17,20 +16,13 @@ from import_review import (
     review_zscore_formal_import_csv,
 )
 from plotting import figure_to_png_bytes
-from pages.management import (
-    guard_work_tab_selection as guard_work_tab_selection_impl,
-    prepare_zscore_project_batch_context as prepare_zscore_project_batch_context_impl,
-    render_zscore_project_batch_management as render_zscore_project_batch_management_impl,
-)
 from services.value_type_service import (
     build_level_measurement_label,
     get_input_value_type_label,
     normalize_input_value_type,
     parse_project_input_value,
-    validate_project_numeric_value,
 )
 from ui.common import (
-    TEXT,
     ZSCORE_PHASE_VIEW_OPTIONS,
     ZSCORE_Y_AXIS_OPTIONS,
     build_safe_export_name,
@@ -46,7 +38,6 @@ from ui.common import (
     parse_numeric_input,
     render_compact_stat_metrics,
     render_cv_limit_hint,
-    render_html_block,
     render_import_review_summary,
     render_latest_analysis_card,
     render_standard_view_help,
@@ -713,31 +704,6 @@ def _sync_zscore_chart_control_widget_state(
         st.session_state["zscore_selected_level"] = selected_level_value
     if force or st.session_state.get("zscore_selected_level_widget") not in template["level_ids"]:
         st.session_state["zscore_selected_level_widget"] = selected_level_value
-
-
-def _capture_zscore_chart_control_state_from_widgets(template: dict[str, Any]) -> None:
-    phase_scope_widget_value = st.session_state.get("zscore_phase_scope_widget")
-    if phase_scope_widget_value in ZSCORE_PHASE_VIEW_OPTIONS:
-        st.session_state["zscore_phase_scope"] = phase_scope_widget_value
-
-    view_mode_widget_value = st.session_state.get("zscore_view_mode_widget")
-    if view_mode_widget_value in {"单水平视图", "合并视图"}:
-        st.session_state["zscore_view_mode"] = view_mode_widget_value
-
-    selected_level_widget_value = st.session_state.get("zscore_selected_level_widget")
-    if selected_level_widget_value in template["level_ids"]:
-        st.session_state["zscore_selected_level"] = selected_level_widget_value
-
-    y_axis_mode_widget_value = st.session_state.get("zscore_y_axis_mode_widget")
-    if y_axis_mode_widget_value in ZSCORE_Y_AXIS_OPTIONS:
-        st.session_state["zscore_y_axis_mode"] = y_axis_mode_widget_value
-
-    try:
-        standard_sd_limit_widget_value = float(st.session_state.get("zscore_standard_sd_limit_widget", 0.0) or 0.0)
-    except (TypeError, ValueError):
-        standard_sd_limit_widget_value = 0.0
-    if standard_sd_limit_widget_value > 0:
-        st.session_state["zscore_standard_sd_limit"] = standard_sd_limit_widget_value
 
 
 def _mark_zscore_view_mode_changed() -> None:

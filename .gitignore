@@ -18,21 +18,29 @@ coverage.xml
 *.tmp
 *.temp
 logs/
-.codex/*.log
+.codex/
+.codex_logs/
+/tmp/
 
 # Local SQLite runtime artifacts and generated demo DB
 *.db-journal
 *.db-wal
 *.db-shm
-data/demo_qc_data.db
+data/*.db
 
 # Packaging/build output
 build/
 dist/
+/release/
+/dist_file_list.txt
 packaging/build/
 packaging/dist/
 packaging/desktop_launcher/bin/
 packaging/desktop_launcher/obj/
+
+# Locally generated analysis/report artifacts
+/output/
+/outputs/
 
 # Local editor/OS files
 .idea/

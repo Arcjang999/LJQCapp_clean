@@ -12,11 +12,18 @@ namespace LJQCApp.Desktop;
 internal static class Program
 {
     [STAThread]
-    private static void Main(string[] args)
+    private static int Main(string[] args)
     {
+        LauncherOptions options = LauncherOptions.Parse(args);
+        if (options.MaintenanceArguments.Count > 0)
+        {
+            return MaintenanceCommandRunner.Run(options.MaintenanceArguments);
+        }
+
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
-        Application.Run(new LauncherForm(LauncherOptions.Parse(args)));
+        Application.Run(new LauncherForm(options));
+        return 0;
     }
 }
 
@@ -25,7 +32,7 @@ internal sealed class LauncherForm : Form
     private readonly LauncherOptions _options;
     private readonly Label _statusLabel;
     private Process? _serviceProcess;
-    private string? _temporaryServiceDirectory;
+    private ServiceExecutable? _serviceExecutable;
     private WebView2? _webView;
     private bool _shutdownStarted;
     private int _port;
@@ -59,8 +66,8 @@ internal sealed class LauncherForm : Form
             _port = _options.Port ?? GetFreeLoopbackPort();
             Log($"Launcher starting. target port={_port}");
 
-            ServiceExecutable serviceExecutable = PrepareServiceExecutable();
-            _serviceProcess = StartServiceProcess(serviceExecutable.Path, _port);
+            _serviceExecutable = ServiceExecutableResolver.Resolve();
+            _serviceProcess = StartServiceProcess(_serviceExecutable.Path, _port);
 
             await WaitForServiceAsync(_serviceProcess, _port);
             await InitializeWebViewAsync(_port);
@@ -71,7 +78,7 @@ internal sealed class LauncherForm : Form
             Log($"Startup failed: {ex}");
             MessageBox.Show(
                 this,
-                "LJQCApp 启动失败。\n\n请查看 %LOCALAPPDATA%\\LJQCApp\\desktop_launcher.log 与 launcher.log。",
+                "LJQCApp 启动失败。\n\n请确认 WebView2 Runtime 可用，并查看 %LOCALAPPDATA%\\LJQCApp\\desktop_launcher.log 和 launcher.log。",
                 "LJQCApp",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error
@@ -80,62 +87,19 @@ internal sealed class LauncherForm : Form
         }
     }
 
-    private ServiceExecutable PrepareServiceExecutable()
-    {
-        string? embeddedResourceName = Assembly
-            .GetExecutingAssembly()
-            .GetManifestResourceNames()
-            .FirstOrDefault(name => name.EndsWith("LJQCAppService.exe", StringComparison.OrdinalIgnoreCase));
-
-        if (!string.IsNullOrWhiteSpace(embeddedResourceName))
-        {
-            string tempRoot = Path.Combine(
-                Path.GetTempPath(),
-                "LJQCApp",
-                "embedded_service",
-                Guid.NewGuid().ToString("N")
-            );
-            Directory.CreateDirectory(tempRoot);
-
-            string extractedPath = Path.Combine(tempRoot, "LJQCAppService.exe");
-            using Stream resourceStream = Assembly.GetExecutingAssembly().GetManifestResourceStream(embeddedResourceName)
-                ?? throw new FileNotFoundException("Embedded service resource not found.", embeddedResourceName);
-            using FileStream outputStream = File.Create(extractedPath);
-            resourceStream.CopyTo(outputStream);
-
-            _temporaryServiceDirectory = tempRoot;
-            Log($"Extracted embedded service to {extractedPath}");
-            return new ServiceExecutable(extractedPath);
-        }
-
-        string[] candidates =
-        [
-            Path.Combine(AppContext.BaseDirectory, "service", "LJQCAppService.exe"),
-            Path.Combine(AppContext.BaseDirectory, "LJQCAppService.exe"),
-        ];
-
-        foreach (string candidate in candidates)
-        {
-            if (File.Exists(candidate))
-            {
-                Log($"Using adjacent service executable {candidate}");
-                return new ServiceExecutable(candidate);
-            }
-        }
-
-        throw new FileNotFoundException("Could not locate LJQCAppService.exe.", candidates[0]);
-    }
-
     private static Process StartServiceProcess(string servicePath, int port)
     {
         ProcessStartInfo startInfo = new()
         {
             FileName = servicePath,
-            Arguments = $"--port {port} --address 127.0.0.1",
             UseShellExecute = false,
             CreateNoWindow = true,
             WorkingDirectory = Path.GetDirectoryName(servicePath) ?? AppContext.BaseDirectory,
         };
+        startInfo.ArgumentList.Add("--port");
+        startInfo.ArgumentList.Add(port.ToString());
+        startInfo.ArgumentList.Add("--address");
+        startInfo.ArgumentList.Add("127.0.0.1");
         startInfo.Environment["LJQCAPP_LAUNCH_MODE"] = "desktop";
 
         Process process = Process.Start(startInfo)
@@ -292,10 +256,7 @@ internal sealed class LauncherForm : Form
             _serviceProcess = null;
         }
 
-        if (!string.IsNullOrWhiteSpace(_temporaryServiceDirectory))
-        {
-            TryDeleteTemporaryServiceDirectory(_temporaryServiceDirectory);
-        }
+        _serviceExecutable?.Cleanup();
     }
 
     private static int GetFreeLoopbackPort()
@@ -307,55 +268,137 @@ internal sealed class LauncherForm : Form
         return port;
     }
 
-    private static void Log(string message)
-    {
-        string logDirectory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "LJQCApp"
-        );
-        Directory.CreateDirectory(logDirectory);
+    private static void Log(string message) => LauncherLog.Write(message);
+}
 
-        string logPath = Path.Combine(logDirectory, "desktop_launcher.log");
-        File.AppendAllText(
-            logPath,
-            $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}{Environment.NewLine}",
-            Encoding.UTF8
-        );
+internal static class MaintenanceCommandRunner
+{
+    public static int Run(IReadOnlyList<string> arguments)
+    {
+        ServiceExecutable? serviceExecutable = null;
+        try
+        {
+            serviceExecutable = ServiceExecutableResolver.Resolve();
+            ProcessStartInfo startInfo = new()
+            {
+                FileName = serviceExecutable.Path,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = Path.GetDirectoryName(serviceExecutable.Path) ?? AppContext.BaseDirectory,
+            };
+            foreach (string argument in arguments)
+            {
+                startInfo.ArgumentList.Add(argument);
+            }
+
+            Process process = Process.Start(startInfo)
+                ?? throw new InvalidOperationException("Failed to start LJQCApp maintenance command.");
+            process.WaitForExit();
+            return process.ExitCode;
+        }
+        catch (Exception ex)
+        {
+            LauncherLog.Write($"Maintenance command failed: {ex}");
+            return 1;
+        }
+        finally
+        {
+            serviceExecutable?.Cleanup();
+        }
     }
+}
 
-    private static void TryDeleteTemporaryServiceDirectory(string directoryPath)
+internal static class ServiceExecutableResolver
+{
+    public static ServiceExecutable Resolve()
     {
+        string? embeddedResourceName = Assembly
+            .GetExecutingAssembly()
+            .GetManifestResourceNames()
+            .FirstOrDefault(name => name.EndsWith("LJQCAppService.exe", StringComparison.OrdinalIgnoreCase));
+
+        if (!string.IsNullOrWhiteSpace(embeddedResourceName))
+        {
+            string tempRoot = Path.Combine(
+                Path.GetTempPath(),
+                "LJQCApp",
+                "embedded_service",
+                Guid.NewGuid().ToString("N")
+            );
+            Directory.CreateDirectory(tempRoot);
+
+            string extractedPath = Path.Combine(tempRoot, "LJQCAppService.exe");
+            using Stream resourceStream = Assembly.GetExecutingAssembly().GetManifestResourceStream(embeddedResourceName)
+                ?? throw new FileNotFoundException("Embedded service resource not found.", embeddedResourceName);
+            using FileStream outputStream = File.Create(extractedPath);
+            resourceStream.CopyTo(outputStream);
+
+            LauncherLog.Write($"Extracted embedded service to {extractedPath}");
+            return new ServiceExecutable(extractedPath, tempRoot);
+        }
+
+        string baseDirectory = AppContext.BaseDirectory;
+        string[] candidates =
+        [
+            Path.Combine(baseDirectory, "_internal", "service", "LJQCAppService.exe"),
+            Path.Combine(baseDirectory, "service", "LJQCAppService.exe"),
+            Path.Combine(baseDirectory, "LJQCAppService.exe"),
+        ];
+
+        foreach (string candidate in candidates)
+        {
+            if (File.Exists(candidate))
+            {
+                LauncherLog.Write($"Using adjacent service executable {candidate}");
+                return new ServiceExecutable(candidate, null);
+            }
+        }
+
+        throw new FileNotFoundException("Could not locate LJQCAppService.exe.", candidates[0]);
+    }
+}
+
+internal sealed record ServiceExecutable(string Path, string? TemporaryDirectory)
+{
+    public void Cleanup()
+    {
+        if (string.IsNullOrWhiteSpace(TemporaryDirectory))
+        {
+            return;
+        }
+
         for (int attempt = 1; attempt <= 10; attempt += 1)
         {
             try
             {
-                if (Directory.Exists(directoryPath))
+                if (Directory.Exists(TemporaryDirectory))
                 {
-                    Directory.Delete(directoryPath, recursive: true);
+                    Directory.Delete(TemporaryDirectory, recursive: true);
                 }
 
-                Log($"Deleted temporary service directory {directoryPath}");
+                LauncherLog.Write($"Deleted temporary service directory {TemporaryDirectory}");
                 return;
             }
             catch (Exception ex) when (attempt < 10)
             {
                 Thread.Sleep(500);
-                Log($"Temporary service cleanup retry {attempt}: {ex.Message}");
+                LauncherLog.Write($"Temporary service cleanup retry {attempt}: {ex.Message}");
             }
             catch (Exception ex)
             {
-                Log($"Temporary service cleanup warning: {ex}");
+                LauncherLog.Write($"Temporary service cleanup warning: {ex}");
             }
         }
     }
 }
 
-internal sealed record LauncherOptions(int? Port, int AutoCloseSeconds)
+internal sealed record LauncherOptions(int? Port, int AutoCloseSeconds, IReadOnlyList<string> MaintenanceArguments)
 {
     public static LauncherOptions Parse(string[] args)
     {
         int? port = null;
         int autoCloseSeconds = 0;
+        List<string> maintenanceArguments = [];
 
         for (int index = 0; index < args.Length; index += 1)
         {
@@ -375,11 +418,47 @@ internal sealed record LauncherOptions(int? Port, int AutoCloseSeconds)
             {
                 autoCloseSeconds = Math.Max(parsedSeconds, 0);
                 index += 1;
+                continue;
+            }
+
+            if (argument is "--reset-db" or "--seed-demo")
+            {
+                maintenanceArguments.Add(argument);
+                continue;
+            }
+
+            bool isMaintenanceOption = argument is "--replace-demo" or "--demo-profile" or "--profile";
+            if (isMaintenanceOption && maintenanceArguments.Count > 0)
+            {
+                maintenanceArguments.Add(argument);
+                bool optionExpectsValue = argument is "--demo-profile" or "--profile";
+                if (optionExpectsValue && index + 1 < args.Length)
+                {
+                    maintenanceArguments.Add(args[index + 1]);
+                    index += 1;
+                }
             }
         }
 
-        return new LauncherOptions(port, autoCloseSeconds);
+        return new LauncherOptions(port, autoCloseSeconds, maintenanceArguments);
     }
 }
 
-internal sealed record ServiceExecutable(string Path);
+internal static class LauncherLog
+{
+    public static void Write(string message)
+    {
+        string logDirectory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "LJQCApp"
+        );
+        Directory.CreateDirectory(logDirectory);
+
+        string logPath = Path.Combine(logDirectory, "desktop_launcher.log");
+        File.AppendAllText(
+            logPath,
+            $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}{Environment.NewLine}",
+            Encoding.UTF8
+        );
+    }
+}

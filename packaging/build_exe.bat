@@ -2,19 +2,22 @@
 setlocal
 chcp 65001 >nul
 
-set "PYTHON_EXE=C:\Users\gao_h\AppData\Local\Python\bin\python.exe"
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..") do set "PROJECT_ROOT=%%~fI"
+set "PYTHON_EXE=%PROJECT_ROOT%\.venv\Scripts\python.exe"
 set "SPEC_FILE=%SCRIPT_DIR%LJQCApp.spec"
 set "SAFE_BUILD_DIR=%LOCALAPPDATA%\LJQCApp\pyinstaller_build"
 set "SAFE_DIST_DIR=%LOCALAPPDATA%\LJQCApp\pyinstaller_dist"
 set "SAFE_PACKAGE_DIR=%SAFE_DIST_DIR%\LJQCApp"
 set "PROJECT_DIST_DIR=%PROJECT_ROOT%dist\LJQCApp"
 
+if not exist "%PYTHON_EXE%" set "PYTHON_EXE=python"
+
 echo [LJQCApp] Building EXE package...
 echo.
 
-if not exist "%PYTHON_EXE%" (
+"%PYTHON_EXE%" --version >nul 2>nul
+if errorlevel 1 (
     echo [ERROR] Python interpreter not found:
     echo %PYTHON_EXE%
     echo.

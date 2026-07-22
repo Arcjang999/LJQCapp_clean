@@ -605,50 +605,6 @@ def _build_plot_reference_map(
     return reference_map
 
 
-def _build_building_display_zscores(
-    saved_runs: list[dict[str, Any]],
-    building_run_ids: set[int],
-) -> dict[tuple[int, str], float]:
-    fallback_map: dict[tuple[int, str], float] = {}
-    if not saved_runs or not building_run_ids:
-        return fallback_map
-
-    level_ids = sorted(
-        {
-            str(level_result.get("level_id"))
-            for run in saved_runs
-            for level_result in run.get("level_results", [])
-            if level_result.get("level_id")
-        }
-    )
-    for level_id in level_ids:
-        raw_values: list[float] = []
-        ordered_building_runs = [
-            run
-            for run in sorted(
-                saved_runs,
-                key=lambda item: (
-                    get_zscore_display_sequence(item),
-                    int(item.get("run_id") or item.get("id") or 0),
-                ),
-            )
-            if int(run.get("run_id") or 0) in building_run_ids
-        ]
-        for run in ordered_building_runs:
-            run_id = int(run.get("run_id") or 0)
-            level_result = _get_level_result(run, level_id)
-            if level_result is None or not _is_level_result_building_included(level_result):
-                continue
-            raw_value = _float_or_none(level_result.get("raw_value"))
-            if raw_value is None:
-                continue
-            raw_values.append(float(raw_value))
-            stats = calculate_level_target_stats(raw_values)
-            computed_zscore = compute_zscore(raw_value, stats["target_mean"], stats["target_sd"])
-            fallback_map[(run_id, level_id)] = float(computed_zscore) if computed_zscore is not None else 0.0
-    return fallback_map
-
-
 def resolve_zscore_batch_context(batch_id: int) -> dict[str, Any]:
     batch = get_zscore_batch(batch_id)
     level_count = int(batch["level_count"])
@@ -2075,16 +2031,6 @@ def _normalize_run_phase(phase: Any) -> str:
     if normalized not in {PHASE_TARGET_BUILDING, PHASE_FORMAL_QC}:
         return PHASE_TARGET_BUILDING
     return normalized
-
-
-def _get_level_raw_value(run: dict[str, Any], level_id: str) -> float | None:
-    for level_result in run.get("level_results", []):
-        if level_result.get("level_id") == level_id:
-            raw_value = level_result.get("raw_value")
-            if raw_value is not None:
-                return float(raw_value)
-            return None
-    return None
 
 
 def _resolve_level_target_reference(

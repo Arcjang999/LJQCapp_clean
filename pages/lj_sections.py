@@ -13,14 +13,8 @@ from import_review import (
     review_lj_building_import_csv,
     review_lj_formal_import_csv,
 )
-from pages.management import (
-    guard_work_tab_selection,
-    prepare_project_batch_context,
-    render_project_batch_management,
-)
 from plotting import figure_to_png_bytes, plot_lj_chart
 from qc_logic import (
-    calculate_qc_results,
     calculate_realtime_stats,
     calculate_target_building_cv_hint,
     disable_lj_building_result,
@@ -39,12 +33,10 @@ from services.export_utils import (
 from services.profiling import profile_timer
 from services.value_type_service import (
     get_input_value_type_label,
-    get_measurement_label,
     normalize_input_value_type,
     parse_project_input_value,
 )
 from ui.common import (
-    TEXT,
     build_chart_control_title,
     build_operator_options,
     build_safe_export_name,
@@ -56,7 +48,6 @@ from ui.common import (
     render_cv_limit_hint,
     render_import_review_summary,
     render_rule_summary_metrics,
-    render_section_intro,
     render_standard_view_help,
     render_status_panel,
 )

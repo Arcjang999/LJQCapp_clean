@@ -16,7 +16,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import database
 from database import (
-    DB_PATH,
     add_result,
     create_batch,
     create_project,

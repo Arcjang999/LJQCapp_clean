@@ -26,6 +26,7 @@ PROJECT_MODULE_FILES = [
 ]
 PROJECT_PACKAGES = [
     "pages",
+    "services",
     "ui",
 ]
 
@@ -55,6 +56,7 @@ hiddenimports = list(
         + collect_submodules("pyarrow")
         + collect_submodules("altair")
         + collect_submodules("pages")
+        + collect_submodules("services")
         + collect_submodules("ui")
         + [
             "database",

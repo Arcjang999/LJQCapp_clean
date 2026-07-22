@@ -2,13 +2,16 @@
 setlocal
 chcp 65001 >nul
 
-set "PYTHON_EXE=C:\Users\gao_h\AppData\Local\Python\bin\python.exe"
 set "SCRIPT_DIR=%~dp0"
+set "PYTHON_EXE=%SCRIPT_DIR%.venv\Scripts\python.exe"
+
+if not exist "%PYTHON_EXE%" set "PYTHON_EXE=python"
 
 echo [LJQCApp] Resetting database...
 echo.
 
-if not exist "%PYTHON_EXE%" (
+"%PYTHON_EXE%" --version >nul 2>nul
+if errorlevel 1 (
     echo [ERROR] Python interpreter not found:
     echo %PYTHON_EXE%
     echo.

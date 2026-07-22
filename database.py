@@ -2046,37 +2046,6 @@ def get_instant_batch(batch_id: int) -> sqlite3.Row:
     return row
 
 
-def create_zscore_project(
-    name: str,
-    level_count: int,
-    input_value_type: str = DEFAULT_INPUT_VALUE_TYPE,
-) -> int:
-    if int(level_count) not in {2, 3}:
-        raise ValueError("Z-score 项目水平数只能是 2 或 3。")
-
-    normalized_input_value_type = normalize_input_value_type(input_value_type)
-    with get_connection() as connection:
-        try:
-            cursor = connection.execute(
-                """
-                INSERT INTO projects (name, method_type, input_value_type)
-                VALUES (?, ?, ?)
-                """,
-                (name, PROJECT_METHOD_ZSCORE, normalized_input_value_type),
-            )
-            project_id = int(cursor.lastrowid)
-            connection.execute(
-                """
-                INSERT INTO zscore_project_config (project_id, level_count)
-                VALUES (?, ?)
-                """,
-                (project_id, int(level_count)),
-            )
-        except sqlite3.IntegrityError as exc:
-            raise ValueError("\u9879\u76ee\u540d\u79f0\u5df2\u5b58\u5728") from exc
-    return project_id
-
-
 def list_zscore_projects(include_management_fields: bool = False) -> pd.DataFrame:
     select_columns = """
                 projects.id,
@@ -2127,55 +2096,6 @@ def get_zscore_project(project_id: int) -> sqlite3.Row:
     if row is None:
         raise ValueError(f"未找到 Z-score 项目 {project_id}")
     return row
-
-
-def create_zscore_batch(
-    instrument: str,
-    reagent: str,
-    qc_material: str,
-    concentration: str,
-    lot_no: str,
-    target_n: int,
-    project_id: int | None = None,
-    level_1_label: str | None = None,
-    level_2_label: str | None = None,
-    level_3_label: str | None = None,
-) -> int:
-    if project_id is None:
-        raise ValueError("\u8bf7\u5148\u9009\u62e9\u9879\u76ee")
-
-    with get_connection() as connection:
-        project_row = connection.execute(
-            """
-            SELECT level_count
-            FROM zscore_project_config
-            WHERE project_id = ?
-            """,
-            (project_id,),
-        ).fetchone()
-        if project_row is None:
-            raise ValueError("所选项目不是 Z-score 项目")
-        if _batch_lot_exists(connection, table_name="batches", project_id=project_id, lot_no=lot_no):
-            raise ValueError("当前项目下已存在相同的质控品批号。")
-
-        cursor = connection.execute(
-            """
-            INSERT INTO batches (
-                project_id, instrument, reagent, qc_material, concentration, lot_no, target_n
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (project_id, instrument, reagent, qc_material, concentration, lot_no, target_n),
-        )
-        batch_id = int(cursor.lastrowid)
-        connection.execute(
-            """
-            INSERT INTO zscore_batch_config (batch_id, project_id, level_count)
-            VALUES (?, ?, ?)
-            """,
-            (batch_id, project_id, int(project_row["level_count"])),
-        )
-    return batch_id
 
 
 def list_zscore_batches(
@@ -2929,55 +2849,6 @@ def export_batch_results_for_phase(
     else:
         phase_df = qc_df[qc_df["phase"] == phase_label].copy()
     return export_batch_results(batch, phase_df, included_columns=included_columns)
-
-
-def add_zscore_run(
-    batch_id: int,
-    project_id: int,
-    test_time: str,
-    operator: str,
-    level_count: int,
-    phase: str,
-    run_status: str,
-    rule_template_id: str,
-    rule_hits_run,
-    error_type_hint: str,
-    analysis_prompt: str,
-) -> int:
-    serialized_rule_hits = json.dumps(rule_hits_run or [], ensure_ascii=False)
-    with get_connection() as connection:
-        cursor = connection.execute(
-            """
-            INSERT INTO zscore_runs (
-                batch_id,
-                project_id,
-                test_time,
-                operator,
-                level_count,
-                phase,
-                run_status,
-                rule_template_id,
-                rule_hits_run,
-                error_type_hint,
-                analysis_prompt
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                batch_id,
-                project_id,
-                test_time,
-                operator,
-                int(level_count),
-                phase,
-                run_status,
-                rule_template_id,
-                serialized_rule_hits,
-                error_type_hint,
-                analysis_prompt,
-            ),
-        )
-        return int(cursor.lastrowid)
 
 
 def update_zscore_run(
