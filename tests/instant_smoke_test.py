@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import sys
 import math
+import sqlite3
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from zipfile import ZipFile
 
 import matplotlib.pyplot as plt
+import pandas as pd
 from streamlit.testing.v1 import AppTest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import database
 from database import (
+    add_instant_result,
     create_batch,
     create_instant_batch,
     create_instant_project,
@@ -22,12 +27,15 @@ from database import (
     create_zscore_project,
     get_batch,
     get_instant_batch,
+    get_instant_judgment_snapshots,
+    get_instant_result_action_logs,
     get_instant_results,
     get_results,
     init_db,
 )
 from pages.lj_sections import build_lj_workbench_context
 from plotting import plot_instant_chart
+from services.export_utils import dataframes_to_xlsx_bytes
 from services.instant_service import (
     build_instant_workbench_context,
     calculate_instant_si_test,
@@ -105,6 +113,7 @@ def bootstrap_batch(
     *,
     project_name: str,
     input_value_type: str = "raw",
+    target_n: int = 20,
 ) -> tuple[int, int]:
     project_id = create_instant_project(project_name, input_value_type=input_value_type)
     batch_id = create_instant_batch(
@@ -114,6 +123,7 @@ def bootstrap_batch(
         qc_material="QC-A",
         concentration="Normal",
         lot_no=f"{project_name[:8]}-LOT",
+        target_n=target_n,
     )
     return project_id, batch_id
 
@@ -290,6 +300,246 @@ def test_disable_restore_and_transfer_hint() -> None:
         context = build_instant_workbench_context(batch_id)
         assert context["summary"]["effective_count"] == 20
         assert context["summary"]["transfer_ready"] is True
+
+
+def test_instant_target_n_controls_short_and_long_accumulation() -> None:
+    with TemporaryDatabaseContext():
+        _, short_batch_id = bootstrap_batch(
+            project_name="Instant Target 8",
+            input_value_type="raw",
+            target_n=8,
+        )
+        seed_instant_results(short_batch_id, [100.0 + index for index in range(7)], operator_prefix="short")
+        short_context = build_instant_workbench_context(short_batch_id)
+        assert int(short_context["batch"]["target_n"]) == 8
+        assert short_context["summary"]["target_n"] == 8
+        assert short_context["summary"]["transfer_ready"] is False
+        assert short_context["transfer_state"]["blockers"] == ["有效点不足 8 个"]
+
+        save_instant_result(
+            batch_id=short_batch_id,
+            test_time=BASE_TIME.format(7),
+            operator="short-7",
+            value=107.0,
+            log_value=None,
+        )
+        short_context = build_instant_workbench_context(short_batch_id)
+        assert short_context["summary"]["transfer_ready"] is True
+        assert short_context["summary"]["transfer_message"] == "已达到 8 个有效点，可确认转入 LJ 法。"
+        short_snapshot = short_context["snapshots_df"].sort_values("snapshot_record_sequence").iloc[-1]
+        assert int(short_snapshot["snapshot_effective_n"]) == 8
+        assert float(short_snapshot["snapshot_si_n2s"]) == 2.03
+        assert float(short_snapshot["snapshot_si_n3s"]) == 2.22
+
+        short_transfer = confirm_instant_transfer_to_lj(short_batch_id)
+        short_lj_batch = get_batch(short_transfer["target_batch_id"])
+        assert int(short_lj_batch["target_n"]) == 8
+        assert short_transfer["target_n"] == 8
+        assert short_transfer["building_count"] == 8
+        assert short_transfer["formal_count"] == 0
+
+        _, long_batch_id = bootstrap_batch(
+            project_name="Instant Target 15",
+            input_value_type="ct",
+            target_n=15,
+        )
+        seed_instant_results(long_batch_id, [25.0 + 0.1 * index for index in range(12)], operator_prefix="long")
+        long_context = build_instant_workbench_context(long_batch_id)
+        assert long_context["summary"]["target_n"] == 15
+        assert long_context["summary"]["transfer_ready"] is False
+        long_snapshot = long_context["snapshots_df"].sort_values("snapshot_record_sequence").iloc[-1]
+        assert int(long_snapshot["snapshot_effective_n"]) == 12
+        assert float(long_snapshot["snapshot_si_n2s"]) == 2.29
+        assert float(long_snapshot["snapshot_si_n3s"]) == 2.55
+
+        for index in range(12, 17):
+            save_instant_result(
+                batch_id=long_batch_id,
+                test_time=BASE_TIME.format(index),
+                operator=f"long-{index}",
+                value=25.0 + 0.1 * index,
+                log_value=None,
+            )
+        long_context = build_instant_workbench_context(long_batch_id)
+        assert long_context["summary"]["effective_count"] == 17
+        assert long_context["summary"]["transfer_ready"] is True
+        assert long_context["summary"]["transfer_message"] == "已达到 15 个有效点，可确认转入 LJ 法。"
+
+        long_transfer = confirm_instant_transfer_to_lj(long_batch_id)
+        long_lj_batch = get_batch(long_transfer["target_batch_id"])
+        assert int(long_lj_batch["target_n"]) == 15
+        assert long_transfer["target_n"] == 15
+        assert long_transfer["building_count"] == 15
+        assert long_transfer["formal_count"] == 2
+
+        for invalid_target_n in (4, 21):
+            try:
+                bootstrap_batch(
+                    project_name=f"Invalid Target {invalid_target_n}",
+                    target_n=invalid_target_n,
+                )
+            except ValueError as exc:
+                assert "5 到 20" in str(exc)
+            else:
+                raise AssertionError("即时法建靶次数超出 5～20 时应被拒绝。")
+
+
+def test_legacy_instant_batch_target_n_defaults_to_twenty() -> None:
+    tempdir = TemporaryDirectory()
+    original_db_path = database.DB_PATH
+    original_legacy_candidates = list(database.LEGACY_DB_CANDIDATES)
+    database.DB_PATH = Path(tempdir.name) / "legacy_instant_target.db"
+    database.LEGACY_DB_CANDIDATES = []
+    try:
+        with sqlite3.connect(database.DB_PATH) as connection:
+            connection.execute(
+                """
+                CREATE TABLE instant_projects (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    input_value_type TEXT NOT NULL DEFAULT 'raw',
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE instant_batches (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER NOT NULL,
+                    input_value_type TEXT NOT NULL DEFAULT 'raw',
+                    instrument TEXT NOT NULL,
+                    reagent TEXT NOT NULL,
+                    qc_material TEXT NOT NULL,
+                    concentration TEXT NOT NULL,
+                    lot_no TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            connection.execute(
+                "INSERT INTO instant_projects (id, name, input_value_type) VALUES (1, 'Legacy Instant', 'raw')"
+            )
+            connection.execute(
+                """
+                INSERT INTO instant_batches (
+                    id, project_id, input_value_type, instrument, reagent,
+                    qc_material, concentration, lot_no
+                )
+                VALUES (1, 1, 'raw', 'Legacy Inst', 'Legacy Reagent', 'Legacy QC', 'Normal', 'LEGACY-LOT')
+                """
+            )
+        init_db()
+        migrated_batch = get_instant_batch(1)
+        assert int(migrated_batch["target_n"]) == 20
+    finally:
+        database.DB_PATH = original_db_path
+        database.LEGACY_DB_CANDIDATES = original_legacy_candidates
+        try:
+            tempdir.cleanup()
+        except PermissionError:
+            pass
+
+
+def test_instant_judgment_snapshots_are_progressive_and_immutable() -> None:
+    with TemporaryDatabaseContext():
+        _, batch_id = bootstrap_batch(project_name="Instant Snapshot Project", input_value_type="raw")
+        seed_instant_results(batch_id, [100.0 + index for index in range(10)], operator_prefix="snapshot")
+
+        context = build_instant_workbench_context(batch_id)
+        snapshots_df = context["snapshots_df"].sort_values("snapshot_record_sequence").reset_index(drop=True)
+        assert snapshots_df["snapshot_effective_n"].astype(int).tolist() == list(range(1, 11))
+        assert snapshots_df["snapshot_source"].tolist() == ["original"] * 10
+        assert snapshots_df.iloc[0]["snapshot_judgment_code"] == "accumulating"
+        assert snapshots_df.iloc[1]["snapshot_judgment_code"] == "accumulating"
+        assert float(snapshots_df.iloc[2]["snapshot_si_n2s"]) == 1.15
+        assert float(snapshots_df.iloc[2]["snapshot_si_n3s"]) == 1.16
+        assert float(snapshots_df.iloc[9]["snapshot_si_n2s"]) == 2.18
+        assert float(snapshots_df.iloc[9]["snapshot_si_n3s"]) == 2.41
+
+        immutable_columns = [
+            "result_id",
+            "snapshot_record_sequence",
+            "snapshot_effective_n",
+            "snapshot_mean",
+            "snapshot_sd",
+            "snapshot_si_upper",
+            "snapshot_si_lower",
+            "snapshot_si_n2s",
+            "snapshot_si_n3s",
+            "snapshot_judgment_code",
+            "snapshot_source",
+        ]
+        frozen_rows = snapshots_df.iloc[:9][immutable_columns].reset_index(drop=True)
+
+        save_instant_result(
+            batch_id=batch_id,
+            test_time=BASE_TIME.format(10),
+            operator="snapshot-10",
+            value=110.0,
+            log_value=None,
+        )
+        first_result_id = int(snapshots_df.iloc[0]["result_id"])
+        disable_instant_result(first_result_id)
+        disabled_context = build_instant_workbench_context(batch_id)
+        updated_frozen_rows = (
+            disabled_context["snapshots_df"]
+            .sort_values("snapshot_record_sequence")
+            .iloc[:9][immutable_columns]
+            .reset_index(drop=True)
+        )
+        assert frozen_rows.equals(updated_frozen_rows)
+        disabled_history_row = disabled_context["history_df"].loc[
+            disabled_context["history_df"]["id"] == first_result_id
+        ].iloc[0]
+        assert disabled_history_row["current_usage_status"] == "当前已禁用"
+        assert len(get_instant_result_action_logs(batch_id)) == 1
+
+        restore_instant_result(first_result_id)
+        restored_snapshots = get_instant_judgment_snapshots(batch_id).sort_values(
+            "snapshot_record_sequence"
+        )
+        assert frozen_rows.equals(restored_snapshots.iloc[:9][immutable_columns].reset_index(drop=True))
+        assert len(get_instant_result_action_logs(batch_id)) == 2
+
+
+def test_legacy_instant_records_receive_marked_reconstructed_snapshots() -> None:
+    with TemporaryDatabaseContext():
+        _, batch_id = bootstrap_batch(project_name="Legacy Instant Project", input_value_type="raw")
+        for minute, value in enumerate([100.0, 101.0, 102.0]):
+            add_instant_result(
+                batch_id=batch_id,
+                test_time=BASE_TIME.format(minute),
+                operator="legacy",
+                value=value,
+                log_value=None,
+            )
+        assert get_instant_judgment_snapshots(batch_id).empty
+
+        context = build_instant_workbench_context(batch_id)
+        snapshots_df = context["snapshots_df"].sort_values("snapshot_record_sequence")
+        assert snapshots_df["snapshot_effective_n"].astype(int).tolist() == [1, 2, 3]
+        assert snapshots_df["snapshot_source"].tolist() == ["reconstructed"] * 3
+
+
+def test_multi_sheet_excel_export_is_valid_and_contains_expected_sheets() -> None:
+    workbook_bytes = dataframes_to_xlsx_bytes(
+        {
+            "检测记录": pd.DataFrame({"序号": [1, 2], "结果": [100.1, 100.2]}),
+            "批次信息": pd.DataFrame({"项目": ["方法"], "内容": ["即时法"]}),
+        }
+    )
+    assert workbook_bytes.startswith(b"PK")
+    with ZipFile(BytesIO(workbook_bytes)) as workbook:
+        names = set(workbook.namelist())
+        assert "xl/worksheets/sheet1.xml" in names
+        assert "xl/worksheets/sheet2.xml" in names
+        workbook_xml = workbook.read("xl/workbook.xml").decode("utf-8")
+        assert "检测记录" in workbook_xml
+        assert "批次信息" in workbook_xml
+        first_sheet_xml = workbook.read("xl/worksheets/sheet1.xml").decode("utf-8")
+        assert "autoFilter" in first_sheet_xml
+        assert 'state="frozen"' in first_sheet_xml
 
 
 def test_name_validation_scopes_are_method_and_project_local() -> None:
@@ -559,19 +809,36 @@ def test_instant_page_uses_business_labels_and_single_judgment_area() -> None:
         assert project_options == ["请选择即时法项目", "AlphaProject | Ct值"]
         assert batch_options[0] == "请选择即时法批次"
         assert batch_options[1].startswith("质控批号：AlphaPro-LOT")
+        assert "建靶 20 次" in batch_options[1]
         assert "项目 1" not in batch_options[1]
         assert "批次 1" not in batch_options[1]
 
         project_table = at.dataframe[0].value
         batch_table = at.dataframe[1].value
         assert list(project_table.columns) == ["项目名称", "输入值类型", "创建时间"]
-        assert list(batch_table.columns) == ["质控品批号", "仪器", "试剂", "质控品", "浓度", "创建时间"]
+        assert list(batch_table.columns) == [
+            "质控品批号",
+            "仪器",
+            "试剂",
+            "质控品",
+            "浓度",
+            "建靶所需次数",
+            "创建时间",
+        ]
         assert "编号" not in project_table.columns
         assert "编号" not in batch_table.columns
+        target_n_selectboxes = [element for element in at.selectbox if element.label == "建靶所需次数"]
+        assert len(target_n_selectboxes) == 1
+        assert int(target_n_selectboxes[0].value) == 20
+        assert [int(option) for option in target_n_selectboxes[0].options] == list(range(5, 21))
 
         caption_values = [item.value for item in at.caption]
         assert not any("当前批次：1" in value for value in caption_values)
         assert any("质控批号 AlphaPro-LOT" in value for value in caption_values)
+        assert any(
+            element.label == "下载当前逐次判定表 Excel"
+            for element in at.get("download_button")
+        )
 
 
 def test_transferred_instant_page_is_read_only_and_lj_page_shows_source() -> None:
@@ -596,6 +863,10 @@ def test_transferred_instant_page_is_read_only_and_lj_page_shows_source() -> Non
         lj_at.run()
         assert any("来源：即时法" in str(item.value) for item in lj_at.info)
         assert any("转入时间" in str(item.value) for item in lj_at.info)
+        assert any(
+            element.label == "下载当前检测记录 Excel"
+            for element in lj_at.get("download_button")
+        )
 
 
 def test_instant_transfer_navigation_uses_pending_intent_and_opens_target_lj_batch() -> None:
@@ -664,6 +935,10 @@ def test_lj_page_uses_business_labels_and_marks_instant_origin() -> None:
         assert "普通创建" in project_table["来源"].tolist()
         assert batch_table["来源"].tolist() == ["由即时法转入"]
         assert any("来源：即时法" in str(item.value) for item in at.info)
+        assert any(
+            element.label == "下载当前检测记录 Excel"
+            for element in at.get("download_button")
+        )
         expander_states = {str(expander.label): bool(expander.proto.expanded) for expander in at.expander}
         assert expander_states["当前批次检测记录"] is False
         assert expander_states["导出与导入"] is False
@@ -707,6 +982,10 @@ def test_zscore_page_uses_business_labels_in_management_and_context() -> None:
         text_values = [str(item.value) for item in at.text]
         assert any("质控品批号：ZLOT-01" in value for value in text_values)
         assert not any("批次：1" in value for value in text_values)
+        assert any(
+            element.label == "下载当前检测记录 Excel"
+            for element in at.get("download_button")
+        )
 
 
 def run_all_tests() -> None:
@@ -716,6 +995,11 @@ def run_all_tests() -> None:
         test_instant_summary_exposes_si_method_and_parameters,
         test_ct_label_and_chart_axis_follow_project_value_type,
         test_disable_restore_and_transfer_hint,
+        test_instant_target_n_controls_short_and_long_accumulation,
+        test_legacy_instant_batch_target_n_defaults_to_twenty,
+        test_instant_judgment_snapshots_are_progressive_and_immutable,
+        test_legacy_instant_records_receive_marked_reconstructed_snapshots,
+        test_multi_sheet_excel_export_is_valid_and_contains_expected_sheets,
         test_name_validation_scopes_are_method_and_project_local,
         test_confirm_transfer_to_lj_with_exactly_twenty_effective_points,
         test_confirm_transfer_to_lj_splits_building_and_formal_points,

@@ -54,6 +54,7 @@ from services.outlier_service import (
 from services.export_utils import (
     dataframe_to_csv_bytes,
     dataframe_to_xlsx_bytes as shared_dataframe_to_xlsx_bytes,
+    dataframes_to_xlsx_bytes,
 )
 from services.profiling import profile_timer
 from zscore_logic import (
@@ -546,6 +547,7 @@ def render_zscore_rule_records_overview_section(context: dict[str, object]) -> N
         history_runs,
         required_level_ids,
     )
+    batch = context["batch"]
 
     with st.container(border=True):
         st.markdown("**规则与记录概览**")
@@ -573,7 +575,39 @@ def render_zscore_rule_records_overview_section(context: dict[str, object]) -> N
             }
             for rule_id in rule_ids
         ]
-        st.dataframe(pd.DataFrame(rule_rows), hide_index=True, width="stretch")
+        rule_summary_df = pd.DataFrame(rule_rows)
+        st.dataframe(rule_summary_df, hide_index=True, width="stretch")
+
+        batch_info_df = pd.DataFrame(
+            [
+                ("项目名称", str(batch["project_name"])),
+                ("质控品批号", str(batch["lot_no"])),
+                ("方法", "多水平（Z-score法）"),
+                ("输入值类型", str(context["input_value_type_label"])),
+                ("最终判定粒度", "run"),
+                ("导出时间", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            ],
+            columns=["项目", "内容"],
+        )
+        workbook_sheets = {
+            "检测记录": run_records_df,
+            "规则汇总": rule_summary_df,
+            "批次信息": batch_info_df,
+        }
+        if not abnormal_records_df.empty:
+            workbook_sheets["警告与失控记录"] = abnormal_records_df
+        workbook_bytes = dataframes_to_xlsx_bytes(workbook_sheets)
+        project_name_fragment = build_safe_export_name(str(batch["project_name"]), "zscore_project")
+        lot_no_fragment = build_safe_export_name(str(batch["lot_no"]), f"batch_{batch['id']}")
+        st.download_button(
+            "下载当前检测记录 Excel",
+            data=workbook_bytes,
+            file_name=f"{project_name_fragment}_{lot_no_fragment}_zscore_records.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"zscore_quick_records_excel_{int(batch['id'])}",
+            disabled=run_records_df.empty,
+            width="stretch",
+        )
 
         with st.expander(
             "警告 / 失控记录",

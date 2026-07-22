@@ -166,6 +166,8 @@ def init_db() -> None:
         _ensure_instant_projects_table(connection)
         _ensure_instant_batches_table(connection)
         _ensure_instant_results_table(connection)
+        _ensure_instant_judgment_snapshots_table(connection)
+        _ensure_instant_result_action_logs_table(connection)
         _ensure_zscore_project_config_table(connection)
         _ensure_zscore_batch_config_table(connection)
         _ensure_zscore_runs_table(connection)
@@ -824,6 +826,7 @@ def _ensure_instant_batches_table(connection: sqlite3.Connection) -> None:
             qc_material TEXT NOT NULL,
             concentration TEXT NOT NULL,
             lot_no TEXT NOT NULL,
+            target_n INTEGER NOT NULL DEFAULT 20 CHECK (target_n BETWEEN 5 AND 20),
             is_disabled INTEGER NOT NULL DEFAULT 0,
             lj_transfer_status TEXT NOT NULL DEFAULT 'pending',
             lj_transfer_target_batch_id INTEGER,
@@ -843,6 +846,7 @@ def _ensure_instant_batches_table(connection: sqlite3.Connection) -> None:
     }
     missing_columns = {
         "input_value_type": f"TEXT NOT NULL DEFAULT '{DEFAULT_INPUT_VALUE_TYPE}'",
+        "target_n": "INTEGER NOT NULL DEFAULT 20 CHECK (target_n BETWEEN 5 AND 20)",
         "is_disabled": "INTEGER NOT NULL DEFAULT 0",
         "lj_transfer_status": "TEXT NOT NULL DEFAULT 'pending'",
         "lj_transfer_target_batch_id": "INTEGER",
@@ -865,6 +869,15 @@ def _ensure_instant_batches_table(connection: sqlite3.Connection) -> None:
            OR LOWER(TRIM(input_value_type)) NOT IN ('raw', 'ct', 'log')
         """,
         (DEFAULT_INPUT_VALUE_TYPE,),
+    )
+    connection.execute(
+        """
+        UPDATE instant_batches
+        SET target_n = 20
+        WHERE target_n IS NULL
+           OR target_n < 5
+           OR target_n > 20
+        """
     )
     if "transfer_status" in {row["name"] for row in connection.execute("PRAGMA table_info(instant_batches)").fetchall()}:
         connection.execute(
@@ -1068,6 +1081,77 @@ def _ensure_instant_results_table(connection: sqlite3.Connection) -> None:
             WHERE instant_batches.id = instant_results.batch_id
         )
         WHERE project_id IS NULL OR project_id = 0
+        """
+    )
+
+
+def _ensure_instant_judgment_snapshots_table(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS instant_judgment_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            result_id INTEGER NOT NULL UNIQUE,
+            batch_id INTEGER NOT NULL,
+            project_id INTEGER NOT NULL,
+            record_sequence INTEGER NOT NULL,
+            effective_n INTEGER NOT NULL,
+            mean_value REAL,
+            sd_value REAL,
+            si_upper REAL,
+            si_lower REAL,
+            si_n2s REAL,
+            si_n3s REAL,
+            max_si REAL,
+            judgment_code TEXT NOT NULL,
+            judgment_label TEXT NOT NULL,
+            reason_code TEXT NOT NULL DEFAULT '',
+            trigger_side TEXT,
+            suspected_result_id INTEGER,
+            suspected_effective_sequence INTEGER,
+            suspected_value REAL,
+            effective_result_ids_json TEXT NOT NULL DEFAULT '[]',
+            snapshot_source TEXT NOT NULL DEFAULT 'original'
+                CHECK (snapshot_source IN ('original', 'reconstructed')),
+            algorithm_version TEXT NOT NULL DEFAULT 'instant_si_v1',
+            calculated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (result_id) REFERENCES instant_results (id) ON DELETE CASCADE,
+            FOREIGN KEY (batch_id) REFERENCES instant_batches (id) ON DELETE CASCADE,
+            FOREIGN KEY (project_id) REFERENCES instant_projects (id) ON DELETE CASCADE,
+            FOREIGN KEY (suspected_result_id) REFERENCES instant_results (id) ON DELETE SET NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_instant_judgment_snapshots_batch_sequence
+        ON instant_judgment_snapshots (batch_id, record_sequence, id)
+        """
+    )
+
+
+def _ensure_instant_result_action_logs_table(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS instant_result_action_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            result_id INTEGER NOT NULL,
+            batch_id INTEGER NOT NULL,
+            action_type TEXT NOT NULL,
+            previous_is_effective INTEGER NOT NULL,
+            new_is_effective INTEGER NOT NULL,
+            previous_manual_status TEXT NOT NULL DEFAULT '',
+            new_manual_status TEXT NOT NULL DEFAULT '',
+            action_note TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (result_id) REFERENCES instant_results (id) ON DELETE CASCADE,
+            FOREIGN KEY (batch_id) REFERENCES instant_batches (id) ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_instant_result_action_logs_batch_time
+        ON instant_result_action_logs (batch_id, created_at, id)
         """
     )
 
@@ -1909,7 +1993,11 @@ def create_instant_batch(
     qc_material: str,
     concentration: str,
     lot_no: str,
+    target_n: int = 20,
 ) -> int:
+    normalized_target_n = int(target_n)
+    if not 5 <= normalized_target_n <= 20:
+        raise ValueError("即时法建靶所需次数必须在 5 到 20 次之间。")
     with get_connection() as connection:
         project_row = connection.execute(
             """
@@ -1927,9 +2015,9 @@ def create_instant_batch(
         cursor = connection.execute(
             """
             INSERT INTO instant_batches (
-                project_id, input_value_type, instrument, reagent, qc_material, concentration, lot_no
+                project_id, input_value_type, instrument, reagent, qc_material, concentration, lot_no, target_n
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 project_id,
@@ -1939,6 +2027,7 @@ def create_instant_batch(
                 qc_material,
                 concentration,
                 lot_no,
+                normalized_target_n,
             ),
         )
         return int(cursor.lastrowid)
@@ -1988,6 +2077,7 @@ def list_instant_batches(
                     instant_batches.qc_material,
                     instant_batches.concentration,
                     instant_batches.lot_no,
+                    instant_batches.target_n,
                     instant_batches.created_at
     """
     if include_management_fields:
@@ -2520,7 +2610,8 @@ def save_zscore_level_outlier_snapshot(batch_id: int, analysis_rows: list[dict[s
         )
 
 
-def add_instant_result(
+def _add_instant_result_with_connection(
+    connection: sqlite3.Connection,
     *,
     batch_id: int,
     test_time: str,
@@ -2530,41 +2621,75 @@ def add_instant_result(
     manual_status: str = "normal",
     manual_note: str = "",
 ) -> int:
-    with get_connection() as connection:
-        batch_row = connection.execute(
-            """
-            SELECT project_id,
-                   transfer_status
-            FROM instant_batches
-            WHERE id = ?
-            """,
-            (batch_id,),
-        ).fetchone()
-        if batch_row is None:
-            raise ValueError(f"未找到即时法批次 {batch_id}")
-        if str(batch_row["transfer_status"] or "not_transferred").strip().lower() == "transferred":
-            raise ValueError("该即时法批次已转入 LJ 法，当前批次已冻结为只读。")
-        if log_value is _UNSET:
-            log_value = _safe_log10(value)
-        cursor = connection.execute(
-            """
-            INSERT INTO instant_results (
-                batch_id, project_id, test_time, operator, value, log_value, manual_status, manual_note
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                batch_id,
-                int(batch_row["project_id"]),
-                test_time,
-                operator,
-                value,
-                log_value,
-                str(manual_status or "normal"),
-                str(manual_note or ""),
-            ),
+    batch_row = connection.execute(
+        """
+        SELECT project_id,
+               transfer_status
+        FROM instant_batches
+        WHERE id = ?
+        """,
+        (batch_id,),
+    ).fetchone()
+    if batch_row is None:
+        raise ValueError(f"未找到即时法批次 {batch_id}")
+    if str(batch_row["transfer_status"] or "not_transferred").strip().lower() == "transferred":
+        raise ValueError("该即时法批次已转入 LJ 法，当前批次已冻结为只读。")
+    if log_value is _UNSET:
+        log_value = _safe_log10(value)
+    cursor = connection.execute(
+        """
+        INSERT INTO instant_results (
+            batch_id, project_id, test_time, operator, value, log_value, manual_status, manual_note
         )
-        return int(cursor.lastrowid)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            batch_id,
+            int(batch_row["project_id"]),
+            test_time,
+            operator,
+            value,
+            log_value,
+            str(manual_status or "normal"),
+            str(manual_note or ""),
+        ),
+    )
+    return int(cursor.lastrowid)
+
+
+def add_instant_result(
+    *,
+    batch_id: int,
+    test_time: str,
+    value: float,
+    operator: str = "",
+    log_value=_UNSET,
+    manual_status: str = "normal",
+    manual_note: str = "",
+    connection: sqlite3.Connection | None = None,
+) -> int:
+    if connection is not None:
+        return _add_instant_result_with_connection(
+            connection,
+            batch_id=batch_id,
+            test_time=test_time,
+            value=value,
+            operator=operator,
+            log_value=log_value,
+            manual_status=manual_status,
+            manual_note=manual_note,
+        )
+    with get_connection() as managed_connection:
+        return _add_instant_result_with_connection(
+            managed_connection,
+            batch_id=batch_id,
+            test_time=test_time,
+            value=value,
+            operator=operator,
+            log_value=log_value,
+            manual_status=manual_status,
+            manual_note=manual_note,
+        )
 
 
 def get_instant_result(result_id: int) -> sqlite3.Row:
@@ -2592,6 +2717,8 @@ def set_instant_result_effective_state(
         result_row = connection.execute(
             """
             SELECT instant_results.batch_id,
+                   instant_results.is_effective,
+                   instant_results.manual_status,
                    instant_batches.transfer_status
             FROM instant_results
             INNER JOIN instant_batches ON instant_batches.id = instant_results.batch_id
@@ -2614,6 +2741,29 @@ def set_instant_result_effective_state(
         )
         if cursor.rowcount == 0:
             raise ValueError(f"未找到即时法检测记录 {result_id}")
+        connection.execute(
+            """
+            INSERT INTO instant_result_action_logs (
+                result_id,
+                batch_id,
+                action_type,
+                previous_is_effective,
+                new_is_effective,
+                previous_manual_status,
+                new_manual_status
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                result_id,
+                int(result_row["batch_id"]),
+                str(manual_status or "normal"),
+                int(result_row["is_effective"] or 0),
+                int(is_effective),
+                str(result_row["manual_status"] or "normal"),
+                str(manual_status or "normal"),
+            ),
+        )
 
 
 def save_instant_result_analysis_snapshot(
@@ -2705,6 +2855,176 @@ def get_instant_results(batch_id: int, include_manual_note: bool = True) -> pd.D
         dataframe["manual_status"] = dataframe["manual_status"].fillna("normal")
         if include_manual_note:
             dataframe["manual_note"] = dataframe["manual_note"].fillna("")
+    return dataframe
+
+
+def create_instant_judgment_snapshot(
+    *,
+    result_id: int,
+    batch_id: int,
+    project_id: int,
+    record_sequence: int,
+    effective_n: int,
+    mean_value: float | None,
+    sd_value: float | None,
+    si_upper: float | None,
+    si_lower: float | None,
+    si_n2s: float | None,
+    si_n3s: float | None,
+    max_si: float | None,
+    judgment_code: str,
+    judgment_label: str,
+    reason_code: str,
+    trigger_side: str | None,
+    suspected_result_id: int | None,
+    suspected_effective_sequence: int | None,
+    suspected_value: float | None,
+    effective_result_ids: list[int],
+    snapshot_source: str,
+    algorithm_version: str,
+    calculated_at: str | None = None,
+    ignore_existing: bool = False,
+    connection: sqlite3.Connection | None = None,
+) -> int | None:
+    def _insert(target_connection: sqlite3.Connection) -> int | None:
+        insert_keyword = "INSERT OR IGNORE" if ignore_existing else "INSERT"
+        cursor = target_connection.execute(
+            f"""
+            {insert_keyword} INTO instant_judgment_snapshots (
+                result_id,
+                batch_id,
+                project_id,
+                record_sequence,
+                effective_n,
+                mean_value,
+                sd_value,
+                si_upper,
+                si_lower,
+                si_n2s,
+                si_n3s,
+                max_si,
+                judgment_code,
+                judgment_label,
+                reason_code,
+                trigger_side,
+                suspected_result_id,
+                suspected_effective_sequence,
+                suspected_value,
+                effective_result_ids_json,
+                snapshot_source,
+                algorithm_version,
+                calculated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+            """,
+            (
+                int(result_id),
+                int(batch_id),
+                int(project_id),
+                int(record_sequence),
+                int(effective_n),
+                mean_value,
+                sd_value,
+                si_upper,
+                si_lower,
+                si_n2s,
+                si_n3s,
+                max_si,
+                str(judgment_code or ""),
+                str(judgment_label or ""),
+                str(reason_code or ""),
+                str(trigger_side or "") or None,
+                int(suspected_result_id) if suspected_result_id is not None else None,
+                int(suspected_effective_sequence)
+                if suspected_effective_sequence is not None
+                else None,
+                suspected_value,
+                json.dumps([int(item) for item in effective_result_ids], ensure_ascii=False),
+                str(snapshot_source or "original"),
+                str(algorithm_version or "instant_si_v1"),
+                calculated_at,
+            ),
+        )
+        return int(cursor.lastrowid) if cursor.rowcount else None
+
+    if connection is not None:
+        return _insert(connection)
+    with get_connection() as managed_connection:
+        return _insert(managed_connection)
+
+
+def get_instant_judgment_snapshots(batch_id: int) -> pd.DataFrame:
+    with get_connection() as connection:
+        dataframe = pd.read_sql_query(
+            """
+            SELECT
+                id AS snapshot_id,
+                result_id,
+                batch_id,
+                project_id,
+                record_sequence AS snapshot_record_sequence,
+                effective_n AS snapshot_effective_n,
+                mean_value AS snapshot_mean,
+                sd_value AS snapshot_sd,
+                si_upper AS snapshot_si_upper,
+                si_lower AS snapshot_si_lower,
+                si_n2s AS snapshot_si_n2s,
+                si_n3s AS snapshot_si_n3s,
+                max_si AS snapshot_max_si,
+                judgment_code AS snapshot_judgment_code,
+                judgment_label AS snapshot_judgment_label,
+                reason_code AS snapshot_reason_code,
+                trigger_side AS snapshot_trigger_side,
+                suspected_result_id AS snapshot_suspected_result_id,
+                suspected_effective_sequence AS snapshot_suspected_effective_sequence,
+                suspected_value AS snapshot_suspected_value,
+                effective_result_ids_json AS snapshot_effective_result_ids_json,
+                snapshot_source,
+                algorithm_version AS snapshot_algorithm_version,
+                calculated_at AS snapshot_calculated_at
+            FROM instant_judgment_snapshots
+            WHERE batch_id = ?
+            ORDER BY record_sequence ASC, id ASC
+            """,
+            connection,
+            params=(batch_id,),
+        )
+    if not dataframe.empty:
+        dataframe["snapshot_calculated_at"] = pd.to_datetime(
+            dataframe["snapshot_calculated_at"], errors="coerce"
+        )
+    return dataframe
+
+
+def get_instant_result_action_logs(batch_id: int) -> pd.DataFrame:
+    with get_connection() as connection:
+        dataframe = pd.read_sql_query(
+            """
+            SELECT
+                action_logs.id AS action_id,
+                action_logs.result_id,
+                action_logs.batch_id,
+                action_logs.action_type,
+                action_logs.previous_is_effective,
+                action_logs.new_is_effective,
+                action_logs.previous_manual_status,
+                action_logs.new_manual_status,
+                action_logs.action_note,
+                action_logs.created_at AS action_time,
+                instant_results.test_time,
+                instant_results.operator,
+                instant_results.value
+            FROM instant_result_action_logs AS action_logs
+            INNER JOIN instant_results ON instant_results.id = action_logs.result_id
+            WHERE action_logs.batch_id = ?
+            ORDER BY datetime(action_logs.created_at) ASC, action_logs.id ASC
+            """,
+            connection,
+            params=(batch_id,),
+        )
+    if not dataframe.empty:
+        dataframe["action_time"] = pd.to_datetime(dataframe["action_time"], errors="coerce")
+        dataframe["test_time"] = pd.to_datetime(dataframe["test_time"], errors="coerce")
     return dataframe
 
 

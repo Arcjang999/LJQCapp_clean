@@ -15,8 +15,11 @@ from database import (
     list_instant_projects,
 )
 from pages.management import guard_work_tab_selection, sync_selector_state
-from plotting import plot_instant_chart
+from plotting import close_figure, plot_instant_chart
+from services.export_utils import dataframes_to_xlsx_bytes
 from services.instant_service import (
+    INSTANT_MAX_TARGET_N,
+    INSTANT_MIN_TARGET_N,
     INSTANT_TRANSFER_READY_COUNT,
     build_instant_transfer_preview,
     build_instant_workbench_context,
@@ -34,6 +37,7 @@ from services.value_type_service import (
 )
 from ui.common import (
     TEXT,
+    build_safe_export_name,
     format_datetime_column,
     format_optional_float,
     render_compact_stat_metrics,
@@ -109,6 +113,8 @@ def _build_instant_batch_label(row: pd.Series) -> str:
     parts = []
     if lot_no:
         parts.append(f"质控批号：{lot_no}")
+    if pd.notna(row.get("target_n")):
+        parts.append(f"建靶 {int(row['target_n'])} 次")
     if created_at:
         parts.append(f"创建于 {created_at}")
     if not parts:
@@ -152,7 +158,7 @@ def _build_instant_batch_table(batches_df: pd.DataFrame) -> pd.DataFrame:
     for column_name in ["lot_no", "instrument", "reagent", "qc_material", "concentration"]:
         display_df[column_name] = display_df[column_name].map(_clean_instant_display_part)
     return display_df[
-        ["lot_no", "instrument", "reagent", "qc_material", "concentration", "created_at"]
+        ["lot_no", "instrument", "reagent", "qc_material", "concentration", "target_n", "created_at"]
     ].rename(
         columns={
             "lot_no": "质控品批号",
@@ -160,6 +166,7 @@ def _build_instant_batch_table(batches_df: pd.DataFrame) -> pd.DataFrame:
             "reagent": "试剂",
             "qc_material": "质控品",
             "concentration": "浓度",
+            "target_n": "建靶所需次数",
             "created_at": "创建时间",
         }
     )
@@ -173,6 +180,7 @@ def _build_instant_batch_summary(batch: dict[str, object] | pd.Series | object) 
     reagent = _clean_instant_display_part(batch_dict.get("reagent"))
     qc_material = _clean_instant_display_part(batch_dict.get("qc_material"))
     concentration = _clean_instant_display_part(batch_dict.get("concentration"))
+    target_n = batch_dict.get("target_n")
     if lot_no:
         parts.append(f"质控批号 {lot_no}")
     if instrument:
@@ -183,6 +191,8 @@ def _build_instant_batch_summary(batch: dict[str, object] | pd.Series | object) 
         parts.append(qc_material)
     if concentration:
         parts.append(concentration)
+    if target_n is not None:
+        parts.append(f"建靶 {int(target_n)} 次")
     return _join_instant_display_parts(parts) or "当前批次"
 
 
@@ -299,6 +309,11 @@ def _render_instant_project_batch_management(
                     qc_material = st.text_input("质控品")
                     concentration = st.text_input("浓度")
                     lot_no = st.text_input("质控品批号")
+                    target_n = st.selectbox(
+                        "建靶所需次数",
+                        options=list(range(INSTANT_MIN_TARGET_N, INSTANT_MAX_TARGET_N + 1)),
+                        index=INSTANT_TRANSFER_READY_COUNT - INSTANT_MIN_TARGET_N,
+                    )
                     create_submitted = st.form_submit_button("创建即时法批次", width="stretch")
                     if create_submitted:
                         required_fields = [instrument, reagent, qc_material, concentration, lot_no]
@@ -312,6 +327,7 @@ def _render_instant_project_batch_management(
                                 qc_material=qc_material.strip(),
                                 concentration=concentration.strip(),
                                 lot_no=lot_no.strip(),
+                                target_n=int(target_n),
                             )
                             st.session_state["instant_selected_batch_id"] = batch_id
                             st.success(f"即时法批次“{lot_no.strip()}”已创建。")
@@ -365,6 +381,7 @@ def _render_instant_transfer_dialog(batch_id: int) -> None:
         else str(transfer_state["target_project_name"])
     )
     target_batch_summary = str(transfer_state.get("target_batch_lot_no") or "").strip() or "系统将新建 LJ 批次"
+    target_n = int(batch["target_n"])
 
     st.caption(
         "确认后将把当前即时法批次中的有效点转入一个新建的 LJ 批次，"
@@ -407,14 +424,14 @@ def _render_instant_transfer_dialog(batch_id: int) -> None:
             ("CV%", format_optional_float(summary["cv"], digits=2, suffix="%")),
             ("目标 LJ 项目", target_project_summary),
             ("将新建的 LJ 批次", f"质控品批号：{target_batch_summary}"),
-            ("目标批次 target_n", str(INSTANT_TRANSFER_READY_COUNT)),
+            ("目标批次 target_n", str(target_n)),
         ]
     )
     st.markdown(
         "\n".join(
             [
-                "- 前 20 个有效点将作为 LJ 建靶数据。",
-                "- 第 21 个及之后的有效点将作为 LJ 正式期数据。",
+                f"- 前 {target_n} 个有效点将作为 LJ 建靶数据。",
+                f"- 第 {target_n + 1} 个及之后的有效点将作为 LJ 正式期数据。",
                 "- 转入后当前即时法批次将冻结为只读，不可继续录入、维护或再次转入。",
             ]
         )
@@ -545,6 +562,7 @@ def _render_instant_entry_and_summary_section(
 def _render_instant_transfer_section(context: dict[str, object]) -> None:
     summary = context["summary"]
     transfer_state = context["transfer_state"]
+    target_n = int(summary["target_n"])
     is_transferred = bool(transfer_state.get("is_transferred"))
 
     if is_transferred:
@@ -577,16 +595,17 @@ def _render_instant_transfer_section(context: dict[str, object]) -> None:
             ("当前有效点数", str(summary["effective_count"])),
             ("达到转入阈值", "是" if summary.get("transfer_ready") else "否"),
             ("待处理疑似离群点", str(summary.get("pending_outlier_review_count", 0))),
-            ("目标阈值", str(INSTANT_TRANSFER_READY_COUNT)),
+            ("目标阈值", str(target_n)),
         ]
     )
     if summary.get("transfer_ready"):
-        st.success("已达到 20 个有效点，可确认转入 LJ 法。")
+        st.success(f"已达到 {target_n} 个有效点，可确认转入 LJ 法。")
     else:
-        st.caption(f"达到 {INSTANT_TRANSFER_READY_COUNT} 个有效点后，才可执行“确认转入 LJ 法”。")
+        st.caption(f"达到 {target_n} 个有效点后，才可执行“确认转入 LJ 法”。")
 
     st.caption(
-        "转入规则：前 20 个有效点作为 LJ 建靶数据；第 21 个及之后的有效点作为 LJ 正式期数据；"
+        f"转入规则：前 {target_n} 个有效点作为 LJ 建靶数据；"
+        f"第 {target_n + 1} 个及之后的有效点作为 LJ 正式期数据；"
         "转入后当前即时法批次将冻结为只读。"
     )
     if st.button(
@@ -597,6 +616,7 @@ def _render_instant_transfer_section(context: dict[str, object]) -> None:
         width="stretch",
     ):
         st.session_state["show_instant_transfer_dialog"] = True
+        st.rerun()
     blockers = list(transfer_state.get("blockers", []))
     if blockers:
         st.info("当前暂不可转入：\n" + "\n".join(f"- {reason}" for reason in blockers))
@@ -623,14 +643,16 @@ def _render_instant_si_method_explanation(summary: dict[str, object]) -> None:
         )
     )
     with st.expander("即刻法 SI 值说明", expanded=False):
-        st.caption("用于前 20 个有效点内的即时质控提示，系统只提示，不自动剔除。")
+        st.caption("用于批次建靶过程中的逐次质控提示，系统只提示，不自动剔除。")
         st.markdown(
             "\n".join(
                 [
                     f"- 当前采用：`{method_label}`。",
                     "- 判定范围：同一批外部质控品的当前有效点集合。",
                     "- 起判条件：有效点数 `n < 3` 时不判定，`n >= 3` 时开始判定。",
-                    "- 使用范围：即刻法 SI 表仅用于前 20 个有效点，超过后应转入 LJ 法。",
+                    f"- 建靶目标：当前批次要求 `{int(summary['target_n'])}` 个有效点，范围可配置为 5～20。",
+                    "- 逐次口径：每一行按当时实际有效点数 n 查表判定，不使用固定 10 次或固定目标次数代替 n。",
+                    "- 使用范围：即刻法 SI 表提供 n=3～20 的临界值，超过 20 后不再继续判定。",
                     f"- 公式：`{formula}`，其中 `s` 使用样本标准差。",
                     "- 判定阈值：SI上限和 SI下限均不超过 n2s 为在控；超过 n2s 但不超过 n3s 为警告；超过 n3s 为疑似离群。",
                     "- 处理方式：系统不自动禁用，保留 / 禁用 / 恢复由用户手工处理。",
@@ -639,27 +661,11 @@ def _render_instant_si_method_explanation(summary: dict[str, object]) -> None:
         )
 
 
-def _render_instant_chart_analysis_section(context: dict[str, object]) -> object:
-    batch = context["batch"]
-    analysis_df = context["analysis_df"]
+def _render_instant_latest_analysis_section(context: dict[str, object]) -> None:
     summary = context["summary"]
     latest_row = context["latest_row"]
-    input_value_type_label = context["input_value_type_label"]
-    figure = plot_instant_chart(
-        analysis_df,
-        summary,
-        title=(
-            f"即时法趋势图 - {_build_instant_batch_summary(batch)}"
-        ),
-        y_axis_label=input_value_type_label,
-    )
-
-    st.markdown("**即时法质控图**")
-    st.pyplot(figure, clear_figure=False, width="stretch")
-
-    st.divider()
     st.markdown("**最新判定区**")
-    st.caption("在此查看当前批次的最新判定。")
+    st.caption("这里显示当前有效集合的最新判定；逐次历史结果请以本页下方快照表为准。")
     latest_source_text = (
         f"最近记录 #{int(latest_row['sequence'])}"
         if latest_row is not None and "sequence" in latest_row
@@ -672,82 +678,158 @@ def _render_instant_chart_analysis_section(context: dict[str, object]) -> object
         source_text=latest_source_text,
         tone_key=_resolve_instant_tone_key(str(summary["latest_status"])),
     )
-    return figure
+
+
+def _render_instant_chart_section(context: dict[str, object]) -> None:
+    batch = context["batch"]
+    analysis_df = context["analysis_df"]
+    summary = context["summary"]
+    input_value_type_label = context["input_value_type_label"]
+    figure = plot_instant_chart(
+        analysis_df,
+        summary,
+        title=(
+            f"即时法趋势图 - {_build_instant_batch_summary(batch)}"
+        ),
+        y_axis_label=input_value_type_label,
+    )
+    with st.expander("辅助趋势图（点击展开）", expanded=False):
+        st.caption("即时法以逐次判定数据为主；本图仅用于辅助观察检测值趋势。")
+        st.pyplot(figure, clear_figure=False, width="stretch")
+    close_figure(figure)
 
 
 def _build_instant_display_dataframe(
-    analysis_df: pd.DataFrame,
+    history_df: pd.DataFrame,
     input_value_type_label: str,
 ) -> pd.DataFrame:
-    display_df = analysis_df.copy()
-    if display_df.empty:
-        return display_df
+    if history_df.empty:
+        return pd.DataFrame()
 
-    display_df["test_time"] = pd.to_datetime(display_df["test_time"]).dt.strftime("%Y-%m-%d %H:%M:%S")
-    display_df["value"] = display_df["value"].map(lambda value: f"{float(value):.4f}")
-    display_df["effective_sequence"] = display_df["effective_sequence"].map(
-        lambda value: "" if pd.isna(value) else str(int(value))
-    )
-    display_df["is_outlier_suspect"] = display_df["is_outlier_suspect"].map(lambda flag: "是" if int(flag) == 1 else "否")
-    for column_name in ["si_upper", "si_lower"]:
-        display_df[column_name] = display_df[column_name].map(
-            lambda value: "-" if value is None or pd.isna(value) else f"{float(value):.4f}"
+    rows: list[dict[str, object]] = []
+    for _, row in history_df.iterrows():
+        suspected_sequence = row.get("snapshot_suspected_effective_sequence")
+        suspected_value = row.get("snapshot_suspected_value")
+        suspected_text = "-"
+        if pd.notna(suspected_sequence):
+            suspected_text = f"有效序号 #{int(suspected_sequence)}"
+            if pd.notna(suspected_value):
+                suspected_text += f"，值={float(suspected_value):.4f}"
+        rows.append(
+            {
+                "记录序号": int(row["snapshot_record_sequence"]),
+                "检测时间": pd.Timestamp(row["test_time"]).strftime("%Y-%m-%d %H:%M:%S"),
+                "检测人": str(row.get("operator") or ""),
+                input_value_type_label: float(row["value"]),
+                "当次有效点数 n": int(row["snapshot_effective_n"]),
+                "当次均值": row.get("snapshot_mean"),
+                "当次样本SD": row.get("snapshot_sd"),
+                "SI上限": row.get("snapshot_si_upper"),
+                "SI下限": row.get("snapshot_si_lower"),
+                "最大SI": row.get("snapshot_max_si"),
+                "n2s": row.get("snapshot_si_n2s"),
+                "n3s": row.get("snapshot_si_n3s"),
+                "距n2s": row.get("snapshot_n2s_margin"),
+                "距n3s": row.get("snapshot_n3s_margin"),
+                "n2s使用率%": row.get("snapshot_n2s_usage_percent"),
+                "录入时质控结论": str(row.get("snapshot_judgment_label") or "-"),
+                "触发方向": {"max": "最大值", "min": "最小值"}.get(
+                    str(row.get("snapshot_trigger_side") or ""), "-"
+                ),
+                "疑似对象": suspected_text,
+                "当前使用状态": str(row.get("current_usage_status") or "-"),
+                "手工处理状态": get_instant_manual_status_label(row.get("manual_status")),
+                "备注": str(row.get("manual_note") or ""),
+                "快照来源": "原始快照"
+                if str(row.get("snapshot_source") or "") == "original"
+                else "历史重建",
+                "算法版本": str(row.get("snapshot_algorithm_version") or ""),
+            }
         )
-    for column_name in ["si_n2s", "si_n3s"]:
-        display_df[column_name] = display_df[column_name].map(
-            lambda value: "-" if value is None or pd.isna(value) else f"{float(value):.2f}"
+    return pd.DataFrame(rows)
+
+
+def _build_instant_action_log_display_dataframe(
+    action_logs_df: pd.DataFrame,
+    history_df: pd.DataFrame,
+    input_value_type_label: str,
+) -> pd.DataFrame:
+    if action_logs_df.empty:
+        return pd.DataFrame()
+    sequence_map = {
+        int(row["id"]): int(row["snapshot_record_sequence"])
+        for _, row in history_df.iterrows()
+        if pd.notna(row.get("snapshot_record_sequence"))
+    }
+    rows: list[dict[str, object]] = []
+    for _, row in action_logs_df.iterrows():
+        result_id = int(row["result_id"])
+        rows.append(
+            {
+                "操作时间": pd.Timestamp(row["action_time"]).strftime("%Y-%m-%d %H:%M:%S"),
+                "记录序号": sequence_map.get(result_id, result_id),
+                "检测时间": pd.Timestamp(row["test_time"]).strftime("%Y-%m-%d %H:%M:%S"),
+                "检测人": str(row.get("operator") or ""),
+                input_value_type_label: float(row["value"]),
+                "操作": get_instant_manual_status_label(row.get("action_type")),
+                "原状态": get_instant_manual_status_label(row.get("previous_manual_status")),
+                "新状态": get_instant_manual_status_label(row.get("new_manual_status")),
+            }
         )
-    display_df["si_trigger_side"] = display_df["si_trigger_side"].map(
-        lambda value: {"max": "最大值", "min": "最小值"}.get(str(value or ""), "-")
-    )
-    display_df["grubbs_statistic"] = display_df["grubbs_statistic"].map(
-        lambda value: "-" if value is None or pd.isna(value) else f"{float(value):.4f}"
-    )
-    display_df["grubbs_threshold"] = display_df["grubbs_threshold"].map(
-        lambda value: "-" if value is None or pd.isna(value) else f"{float(value):.4f}"
-    )
-    display_df["manual_status"] = display_df["manual_status"].map(get_instant_manual_status_label)
-    ordered_columns = [
-        "sequence",
-        "effective_sequence",
-        "test_time",
-        "operator",
-        "value",
-        "status",
-        "manual_status",
-        "is_outlier_suspect",
-        "si_upper",
-        "si_lower",
-        "si_n2s",
-        "si_n3s",
-        "si_trigger_side",
-    ]
-    return display_df[ordered_columns].rename(
-        columns={
-            "sequence": "记录序号",
-            "effective_sequence": "有效序号",
-            "test_time": "检测时间",
-            "operator": "检测人",
-            "value": input_value_type_label,
-            "status": "状态",
-            "manual_status": "手工处理状态",
-            "is_outlier_suspect": "疑似离群",
-            "si_upper": "SI上限",
-            "si_lower": "SI下限",
-            "si_n2s": "n2s",
-            "si_n3s": "n3s",
-            "si_trigger_side": "触发方向",
-        }
-    )
+    return pd.DataFrame(rows)
 
 
 def _render_instant_records_section(context: dict[str, object]) -> None:
-    analysis_df = context["analysis_df"]
+    history_df = context["history_df"]
+    action_logs_df = context["action_logs_df"]
+    batch = context["batch"]
     input_value_type_label = context["input_value_type_label"]
-    with st.expander("当前记录表（点击折叠/展开）", expanded=False):
-        st.caption("当前批次历史记录、疑似离群提示状态与手工处理状态都会保留在此。")
-        display_df = _build_instant_display_dataframe(analysis_df, input_value_type_label)
+    display_df = _build_instant_display_dataframe(history_df, input_value_type_label)
+    action_display_df = _build_instant_action_log_display_dataframe(
+        action_logs_df,
+        history_df,
+        input_value_type_label,
+    )
+    batch_info_df = pd.DataFrame(
+        [
+            ("项目名称", str(batch["project_name"])),
+            ("质控品批号", str(batch["lot_no"])),
+            ("方法", "即时法 SI 值判定"),
+            ("输入值类型", input_value_type_label),
+            ("建靶所需次数", str(int(batch["target_n"]))),
+            ("导出时间", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            ("历史口径", "每行保存该次录入完成后的累计判定快照；后续重算不改写历史快照"),
+        ],
+        columns=["项目", "内容"],
+    )
+    workbook_sheets = {"逐次判定记录": display_df, "批次信息": batch_info_df}
+    if not action_display_df.empty:
+        workbook_sheets["维护操作记录"] = action_display_df
+    workbook_bytes = dataframes_to_xlsx_bytes(workbook_sheets)
+    project_name_fragment = build_safe_export_name(str(batch["project_name"]), "instant_project")
+    lot_no_fragment = build_safe_export_name(str(batch["lot_no"]), f"batch_{batch['id']}")
+
+    st.caption(
+        "每一行表示“本次数据录入后，对当时累计有效集合形成的判定快照”；"
+        "禁用或恢复只改变当前使用状态，不改写录入时质控结论。"
+    )
+    st.download_button(
+        "下载当前逐次判定表 Excel",
+        data=workbook_bytes,
+        file_name=f"{project_name_fragment}_{lot_no_fragment}_instant_history.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key=f"instant_records_excel_{int(batch['id'])}",
+        type="primary",
+        disabled=display_df.empty,
+        width="stretch",
+    )
+    if display_df.empty:
+        st.info("当前批次暂无检测记录。")
+    else:
         st.dataframe(display_df, width="stretch", hide_index=True)
+    if not action_display_df.empty:
+        with st.expander("查看维护操作记录", expanded=False):
+            st.dataframe(action_display_df, width="stretch", hide_index=True)
 
 
 def _build_maintenance_option_label(row: pd.Series, input_value_type_label: str) -> str:
@@ -849,7 +931,7 @@ def _render_instant_maintenance_section(context: dict[str, object]) -> None:
 def render_instant_page() -> None:
     st.subheader("即时法")
     st.caption(
-        "即时法是面向单水平项目的过渡方法，适用于短期内难以快速累积 20 个点的场景；"
+        "即时法是面向单水平项目的过渡方法，批次建靶次数可在 5～20 次之间设置；"
         "页面重点突出有效点累计、即刻法 SI 值提示和确认转入 LJ 法。"
     )
     projects_df, selected_project_id, batches_df, selected_batch_id = prepare_instant_project_batch_context()
@@ -868,12 +950,14 @@ def render_instant_page() -> None:
     summary = context["summary"]
     transfer_state = context["transfer_state"]
     input_value_type_label = context["input_value_type_label"]
+    target_n = int(summary["target_n"])
     with work_tab:
         context_items = [
             ("项目名称", batch["project_name"]),
             ("质控品批号", batch["lot_no"]),
             ("输入值类型", input_value_type_label),
             ("当前有效点数", summary["effective_count"]),
+            ("建靶所需次数", target_n),
             ("总记录数", summary["total_count"]),
             ("仪器", batch["instrument"]),
             ("试剂", batch["reagent"]),
@@ -883,7 +967,7 @@ def render_instant_page() -> None:
         context_badges = [
             f"质控批号 {batch['lot_no']}",
             input_value_type_label,
-            f"有效点 {summary['effective_count']}/{INSTANT_TRANSFER_READY_COUNT}",
+            f"有效点 {summary['effective_count']}/{target_n}",
         ]
         context_caption = (
             f"当前项目：{batch['project_name']}。请确认输入值类型（{input_value_type_label}）后再录入结果。"
@@ -917,11 +1001,11 @@ def render_instant_page() -> None:
             _render_instant_transfer_dialog(selected_batch_id)
         render_section_intro(
             title="当前动作区",
-            caption="左侧用于结果录入与累计统计，右侧用于图表和最新判定。",
-            badges=["即时法", "过渡方法", f"有效点 {summary['effective_count']}/{INSTANT_TRANSFER_READY_COUNT}", input_value_type_label],
+            caption="左侧用于结果录入与累计统计，右侧用于查看当前有效集合的最新判定。",
+            badges=["即时法", "过渡方法", f"有效点 {summary['effective_count']}/{target_n}", input_value_type_label],
             tone="accent",
         )
-        entry_col, chart_col = st.columns([0.98, 1.12], gap="large")
+        entry_col, latest_col = st.columns([0.98, 1.12], gap="large")
         with entry_col:
             with st.container():
                 render_section_intro(
@@ -930,38 +1014,41 @@ def render_instant_page() -> None:
                     tone="accent",
                 )
                 _render_instant_entry_and_summary_section(context, selected_batch_id)
-        with chart_col:
+        with latest_col:
             with st.container():
                 render_section_intro(
-                    title="图表与最新判定",
-                    caption="在此查看趋势图和最新判定。",
+                    title="当前最新判定",
+                    caption="当前摘要允许随有效点禁用或恢复而重算；历史快照保持不变。",
                     tone="accent",
                 )
-                _render_instant_chart_analysis_section(context)
+                _render_instant_latest_analysis_section(context)
+
+        with st.container(border=True):
+            render_section_intro(
+                title="逐次判定记录",
+                caption="数据为即时法主记录；每次录入形成一行不可变累计判定快照，并可直接下载 Excel。",
+                badges=["默认展示", "历史不改写", "Excel"],
+                tone="accent",
+            )
+            _render_instant_records_section(context)
+
+        _render_instant_chart_section(context)
 
         render_section_intro(
             title="历史与次要操作区",
-            caption="下方可查看转入 LJ、记录回顾、维护和即刻法 SI 值说明。",
-            badges=["转入 LJ", "记录回顾", "维护"],
+            caption="下方用于转入 LJ、记录维护和查看即刻法 SI 值说明。",
+            badges=["转入 LJ", "维护", "方法说明"],
             tone="muted",
         )
-        with st.container(border=True):
-            render_section_intro(
-                title="转入 LJ 法",
-                caption="明确显示当前是否可转入 LJ 法，以及转入后对应的去向项目和批次。",
-                tone="muted",
-            )
-            _render_instant_transfer_section(context)
-
         lower_left, lower_right = st.columns([1.0, 1.0], gap="large")
         with lower_left:
             with st.container(border=True):
                 render_section_intro(
-                    title="当前记录表",
-                    caption="查看历史记录、疑似离群状态和手工处理状态。",
+                    title="转入 LJ 法",
+                    caption="明确显示当前是否可转入 LJ 法，以及转入后对应的去向项目和批次。",
                     tone="muted",
                 )
-                _render_instant_records_section(context)
+                _render_instant_transfer_section(context)
         with lower_right:
             with st.container(border=True):
                 render_section_intro(

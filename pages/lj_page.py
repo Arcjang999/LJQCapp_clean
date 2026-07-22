@@ -191,7 +191,7 @@ def render_lj_work_tab(
                 tone="default",
             )
             render_lj_rule_summary_section(stats)
-            render_lj_records_section(qc_df, context["input_value_type"])
+            render_lj_records_section(qc_df, context["input_value_type"], context["batch"])
 
         lower_left, lower_right = st.columns([1.0, 1.0], gap="large")
         with lower_left:

@@ -9,9 +9,12 @@ import pandas as pd
 from database import (
     PROJECT_METHOD_LJ,
     add_instant_result,
+    create_instant_judgment_snapshot,
     get_connection,
     get_instant_batch,
+    get_instant_judgment_snapshots,
     get_instant_result,
+    get_instant_result_action_logs,
     get_instant_results,
     save_instant_result_analysis_snapshot,
     set_instant_result_effective_state,
@@ -19,9 +22,12 @@ from database import (
 from services.value_type_service import get_input_value_type_label, normalize_input_value_type
 
 
+INSTANT_MIN_TARGET_N = 5
+INSTANT_MAX_TARGET_N = 20
 INSTANT_TRANSFER_READY_COUNT = 20
 INSTANT_SI_MIN_SAMPLE_SIZE = 3
 INSTANT_SI_METHOD_NAME = "Instant SI"
+INSTANT_SI_ALGORITHM_VERSION = "instant_si_v1"
 INSTANT_SI_METHOD_LABEL = "即刻法 SI 值判定"
 INSTANT_SI_FORMULA_TEXT = "SI上限 = (X最大值 - x̄) / s；SI下限 = (x̄ - X最小值) / s"
 INSTANT_SI_LIMITS: dict[int, dict[str, float]] = {
@@ -193,6 +199,160 @@ def calculate_instant_si_test(values: Sequence[float]) -> dict[str, object]:
     return result
 
 
+def normalize_instant_target_n(value: object) -> int:
+    try:
+        target_n = int(value)
+    except (TypeError, ValueError):
+        return INSTANT_TRANSFER_READY_COUNT
+    if not INSTANT_MIN_TARGET_N <= target_n <= INSTANT_MAX_TARGET_N:
+        return INSTANT_TRANSFER_READY_COUNT
+    return target_n
+
+
+def _get_instant_snapshot_judgment_label(si_result: dict[str, object]) -> str:
+    status = str(si_result.get("status") or "")
+    return {
+        "accumulating": "继续累计（未判定）",
+        "in_control": "在控",
+        "warning": "警告",
+        "reject": "疑似离群",
+        "over_limit": "超出即时法表范围",
+        "no_data": "暂无数据",
+    }.get(status, status or "暂无数据")
+
+
+def _build_instant_judgment_snapshot_payload(
+    results_df: pd.DataFrame,
+    *,
+    result_id: int,
+    record_sequence: int,
+    snapshot_source: str,
+) -> dict[str, object]:
+    ordered_df = results_df.copy().sort_values(["test_time", "id"]).reset_index(drop=True)
+    ordered_df["is_effective"] = ordered_df["is_effective"].fillna(1).astype(int)
+    target_rows = ordered_df.loc[ordered_df["id"].astype(int) == int(result_id)]
+    if target_rows.empty:
+        raise ValueError(f"未找到用于生成逐次判定快照的即时法记录 {result_id}")
+
+    target_row = target_rows.iloc[0]
+    effective_df = ordered_df.loc[ordered_df["is_effective"] == 1].copy().reset_index(drop=True)
+    effective_values = effective_df["value"].astype(float).tolist()
+    effective_result_ids = effective_df["id"].astype(int).tolist()
+    effective_n = len(effective_values)
+    mean_value = float(pd.Series(effective_values).mean()) if effective_n >= 1 else None
+    sd_value = float(pd.Series(effective_values).std(ddof=1)) if effective_n >= 2 else None
+    si_result = calculate_instant_si_test(effective_values)
+    si_upper = _safe_float_or_none(si_result.get("si_upper"))
+    si_lower = _safe_float_or_none(si_result.get("si_lower"))
+    max_si = max([value for value in [si_upper, si_lower] if value is not None], default=None)
+
+    suspected_result_id = None
+    suspected_effective_sequence = None
+    suspected_value = _safe_float_or_none(si_result.get("suspected_value"))
+    if bool(si_result.get("is_suspect")) and si_result.get("suspected_index") is not None:
+        suspected_index = int(si_result["suspected_index"])
+        if 0 <= suspected_index < len(effective_df):
+            suspected_result_id = int(effective_df.iloc[suspected_index]["id"])
+            suspected_effective_sequence = suspected_index + 1
+
+    return {
+        "result_id": int(result_id),
+        "batch_id": int(target_row["batch_id"]),
+        "project_id": int(target_row["project_id"]),
+        "record_sequence": int(record_sequence),
+        "effective_n": effective_n,
+        "mean_value": mean_value,
+        "sd_value": sd_value,
+        "si_upper": si_upper,
+        "si_lower": si_lower,
+        "si_n2s": _safe_float_or_none(si_result.get("n2s")),
+        "si_n3s": _safe_float_or_none(si_result.get("n3s")),
+        "max_si": max_si,
+        "judgment_code": str(si_result.get("status") or "no_data"),
+        "judgment_label": _get_instant_snapshot_judgment_label(si_result),
+        "reason_code": str(si_result.get("reason") or ""),
+        "trigger_side": str(si_result.get("trigger_side") or "") or None,
+        "suspected_result_id": suspected_result_id,
+        "suspected_effective_sequence": suspected_effective_sequence,
+        "suspected_value": suspected_value,
+        "effective_result_ids": effective_result_ids,
+        "snapshot_source": snapshot_source,
+        "algorithm_version": INSTANT_SI_ALGORITHM_VERSION,
+    }
+
+
+def ensure_instant_judgment_snapshots(batch_id: int) -> pd.DataFrame:
+    results_df = get_instant_results(batch_id, include_manual_note=True)
+    snapshots_df = get_instant_judgment_snapshots(batch_id)
+    if results_df.empty:
+        return snapshots_df
+
+    existing_result_ids = (
+        set(snapshots_df["result_id"].astype(int).tolist()) if not snapshots_df.empty else set()
+    )
+    ordered_df = results_df.copy().sort_values(["test_time", "id"]).reset_index(drop=True)
+    missing_result_ids = set(ordered_df["id"].astype(int).tolist()) - existing_result_ids
+    if not missing_result_ids:
+        return snapshots_df
+
+    with get_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        for position, row in ordered_df.iterrows():
+            result_id = int(row["id"])
+            if result_id not in missing_result_ids:
+                continue
+            reconstructed_prefix = ordered_df.iloc[: position + 1].copy()
+            reconstructed_prefix["is_effective"] = 1
+            payload = _build_instant_judgment_snapshot_payload(
+                reconstructed_prefix,
+                result_id=result_id,
+                record_sequence=position + 1,
+                snapshot_source="reconstructed",
+            )
+            create_instant_judgment_snapshot(
+                **payload,
+                ignore_existing=True,
+                connection=connection,
+            )
+    return get_instant_judgment_snapshots(batch_id)
+
+
+def build_instant_history_dataframe(
+    analysis_df: pd.DataFrame,
+    snapshots_df: pd.DataFrame,
+) -> pd.DataFrame:
+    if analysis_df.empty:
+        return analysis_df.copy()
+    history_df = analysis_df.copy()
+    if snapshots_df.empty:
+        return history_df
+    history_df = history_df.merge(
+        snapshots_df,
+        how="left",
+        left_on="id",
+        right_on="result_id",
+        suffixes=("", "_snapshot"),
+    )
+    history_df["snapshot_n2s_margin"] = history_df["snapshot_si_n2s"] - history_df["snapshot_max_si"]
+    history_df["snapshot_n3s_margin"] = history_df["snapshot_si_n3s"] - history_df["snapshot_max_si"]
+    history_df["snapshot_n2s_usage_percent"] = history_df.apply(
+        lambda row: (
+            float(row["snapshot_max_si"]) / float(row["snapshot_si_n2s"]) * 100.0
+            if pd.notna(row.get("snapshot_max_si"))
+            and pd.notna(row.get("snapshot_si_n2s"))
+            and not math.isclose(float(row["snapshot_si_n2s"]), 0.0, abs_tol=1e-12)
+            else None
+        ),
+        axis=1,
+    )
+    history_df["current_usage_status"] = history_df["is_effective"].map(
+        lambda value: "当前有效" if int(value or 0) == 1 else "当前已禁用"
+    )
+    return history_df.sort_values(
+        ["snapshot_record_sequence", "test_time", "id"], na_position="last"
+    ).reset_index(drop=True)
+
+
 def _build_empty_analysis_dataframe(results_df: pd.DataFrame | None = None) -> pd.DataFrame:
     base = results_df.copy() if results_df is not None else pd.DataFrame()
     default_columns = [
@@ -237,7 +397,12 @@ def get_latest_instant_row(analysis_df: pd.DataFrame) -> pd.Series | None:
     return latest_df.iloc[-1]
 
 
-def analyze_instant_results(results_df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, object]]:
+def analyze_instant_results(
+    results_df: pd.DataFrame,
+    *,
+    target_n: int = INSTANT_TRANSFER_READY_COUNT,
+) -> tuple[pd.DataFrame, dict[str, object]]:
+    normalized_target_n = normalize_instant_target_n(target_n)
     summary: dict[str, object] = {
         "total_count": 0,
         "effective_count": 0,
@@ -247,6 +412,7 @@ def analyze_instant_results(results_df: pd.DataFrame) -> tuple[pd.DataFrame, dic
         "kept_outlier_count": 0,
         "disabled_outlier_count": 0,
         "transferable_effective_count": 0,
+        "target_n": normalized_target_n,
         "mean": None,
         "sd": None,
         "cv": None,
@@ -440,7 +606,7 @@ def analyze_instant_results(results_df: pd.DataFrame) -> tuple[pd.DataFrame, dic
     else:
         latest_row = get_latest_instant_row(analysis_df)
 
-    transfer_ready = effective_count >= INSTANT_TRANSFER_READY_COUNT
+    transfer_ready = effective_count >= normalized_target_n
     suspect_mask = analysis_df["is_outlier_suspect"] == 1
     pending_outlier_review_count = int(
         (
@@ -549,7 +715,12 @@ def analyze_instant_results(results_df: pd.DataFrame) -> tuple[pd.DataFrame, dic
             "grubbs_suspected_effective_sequence": suspected_effective_sequence,
             "grubbs_suspected_value": suspected_value,
             "transfer_ready": transfer_ready,
-            "transfer_message": "已达到 20 个有效点，可确认转入 LJ 法。" if transfer_ready else "",
+            "target_n": normalized_target_n,
+            "transfer_message": (
+                f"已达到 {normalized_target_n} 个有效点，可确认转入 LJ 法。"
+                if transfer_ready
+                else ""
+            ),
             "transfer_status": INSTANT_TRANSFER_STATUS_NOT_TRANSFERRED,
             "transfer_action_enabled": False,
             "transfer_blockers": [],
@@ -729,11 +900,12 @@ def _build_instant_transfer_blockers(
     summary: dict[str, object],
 ) -> list[str]:
     blockers: list[str] = []
+    target_n = normalize_instant_target_n(batch["target_n"])
     transfer_status = normalize_instant_transfer_status(batch["transfer_status"])
     if transfer_status == INSTANT_TRANSFER_STATUS_TRANSFERRED:
         blockers.append("该批次已转入 LJ 法")
-    if int(summary["effective_count"]) < INSTANT_TRANSFER_READY_COUNT:
-        blockers.append(f"有效点不足 {INSTANT_TRANSFER_READY_COUNT} 个")
+    if int(summary["effective_count"]) < target_n:
+        blockers.append(f"有效点不足 {target_n} 个")
     pending_count = int(summary.get("pending_outlier_review_count", 0) or 0)
     if pending_count > 0:
         blockers.append(f"仍存在 {pending_count} 个待处理疑似离群点")
@@ -784,6 +956,7 @@ def _build_instant_transfer_state(
         "eligible": len(blockers) == 0,
         "blockers": blockers,
         "pending_outlier_review_count": int(summary.get("pending_outlier_review_count", 0) or 0),
+        "target_n": normalize_instant_target_n(batch["target_n"]),
         "pending_outlier_effective_sequences": pending_sequences,
         "target_project_action": str(project_plan["action"]),
         "target_project_id": project_plan["project_id"],
@@ -804,7 +977,10 @@ def _build_instant_transfer_state(
 def build_instant_transfer_preview(batch_id: int) -> dict[str, object]:
     batch = get_instant_batch(batch_id)
     results_df = get_instant_results(batch_id, include_manual_note=True)
-    analysis_df, summary = analyze_instant_results(results_df)
+    analysis_df, summary = analyze_instant_results(
+        results_df,
+        target_n=normalize_instant_target_n(batch["target_n"]),
+    )
     transfer_state = _build_instant_transfer_state(batch, analysis_df, summary)
     summary["transfer_status"] = transfer_state["status"]
     summary["transfer_action_enabled"] = transfer_state["eligible"]
@@ -818,8 +994,12 @@ def build_instant_transfer_preview(batch_id: int) -> dict[str, object]:
 
 
 def persist_instant_batch_analysis(batch_id: int) -> None:
+    batch = get_instant_batch(batch_id)
     results_df = get_instant_results(batch_id, include_manual_note=True)
-    analysis_df, _ = analyze_instant_results(results_df)
+    analysis_df, _ = analyze_instant_results(
+        results_df,
+        target_n=normalize_instant_target_n(batch["target_n"]),
+    )
     analysis_rows: list[dict[str, object]] = []
     for _, row in analysis_df.iterrows():
         if int(row.get("is_effective", 1) or 0) != 1:
@@ -839,7 +1019,13 @@ def persist_instant_batch_analysis(batch_id: int) -> None:
 def build_instant_workbench_context(batch_id: int) -> dict[str, object]:
     batch = get_instant_batch(batch_id)
     results_df = get_instant_results(batch_id, include_manual_note=True)
-    analysis_df, summary = analyze_instant_results(results_df)
+    snapshots_df = ensure_instant_judgment_snapshots(batch_id)
+    analysis_df, summary = analyze_instant_results(
+        results_df,
+        target_n=normalize_instant_target_n(batch["target_n"]),
+    )
+    history_df = build_instant_history_dataframe(analysis_df, snapshots_df)
+    action_logs_df = get_instant_result_action_logs(batch_id)
     latest_row = get_latest_instant_row(analysis_df)
     transfer_state = _build_instant_transfer_state(batch, analysis_df, summary)
     summary["transfer_status"] = transfer_state["status"]
@@ -850,6 +1036,9 @@ def build_instant_workbench_context(batch_id: int) -> dict[str, object]:
         "batch": batch,
         "results_df": results_df,
         "analysis_df": analysis_df,
+        "snapshots_df": snapshots_df,
+        "history_df": history_df,
+        "action_logs_df": action_logs_df,
         "summary": summary,
         "transfer_state": transfer_state,
         "latest_row": latest_row,
@@ -867,13 +1056,32 @@ def save_instant_result(
     value: float,
     log_value: float | None,
 ) -> int:
-    result_id = add_instant_result(
-        batch_id=batch_id,
-        test_time=test_time,
-        operator=operator,
-        value=value,
-        log_value=log_value,
-    )
+    ensure_instant_judgment_snapshots(batch_id)
+    with get_connection() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        result_id = add_instant_result(
+            batch_id=batch_id,
+            test_time=test_time,
+            operator=operator,
+            value=value,
+            log_value=log_value,
+            connection=connection,
+        )
+        results_df = _load_instant_results_with_connection(
+            connection,
+            batch_id,
+            include_manual_note=True,
+        )
+        payload = _build_instant_judgment_snapshot_payload(
+            results_df,
+            result_id=result_id,
+            record_sequence=len(results_df),
+            snapshot_source="original",
+        )
+        create_instant_judgment_snapshot(
+            **payload,
+            connection=connection,
+        )
     persist_instant_batch_analysis(batch_id)
     return result_id
 
@@ -919,8 +1127,9 @@ def confirm_instant_transfer_to_lj(batch_id: int) -> dict[str, object]:
     with get_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
         batch = _fetch_instant_batch_row_with_connection(connection, batch_id)
+        target_n = normalize_instant_target_n(batch["target_n"])
         results_df = _load_instant_results_with_connection(connection, batch_id, include_manual_note=True)
-        analysis_df, summary = analyze_instant_results(results_df)
+        analysis_df, summary = analyze_instant_results(results_df, target_n=target_n)
         blockers = _build_instant_transfer_blockers(batch, summary)
         if blockers:
             raise ValueError("；".join(blockers))
@@ -932,8 +1141,8 @@ def confirm_instant_transfer_to_lj(batch_id: int) -> dict[str, object]:
             .reset_index(drop=True)
         )
         transferred_effective_count = int(len(effective_df))
-        if transferred_effective_count < INSTANT_TRANSFER_READY_COUNT:
-            raise ValueError(f"有效点不足 {INSTANT_TRANSFER_READY_COUNT} 个，不能确认转入 LJ 法。")
+        if transferred_effective_count < target_n:
+            raise ValueError(f"有效点不足 {target_n} 个，不能确认转入 LJ 法。")
 
         project_plan = _resolve_lj_project_plan(
             connection,
@@ -988,7 +1197,7 @@ def confirm_instant_transfer_to_lj(batch_id: int) -> dict[str, object]:
                 str(batch["qc_material"] or ""),
                 str(batch["concentration"] or ""),
                 target_batch_lot_no,
-                INSTANT_TRANSFER_READY_COUNT,
+                target_n,
                 None,
                 "instant",
                 int(batch["project_id"]),
@@ -1076,7 +1285,8 @@ def confirm_instant_transfer_to_lj(batch_id: int) -> dict[str, object]:
         "target_batch_lot_no": target_batch_lot_no,
         "transferred_at": transferred_at,
         "transferred_effective_count": transferred_effective_count,
-        "building_count": min(INSTANT_TRANSFER_READY_COUNT, transferred_effective_count),
-        "formal_count": max(0, transferred_effective_count - INSTANT_TRANSFER_READY_COUNT),
+        "target_n": target_n,
+        "building_count": min(target_n, transferred_effective_count),
+        "formal_count": max(0, transferred_effective_count - target_n),
         "target_project_action": str(project_plan["action"]),
     }

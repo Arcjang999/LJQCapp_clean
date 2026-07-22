@@ -29,6 +29,7 @@ from services.outlier_service import (
 from services.export_utils import (
     dataframe_to_csv_bytes,
     dataframe_to_xlsx_bytes as shared_dataframe_to_xlsx_bytes,
+    dataframes_to_xlsx_bytes,
 )
 from services.profiling import profile_timer
 from services.value_type_service import (
@@ -639,10 +640,34 @@ def render_lj_rule_summary_section(stats: dict[str, object]) -> None:
             st.markdown(f"- `{format_rule_code(rule_id)}`：{format_rule_description(rule_id)}")
 
 
-def render_lj_records_section(qc_df: pd.DataFrame, input_value_type: str) -> None:
+def render_lj_records_section(qc_df: pd.DataFrame, input_value_type: str, batch) -> None:
+    display_df = prepare_display_records(qc_df, input_value_type=input_value_type)
+    batch_info_df = pd.DataFrame(
+        [
+            ("项目名称", str(batch["project_name"])),
+            ("质控品批号", str(batch["lot_no"])),
+            ("方法", "单水平（LJ法）"),
+            ("输入值类型", get_input_value_type_label(input_value_type)),
+            ("导出时间", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        ],
+        columns=["项目", "内容"],
+    )
+    workbook_bytes = dataframes_to_xlsx_bytes(
+        {"检测记录": display_df, "批次信息": batch_info_df}
+    )
+    project_name_fragment = build_safe_export_name(str(batch["project_name"]), "lj_project")
+    lot_no_fragment = build_safe_export_name(str(batch["lot_no"]), f"batch_{batch['id']}")
+    st.download_button(
+        "下载当前检测记录 Excel",
+        data=workbook_bytes,
+        file_name=f"{project_name_fragment}_{lot_no_fragment}_lj_records.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key=f"lj_quick_records_excel_{int(batch['id'])}",
+        disabled=display_df.empty,
+        width="stretch",
+    )
     with st.expander("当前批次检测记录", expanded=False):
         st.caption("查看当前批次的完整检测记录、规则触发和分析提示。")
-        display_df = prepare_display_records(qc_df, input_value_type=input_value_type)
         render_records_table_impl(display_df)
 
 
