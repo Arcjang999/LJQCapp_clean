@@ -1088,24 +1088,46 @@ def inject_global_styles() -> None:
         unsafe_allow_html=True,
     )
 
+GLOBAL_PAGE_SESSION_KEYS = (
+    "show_master_data_page",
+    "show_project_management_page",
+    "show_report_history_page",
+    "show_settings_page",
+)
+
+
+def open_global_page(page_key: str) -> None:
+    if page_key not in GLOBAL_PAGE_SESSION_KEYS:
+        raise ValueError(f"未知全局页面：{page_key}")
+
+    for session_key in GLOBAL_PAGE_SESSION_KEYS:
+        st.session_state[session_key] = session_key == page_key
+    if page_key == "show_settings_page":
+        st.session_state["refresh_settings_form"] = True
+    st.rerun()
+
+
 def render_page_chrome() -> None:
-    title_column, action_column = st.columns([0.72, 0.28], gap="medium", vertical_alignment="top")
+    title_column, action_column = st.columns([0.50, 0.50], gap="medium", vertical_alignment="top")
     with title_column:
         st.title(APP_TITLE)
-        st.caption("单水平（LJ法）、多水平（Z-score法）与即时法共用同一主导航；报告历史与系统设置位于右上角全局入口。")
+        st.caption("主导航只保留质控方法；基础资料、项目管理、报告历史和系统设置统一放在右上角全局入口。")
 
     with action_column:
-        st.caption("全局入口：报告历史用于查看已生成报告，系统设置用于维护默认信息和数据存储；如需提交使用问题，可通过“问题反馈”进入反馈表。")
-        history_column, settings_column, feedback_column = st.columns(3, gap="small")
+        st.caption("全局管理与支持入口")
+        master_column, project_column, history_column, settings_column, feedback_column = st.columns(5, gap="small")
+        with master_column:
+            if st.button("基础资料", key="open_master_data_page", use_container_width=True):
+                open_global_page("show_master_data_page")
+        with project_column:
+            if st.button("项目/批次", key="open_project_management_page", use_container_width=True):
+                open_global_page("show_project_management_page")
         with history_column:
             if st.button("报告历史", key="open_report_history_page", use_container_width=True):
-                st.session_state["show_report_history_page"] = True
-                st.rerun()
+                open_global_page("show_report_history_page")
         with settings_column:
             if st.button("系统设置", key="open_system_settings", use_container_width=True):
-                st.session_state["show_settings_page"] = True
-                st.session_state["refresh_settings_form"] = True
-                st.rerun()
+                open_global_page("show_settings_page")
         with feedback_column:
             if hasattr(st, "link_button"):
                 st.link_button(

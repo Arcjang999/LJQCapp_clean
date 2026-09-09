@@ -646,22 +646,23 @@ def test_lj_page_uses_business_labels_and_marks_instant_origin() -> None:
         at.session_state["selected_batch_id"] = transfer_result["target_batch_id"]
         at.run()
 
-        project_options = list(at.selectbox(key="project_selector").options)
-        batch_options = list(at.selectbox(key="batch_selector").options)
+        project_options = list(at.selectbox(key="v12_lj_project_selector").options)
+        batch_options = list(at.selectbox(key="v12_lj_batch_selector").options)
         assert not any(option.startswith("项目 ") for option in project_options[1:])
         assert any("由即时法转入" in option for option in project_options[1:])
+        assert not any("LJ普通项目" in option for option in project_options[1:])
         assert not any(option.startswith("批次 ") for option in batch_options[1:])
         assert any("由即时法转入" in option for option in batch_options[1:])
         assert any(option.startswith("质控批号：Transfer-LOT") for option in batch_options[1:])
 
-        project_table = at.dataframe[0].value
-        batch_table = at.dataframe[1].value
-        assert list(project_table.columns) == ["项目名称", "输入值类型", "来源", "创建时间"]
-        assert list(batch_table.columns) == ["质控品批号", "仪器", "试剂", "质控品", "浓度", "来源", "创建时间"]
-        assert "编号" not in project_table.columns
+        batch_tables = [
+            element.value
+            for element in at.dataframe
+            if "质控品批号" in element.value.columns and "来源" in element.value.columns
+        ]
+        assert batch_tables
+        batch_table = batch_tables[0]
         assert "编号" not in batch_table.columns
-        assert "由即时法转入" in project_table["来源"].tolist()
-        assert "普通创建" in project_table["来源"].tolist()
         assert batch_table["来源"].tolist() == ["由即时法转入"]
         assert any("来源：即时法" in str(item.value) for item in at.info)
         expander_states = {str(expander.label): bool(expander.proto.expanded) for expander in at.expander}

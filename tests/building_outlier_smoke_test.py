@@ -47,17 +47,19 @@ from zscore_logic import (
     restore_zscore_building_run,
 )
 
-LJ_PAGE_APPTEST_SCRIPT = f"""
+LJ_MAINTENANCE_APPTEST_SCRIPT = f"""
 import sys
 from pathlib import Path
+import streamlit as st
 
 ROOT = Path({str(PROJECT_ROOT)!r})
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from pages.lj_page import render_lj_page
+from pages.lj_sections import build_lj_workbench_context, render_lj_maintenance_section
 
-render_lj_page()
+batch_id = int(st.session_state["test_batch_id"])
+render_lj_maintenance_section(build_lj_workbench_context(batch_id))
 """
 
 
@@ -166,9 +168,8 @@ def test_lj_building_maintenance_shows_current_effective_status_after_restore() 
         suspect_row = qc_df[qc_df["is_outlier_suspect"] == 1].iloc[0]
         suspect_id = int(suspect_row["id"])
 
-        at = AppTest.from_string(LJ_PAGE_APPTEST_SCRIPT)
-        at.session_state["selected_project_id"] = project_id
-        at.session_state["selected_batch_id"] = batch_id
+        at = AppTest.from_string(LJ_MAINTENANCE_APPTEST_SCRIPT)
+        at.session_state["test_batch_id"] = batch_id
         at.run()
 
         initial_options = [str(option) for option in at.selectbox(key="lj_outlier_record_selector").options]

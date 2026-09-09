@@ -14,6 +14,8 @@ from pages.main_page import (
     normalize_top_level_method_selection,
     render_main_entry_page,
 )
+from pages.master_data_page import render_master_data_page
+from pages.project_management_page import render_project_management_page
 from pages.report_history_page import render_report_history_page
 from pages.settings_page import render_settings_page
 from pages.zscore_page import render_zscore_page
@@ -63,6 +65,14 @@ if bool(st.session_state.get("show_settings_page", False)):
 
 if bool(st.session_state.get("show_report_history_page", False)):
     render_report_history_page()
+    st.stop()
+
+if bool(st.session_state.get("show_master_data_page", False)):
+    render_master_data_page()
+    st.stop()
+
+if bool(st.session_state.get("show_project_management_page", False)):
+    render_project_management_page()
     st.stop()
 
 selected_method = st.radio(

@@ -128,6 +128,8 @@ class LjMonthlyReportBasicInfo:
     report_month_label: str
     method_label: str
     input_value_type_label: str
+    unit_symbol: str
+    detection_method: str
     lab_name: str
     department_name: str
     qc_owner_name: str
@@ -458,6 +460,8 @@ def build_lj_monthly_report_package(batch_id: int, report_month: str) -> LjMonth
             report_month_label=report_month_label,
             method_label=LJ_METHOD_LABEL,
             input_value_type_label=input_value_type_label,
+            unit_symbol=str(dict(batch).get("unit_symbol") or "-"),
+            detection_method=str(dict(batch).get("method_name") or "-"),
             lab_name=report_settings.lab_name,
             department_name=report_settings.department_name,
             qc_owner_name=report_settings.qc_owner_name,
@@ -1192,6 +1196,15 @@ def _build_abnormal_summary_text(
 
 def _resolve_target_source(batch) -> tuple[str, str]:
     source_method = str(batch["source_method"] or "").strip().lower()
+    if source_method == "v11":
+        batch_dict = dict(batch)
+        source_label = str(batch_dict.get("v11_target_source") or "building").strip().lower()
+        config_name = str(batch_dict.get("v11_config_name") or "").strip()
+        if source_label == "building":
+            detail = "基于本批次有效建靶点计算。"
+            if config_name:
+                detail += f" 上游配置：{config_name}。"
+            return ("新版配置：本批次建靶值", detail)
     if source_method == "instant":
         source_project = str(batch["source_instant_project_name"] or "").strip() or "即时法项目"
         source_batch = str(batch["source_instant_batch_lot_no"] or "").strip() or "未填写质控批号"

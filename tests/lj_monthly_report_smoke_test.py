@@ -33,17 +33,18 @@ from services.settings_service import REPORT_SETTINGS_FALLBACKS, save_report_set
 from tests.report_pdf_assertions import assert_uniform_a4_pages_without_watermark
 
 
-LJ_PAGE_APPTEST_SCRIPT = f"""
+LJ_REPORT_APPTEST_SCRIPT = f"""
 import sys
 from pathlib import Path
+import streamlit as st
 
 ROOT = Path({str(PROJECT_ROOT)!r})
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from pages.lj_page import render_lj_page
+from pages.lj_report_section import render_lj_monthly_report_section
 
-render_lj_page()
+render_lj_monthly_report_section(int(st.session_state["test_batch_id"]))
 """
 
 
@@ -238,11 +239,10 @@ def test_lj_monthly_report_uses_business_text_for_single_record_and_no_abnormal(
 
 def test_lj_monthly_report_page_exposes_generate_and_download_flow() -> None:
     with TemporaryDatabaseContext():
-        project_id, batch_id = seed_lj_batch_with_formal_monthly_data()
+        _project_id, batch_id = seed_lj_batch_with_formal_monthly_data()
         report_scope = f"lj_monthly_report_{batch_id}"
-        at = AppTest.from_string(LJ_PAGE_APPTEST_SCRIPT)
-        at.session_state["selected_project_id"] = project_id
-        at.session_state["selected_batch_id"] = batch_id
+        at = AppTest.from_string(LJ_REPORT_APPTEST_SCRIPT)
+        at.session_state["test_batch_id"] = batch_id
         at.run()
 
         assert not list(at.exception)

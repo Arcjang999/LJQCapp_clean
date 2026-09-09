@@ -22,6 +22,8 @@ from services.value_type_service import (
     normalize_input_value_type,
     should_show_auxiliary_log_column,
 )
+from migrations.v1_1_master_data import ensure_v11_schema
+from migrations.v1_2_workbench import ensure_v12_workbench_schema
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -173,6 +175,8 @@ def init_db() -> None:
         _ensure_zscore_level_targets_table(connection)
         _ensure_report_exports_table(connection)
         _ensure_app_settings_table(connection)
+        ensure_v11_schema(connection)
+        ensure_v12_workbench_schema(connection)
         _rebind_legacy_batches_foreign_keys(connection)
         connection.execute(
             """
@@ -1647,16 +1651,39 @@ def get_batch(batch_id: int) -> sqlite3.Row:
             """
             SELECT
                 batches.*,
-                projects.name AS project_name,
+                COALESCE(v11_tests.chinese_name, projects.name) AS project_name,
                 projects.input_value_type AS input_value_type,
                 source_projects.name AS source_instant_project_name,
-                source_batches.lot_no AS source_instant_batch_lot_no
+                source_batches.lot_no AS source_instant_batch_lot_no,
+                v11_bindings.lot_config_id AS v11_lot_config_id,
+                v11_bindings.lot_config_item_id AS v11_lot_config_item_id,
+                v11_configs.config_name AS v11_config_name,
+                v11_lots.expiry_date AS v11_expiry_date,
+                v11_units.symbol AS unit_symbol,
+                v11_methods.method_name AS method_name,
+                v11_levels.target_source AS v11_target_source,
+                v11_items.quality_target_source_text AS quality_target_source_text
             FROM batches
             LEFT JOIN projects ON projects.id = batches.project_id
             LEFT JOIN instant_projects AS source_projects
                 ON source_projects.id = batches.source_instant_project_id
             LEFT JOIN instant_batches AS source_batches
                 ON source_batches.id = batches.source_instant_batch_id
+            LEFT JOIN qc_workbench_bindings AS v11_bindings
+                ON v11_bindings.runtime_batch_id = batches.id
+               AND v11_bindings.qc_method = 'lj'
+            LEFT JOIN qc_lot_configs AS v11_configs
+                ON v11_configs.id = v11_bindings.lot_config_id
+            LEFT JOIN qc_lot_config_items AS v11_items
+                ON v11_items.id = v11_bindings.lot_config_item_id
+            LEFT JOIN md_test_items AS v11_tests ON v11_tests.id = v11_items.test_item_id
+            LEFT JOIN md_qc_material_lots AS v11_lots
+                ON v11_lots.id = v11_configs.qc_material_lot_id
+            LEFT JOIN md_units AS v11_units ON v11_units.id = v11_items.unit_id
+            LEFT JOIN md_methods AS v11_methods ON v11_methods.id = v11_items.method_id
+            LEFT JOIN qc_lot_config_item_levels AS v11_levels
+                ON v11_levels.lot_config_item_id = v11_items.id
+               AND v11_levels.is_disabled = 0
             WHERE batches.id = ?
             """,
             (batch_id,),

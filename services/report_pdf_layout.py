@@ -183,6 +183,7 @@ def _build_lj_summary_page(report: Any):
 
     basic_rows = [
         ["方法", report.basic_info.method_label, "输入值类型", report.basic_info.input_value_type_label],
+        ["检测方法", report.basic_info.detection_method, "单位", report.basic_info.unit_symbol],
         ["质控品批号", report.basic_info.lot_no, "仪器", report.basic_info.instrument],
         ["试剂", report.basic_info.reagent, "质控品", report.basic_info.qc_material],
         ["浓度", report.basic_info.concentration, "当前靶值来源", report.basic_info.target_source_label],

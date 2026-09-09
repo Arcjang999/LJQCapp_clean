@@ -1,5 +1,15 @@
 # AGENTS.md
 
+## 0. 跨设备接手必读
+
+如果这是从另一台电脑或新的 Codex 任务继续开发，开始修改前必须依次阅读：
+
+1. `docs/DEVELOPMENT_HANDOFF.md`
+2. `docs/v1_1_dictionary_project_management_spec.md`
+3. `docs/v1_2_lj_workbench_integration_spec.md`
+
+`docs/DEVELOPMENT_HANDOFF.md` 记录当前远端分支、实际完成度、后续路线、Mac 启动与基线测试方式。不要只依据旧聊天摘要判断当前代码状态。
+
 ## 1. 项目定位
 
 这是一个**本地单机版实验室室内质控软件**，当前技术栈为：

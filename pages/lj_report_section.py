@@ -148,6 +148,8 @@ def _render_report_preview(package: LjMonthlyReportPackage) -> None:
             ("质控负责人", report.basic_info.qc_owner_name),
             ("审核人", report.basic_info.reviewer_name),
             ("方法", report.basic_info.method_label),
+            ("检测方法", report.basic_info.detection_method),
+            ("单位", report.basic_info.unit_symbol),
             ("报告月份", report.report_month_label),
             ("报告期间", report.report_period_label),
             ("输入值类型", report.basic_info.input_value_type_label),

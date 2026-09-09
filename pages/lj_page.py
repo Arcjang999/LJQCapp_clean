@@ -4,6 +4,10 @@ import pandas as pd
 import streamlit as st
 
 from plotting import close_figure
+from pages.lj_config_section import (
+    prepare_lj_v12_project_batch_context,
+    render_lj_v12_configuration_selection,
+)
 from pages.lj_report_section import render_lj_monthly_report_section
 from pages.lj_sections import (
     build_lj_workbench_context,
@@ -16,8 +20,6 @@ from pages.lj_sections import (
 )
 from pages.management import (
     guard_work_tab_selection,
-    prepare_project_batch_context,
-    render_project_batch_management,
 )
 from ui.common import (
     TEXT,
@@ -59,9 +61,9 @@ def _build_lj_source_message(batch) -> str:
 def render_lj_page() -> None:
     st.subheader("单水平（LJ法）")
     st.caption("适用于单水平项目的日常室内质控。建靶期重点查看离群值判断，进入正式期后按 Westgard 规则判读并生成月报。")
-    projects_df, selected_project_id, batches_df, selected_batch_id = prepare_project_batch_context()
-    manage_tab, work_tab, report_tab = st.tabs([TEXT["manage"], TEXT["current_batch"], "LJ 月报"])
-    render_project_batch_management(
+    projects_df, selected_project_id, batches_df, selected_batch_id = prepare_lj_v12_project_batch_context()
+    manage_tab, work_tab, report_tab = st.tabs(["项目与批号", TEXT["current_batch"], "LJ 月报"])
+    render_lj_v12_configuration_selection(
         manage_tab,
         projects_df,
         selected_project_id,
@@ -130,6 +132,10 @@ def render_lj_work_tab(
                 ("质控品", batch["qc_material"]),
                 ("浓度", batch["concentration"]),
                 ("质控品批号", batch["lot_no"]),
+                ("单位", _clean_lj_display_part(batch_dict.get("unit_symbol")) or "-"),
+                ("检测方法", _clean_lj_display_part(batch_dict.get("method_name")) or "-"),
+                ("配置名称", _clean_lj_display_part(batch_dict.get("v11_config_name")) or "-"),
+                ("批号效期", _clean_lj_display_part(batch_dict.get("v11_expiry_date")) or "-"),
                 ("CV 要求", "-" if cv_limit is None else f"≤ {cv_limit:.2f}%"),
                 *(
                     [("来源", "由即时法转入")]

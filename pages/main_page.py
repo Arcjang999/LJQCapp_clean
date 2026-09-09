@@ -4,10 +4,12 @@ from textwrap import dedent
 
 import streamlit as st
 
-from ui.common import render_html_block, render_section_intro
+from ui.common import open_global_page, render_html_block, render_section_intro
 
 
 MAIN_ENTRY_LABEL = "主页"
+MASTER_DATA_ENTRY_LABEL = "基础资料"
+PROJECT_MANAGEMENT_ENTRY_LABEL = "项目/批次管理"
 LJ_ENTRY_LABEL = "单水平（LJ法）"
 ZSCORE_ENTRY_LABEL = "多水平（Z-score法）"
 INSTANT_ENTRY_LABEL = "即时法"
@@ -23,6 +25,9 @@ LEGACY_METHOD_ENTRY_MAP = {
     "首页": MAIN_ENTRY_LABEL,
     "主页": MAIN_ENTRY_LABEL,
     "Main": MAIN_ENTRY_LABEL,
+    "基础资料": MASTER_DATA_ENTRY_LABEL,
+    "项目管理": PROJECT_MANAGEMENT_ENTRY_LABEL,
+    "项目/批次管理": PROJECT_MANAGEMENT_ENTRY_LABEL,
     "LJ": LJ_ENTRY_LABEL,
     "单水平（LJ法）": LJ_ENTRY_LABEL,
     "Z-score": ZSCORE_ENTRY_LABEL,
@@ -54,13 +59,6 @@ def normalize_top_level_method_selection() -> None:
         return
 
     st.session_state["top_level_method_selector"] = METHOD_ENTRY_OPTIONS[0]
-
-
-def _open_global_page(page_key: str) -> None:
-    st.session_state[page_key] = True
-    if page_key == "show_settings_page":
-        st.session_state["refresh_settings_form"] = True
-    st.rerun()
 
 
 def _render_method_card(
@@ -354,19 +352,38 @@ def render_main_entry_page() -> None:
         <div class="home-hero">
             <div class="home-hero-title">实验室室内质控工作台</div>
             <div class="home-hero-caption">
-                面向日常单机使用场景，统一提供单水平（LJ法）、多水平（Z-score法）、即时法、
-                月报生成、报告历史与系统设置入口。
+                面向日常单机使用场景，先通过基础资料和新版项目管理完成上游配置，
+                再进入单水平（LJ法）、多水平（Z-score法）与即时法工作台。
             </div>
             <div class="welcome-chip-row">
                 <span class="welcome-chip">单水平（LJ法）</span>
                 <span class="welcome-chip">多水平（Z-score法）</span>
                 <span class="welcome-chip">即时法</span>
+                <span class="welcome-chip">基础资料与多项目模板</span>
                 <span class="welcome-chip">月报、报告历史与系统设置</span>
             </div>
         </div>
         """
     ).strip()
     render_html_block(hero_html)
+
+    management_col1, management_col2 = st.columns(2, gap="medium")
+    with management_col1:
+        if st.button(
+            "进入基础资料",
+            key="hero_jump_master_data",
+            type="primary",
+            width="stretch",
+        ):
+            open_global_page("show_master_data_page")
+    with management_col2:
+        if st.button(
+            "进入新版项目 / 批次管理",
+            key="hero_jump_project_management",
+            type="primary",
+            width="stretch",
+        ):
+            open_global_page("show_project_management_page")
 
     action_col1, action_col2, action_col3 = st.columns(3, gap="medium")
     with action_col1:
@@ -379,7 +396,7 @@ def render_main_entry_page() -> None:
         if st.button("进入即时法", key="hero_jump_instant", type="primary", width="stretch"):
             switch_top_level_method(INSTANT_ENTRY_LABEL)
 
-    st.caption("右上角保留报告历史和系统设置等全局入口，当前页面主要用于方法选择和操作帮助查看。")
+    st.caption("基础资料、项目/批次管理、报告历史和系统设置均位于右上角；主导航只用于切换质控方法。")
 
     render_section_intro(
         title="方法入口",
@@ -454,7 +471,7 @@ def render_main_entry_page() -> None:
             tags=["历史记录中心", "摘要查看", "重新生成"],
         )
         if st.button("打开报告历史", key="open_main_report_history_card", width="stretch"):
-            _open_global_page("show_report_history_page")
+            open_global_page("show_report_history_page")
 
     with global_col2:
         _render_method_card(
@@ -469,7 +486,7 @@ def render_main_entry_page() -> None:
             tags=["报告默认信息", "数据存储", "备份恢复"],
         )
         if st.button("打开系统设置", key="open_main_settings_card", width="stretch"):
-            _open_global_page("show_settings_page")
+            open_global_page("show_settings_page")
 
     render_section_intro(
         title="使用说明",

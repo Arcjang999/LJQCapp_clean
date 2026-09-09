@@ -25,10 +25,12 @@ PROJECT_MODULE_FILES = [
     "zscore_plotting.py",
 ]
 PROJECT_PACKAGES = [
+    "migrations",
     "pages",
     "services",
     "ui",
 ]
+PROJECT_DATA_DIRS = ["data"]
 
 
 def collect_project_source_datas() -> list[tuple[str, str]]:
@@ -39,6 +41,13 @@ def collect_project_source_datas() -> list[tuple[str, str]]:
     for package_name in PROJECT_PACKAGES:
         package_root = PROJECT_ROOT / package_name
         for file_path in package_root.rglob("*"):
+            if not file_path.is_file():
+                continue
+            relative_parent = file_path.parent.relative_to(PROJECT_ROOT)
+            datas.append((str(file_path), str(relative_parent)))
+    for data_dir_name in PROJECT_DATA_DIRS:
+        data_root = PROJECT_ROOT / data_dir_name
+        for file_path in data_root.rglob("*"):
             if not file_path.is_file():
                 continue
             relative_parent = file_path.parent.relative_to(PROJECT_ROOT)
@@ -56,6 +65,7 @@ hiddenimports = list(
         + collect_submodules("pyarrow")
         + collect_submodules("altair")
         + collect_submodules("pages")
+        + collect_submodules("migrations")
         + collect_submodules("services")
         + collect_submodules("ui")
         + [
