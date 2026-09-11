@@ -16,9 +16,9 @@ from services.value_type_service import (
 
 LJ_BUILDING_BASE_REQUIRED_COLUMNS = ["检测时间", "检测人"]
 LJ_BUILDING_REAGENT_CHANGE_COLUMN = "试剂批号变更（可选）"
-LJ_BUILDING_OPTIONAL_COLUMNS = ["备注", LJ_BUILDING_REAGENT_CHANGE_COLUMN]
+LJ_BUILDING_OPTIONAL_COLUMNS = ["备注", LJ_BUILDING_REAGENT_CHANGE_COLUMN, "实际试剂批号"]
 ZSCORE_BUILDING_BASE_COLUMNS = ["检测时间", "检测人"]
-ZSCORE_BUILDING_OPTIONAL_COLUMNS = ["备注"]
+ZSCORE_BUILDING_OPTIONAL_COLUMNS = ["备注", "实际试剂批号"]
 REVIEW_ISSUE_DISPLAY_COLUMNS = ["行号", "字段名", "问题说明", "是否阻断"]
 FILE_LEVEL_ROW_LABEL = "文件级"
 
@@ -234,7 +234,7 @@ def _review_zscore_import_csv(
     missing_optional_columns = [
         column for column in ZSCORE_BUILDING_OPTIONAL_COLUMNS if column not in input_columns
     ]
-    allowed_column_orders = [expected_required_columns, expected_template_columns]
+    allowed_column_orders = [expected_required_columns, expected_required_columns+["备注"], expected_required_columns+["实际试剂批号"], expected_template_columns]
     has_template_blocking_issues = False
 
     if normalized_level_count == 2 and level_3_column in input_columns:
@@ -399,6 +399,7 @@ def _review_zscore_import_csv(
         normalized_rows.append(
             {
                 "test_time": parsed_time_string,
+                "actual_reagent_lot": str(row.get("实际试剂批号", "") or "").strip(),
                 "operator": operator,
                 "manual_note": manual_note,
                 "level_results": normalized_level_results,
@@ -634,6 +635,7 @@ def _review_lj_import_csv(
         normalized_rows.append(
             {
                 "test_time": parsed_time_string,
+                "actual_reagent_lot": str(row.get("实际试剂批号", "") or "").strip(),
                 "operator": operator,
                 "value": float(parsed_value),
                 "log_value": log_value,
@@ -686,6 +688,28 @@ def _read_csv_for_review(file_bytes: bytes) -> tuple[pd.DataFrame | None, list[d
                 is_blocking=True,
             )
         ]
+
+    if file_bytes.startswith(b'PK'):
+        from services.export_utils import xlsx_bytes_to_dataframes
+        from zipfile import ZipFile
+        import xml.etree.ElementTree as ET
+        try:
+            sheets=xlsx_bytes_to_dataframes(file_bytes)
+            populated=[frame for frame in sheets.values() if not frame.empty]
+            if len(populated)!=1:raise ValueError('检测数据导入须包含唯一一张非空工作表。')
+            frame=populated[0].fillna('').copy()
+            if '检测时间' in frame:
+                with ZipFile(BytesIO(file_bytes)) as archive:
+                    root=ET.fromstring(archive.read('xl/workbook.xml'))
+                    props=root.find('{http://schemas.openxmlformats.org/spreadsheetml/2006/main}workbookPr')
+                    origin='1904-01-01' if props is not None and props.get('date1904') in ('1','true') else '1899-12-30'
+                numeric=pd.to_numeric(frame['检测时间'],errors='coerce')
+                for index,value in numeric.items():
+                    if pd.notna(value) and 1<=value<=100000:
+                        frame.at[index,'检测时间']=pd.to_datetime(value,unit='D',origin=origin).round('s').strftime('%Y-%m-%d %H:%M:%S')
+            return frame.astype(str),[]
+        except (ValueError,KeyError,ET.ParseError) as exc:
+            return None,[_make_issue(row_label=FILE_LEVEL_ROW_LABEL,field_name='Excel 文件',message=str(exc),is_blocking=True)]
 
     last_exception: Exception | None = None
     for encoding in ("utf-8-sig", "utf-8", "gbk"):

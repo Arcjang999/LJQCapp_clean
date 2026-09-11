@@ -151,6 +151,8 @@ def _render_report_preview(package: ZScoreMonthlyReportPackage) -> None:
             ("报告月份", report.report_month_label),
             ("报告期间", report.report_period_label),
             ("输入值类型", report.basic_info.input_value_type_label),
+            ("单位", report.basic_info.unit_symbol),
+            ("检测方法", report.basic_info.detection_method),
             ("水平数", report.basic_info.level_count_label),
             ("各水平说明", report.basic_info.level_summary),
             ("当前规则组合", report.basic_info.template_label),

@@ -1217,6 +1217,10 @@ def render_zscore_batch_header(
     level_summary: str,
     lot_no: Any,
     cv_limit: float | None,
+    unit_symbol: Any = None,
+    method_name: Any = None,
+    config_name: Any = None,
+    expiry_date: Any = None,
 ) -> None:
     batch_display = (
         f"质控批号 {_stringify_display_value(lot_no)}"
@@ -1237,6 +1241,10 @@ def render_zscore_batch_header(
         ("浓度", concentration),
         ("水平说明", level_summary),
         ("质控品批号", lot_no),
+        ("单位", unit_symbol),
+        ("检测方法", method_name),
+        ("配置名称", config_name),
+        ("批号效期", expiry_date),
         ("CV 要求", "-" if cv_limit is None else f"≤ {float(cv_limit):.2f}%"),
     ]
     cards = []

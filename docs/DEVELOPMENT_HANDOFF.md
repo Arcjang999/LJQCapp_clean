@@ -1,16 +1,20 @@
 # LJQC 开发路线与跨设备接手说明
 
-更新时间：2026-09-09
+更新时间：2026-09-11（批号生命周期迁移与验收完成后）
 
 ## 1. 这份文件解决什么问题
 
 这份文件是 LJQC 当前开发状态的跨电脑交接入口。它把此前围绕竞品、产品路线、V1.1、V1.2 和后续版本的讨论，整理成仓库内可持续维护的说明。
 
-新的电脑或新的 Codex 任务不需要依赖旧聊天记录。只要能拉取本仓库的远端分支，并依次阅读本文件、`AGENTS.md` 和两个版本规格，就能够继续工作。
+新的电脑或新的 Codex 任务不需要依赖旧聊天记录。只要能拉取本仓库的远端分支，并依次阅读本文件、`AGENTS.md` 和相关版本规格，就能够继续工作。
 
 当前开发分支：`codex/v1-2-lj-integration`
 
-当前代码基线：本地 `main@3c737fb`。远端工作分支推送后，以 `origin/codex/v1-2-lj-integration` 的最新提交为准。
+本轮开发起点：`b9355b6`。2026-09-11 的存储路径、模板试剂、Z-score、即时法和批号生命周期改动已在 Mac 完成，功能、测试和交接文档统一纳入本轮提交；最新 HEAD 和远端同步状态以 Git 核对为准。新 session 应继续使用 `/Users/gaohongchong/Documents/Codex/LJQCapp`，不要清理未提交改动。当前交接任务入口为 [下一阶段任务书](NEXT_SESSION_TASKS.md)。
+
+2026-09-11 同日补充：新建项目模板现在要求从字典选择本地仪器、试剂和质控品。模板新增可空的 `default_reagent_id`，只预填后续新增项目；旧模板可补选，各项目可覆盖，已有项目和批号快照不被默认值修改。修复了表格试剂标签与字典不一致导致原样保存丢失关联的问题。迁移只加列，不猜测或回填旧模板试剂；本地迁移前已备份。产品规则及资料依据见 `docs/v1_2_template_reagent_spec.md`。
+
+2026-09-11 批号生命周期首轮本地实现已完成：三方法实际试剂批号、逐次配置快照、试剂切换及更正、质控品平行/结束、Z-score 水平组合、LJ/Z-score 控制参数版本、导入预览与报告追溯已接通。详见 [实现与验收说明](v1_2_lot_lifecycle_implementation.md)；原 [整体设计](v1_2_lot_lifecycle_design.md) 保留实施前分析。用户已授权将本轮源码及交接文档提交并推送到当前分支。
 
 ## 2. 一句话产品方向
 
@@ -60,9 +64,10 @@ V3 可选的云端室间比对
 | V1.1 基础字典 | 已完成 | 新数据模型、296 个 WS/T 886—2026 定量项目、本地新增、别名、来源和软停用已实现 |
 | V1.1 新版项目/批次管理 | 已完成 | 多项目模板、批号配置、复制上一批号、批量配置、XLSX 导入导出和快照已实现 |
 | V1.2 LJ 接入 | 第一阶段已完成 | 新版配置已接入 LJ，旧计算不变；单位、方法等已带入工作台和月报 |
-| V1.2 Z-score 接入 | 未开始 | 下一项主任务 |
-| V1.2 即时法接入 | 未开始 | 现有即时法仍可用，转入 LJ 链路已保留 |
-| V1.2 人工/厂家靶值接入 | 未开始 | 需先锁定如何与现有建靶逻辑共存 |
+| V1.2 Z-score 接入 | 第一阶段已完成 | 新版 2/3 水平本批次建靶配置已接入工作台与月报，保留 run 判定和维护 |
+| V1.2 即时法接入 | 已完成本批次建靶接入 | 已启用单水平配置进入即时法；3 点 SI、20 点人工转入 LJ、转入后只读；来源快照随转入保留 |
+| V1.2 人工/厂家靶值接入 | 已完成 LJ/Z-score 接入 | 全部水平人工确认后建立参数版本，记录依据、人员和生效时间 |
+| V1.2 批号生命周期 | 已完成首轮本地实现 | 三方法批号追溯、换批流程、参数版本及报告，边界见实现说明 |
 | V1.3 | 未开始 | 质量目标、定性/半定量、失控闭环、报告增强 |
 | V2 LIS | 未开始 | 等医院和开发商确认接口条件 |
 | V3 室间比对 | 未开始 | 独立云端服务，不进入本地 SQLite 核心 |
@@ -192,21 +197,17 @@ V1.1 已启用批号项目
 - 即时法已转入的 LJ 批次继续可见，并保留来源项目、来源批次和转入时间；
 - `qc_logic.py` 的统计和 Westgard 计算未修改。
 
-尚未接入 LJ 的配置：
+以上为第一阶段记录。2026-09-11 已增加 LJ/Z-score 人工和厂家参数接入：需确认完整水平参数版本后用于正式判定。复制后待确认参数仍不能直接用于正式录入。计算适配层现按参数版本传入历史窗口，原 Westgard 规则定义保留。
 
-- 人工靶值；
-- 厂家靶值；
-- 复制后待确认靶值。
-
-这些配置仍保存在 V1.1 数据模型中，页面会说明暂未接入原因。
-
-## 8. 下一项开发任务：V1.2 Z-score 接入
+## 8. V1.2 Z-score 已完成的第一阶段
 
 建议从现有 `codex/v1-2-lj-integration` 分支继续，不要从旧 `main` 重新做 V1.1。
 
-目标是复用 LJ 已建立的运行绑定思路，把已启用的新版 Z-score 配置接入现有 Z-score 工作台。
+已复用工作台绑定思路，把已启用的新版 Z-score 配置接入现有工作台。详细实现与边界见 `docs/v1_2_zscore_workbench_integration_spec.md`。
 
-第一阶段准入建议：
+新增 `source_snapshot_json` 幂等迁移。检测记录产生后保留原始配置快照；配置停用不删除结果，恢复后沿用原运行批次。水平顺序或计算相关配置改变时阻止继续接入，提示另建配置。
+
+第一阶段准入条件：
 
 - 项目模板和批号配置均 active 且未停用；
 - `qc_method = zscore`；
@@ -225,7 +226,7 @@ V1.1 已启用批号项目
 - 保存新 run 后保持当前单水平/合并视图；
 - 不重写现有规则模板和绘图模块。
 
-验收至少覆盖：
+本阶段已验证：
 
 1. 2 水平配置进入工作台并完成建靶、正式期和报告；
 2. 3 水平配置进入工作台并完成建靶、正式期和报告；
@@ -237,13 +238,13 @@ V1.1 已启用批号项目
 
 ## 9. V1.2 后续顺序
 
-Z-score 接入完成后：
+按用户确认的顺序，已先完成即时法接入，规格见 [即时法新版接入](v1_2_instant_workbench_integration_spec.md)。
 
-1. 接入即时法新版上游配置，固定 20 个有效点规则不变；
-2. 保留 3 个有效点后开始格拉布斯检验；
-3. 保留“提示 + 人工确认”转入 LJ，不自动转入；
-4. 再单独确定人工/厂家靶值如何进入 LJ 和 Z-score；
-5. 三种工作台稳定后，清理不再使用的旧管理入口代码。
+1. 即时法使用已启用的单水平、本批次建靶配置，固定 20 个有效点；保留 3 点 SI 检验、人工确认转入 LJ 和源批次只读。
+2. 本轮保存 Instant 来源快照到 LJ 批次，保证转入后的单位、方法、试剂、仪器、质控品和配置来源可追溯。
+3. 批号生命周期首轮改造已完成，接手先读 [实现与验收说明](v1_2_lot_lifecycle_implementation.md)，在用户实际试用中继续校验换批工作流。
+4. LJ/Z-score 人工/厂家靶值已通过确认及版本机制接入；即时法仍保持本批次建靶流程。
+5. 普通旧即时法项目保留在数据库，未自动迁移进新版选择器；历史即时法转入的 LJ 批次继续可见。
 
 ## 10. V1.3 业务完整性增强
 
@@ -340,6 +341,8 @@ V1.1 的字典和项目配置会直接作为 LIS 映射基础，因此当前主�
 | `services/project_config_service.py` | 模板、批号、复制、校验和快照 |
 | `services/project_config_io_service.py` | 配置 XLSX 导入导出 |
 | `services/workbench_config_service.py` | 新版配置到 LJ 运行时绑定 |
+| `services/zscore_workbench_service.py` | 新版 Z-score 配置快照与运行时绑定 |
+| `pages/zscore_config_section.py` | Z-score 新版项目与批号选择 |
 | `pages/master_data_page.py` | 基础资料全局页 |
 | `pages/project_management_page.py` | 新版项目/批次管理全局页 |
 | `pages/lj_config_section.py` | LJ 新版配置选择 |
@@ -359,14 +362,19 @@ V1.1 的字典和项目配置会直接作为 LIS 映射基础，因此当前主�
 - 新版配置和运行绑定使用同一个 SQLite 数据库；
 - 数据库文件不应提交到 Git；
 - 版本化的基础词库 CSV 应提交；
-- macOS 默认数据库路径为 `~/.ljqcapp/qc_lj_app.db`；
-- Windows 默认数据库路径为 `%LOCALAPPDATA%/LJQCApp/qc_lj_app.db`。
+- 源码运行时，macOS / Windows 默认数据库路径均为项目目录内的 `data/qc_lj_app.db`，不随终端当前目录变化；
+- 打包运行时使用可执行程序旁的 `data/qc_lj_app.db`；macOS `.app` 使用整个 `.app` 包旁的 `data`，不写入包内或临时解压目录；
+- 存储设置位于同一 `data/storage_config.json`，默认备份位于 `data/backups/`；设置页仍支持迁移到自选目录；
+- 程序所在目录必须可写；旧版 `~/.ljqcapp` / `%LOCALAPPDATA%/LJQCApp` 的数据库需显式迁移或从备份恢复，升级不会自动导入这些位置的数据；
+- 本地数据库、备份和存储设置不提交到 Git，也不加入安装包；打包时只包含 `data/dictionaries` 基础词库。
 
-本阶段不需要旧测试数据。新电脑可以从空数据库启动，迁移和种子会自动建立新模型。
+新电脑可以从空数据库启动，迁移和种子会自动建立新模型。当前 Mac 已有用户录入的测试数据，必须保留；“V1.1 不迁移普通旧项目”的历史范围说明不构成清空当前数据库的授权。已有数据库升级应先备份，按批号生命周期实现说明执行受校验的迁移。
 
 ## 16. 在 Mac 上拉取并运行
 
 ### 16.1 获取代码
+
+同一台 Mac 的新 session 直接继续现有目录即可。以下克隆步骤仅适用于其他电脑；拉取后核对分支和最新提交。当前本机数据库、备份和测试产物不随 Git 同步。
 
 ```bash
 git clone https://github.com/Arcjang999/LJQCapp_clean.git
@@ -390,7 +398,7 @@ git pull --ff-only
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
 ```
 
 ### 16.3 启动
@@ -415,7 +423,7 @@ python run_app.py
 - `packaging/LJQCApp.spec` 是 Windows 打包基线；
 - `.bat` 启动、重置和演示数据脚本不能在 macOS 直接运行，应执行对应 Python 命令；
 - 设置页的“打开文件夹”辅助函数目前偏 Windows，实现 macOS 正式包前需要改为调用系统 `open`；
-- PDF 中文字体需要在 Mac 上单独做一次实际导出检查；
+- 已在当前 Mac 导出并逐页检查 2/3 水平月报中文、图例及表格；其他 Mac 仍需检查字体；
 - 原生目录选择依赖 PySide6，首次安装后应验证设置页目录选择、数据库迁移和恢复。
 
 这些边界不会阻止 Codex 在 Mac 上继续源码开发、运行 Streamlit 或执行绝大多数 smoke tests。
@@ -440,49 +448,57 @@ python tests/lj_v12_integration_smoke_test.py
 python tests/building_outlier_smoke_test.py
 python tests/lj_monthly_report_smoke_test.py
 python tests/instant_smoke_test.py
+python tests/instant_v12_integration_smoke_test.py
 python tests/zscore_smoke_test.py
+python tests/zscore_v12_integration_smoke_test.py
 python tests/zscore_monthly_report_smoke_test.py
 python tests/report_history_smoke_test.py
 python tests/settings_smoke_test.py
 python tests/storage_smoke_test.py
 python tests/results_migration_smoke_test.py
+python tests/lot_lifecycle_smoke_test.py
 ```
 
 不要直接运行 `tests/demo_data_current_db_smoke_test.py`，除非已经确认它使用隔离数据库；它的名称表示可能接触当前配置数据库。
 
 ## 18. 最近一次已完成验证
 
-在 Windows 开发机上已经完成：
+最新验收：2026-09-11 当前 Mac 的 19 组 smoke suites 全部通过；批号生命周期新增 11 项，Z-score 核心执行 49 项、即时法核心 15 项，另有各工作台接入、配置、迁移、报告及演示数据回归。详见 `output/lot-lifecycle-2026-09-11/final-regression.json` 和各组日志。该 JSON 的 `test_functions` 是源码函数数，不能全部当作实际执行数量相加。
+
+浏览器隔离验收完成连续 3 次 Z-score 保存并保持合并视图、实际试剂批号保存和管理页指定项目换批；LJ/Z-score PDF 已渲染检查。高缩放指定硬件环境和安装包未做验收。
+
+本机数据库于 14:22 完成迁移并恢复 8501 服务。保留 3 次 Z-score 检测和 6 条水平结果，回填 3 条来源快照上下文；实际试剂批号仍为“未记录”。备份 `data/backups/before-lot-lifecycle-20260911-142235.db`，审计 `output/lot-lifecycle-2026-09-11/real-migration/migration-audit.json`；原始结果一致性、完整性和外键检查通过。
+
+以下为此前阶段记录，不代表本轮 Windows 验收：
 
 - 所有应用源码 `py_compile`；
 - V1.1 基础资料、项目管理和 XLSX 导入导出 smoke tests；
 - V1.2 LJ 绑定和页面 smoke tests；
 - LJ 建靶离群维护和月报 smoke tests；
 - 即时法 15 条 smoke tests；
+- 即时法 V1.2 接入 10 条 smoke tests（包括重复初始化、转入快照和新版选择器）；
 - Z-score 49 条 smoke tests和月报测试；
 - 报告历史、设置、存储和结果迁移测试；
 - 浏览器手工检查全局入口、新版 LJ 选择、当前批次上下文；
 - 有效视口宽度 1280px 下无横向页面溢出。
 
-Mac 上仍需重新运行第 17 节的检查，不能把 Windows 通过直接等同于 Mac 已通过。
+批号改造前，2026-09-11 已在当前 Mac 完成当时基线的 14 组测试（含 Z-score 49 条、新接入 7 条），并检查新版选择、合并视图保存、整次检测禁用/恢复、正式期只读历史和 2/3 水平 PDF。日志位于本地忽略目录 `output/zscore-v12-2026-09-11/`。
+
+受限环境首次导入 matplotlib 时，部分 AppTest 的默认 3 秒超时不足；使用可写 `MPLCONFIGDIR` 并预热字体缓存后复跑通过。其他电脑仍需自行运行基线检查。
 
 ## 19. 给 Mac 上 Codex 的接手提示
 
 可把下面整段作为新任务的第一条消息：
 
 ```text
-请先阅读仓库根目录 AGENTS.md、docs/DEVELOPMENT_HANDOFF.md、
-docs/v1_1_dictionary_project_management_spec.md 和
-docs/v1_2_lj_workbench_integration_spec.md。
-
-当前应在 codex/v1-2-lj-integration 分支继续。先检查 git 状态、安装依赖，
-运行 DEVELOPMENT_HANDOFF.md 第 17 节的基线测试并报告 macOS 特有问题。
-不要迁移普通旧项目或旧测试数据，不要重写 LJ/Z-score/即时法计算核心。
-
-下一项开发任务是 V1.2 Z-score 接入：复用 qc_workbench_bindings 的适配思路，
-让已启用的新版 2/3 水平 Z-score 配置进入现有工作台和月报，同时保持最终判定、
-建靶维护和禁用/恢复都按整个 run 处理。第一阶段只接入本批次建靶。
-修改后运行全部相关 smoke tests，并对页面选择、合并视图保持、正式期锁定和图例位置做手工回归。
+继续开发 /Users/gaohongchong/Documents/Codex/LJQCapp。
+先阅读 AGENTS.md、docs/DEVELOPMENT_HANDOFF.md、docs/NEXT_SESSION_TASKS.md
+及 docs/v1_2_lot_lifecycle_implementation.md，再按任务书接手。
+当前分支 codex/v1-2-lj-integration，先检查最新提交和工作区状态，保留后续本地改动，
+不要覆盖、重置、重新克隆代替现有目录，也不要重复实现已完成的批号生命周期功能。
+本机 data/qc_lj_app.db 已迁移并保留原数据，先确认 8501 的运行状态。
+下一步先按任务书完成换批工作流的试用与边界核查，再根据结果修复问题；
+不要自行开始 V1.3、LIS 或打包发布。测试使用隔离数据库，更新验证记录和交接文档。
 ```
 
 ## 20. 接手成功判定
@@ -495,6 +511,6 @@ docs/v1_2_lj_workbench_integration_spec.md。
 4. 空数据库启动时 V1.1/V1.2 迁移成功；
 5. `lj_v12_integration_smoke_test.py` 通过；
 6. 能打开基础资料、项目/批次管理和 LJ 工作台；
-7. 能准确复述下一项是 Z-score 新版上游接入，而不是重写计算算法。
+7. 能确认 Z-score、即时法和批号生命周期首轮本地实现已完成，并按实现说明区分已验证范围与后续事项。
 
-在 Mac 实机完成这七项之前，只能确认“仓库交接材料已准备好”，不能宣称“macOS 已完整验证”。
+当前 Mac 已完成源码开发与上述回归；macOS 安装包和原生目录选择仍未做发布验收。

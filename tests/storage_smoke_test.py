@@ -4,6 +4,7 @@ import json
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from streamlit.testing.v1 import AppTest
 
@@ -22,6 +23,20 @@ from services.storage_service import (
 
 
 APP_FILE_PATH = str(PROJECT_ROOT / "app.py")
+
+
+def test_default_storage_stays_beside_source_or_packaged_application() -> None:
+    with patch.object(sys, "frozen", False, create=True):
+        assert database._get_persistent_data_dir() == PROJECT_ROOT / "data"
+
+    with TemporaryDirectory() as tempdir:
+        root = Path(tempdir).resolve()
+        with patch.object(sys, "frozen", True, create=True):
+            with patch.object(sys, "executable", str(root / "LJQCApp.exe")):
+                with patch.object(sys, "_MEIPASS", str(root / "temporary-extraction"), create=True):
+                    assert database._get_persistent_data_dir() == root / "data"
+            with patch.object(sys, "executable", str(root / "LJQCApp.app/Contents/MacOS/LJQCApp")):
+                assert database._get_persistent_data_dir() == root / "data"
 
 
 class TemporaryStorageContext:
@@ -82,7 +97,8 @@ def test_database_migration_updates_external_path_config_and_survives_restart() 
         assert config_payload["database_path"] == str(result.target_path.resolve())
 
         database.refresh_db_path_from_config()
-        assert database.get_db_path() == result.target_path
+        # macOS may expose the same directory through /var and /private/var.
+        assert database.get_db_path().resolve() == result.target_path.resolve()
         init_db()
         with get_connection() as connection:
             rows = connection.execute("SELECT name FROM projects ORDER BY id ASC").fetchall()
@@ -134,6 +150,7 @@ def test_restore_creates_protection_backup_and_restores_previous_snapshot() -> N
 
 
 if __name__ == "__main__":
+    test_default_storage_stays_beside_source_or_packaged_application()
     test_default_path_startup_without_external_config()
     test_database_migration_updates_external_path_config_and_survives_restart()
     test_manual_backup_creates_valid_timestamped_database_file()

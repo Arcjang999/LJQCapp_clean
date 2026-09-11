@@ -43,10 +43,11 @@ from services.project_config_service import (
     save_template_items,
     set_lot_config_disabled,
     set_project_template_disabled,
+    set_template_default_reagent,
     validate_lot_config,
     validate_project_template,
 )
-from ui.common import render_section_intro
+from ui.common import open_global_page, render_section_intro
 
 
 QC_METHOD_BY_LABEL = {label: code for code, label in QC_METHOD_LABELS.items()}
@@ -198,6 +199,7 @@ def _select_current_entity(
 def _render_template_creation() -> None:
     instruments = list_lab_instruments()
     materials = list_qc_materials()
+    reagents = list_reagents()
     instrument_labels, instrument_map, _ = _option_map(
         instruments,
         _instrument_label,
@@ -208,16 +210,22 @@ def _render_template_creation() -> None:
         _material_label,
         placeholder="请选择质控品",
     )
+    reagent_labels, reagent_map, _ = _option_map(
+        reagents, _reagent_label, placeholder="请选择试剂",
+    )
     with st.expander("新建项目模板", expanded=False):
-        if instruments.empty or materials.empty:
-            st.warning("请先到“基础资料”完成本地仪器和质控品维护。")
+        if instruments.empty or materials.empty or reagents.empty:
+            st.warning("请先到“基础资料”完成本地仪器、试剂和质控品维护。")
         with st.form("v11_create_project_template_form", clear_on_submit=True):
             template_name = st.text_input("模板名称 *")
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             with col1:
                 instrument_label = st.selectbox("本地仪器 *", instrument_labels)
             with col2:
+                reagent_label = st.selectbox("试剂 *", reagent_labels)
+            with col3:
                 material_label = st.selectbox("质控品 *", material_labels)
+            st.caption("所选试剂将作为新增检验项目的默认试剂；不同检验项目可分别调整。")
             notes = st.text_input("模板备注")
             submitted = st.form_submit_button(
                 "创建模板",
@@ -227,14 +235,16 @@ def _render_template_creation() -> None:
             if submitted:
                 instrument_id = instrument_map[instrument_label]
                 material_id = material_map[material_label]
-                if instrument_id is None or material_id is None:
-                    st.error("请选择本地仪器和质控品。")
+                reagent_id = reagent_map[reagent_label]
+                if instrument_id is None or material_id is None or reagent_id is None:
+                    st.error("请选择本地仪器、试剂和质控品。")
                 else:
                     try:
                         template_id = create_project_template(
                             template_name=template_name,
                             lab_instrument_id=int(instrument_id),
                             qc_material_id=int(material_id),
+                            default_reagent_id=int(reagent_id),
                             notes=notes,
                         )
                     except ValueError as exc:
@@ -245,7 +255,7 @@ def _render_template_creation() -> None:
                         st.rerun()
 
 
-def _template_item_editor_rows(items: pd.DataFrame) -> pd.DataFrame:
+def _template_item_editor_rows(items: pd.DataFrame, lookups: dict[str, object]) -> pd.DataFrame:
     if items.empty:
         return pd.DataFrame(
             columns=[
@@ -272,16 +282,10 @@ def _template_item_editor_rows(items: pd.DataFrame) -> pd.DataFrame:
             "输入值类型": items["input_value_type"].map(INPUT_VALUE_TYPE_LABELS),
             "单位": items["unit_symbol"].fillna("").astype(str),
             "方法学": items["method_name"].fillna("").astype(str),
-            "试剂": items.apply(
-                lambda row: (
-                    _safe_text(row.get("reagent_name"), "")
-                    + (
-                        f"｜{_safe_text(row.get('reagent_trade_name'), '')}"
-                        if _safe_text(row.get("reagent_trade_name"), "")
-                        else ""
-                    )
-                ),
-                axis=1,
+            "试剂": items["reagent_id"].map(
+                lambda value: "" if pd.isna(value) else lookups["reagent_label_by_id"].get(
+                    int(value), f"已停用或不可用的试剂（#{int(value)}），请重新选择"
+                )
             ),
             "水平数": items["level_count"].astype(int),
             "建靶点数": items["target_n"].astype(int),
@@ -297,14 +301,17 @@ def _build_editor_lookup_options() -> dict[str, object]:
     reagents = list_reagents()
     unit_options = [_safe_text(value) for value in units["symbol"].tolist()]
     method_options = [_safe_text(value) for value in methods["method_name"].tolist()]
-    reagent_options = [_reagent_label(row) for _, row in reagents.iterrows()]
+    reagent_labels, reagent_ids, reagent_label_by_id = _option_map(
+        reagents, _reagent_label, placeholder=""
+    )
     return {
         "units": units,
         "methods": methods,
         "reagents": reagents,
         "unit_options": unit_options,
         "method_options": method_options,
-        "reagent_options": reagent_options,
+        "reagent_options": reagent_labels[1:],
+        "reagent_label_by_id": reagent_label_by_id,
         "unit_id_by_label": {
             _safe_text(row.get("symbol")): int(row["id"]) for _, row in units.iterrows()
         },
@@ -312,9 +319,7 @@ def _build_editor_lookup_options() -> dict[str, object]:
             _safe_text(row.get("method_name")): int(row["id"])
             for _, row in methods.iterrows()
         },
-        "reagent_id_by_label": {
-            _reagent_label(row): int(row["id"]) for _, row in reagents.iterrows()
-        },
+        "reagent_id_by_label": reagent_ids,
     }
 
 
@@ -328,6 +333,13 @@ def _save_editor_rows(template_id: int, edited: pd.DataFrame, lookups: dict[str,
         unit_label = str(row.get("单位") or "")
         method_label = str(row.get("方法学") or "")
         reagent_label = str(row.get("试剂") or "")
+        for field, value, lookup_key in (
+            ("单位", unit_label, "unit_id_by_label"),
+            ("方法学", method_label, "method_id_by_label"),
+            ("试剂", reagent_label, "reagent_id_by_label"),
+        ):
+            if value and value not in lookups[lookup_key]:
+                raise ValueError(f"第 {index + 1} 行的{field}已不在可选字典中，请重新选择后保存。")
         rows.append(
             {
                 "test_item_id": int(row["test_item_id"]),
@@ -346,7 +358,7 @@ def _save_editor_rows(template_id: int, edited: pd.DataFrame, lookups: dict[str,
     save_template_items(template_id, rows)
 
 
-def _render_add_template_items(template_id: int) -> None:
+def _render_add_template_items(template_id: int, default_reagent_id: int | None) -> None:
     all_items = list_test_items()
     existing = list_template_items(template_id)
     existing_ids = set(existing["test_item_id"].astype(int).tolist()) if not existing.empty else set()
@@ -360,7 +372,8 @@ def _render_add_template_items(template_id: int) -> None:
     lookups = _build_editor_lookup_options()
     unit_options = list(lookups["unit_options"])
     method_options = list(lookups["method_options"])
-    reagent_options = list(lookups["reagent_options"])
+    reagent_options = [""] + list(lookups["reagent_options"])
+    default_reagent_label = lookups["reagent_label_by_id"].get(default_reagent_id, "")
     with st.expander("批量添加检验项目", expanded=existing.empty):
         if available_items.empty:
             st.info("没有更多可添加的启用检验项目。")
@@ -397,6 +410,7 @@ def _render_add_template_items(template_id: int) -> None:
             reagent_label = st.selectbox(
                 "批量试剂",
                 reagent_options,
+                index=reagent_options.index(default_reagent_label),
                 key=f"v11_bulk_reagent_{template_id}",
             )
             level_count = st.number_input(
@@ -419,7 +433,7 @@ def _render_add_template_items(template_id: int) -> None:
             key=f"v11_add_items_button_{template_id}",
             type="primary",
             width="stretch",
-            disabled=not selected_labels,
+            disabled=not selected_labels or not reagent_label,
         ):
             combined_rows: list[dict[str, object]] = []
             for _, row in existing.iterrows():
@@ -469,22 +483,49 @@ def _render_add_template_items(template_id: int) -> None:
                 st.rerun()
 
 
+def _render_template_default_reagent(template) -> None:
+    template_id = int(template["id"])
+    labels, by_label, by_id = _option_map(
+        list_reagents(), _reagent_label, placeholder="请选择试剂",
+    )
+    current = by_id.get(template["default_reagent_id"])
+    with st.expander("模板默认试剂", expanded=current is None):
+        st.caption("用于预填新增加的检验项目。修改默认值不会覆盖已有项目、批号配置或历史记录。")
+        if current is None:
+            st.warning("请从字典补选模板默认试剂；已有项目的试剂保留原配置。")
+        selected = st.selectbox(
+            "默认试剂 *", labels, index=labels.index(current) if current else 0,
+            key=f"v12_default_reagent_{template_id}_{template['revision_no']}",
+        )
+        if st.button("保存默认试剂", key=f"v12_save_default_reagent_{template_id}",
+                     disabled=by_label[selected] is None):
+            try:
+                set_template_default_reagent(template_id, int(by_label[selected]))
+            except ValueError as exc:
+                st.error(str(exc))
+            else:
+                st.session_state.pop(f"v11_bulk_reagent_{template_id}", None)
+                st.rerun()
+
+
 def _render_template_editor(template_id: int) -> None:
     template = get_project_template(template_id)
     items = list_template_items(template_id)
     st.caption(
         f"当前模板：{template['template_name']}｜仪器：{template['instrument_name']}｜"
+        f"默认试剂：{_safe_text(template['default_reagent_name'], '尚未设置')}｜"
         f"质控品：{template['qc_material_name']}｜"
         f"状态：{'已启用' if template['status'] == 'active' else '草稿'}"
     )
-    _render_add_template_items(template_id)
+    _render_template_default_reagent(template)
+    _render_add_template_items(template_id, template["default_reagent_id"])
 
     items = list_template_items(template_id)
     if items.empty:
         st.info("请先批量添加检验项目。")
     else:
         lookups = _build_editor_lookup_options()
-        editor_df = _template_item_editor_rows(items)
+        editor_df = _template_item_editor_rows(items, lookups)
         edited = st.data_editor(
             editor_df,
             hide_index=True,
@@ -1240,17 +1281,31 @@ def render_project_management_page() -> None:
         title="新版项目 / 批次管理",
         eyebrow="全局入口",
         caption=(
-            "按本地仪器与质控品建立多项目模板，再为具体质控品批号配置水平、靶值和 SD。"
-            "本页面使用全新的 V1.1 数据链路，不读取旧测试项目。"
+            "从基础资料字典选择本地仪器、试剂和质控品，建立项目模板；"
+            "再为具体质控品批号配置水平、靶值和 SD。多项目模板中可分别调整各项目的试剂。"
         ),
         badges=["多项目批量配置", "复制上一批号", "配置快照"],
         tone="accent",
     )
     st.info(
         "推荐顺序：先在“基础资料”维护字典，再创建项目模板，最后创建或复制批号配置。"
-        "本阶段只换上游管理，不调用质控计算。"
+        "仪器型号需先登记为本地仪器，才能用于项目模板。"
     )
-    tabs = st.tabs(["项目模板", "批号配置", "复制上一批号", "导入导出"])
+    dictionary_counts = {
+        "本地仪器": len(list_lab_instruments()),
+        "试剂": len(list_reagents()),
+        "质控品": len(list_qc_materials()),
+    }
+    st.caption("当前可选字典：" + "｜".join(f"{name} {count} 条" for name, count in dictionary_counts.items()))
+    missing = [name for name, count in dictionary_counts.items() if count == 0]
+    if missing:
+        st.warning(
+            "、".join(missing) + "字典暂无可选记录。请先在基础资料中新增实际使用的产品，再回到这里选择。"
+            "当前内置检验项目、方法学和单位，尚未内置仪器、试剂及质控品产品目录。"
+        )
+    if st.button("维护仪器、试剂和质控品字典", key="v11_open_product_dictionaries"):
+        open_global_page("show_master_data_page")
+    tabs = st.tabs(["项目模板", "批号配置", "复制上一批号", "导入导出", "批号使用与追溯"])
     with tabs[0]:
         _render_templates_tab()
     with tabs[1]:
@@ -1259,3 +1314,7 @@ def render_project_management_page() -> None:
         _render_copy_tab()
     with tabs[3]:
         _render_import_export_tab()
+
+    with tabs[4]:
+        from pages.lot_lifecycle_section import render_lot_management
+        render_lot_management()

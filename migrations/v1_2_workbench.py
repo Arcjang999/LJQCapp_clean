@@ -49,3 +49,17 @@ def ensure_v12_workbench_schema(connection: sqlite3.Connection) -> None:
         """,
         (MIGRATION_KEY, "V1.2"),
     )
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(qc_workbench_bindings)")}
+    if "source_snapshot_json" not in columns:
+        connection.execute("ALTER TABLE qc_workbench_bindings ADD COLUMN source_snapshot_json TEXT NOT NULL DEFAULT '{}'")
+    connection.execute(
+        "INSERT OR IGNORE INTO schema_migrations (migration_key, app_version) VALUES (?, 'V1.2')",
+        ("v1_2_zscore_snapshot_002",),
+    )
+    batch_columns = {row[1] for row in connection.execute("PRAGMA table_info(batches)")}
+    if "source_config_snapshot_json" not in batch_columns:
+        connection.execute("ALTER TABLE batches ADD COLUMN source_config_snapshot_json TEXT NOT NULL DEFAULT '{}'")
+    connection.execute(
+        "INSERT OR IGNORE INTO schema_migrations (migration_key, app_version) VALUES (?, 'V1.2')",
+        ("v1_2_instant_transfer_snapshot_003",),
+    )

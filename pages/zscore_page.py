@@ -6,9 +6,8 @@ import streamlit as st
 from plotting import close_figure
 from pages.management import (
     guard_work_tab_selection,
-    prepare_zscore_project_batch_context,
-    render_zscore_project_batch_management,
 )
+from pages.zscore_config_section import prepare_zscore_v12_project_batch_context, render_zscore_v12_configuration_selection
 from pages.zscore_report_section import render_zscore_monthly_report_section
 from pages.zscore_sections import (
     build_zscore_workbench_context,
@@ -229,14 +228,15 @@ def _render_zscore_maintenance_summary(context: dict[str, object]) -> None:
 def render_zscore_page() -> None:
     st.subheader("多水平（Z-score法）")
     st.caption("适用于 2 水平或 3 水平项目的联合判断。")
-    projects_df, selected_project_id, batches_df, selected_batch_id = prepare_zscore_project_batch_context()
-    manage_tab, work_tab, report_tab = st.tabs([TEXT["manage"], TEXT["current_batch"], "Z-score 月报"])
-    render_zscore_project_batch_management(
+    projects_df, selected_project_id, batches_df, selected_batch_id, issues = prepare_zscore_v12_project_batch_context()
+    manage_tab, work_tab, report_tab = st.tabs(["项目与批号", TEXT["current_batch"], "Z-score 月报"])
+    render_zscore_v12_configuration_selection(
         manage_tab,
         projects_df,
         selected_project_id,
         batches_df,
         selected_batch_id,
+        issues,
     )
     guard_work_tab_selection(work_tab, selected_project_id, selected_batch_id)
     guard_work_tab_selection(report_tab, selected_project_id, selected_batch_id)
@@ -267,6 +267,10 @@ def render_zscore_page() -> None:
             level_summary=level_summary,
             lot_no=batch["lot_no"],
             cv_limit=cv_limit,
+            unit_symbol=dict(batch).get("unit_symbol"),
+            method_name=dict(batch).get("method_name"),
+            config_name=dict(batch).get("v11_config_name"),
+            expiry_date=dict(batch).get("v11_expiry_date"),
         )
 
         render_section_intro(
@@ -347,6 +351,9 @@ def render_zscore_page() -> None:
                 with st.expander("导出与导入", expanded=False):
                     render_zscore_export_import_section(context, selected_batch_id, chart_panel_state)
         close_figure(chart_panel_state.get("figure"))
+
+        from pages.lot_lifecycle_section import render_result_provenance
+        render_result_provenance("zscore",selected_batch_id)
 
     with report_tab:
         render_zscore_monthly_report_section(selected_batch_id)

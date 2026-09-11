@@ -183,7 +183,7 @@ def test_lj_monthly_report_builds_pdf_and_snapshot() -> None:
         assert pdf_bytes.startswith(b"%PDF")
 
         reader = assert_uniform_a4_pages_without_watermark(pdf_bytes)
-        assert len(reader.pages) == 4
+        assert len(reader.pages) == 5
         assert str(reader.metadata.get("/Subject", "")) == REPORT_TYPE_LJ_MONTHLY
 
         snapshot_id = save_lj_monthly_report_snapshot(package)
@@ -234,7 +234,7 @@ def test_lj_monthly_report_uses_business_text_for_single_record_and_no_abnormal(
 
         pdf_bytes = build_lj_monthly_report_pdf(package)
         reader = assert_uniform_a4_pages_without_watermark(pdf_bytes)
-        assert len(reader.pages) == 3
+        assert len(reader.pages) == 4
 
 
 def test_lj_monthly_report_page_exposes_generate_and_download_flow() -> None:

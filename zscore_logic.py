@@ -415,6 +415,7 @@ def _build_zscore_plot_dataframe_impl(
     display_phase: str | None = None,
 ) -> pd.DataFrame:
     expected_columns = [
+        "target_profile_id", "actual_reagent_lot", "context_id",
         "run_id",
         "test_sequence",
         "run_index",
@@ -462,6 +463,7 @@ def _build_zscore_plot_dataframe_impl(
             reference_profile = reference_map.get((run_id, level_id), {})
             rows.append(
                 {
+                    "target_profile_id":run.get("target_profile_id"),"actual_reagent_lot":run.get("actual_reagent_lot","未记录"),"context_id":run.get("context_id"),
                     "run_id": run_id,
                     "test_sequence": test_sequence,
                     "run_index": test_sequence,
@@ -474,8 +476,8 @@ def _build_zscore_plot_dataframe_impl(
                     "log_value": level_result.get("log_value"),
                     "building_reference_mean": reference_profile.get("building_reference_mean"),
                     "building_reference_sd": reference_profile.get("building_reference_sd"),
-                    "formal_reference_mean": reference_profile.get("formal_reference_mean"),
-                    "formal_reference_sd": reference_profile.get("formal_reference_sd"),
+                    "formal_reference_mean": level_result.get("target_mean") if run.get("target_profile_id") else reference_profile.get("formal_reference_mean"),
+                    "formal_reference_sd": level_result.get("target_sd") if run.get("target_profile_id") else reference_profile.get("formal_reference_sd"),
                     "phase": run_phase,
                     "plot_phase": run_phase,
                     "is_building_stat_point": is_building_stat_point,
@@ -734,6 +736,20 @@ def get_zscore_runs(batch_id: int, template_id: str | None = None) -> list[dict[
                     "level_results": sorted(level_results, key=lambda item: item["level_id"]),
                 }
             )
+        from database import get_connection
+        from services.lot_lifecycle_service import result_context_map
+        with get_connection() as c:
+            contexts=result_context_map(c,"zscore",batch_id)
+            confirmed_parameters={r["id"]:{l["level_id"]:l for l in json.loads(r["levels_json"])} for r in c.execute("SELECT id,levels_json FROM qc_target_profiles WHERE qc_method='zscore' AND batch_id=?",(batch_id,))}
+        for run in runs:
+            context=contexts.get(run["id"],{})
+            run["target_profile_id"]=context.get("target_profile_id")
+            run["actual_reagent_lot"]=context.get("reagent_lot_no") or "未记录"
+            run["context_id"]=context.get("id")
+            for level in run["level_results"]:
+                parameters=confirmed_parameters.get(run["target_profile_id"],{}).get(level["level_id"])
+                if parameters:
+                    level["target_mean"]=float(parameters["mean"]);level["target_sd"]=float(parameters["sd"])
         formal_started = current_phase == PHASE_FORMAL_QC
         for run in runs:
             run["is_locked_for_maintenance"] = bool(
@@ -752,6 +768,8 @@ def get_zscore_level_targets(
     batch_id: int,
     template_id: str,
     required_n: int | None = None,
+    at_time=None,
+    use_confirmed: bool = True,
 ) -> dict[str, dict[str, Any]]:
     templates = build_zscore_rule_templates()
     template = templates[template_id]
@@ -787,7 +805,8 @@ def get_zscore_level_targets(
             is_ready=bool(record.get("is_ready", 0)),
             phase=_normalize_run_phase(record.get("phase")),
         )
-    return profiles
+    from services.lot_lifecycle_service import overlay_zscore_profiles,target_profile
+    return overlay_zscore_profiles(profiles,target_profile("zscore",batch_id,at_time)) if use_confirmed else profiles
 
 
 def upsert_zscore_level_target(batch_id: int, level_id: str, **fields) -> None:
@@ -880,6 +899,9 @@ def should_enable_formal_rules(
         return False
     if not all(bool(target_profiles.get(level_id, {}).get("is_ready")) for level_id in level_ids):
         return False
+
+    if all(target_profiles[level].get("target_profile_id") for level in level_ids):
+        return True
 
     required_counts = [
         int(target_profiles.get(level_id, {}).get("required_n", 0) or 0)
@@ -1031,7 +1053,7 @@ def _persist_zscore_building_outlier_snapshots(batch_id: int, runs: list[dict[st
     db_save_zscore_level_outlier_snapshot(batch_id, snapshot_rows)
 
 
-def create_zscore_run(
+def _create_zscore_run_impl(
     batch_id: int,
     test_time: Any,
     operator: str,
@@ -1039,6 +1061,7 @@ def create_zscore_run(
     template_id: str,
     required_n: int | None = None,
     manual_note: str = "",
+    lot_selection: dict | None = None,
 ) -> dict[str, Any]:
     batch_context = resolve_zscore_batch_context(batch_id)
     batch = batch_context["batch"]
@@ -1056,7 +1079,24 @@ def create_zscore_run(
 
     history_runs = get_zscore_runs(batch_id, template_id)
     next_test_sequence = max((int(run.get("test_sequence") or 0) for run in history_runs), default=0) + 1
-    target_profiles = get_zscore_level_targets(batch_id, template_id, required_n=target_n)
+    from services.lot_lifecycle_service import target_profile,create_target_profile,overlay_zscore_profiles
+    has_later_runs=any(pd.Timestamp(run["test_time"])>pd.Timestamp(test_time) for run in history_runs)
+    history_runs=sorted([run for run in history_runs if pd.Timestamp(run["test_time"])<=pd.Timestamp(test_time)],key=lambda run:(pd.Timestamp(run["test_time"]),run["id"]))
+    version=target_profile("zscore",batch_id,test_time)
+    target_profiles=get_zscore_level_targets(batch_id,template_id,required_n=target_n,at_time=test_time)
+    if has_later_runs and version is None:
+        target_profiles=build_level_target_profiles(history_runs,template_id,required_n=target_n)
+    if version is None and target_profile("zscore",batch_id,"9999-12-31") is None and determine_zscore_phase(target_profiles,template["level_ids"]) == PHASE_FORMAL_QC:
+        if all(float(target_profiles[level].get("final_target_sd") or 0)>0 for level in template["level_ids"]):
+            version_id=create_target_profile(method="zscore",batch_id=batch_id,
+                levels=[{"level_id":level,"mean":target_profiles[level]["final_target_mean"],"sd":target_profiles[level]["final_target_sd"]} for level in template["level_ids"]],
+                source="building",evidence="由各水平有效建靶记录固化",confirmed_by="系统：既有建靶规则",effective_at=test_time,
+                source_result_ids=sorted(get_building_stat_run_ids(history_runs)))
+            version=target_profile("zscore",batch_id,profile_id=version_id)
+            target_profiles=overlay_zscore_profiles(target_profiles,version)
+    if version:
+        lot_selection={**(lot_selection or {}),"target_profile_id":version["id"]}
+        history_runs=[run for run in history_runs if run.get("target_profile_id")==version["id"] or (version["version_no"]==1 and version["source"]=="building" and run.get("target_profile_id") is None and run["phase"]==PHASE_FORMAL_QC)]
     current_phase = determine_zscore_phase(target_profiles, template["level_ids"])
     updated_profiles = deepcopy(target_profiles)
 
@@ -1121,6 +1161,7 @@ def create_zscore_run(
         error_type_hint=current_run["error_type_hint"],
         analysis_prompt=current_run["analysis_prompt"],
         manual_note=current_run["manual_note"],
+        lot_selection=lot_selection,
     )
     db_add_zscore_level_results(run_id, current_run["level_results"])
     latest_run = _merge_persisted_zscore_run(
@@ -1136,12 +1177,27 @@ def create_zscore_run(
         _persist_zscore_building_outlier_snapshots(batch_id, combined_runs)
         latest_run = combined_runs[-1]
 
+    latest_run["target_profile_id"] = version["id"] if version else None
     latest_run["target_profiles"] = deepcopy(updated_profiles)
     latest_run["is_locked_for_maintenance"] = bool(
         determine_zscore_phase(updated_profiles, template["level_ids"]) == PHASE_FORMAL_QC
         and str(latest_run.get("phase")) == PHASE_TARGET_BUILDING
     )
     return latest_run
+
+
+def create_zscore_run(*args, **kwargs):
+    from database import atomic_write
+    from services.lot_lifecycle_service import append_evaluation
+    with atomic_write():
+        result = _create_zscore_run_impl(*args, **kwargs)
+        append_evaluation("zscore", result["id"], result, "recorded")
+        batch_id=int(result['batch_id'])
+        runs=get_zscore_runs(batch_id,result['rule_template_id'])
+        if any(pd.Timestamp(run['test_time'])>pd.Timestamp(result['test_time']) for run in runs):
+            rebuilt=_rebuild_zscore_batch_state_impl(batch_id)
+            return next(run for run in rebuilt['runs'] if run['id']==result['id'])
+        return result
 
 
 def add_zscore_level_results(run_id: int, level_results: list[dict[str, Any]]) -> None:
@@ -1225,14 +1281,22 @@ def _rebuild_zscore_batch_state_impl(batch_id: int) -> dict[str, Any]:
     raw_runs = sorted(
         deepcopy(db_get_zscore_runs_with_levels_for_batch(batch_id)),
         key=lambda run: (
-            int(run.get("test_sequence")) if run.get("test_sequence") is not None else int(run["id"]),
+            pd.Timestamp(run["test_time"]),
             int(run["id"]),
         ),
     )
     target_profiles = _build_rebuild_target_profiles(batch_id, template_id, level_ids, target_n)
     rebuilt_runs: list[dict[str, Any]] = []
 
+    from database import get_connection
+    from services.lot_lifecycle_service import result_context_map,target_profile,overlay_zscore_profiles,append_evaluation
+    with get_connection() as c:
+        contexts=result_context_map(c,"zscore",batch_id)
     for raw_run in raw_runs:
+        profile_id=contexts.get(raw_run["id"],{}).get("target_profile_id")
+        version=target_profile("zscore",batch_id,profile_id=profile_id) if profile_id else None
+        if version:
+            target_profiles=overlay_zscore_profiles(target_profiles,version)
         normalized_level_results = _normalize_input_level_results(
             [
                 {
@@ -1273,12 +1337,13 @@ def _rebuild_zscore_batch_state_impl(batch_id: int) -> dict[str, Any]:
 
         current_run = evaluate_zscore_run_with_phase(
             normalized_level_results,
-            rebuilt_runs,
+            [r for r in rebuilt_runs if r.get("target_profile_id")==profile_id or (version and version["version_no"]==1 and version["source"]=="building" and r.get("target_profile_id") is None and r["phase"]==PHASE_FORMAL_QC)],
             template_id,
             required_n=target_n,
             target_profiles=updated_profiles,
             phase_override=current_phase,
         )
+        current_run["target_profile_id"] = profile_id
         current_run["run_id"] = int(raw_run["id"])
         current_run["id"] = int(raw_run["id"])
         current_run["test_sequence"] = (
@@ -1380,6 +1445,8 @@ def _rebuild_zscore_batch_state_impl(batch_id: int) -> dict[str, Any]:
             ],
         )
 
+    for run in rebuilt_runs:
+        append_evaluation("zscore",run["id"],run,"maintenance_review")
     persisted_runs = get_zscore_runs(batch_id, template_id)
     persisted_targets = get_zscore_level_targets(batch_id, template_id, required_n=target_n)
     return {
@@ -1393,11 +1460,12 @@ def _rebuild_zscore_batch_state_impl(batch_id: int) -> dict[str, Any]:
 
 
 def rebuild_zscore_batch_state(batch_id: int) -> dict[str, Any]:
-    with profile_timer("rebuild_zscore_batch_state", batch_id=batch_id):
+    from database import atomic_write
+    with atomic_write(), profile_timer("rebuild_zscore_batch_state", batch_id=batch_id):
         return _rebuild_zscore_batch_state_impl(batch_id)
 
 
-def update_saved_zscore_run(
+def _update_saved_zscore_run_impl(
     run_id: int,
     test_time: Any,
     operator: str,
@@ -1405,6 +1473,10 @@ def update_saved_zscore_run(
     manual_note: str | None = None,
 ) -> dict[str, Any]:
     existing_run = _get_zscore_run_for_maintenance(run_id)
+    from database import get_connection
+    from services.lot_lifecycle_service import require_writable
+    with get_connection() as connection:
+        require_writable(connection,"zscore",existing_run["batch_id"])
     batch_id = int(existing_run["batch_id"])
     if bool(existing_run.get("is_locked_for_maintenance")):
         raise ValueError("建靶期数据在正式期启用后已锁定，不允许编辑。")
@@ -1442,6 +1514,10 @@ def update_saved_zscore_run(
 
 def update_saved_zscore_run_manual_note(run_id: int, manual_note: str) -> dict[str, Any]:
     existing_run = _get_zscore_run_for_maintenance(run_id)
+    from database import get_connection
+    from services.lot_lifecycle_service import require_writable
+    with get_connection() as connection:
+        require_writable(connection,"zscore",existing_run["batch_id"])
     if bool(existing_run.get("is_locked_for_maintenance")):
         raise ValueError("建靶期数据在正式期启用后已锁定，不允许编辑。")
     batch_id = int(existing_run["batch_id"])
@@ -1462,12 +1538,14 @@ def update_saved_zscore_run_manual_note(run_id: int, manual_note: str) -> dict[s
 
 def delete_saved_zscore_run(run_id: int) -> dict[str, Any]:
     existing_run = _get_zscore_run_for_maintenance(run_id)
+    from database import get_connection
+    from services.lot_lifecycle_service import require_writable
+    with get_connection() as connection:
+        require_writable(connection,"zscore",existing_run["batch_id"])
     batch_id = int(existing_run["batch_id"])
     if bool(existing_run.get("is_locked_for_maintenance")):
         raise ValueError("建靶期数据在正式期启用后已锁定，不允许删除。")
-    db_delete_zscore_level_results_by_run(run_id)
-    db_delete_zscore_run(run_id)
-    return rebuild_zscore_batch_state(batch_id)
+    raise ValueError("原始记录须保留追溯，不允许删除；建靶期可使用禁用并保留原因。")
 
 
 def _get_zscore_run_for_maintenance(run_id: int) -> dict[str, Any]:
@@ -1505,6 +1583,9 @@ def _get_zscore_level_result_for_outlier_action(level_result_id: int) -> tuple[d
 
 def _get_zscore_building_run_for_outlier_action(run_id: int) -> tuple[dict[str, Any], int]:
     target_run = _get_zscore_run_for_maintenance(run_id)
+    from database import get_connection
+    from services.lot_lifecycle_service import require_writable
+    with get_connection() as c:require_writable(c,"zscore",target_run["batch_id"])
     batch_id = int(target_run["batch_id"])
     template_id = str(target_run["rule_template_id"])
     saved_runs = get_zscore_runs(batch_id, template_id)
@@ -2327,3 +2408,15 @@ def _safe_cv(mean_value: float | None, sd_value: float | None) -> float | None:
 
 def _format_test_time(value: Any) -> str:
     return pd.Timestamp(value).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def update_saved_zscore_run(run_id,*args,**kwargs):
+    from database import atomic_write
+    from services.lot_lifecycle_service import validate_result_edit
+    with atomic_write() as connection:
+        validate_result_edit(connection,'zscore',run_id,kwargs.get('test_time',args[0] if args else None))
+        return _update_saved_zscore_run_impl(run_id,*args,**kwargs)
+
+from services.lot_lifecycle_service import atomic_action
+_apply_zscore_building_run_state=atomic_action(_apply_zscore_building_run_state)
+update_saved_zscore_run_manual_note=atomic_action(update_saved_zscore_run_manual_note)

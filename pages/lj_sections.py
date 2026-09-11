@@ -1,4 +1,5 @@
 from __future__ import annotations
+from services.lot_lifecycle_service import review_import_lots, import_reviewed_results
 
 from datetime import datetime
 import hashlib
@@ -297,6 +298,12 @@ def build_lj_workbench_context(selected_batch_id: int) -> dict[str, object]:
             batch=batch,
             results_df=results_df,
         )
+        from services.lot_lifecycle_service import target_profile
+        confirmed=target_profile('lj',selected_batch_id)
+        if qc_df.empty and confirmed:
+            level=confirmed['levels'][0]
+            stats.update(target_ready=True,mean=level['mean'],sd=level['sd'],cv=abs(level['sd']/level['mean']*100) if level['mean'] else None,
+                target_profile_id=confirmed['id'],message='控制参数已确认，可录入正式质控结果。')
         latest_status, latest_status_message = get_latest_status_context(qc_df)
         latest_rule_hits, latest_compact_message = get_latest_result_panel_content(qc_df, latest_status_message)
         return {
@@ -359,6 +366,9 @@ def render_lj_entry_and_stats_section(
     context: dict[str, object],
     selected_batch_id: int,
 ) -> None:
+    from pages.lot_lifecycle_section import render_result_lot_choice,is_batch_writable
+    if not is_batch_writable("lj",selected_batch_id):
+        return
     batch = context["batch"]
     input_value_type = context["input_value_type"]
     input_value_type_label = context["input_value_type_label"]
@@ -422,6 +432,8 @@ def render_lj_entry_and_stats_section(
             key="entry_reagent_changed",
         )
 
+        lot_selection = render_result_lot_choice("lj",selected_batch_id,test_time,"lj_entry")
+
         if st.button("保存检测结果", type="primary", width="stretch"):
             validation_errors: list[str] = []
             cleaned_operator = (operator or "").strip()
@@ -436,15 +448,20 @@ def render_lj_entry_and_stats_section(
             if validation_errors:
                 st.error("\n".join(validation_errors))
             else:
-                add_result(
-                    batch_id=selected_batch_id,
-                    test_time=test_time.strftime("%Y-%m-%d %H:%M:%S"),
-                    operator=cleaned_operator,
-                    value=float(parsed_value),
-                    log_value=log_value,
-                    reagent_lot_changed=int(reagent_lot_changed),
-                    manual_note="",
-                )
+                try:
+                    add_result(
+                        batch_id=selected_batch_id,
+                        test_time=test_time.strftime("%Y-%m-%d %H:%M:%S"),
+                        operator=cleaned_operator,
+                        value=float(parsed_value),
+                        log_value=log_value,
+                        reagent_lot_changed=int(reagent_lot_changed),
+                        manual_note="",
+                        lot_selection=lot_selection,
+                    )
+                except ValueError as exc:
+                    st.error(str(exc))
+                    return
                 st.success("检测结果已保存。")
                 st.session_state["reset_entry_form"] = True
                 st.rerun()
@@ -645,6 +662,10 @@ def render_lj_records_section(qc_df: pd.DataFrame, input_value_type: str) -> Non
         display_df = prepare_display_records(qc_df, input_value_type=input_value_type)
         render_records_table_impl(display_df)
 
+
+    if not qc_df.empty:
+        from pages.lot_lifecycle_section import render_result_provenance
+        render_result_provenance("lj",int(qc_df["batch_id"].iloc[0]))
 
 def render_lj_maintenance_section(context: dict[str, object]) -> None:
     qc_df = context["qc_df"]
@@ -1009,7 +1030,7 @@ def _render_lj_export_import_section_impl(
     st.markdown("**CSV 导入**")
     st.caption("建靶期和正式期分别提供模板下载、审查和导入。")
     st.markdown("**建靶期 CSV 导入**")
-    st.caption(f"先下载标准模板，再上传 CSV 审查；只有无阻断错误时，才允许确认导入当前批次建靶期{input_value_type_label}数据。")
+    st.caption(f"先下载标准模板，再上传 CSV 或单工作表 Excel 审查；只有无阻断错误时，才允许确认导入当前批次建靶期{input_value_type_label}数据。")
     st.markdown("- `试剂批号变更（可选）` 在建靶期一般不填。")
     st.markdown("- 正式期仅在“更换试剂批号后的第一条记录”填写“是”。")
     st.markdown("- 其余记录填“否”或留空。")
@@ -1028,8 +1049,8 @@ def _render_lj_export_import_section_impl(
         st.session_state.pop(lj_import_review_state_key, None)
 
     uploaded_lj_building_csv = st.file_uploader(
-        "上传建靶期 CSV",
-        type=["csv"],
+        "上传建靶期 CSV / Excel",
+        type=["csv", "xlsx"],
         key=lj_import_uploader_key,
         disabled=lj_building_import_disabled,
         help="请优先使用上方标准模板，目前仅支持 CSV。",
@@ -1062,6 +1083,7 @@ def _render_lj_export_import_section_impl(
             target_n=int(batch["target_n"]),
             input_value_type=input_value_type,
         )
+        lj_import_review_state=review_import_lots(lj_import_review_state,"lj",selected_batch_id)
         lj_import_review_state["file_signature"] = current_lj_import_signature
         st.session_state[lj_import_review_state_key] = lj_import_review_state
 
@@ -1093,16 +1115,11 @@ def _render_lj_export_import_section_impl(
         disabled=confirm_lj_import_disabled,
     )
     if confirm_lj_import_clicked and lj_import_review_state is not None:
-        for row in lj_import_review_state["normalized_rows"]:
-            add_result(
-                batch_id=selected_batch_id,
-                test_time=row["test_time"],
-                operator=row["operator"],
-                value=float(row["value"]),
-                log_value=row.get("log_value"),
-                reagent_lot_changed=int(row["reagent_lot_changed"]),
-                manual_note=row["manual_note"],
-            )
+        try:
+            import_reviewed_results("lj",selected_batch_id,lj_import_review_state["normalized_rows"])
+        except ValueError as exc:
+            st.error(f"导入未保存：{exc}")
+            return
         imported_row_count = len(lj_import_review_state["normalized_rows"])
         st.session_state.pop(lj_import_review_state_key, None)
         st.session_state[lj_import_uploader_nonce_key] = lj_import_uploader_nonce + 1
@@ -1113,7 +1130,7 @@ def _render_lj_export_import_section_impl(
 
     st.divider()
     st.markdown("**LJ 正式期 CSV 导入**")
-    st.caption(f"先下载标准模板，再上传 CSV 审查；导入目标为当前批次正式期，只有无阻断错误时才允许确认导入当前批次{input_value_type_label}数据。")
+    st.caption(f"先下载标准模板，再上传 CSV 或单工作表 Excel 审查；导入目标为当前批次正式期，只有无阻断错误时才允许确认导入当前批次{input_value_type_label}数据。")
     st.markdown("- `试剂批号变更（可选）` 在建靶期一般不填。")
     st.markdown("- 正式期仅在“更换试剂批号后的第一条记录”填写“是”。")
     st.markdown("- 其余记录填“否”或留空。")
@@ -1131,8 +1148,8 @@ def _render_lj_export_import_section_impl(
         st.info("当前批次尚未完成建靶，不能导入正式期数据。你仍可先上传 CSV 做审查。")
 
     uploaded_lj_formal_csv = st.file_uploader(
-        "上传正式期 CSV",
-        type=["csv"],
+        "上传正式期 CSV / Excel",
+        type=["csv", "xlsx"],
         key=lj_formal_import_uploader_key,
         help="请优先使用上方标准模板，目前仅支持 CSV。",
     )
@@ -1169,6 +1186,7 @@ def _render_lj_export_import_section_impl(
             target_ready=lj_target_ready,
             input_value_type=input_value_type,
         )
+        lj_formal_import_review_state=review_import_lots(lj_formal_import_review_state,"lj",selected_batch_id)
         lj_formal_import_review_state["file_signature"] = current_lj_formal_signature
         st.session_state[lj_formal_import_review_state_key] = lj_formal_import_review_state
 
@@ -1202,16 +1220,11 @@ def _render_lj_export_import_section_impl(
         disabled=confirm_lj_formal_import_disabled,
     )
     if confirm_lj_formal_import_clicked and lj_formal_import_review_state is not None:
-        for row in lj_formal_import_review_state["normalized_rows"]:
-            add_result(
-                batch_id=selected_batch_id,
-                test_time=row["test_time"],
-                operator=row["operator"],
-                value=float(row["value"]),
-                log_value=row.get("log_value"),
-                reagent_lot_changed=int(row["reagent_lot_changed"]),
-                manual_note=row["manual_note"],
-            )
+        try:
+            import_reviewed_results("lj",selected_batch_id,lj_formal_import_review_state["normalized_rows"])
+        except ValueError as exc:
+            st.error(f"导入未保存：{exc}")
+            return
         imported_formal_row_count = len(lj_formal_import_review_state["normalized_rows"])
         st.session_state.pop(lj_formal_import_review_state_key, None)
         st.session_state[lj_formal_import_uploader_nonce_key] = lj_formal_import_uploader_nonce + 1

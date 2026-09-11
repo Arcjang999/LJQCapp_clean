@@ -5,16 +5,11 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from database import (
-    count_instant_project_batches,
-    create_instant_batch,
-    create_instant_project,
-    get_instant_batch,
-    get_instant_project,
-    list_instant_batches,
-    list_instant_projects,
+from pages.management import guard_work_tab_selection
+from pages.instant_config_section import (
+    prepare_instant_v12_project_batch_context,
+    render_instant_v12_configuration_selection,
 )
-from pages.management import guard_work_tab_selection, sync_selector_state
 from plotting import plot_instant_chart
 from services.instant_service import (
     INSTANT_TRANSFER_READY_COUNT,
@@ -28,13 +23,11 @@ from services.instant_service import (
     save_instant_result,
 )
 from services.value_type_service import (
-    INPUT_VALUE_TYPE_OPTIONS,
     get_input_value_type_label,
     parse_project_input_value,
 )
 from ui.common import (
     TEXT,
-    format_datetime_column,
     format_optional_float,
     render_compact_stat_metrics,
     render_latest_analysis_card,
@@ -43,126 +36,12 @@ from ui.common import (
 )
 
 
-def _ensure_selected_instant_project(projects_df: pd.DataFrame) -> int | None:
-    if projects_df.empty:
-        st.session_state["instant_selected_project_id"] = None
-        st.session_state["instant_project_selector"] = "请选择即时法项目"
-        return None
-    valid_ids = set(projects_df["id"].astype(int).tolist())
-    current_id = st.session_state.get("instant_selected_project_id")
-    if current_id is not None and current_id not in valid_ids:
-        st.session_state["instant_selected_project_id"] = None
-        st.session_state["instant_project_selector"] = "请选择即时法项目"
-        return None
-    return None if current_id is None else int(current_id)
-
-
-def _ensure_selected_instant_batch(batches_df: pd.DataFrame) -> int | None:
-    if batches_df.empty:
-        st.session_state["instant_selected_batch_id"] = None
-        st.session_state["instant_batch_selector"] = "请选择即时法批次"
-        return None
-    valid_ids = set(batches_df["id"].astype(int).tolist())
-    current_id = st.session_state.get("instant_selected_batch_id")
-    if current_id is not None and current_id not in valid_ids:
-        st.session_state["instant_selected_batch_id"] = None
-        st.session_state["instant_batch_selector"] = "请选择即时法批次"
-        return None
-    return None if current_id is None else int(current_id)
-
-
-def prepare_instant_project_batch_context() -> tuple[pd.DataFrame, int | None, pd.DataFrame, int | None]:
-    projects_df = list_instant_projects()
-    selected_project_id = _ensure_selected_instant_project(projects_df)
-    batches_df = list_instant_batches(selected_project_id) if selected_project_id is not None else pd.DataFrame()
-    selected_batch_id = _ensure_selected_instant_batch(batches_df)
-    return projects_df, selected_project_id, batches_df, selected_batch_id
-
-
 def _clean_instant_display_part(value: object) -> str:
     return " ".join(str(value or "").split()).strip()
 
 
-def _format_selector_datetime(value: object) -> str:
-    cleaned_value = _clean_instant_display_part(value)
-    if not cleaned_value:
-        return ""
-    try:
-        return pd.to_datetime(cleaned_value).strftime("%Y-%m-%d %H:%M")
-    except (TypeError, ValueError):
-        return cleaned_value
-
-
 def _join_instant_display_parts(parts: list[str]) -> str:
     return " | ".join(part for part in parts if part)
-
-
-def _build_instant_project_label(row: pd.Series) -> str:
-    project_name = _clean_instant_display_part(row.get("name")) or "未命名项目"
-    input_value_type_label = get_input_value_type_label(row.get("input_value_type"))
-    return _join_instant_display_parts([project_name, input_value_type_label])
-
-
-def _build_instant_batch_label(row: pd.Series) -> str:
-    lot_no = _clean_instant_display_part(row.get("lot_no"))
-    created_at = _format_selector_datetime(row.get("created_at"))
-    parts = []
-    if lot_no:
-        parts.append(f"质控批号：{lot_no}")
-    if created_at:
-        parts.append(f"创建于 {created_at}")
-    if not parts:
-        parts.append("未命名批次")
-    return _join_instant_display_parts(parts)
-
-
-def _build_instant_project_select_options(projects_df: pd.DataFrame) -> tuple[list[str], dict[str, int | None]]:
-    option_map = {"请选择即时法项目": None}
-    for _, row in projects_df.iterrows():
-        option_map[_build_instant_project_label(row)] = int(row["id"])
-    return list(option_map.keys()), option_map
-
-
-def _build_instant_batch_select_options(batches_df: pd.DataFrame) -> tuple[list[str], dict[str, int | None]]:
-    option_map = {"请选择即时法批次": None}
-    for _, row in batches_df.iterrows():
-        option_map[_build_instant_batch_label(row)] = int(row["id"])
-    return list(option_map.keys()), option_map
-
-
-def _build_instant_project_table(projects_df: pd.DataFrame) -> pd.DataFrame:
-    if projects_df.empty:
-        return projects_df
-    display_df = format_datetime_column(projects_df, "created_at").copy()
-    display_df["name"] = display_df["name"].map(_clean_instant_display_part)
-    display_df["input_value_type"] = display_df["input_value_type"].map(get_input_value_type_label)
-    return display_df[["name", "input_value_type", "created_at"]].rename(
-        columns={
-            "name": "项目名称",
-            "input_value_type": "输入值类型",
-            "created_at": "创建时间",
-        }
-    )
-
-
-def _build_instant_batch_table(batches_df: pd.DataFrame) -> pd.DataFrame:
-    if batches_df.empty:
-        return batches_df
-    display_df = format_datetime_column(batches_df, "created_at").copy()
-    for column_name in ["lot_no", "instrument", "reagent", "qc_material", "concentration"]:
-        display_df[column_name] = display_df[column_name].map(_clean_instant_display_part)
-    return display_df[
-        ["lot_no", "instrument", "reagent", "qc_material", "concentration", "created_at"]
-    ].rename(
-        columns={
-            "lot_no": "质控品批号",
-            "instrument": "仪器",
-            "reagent": "试剂",
-            "qc_material": "质控品",
-            "concentration": "浓度",
-            "created_at": "创建时间",
-        }
-    )
 
 
 def _build_instant_batch_summary(batch: dict[str, object] | pd.Series | object) -> str:
@@ -207,148 +86,6 @@ def _navigate_to_lj_batch(project_id: int | None, batch_id: int | None) -> None:
 
 def _close_instant_transfer_dialog() -> None:
     st.session_state["show_instant_transfer_dialog"] = False
-
-
-def _render_instant_project_batch_management(
-    manage_tab,
-    projects_df: pd.DataFrame,
-    selected_project_id: int | None,
-    batches_df: pd.DataFrame,
-    selected_batch_id: int | None,
-) -> None:
-    with manage_tab:
-        top_left, top_right = st.columns([1, 1.4])
-
-        with top_left:
-            st.subheader("新建即时法项目")
-            with st.form("create_instant_project_form", clear_on_submit=True):
-                project_name = st.text_input("项目名称")
-                input_value_type = st.radio(
-                    "输入值类型",
-                    options=INPUT_VALUE_TYPE_OPTIONS,
-                    format_func=get_input_value_type_label,
-                    horizontal=True,
-                )
-                project_submitted = st.form_submit_button("创建即时法项目", width="stretch")
-                if project_submitted:
-                    if not project_name.strip():
-                        st.error(TEXT["fill_project"])
-                    else:
-                        try:
-                            project_id = create_instant_project(
-                                project_name.strip(),
-                                input_value_type=input_value_type,
-                            )
-                        except ValueError as exc:
-                            st.error(str(exc))
-                        else:
-                            st.session_state["instant_selected_project_id"] = project_id
-                            st.session_state["instant_selected_batch_id"] = None
-                            st.success(f"即时法项目“{project_name.strip()}”已创建。")
-                            st.rerun()
-
-            st.subheader("即时法项目列表与选择")
-            if projects_df.empty:
-                st.info("当前还没有即时法项目，请先创建项目并确定输入值类型。")
-            else:
-                project_labels, project_options = _build_instant_project_select_options(projects_df)
-                sync_selector_state(
-                    selector_key="instant_project_selector",
-                    selected_id_key="instant_selected_project_id",
-                    options_map=project_options,
-                    placeholder=project_labels[0],
-                )
-                selected_project_label = st.selectbox(
-                    "选择即时法项目",
-                    options=project_labels,
-                    key="instant_project_selector",
-                )
-                new_project_id = project_options[selected_project_label]
-                if new_project_id != selected_project_id:
-                    st.session_state["instant_selected_project_id"] = new_project_id
-                    st.session_state["instant_selected_batch_id"] = None
-                    st.session_state["instant_batch_selector"] = "请选择即时法批次"
-                    st.rerun()
-
-                project_table = _build_instant_project_table(projects_df)
-                st.dataframe(project_table, width="stretch", hide_index=True)
-                if selected_project_id is not None:
-                    current_project = get_instant_project(selected_project_id)
-                    has_existing_batches = count_instant_project_batches(selected_project_id) > 0
-                    st.caption(
-                        "当前项目："
-                        f"{current_project['name']}｜输入值类型："
-                        f"{get_input_value_type_label(current_project['input_value_type'])}。"
-                    )
-                    if has_existing_batches:
-                        st.info("当前项目下已存在批次，输入值类型不可修改。")
-
-        with top_right:
-            st.subheader("新建即时法批次")
-            if selected_project_id is None:
-                st.info("请先选择即时法项目。")
-            else:
-                current_project = get_instant_project(selected_project_id)
-                current_input_value_type_label = get_input_value_type_label(current_project["input_value_type"])
-                st.caption(
-                    f"当前批次将归属于项目：{current_project['name']}｜输入值类型固定为 {current_input_value_type_label}。"
-                )
-                with st.form("create_instant_batch_form", clear_on_submit=True):
-                    instrument = st.text_input("仪器")
-                    reagent = st.text_input("试剂")
-                    qc_material = st.text_input("质控品")
-                    concentration = st.text_input("浓度")
-                    lot_no = st.text_input("质控品批号")
-                    create_submitted = st.form_submit_button("创建即时法批次", width="stretch")
-                    if create_submitted:
-                        required_fields = [instrument, reagent, qc_material, concentration, lot_no]
-                        if any(not field.strip() for field in required_fields):
-                            st.error(TEXT["fill_batch"])
-                        else:
-                            batch_id = create_instant_batch(
-                                project_id=selected_project_id,
-                                instrument=instrument.strip(),
-                                reagent=reagent.strip(),
-                                qc_material=qc_material.strip(),
-                                concentration=concentration.strip(),
-                                lot_no=lot_no.strip(),
-                            )
-                            st.session_state["instant_selected_batch_id"] = batch_id
-                            st.success(f"即时法批次“{lot_no.strip()}”已创建。")
-                            st.rerun()
-
-            st.subheader("即时法批次列表与选择")
-            if selected_project_id is None:
-                st.info("请先选择即时法项目。")
-            elif batches_df.empty:
-                st.info("当前项目下还没有即时法批次，请先创建批次。")
-            else:
-                batch_labels, batch_options = _build_instant_batch_select_options(batches_df)
-                sync_selector_state(
-                    selector_key="instant_batch_selector",
-                    selected_id_key="instant_selected_batch_id",
-                    options_map=batch_options,
-                    placeholder=batch_labels[0],
-                )
-                selected_batch_label = st.selectbox(
-                    "选择即时法批次",
-                    options=batch_labels,
-                    key="instant_batch_selector",
-                )
-                new_batch_id = batch_options[selected_batch_label]
-                if new_batch_id != selected_batch_id:
-                    st.session_state["instant_selected_batch_id"] = new_batch_id
-                    st.rerun()
-
-                batch_table = _build_instant_batch_table(batches_df)
-                st.dataframe(batch_table, width="stretch", hide_index=True)
-                if selected_batch_id is not None:
-                    current_batch = get_instant_batch(selected_batch_id)
-                    st.caption(
-                        "当前批次："
-                        f"{_build_instant_batch_summary(current_batch)}｜项目：{current_batch['project_name']}｜"
-                        f"输入值类型：{get_input_value_type_label(current_batch['input_value_type'])}。"
-                    )
 
 
 @st.dialog("确认转入 LJ 法", width="large", on_dismiss=_close_instant_transfer_dialog)
@@ -407,7 +144,7 @@ def _render_instant_transfer_dialog(batch_id: int) -> None:
             ("CV%", format_optional_float(summary["cv"], digits=2, suffix="%")),
             ("目标 LJ 项目", target_project_summary),
             ("将新建的 LJ 批次", f"质控品批号：{target_batch_summary}"),
-            ("目标批次 target_n", str(INSTANT_TRANSFER_READY_COUNT)),
+            ("建靶有效点数", str(INSTANT_TRANSFER_READY_COUNT)),
         ]
     )
     st.markdown(
@@ -454,6 +191,7 @@ def _render_instant_entry_and_summary_section(
     context: dict[str, object],
     selected_batch_id: int,
 ) -> None:
+    from pages.lot_lifecycle_section import render_result_lot_choice,is_batch_writable
     batch = context["batch"]
     input_value_type = context["input_value_type"]
     input_value_type_label = context["input_value_type_label"]
@@ -469,7 +207,7 @@ def _render_instant_entry_and_summary_section(
     st.markdown("**结果录入区**")
     if is_transferred:
         st.info("该批次已转入 LJ 法，当前录入区已冻结为只读。")
-    else:
+    elif is_batch_writable("instant",selected_batch_id):
         if st.session_state.get("instant_entry_batch_id") != selected_batch_id:
             st.session_state["instant_entry_batch_id"] = selected_batch_id
             st.session_state["instant_entry_operator"] = operator_options[0] if operator_options else ""
@@ -505,6 +243,7 @@ def _render_instant_entry_and_summary_section(
             input_value_type,
             field_label=input_value_type_label,
         )
+        lot_selection=render_result_lot_choice("instant",selected_batch_id,test_time,"instant_entry")
         if st.button("保存检测结果", key="instant_entry_save_button", type="primary", width="stretch"):
             validation_errors: list[str] = []
             cleaned_operator = str(operator or "").strip()
@@ -517,13 +256,18 @@ def _render_instant_entry_and_summary_section(
             if validation_errors:
                 st.error("\n".join(validation_errors))
             else:
-                save_instant_result(
-                    batch_id=selected_batch_id,
-                    test_time=test_time.strftime("%Y-%m-%d %H:%M:%S"),
-                    operator=cleaned_operator,
-                    value=float(parsed_value),
-                    log_value=log_value,
-                )
+                try:
+                    save_instant_result(
+                        batch_id=selected_batch_id,
+                        test_time=test_time.strftime("%Y-%m-%d %H:%M:%S"),
+                        operator=cleaned_operator,
+                        value=float(parsed_value),
+                        log_value=log_value,
+                        lot_selection=lot_selection,
+                    )
+                except ValueError as exc:
+                    st.error(str(exc))
+                    return
                 st.success(f"即时法结果已保存到批次“{batch['lot_no']}”。")
                 st.session_state["instant_reset_entry_form"] = True
                 st.rerun()
@@ -597,6 +341,7 @@ def _render_instant_transfer_section(context: dict[str, object]) -> None:
         width="stretch",
     ):
         st.session_state["show_instant_transfer_dialog"] = True
+        st.rerun()
     blockers = list(transfer_state.get("blockers", []))
     if blockers:
         st.info("当前暂不可转入：\n" + "\n".join(f"- {reason}" for reason in blockers))
@@ -852,14 +597,15 @@ def render_instant_page() -> None:
         "即时法是面向单水平项目的过渡方法，适用于短期内难以快速累积 20 个点的场景；"
         "页面重点突出有效点累计、即刻法 SI 值提示和确认转入 LJ 法。"
     )
-    projects_df, selected_project_id, batches_df, selected_batch_id = prepare_instant_project_batch_context()
+    projects_df, selected_project_id, batches_df, selected_batch_id, issues = prepare_instant_v12_project_batch_context()
     manage_tab, work_tab = st.tabs([TEXT["manage"], TEXT["current_batch"]])
-    _render_instant_project_batch_management(
+    render_instant_v12_configuration_selection(
         manage_tab,
         projects_df,
         selected_project_id,
         batches_df,
         selected_batch_id,
+        issues,
     )
     guard_work_tab_selection(work_tab, selected_project_id, selected_batch_id)
 
@@ -879,6 +625,11 @@ def render_instant_page() -> None:
             ("试剂", batch["reagent"]),
             ("质控品", batch["qc_material"]),
             ("浓度", batch["concentration"]),
+            ("质控水平", batch["level_name"] or "-"),
+            ("单位", batch["unit_symbol"] or "-"),
+            ("检测方法", batch["method_name"] or "-"),
+            ("配置名称", batch["v11_config_name"] or "-"),
+            ("批号效期", batch["v11_expiry_date"] or "-"),
         ]
         context_badges = [
             f"质控批号 {batch['lot_no']}",
@@ -973,3 +724,6 @@ def render_instant_page() -> None:
 
         with st.container(border=True):
             _render_instant_si_method_explanation(summary)
+
+        from pages.lot_lifecycle_section import render_result_provenance
+        render_result_provenance("instant",selected_batch_id)

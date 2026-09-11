@@ -11,6 +11,8 @@ from database import (
     add_instant_result,
     get_connection,
     get_instant_batch,
+    get_instant_batch_with_connection,
+    require_active_instant_binding,
     get_instant_result,
     get_instant_results,
     save_instant_result_analysis_snapshot,
@@ -611,26 +613,8 @@ def _load_instant_results_with_connection(
 
 
 def _fetch_instant_batch_row_with_connection(connection, batch_id: int):
-    row = connection.execute(
-        """
-        SELECT
-            instant_batches.*,
-            instant_projects.name AS project_name,
-            target_projects.name AS transferred_to_lj_project_name,
-            target_batches.lot_no AS transferred_to_lj_batch_lot_no
-        FROM instant_batches
-        LEFT JOIN instant_projects ON instant_projects.id = instant_batches.project_id
-        LEFT JOIN projects AS target_projects
-            ON target_projects.id = instant_batches.transferred_to_lj_project_id
-        LEFT JOIN batches AS target_batches
-            ON target_batches.id = instant_batches.transferred_to_lj_batch_id
-        WHERE instant_batches.id = ?
-        """,
-        (batch_id,),
-    ).fetchone()
-    if row is None:
-        raise ValueError(f"未找到即时法批次 {batch_id}")
-    return row
+    return get_instant_batch_with_connection(connection, batch_id)
+
 
 
 def _find_existing_lj_project(connection, project_name: str, input_value_type: str):
@@ -711,6 +695,23 @@ def _lj_batch_lot_exists(connection, project_id: int, lot_no: str) -> bool:
     return row is not None
 
 
+def _resolve_transfer_project_plan(connection, batch) -> dict[str, object]:
+    if not dict(batch).get("v11_lot_config_item_id"):
+        return _resolve_lj_project_plan(connection, str(batch["project_name"]), str(batch["input_value_type"]))
+    existing = connection.execute("""
+        SELECT p.id, p.name FROM batches b JOIN projects p ON p.id = b.project_id
+        WHERE b.source_method = 'instant' AND b.source_instant_project_id = ?
+          AND p.method_type = 'lj' AND p.input_value_type = ? ORDER BY b.id LIMIT 1
+    """, (batch["project_id"], batch["input_value_type"])).fetchone()
+    if existing:
+        return {"action": "reuse", "project_id": existing["id"], "project_name": existing["name"],
+                "input_value_type": batch["input_value_type"]}
+    name = _resolve_unique_lj_project_name(
+        connection, f"{batch['project_name']}｜{batch['instrument']}｜即时法转入", batch["input_value_type"]
+    )
+    return {"action": "create", "project_id": None, "project_name": name, "input_value_type": batch["input_value_type"]}
+
+
 def _resolve_lj_batch_lot_no(connection, project_id: int, source_lot_no: str) -> str:
     cleaned_lot_no = str(source_lot_no or "").strip() or "即时法转入批次"
     if not _lj_batch_lot_exists(connection, project_id, cleaned_lot_no):
@@ -746,11 +747,7 @@ def _build_instant_transfer_state(
     summary: dict[str, object],
 ) -> dict[str, object]:
     with get_connection() as connection:
-        project_plan = _resolve_lj_project_plan(
-            connection,
-            str(batch["project_name"]),
-            str(batch["input_value_type"]),
-        )
+        project_plan = _resolve_transfer_project_plan(connection, batch)
         preview_project_id = project_plan["project_id"]
         if preview_project_id is None:
             preview_project_id = -1
@@ -834,6 +831,9 @@ def persist_instant_batch_analysis(batch_id: int) -> None:
             }
         )
     save_instant_result_analysis_snapshot(batch_id, analysis_rows)
+    from services.lot_lifecycle_service import append_evaluation
+    for row in analysis_df.to_dict('records'):
+        append_evaluation("instant",int(row['id']),row,"current_review")
 
 
 def build_instant_workbench_context(batch_id: int) -> dict[str, object]:
@@ -859,13 +859,14 @@ def build_instant_workbench_context(batch_id: int) -> dict[str, object]:
     }
 
 
-def save_instant_result(
+def _save_instant_result_impl(
     *,
     batch_id: int,
     test_time: str,
     operator: str,
     value: float,
     log_value: float | None,
+    lot_selection: dict | None = None,
 ) -> int:
     result_id = add_instant_result(
         batch_id=batch_id,
@@ -873,9 +874,16 @@ def save_instant_result(
         operator=operator,
         value=value,
         log_value=log_value,
+        lot_selection=lot_selection,
     )
     persist_instant_batch_analysis(batch_id)
     return result_id
+
+
+def save_instant_result(**kwargs):
+    from database import atomic_write
+    with atomic_write():
+        return _save_instant_result_impl(**kwargs)
 
 
 def disable_instant_result(result_id: int) -> int:
@@ -918,6 +926,9 @@ def confirm_instant_transfer_to_lj(batch_id: int) -> dict[str, object]:
     transferred_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with get_connection() as connection:
         connection.execute("BEGIN IMMEDIATE")
+        require_active_instant_binding(connection, batch_id)
+        from services.lot_lifecycle_service import require_writable
+        require_writable(connection,"instant",batch_id)
         batch = _fetch_instant_batch_row_with_connection(connection, batch_id)
         results_df = _load_instant_results_with_connection(connection, batch_id, include_manual_note=True)
         analysis_df, summary = analyze_instant_results(results_df)
@@ -935,11 +946,7 @@ def confirm_instant_transfer_to_lj(batch_id: int) -> dict[str, object]:
         if transferred_effective_count < INSTANT_TRANSFER_READY_COUNT:
             raise ValueError(f"有效点不足 {INSTANT_TRANSFER_READY_COUNT} 个，不能确认转入 LJ 法。")
 
-        project_plan = _resolve_lj_project_plan(
-            connection,
-            str(batch["project_name"]),
-            str(batch["input_value_type"]),
-        )
+        project_plan = _resolve_transfer_project_plan(connection, batch)
         target_project_id = project_plan["project_id"]
         target_project_name = str(project_plan["project_name"])
         if target_project_id is None:
@@ -977,9 +984,10 @@ def confirm_instant_transfer_to_lj(batch_id: int) -> dict[str, object]:
                 source_method,
                 source_instant_project_id,
                 source_instant_batch_id,
-                source_transfer_time
+                source_transfer_time,
+                source_config_snapshot_json
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 target_project_id,
@@ -989,18 +997,19 @@ def confirm_instant_transfer_to_lj(batch_id: int) -> dict[str, object]:
                 str(batch["concentration"] or ""),
                 target_batch_lot_no,
                 INSTANT_TRANSFER_READY_COUNT,
-                None,
+                batch["cv_limit"],
                 "instant",
                 int(batch["project_id"]),
                 int(batch["id"]),
                 transferred_at,
+                batch["source_snapshot_json"],
             ),
         )
         target_batch_id = int(batch_cursor.lastrowid)
 
         for _, row in effective_df.iterrows():
             log_value = row.get("log_value")
-            connection.execute(
+            result_cursor = connection.execute(
                 """
                 INSERT INTO results (
                     batch_id,
@@ -1023,6 +1032,9 @@ def confirm_instant_transfer_to_lj(batch_id: int) -> dict[str, object]:
                     str(row.get("manual_note", "") or ""),
                 ),
             )
+
+            from services.lot_lifecycle_service import transfer_result_context
+            transfer_result_context(connection, int(row["id"]), int(result_cursor.lastrowid), target_batch_id)
 
         connection.execute(
             """
@@ -1080,3 +1092,7 @@ def confirm_instant_transfer_to_lj(batch_id: int) -> dict[str, object]:
         "formal_count": max(0, transferred_effective_count - INSTANT_TRANSFER_READY_COUNT),
         "target_project_action": str(project_plan["action"]),
     }
+
+from services.lot_lifecycle_service import atomic_action
+for _maintenance_action in ('disable_instant_result','restore_instant_result','keep_instant_result'):
+    globals()[_maintenance_action]=atomic_action(globals()[_maintenance_action])

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from services.lot_lifecycle_service import review_import_lots, import_reviewed_results
 
 from copy import deepcopy
 from datetime import datetime
@@ -175,7 +176,7 @@ def render_zscore_latest_analysis_panel(
     st.markdown("**最新结果分析**")
     if latest_run is None:
         if overall_phase == PHASE_FORMAL_QC:
-            st.info("建靶已完成，正式规则已启用。请录入首条正式质控检测记录。")
+            st.info("控制参数已确认，正式规则已启用。请录入首条正式质控检测记录。")
         else:
             st.info("当前处于建靶期，请先录入检测记录，用于累计实验室靶值并观察多水平趋势。")
         return
@@ -1115,6 +1116,7 @@ def build_zscore_phase_export_dataframe(
             ]
         )
 
+    export_columns.extend(["实际试剂批号","靶值版本ID","上下文ID"])
     rows: list[dict[str, Any]] = []
     for run in export_runs:
         level_results_by_id = {
@@ -1122,6 +1124,7 @@ def build_zscore_phase_export_dataframe(
             for level_result in run.get("level_results", [])
         }
         row: dict[str, Any] = {
+            "实际试剂批号":run.get("actual_reagent_lot","未记录"),"靶值版本ID":run.get("target_profile_id"),"上下文ID":run.get("context_id"),
             "检测序号": get_zscore_display_sequence(run),
             "检测时间": _format_zscore_export_datetime(run.get("test_time")),
             "检测人": str(run.get("operator", "") or ""),
@@ -1262,6 +1265,9 @@ def render_zscore_entry_section(
     context: dict[str, object],
     selected_batch_id: int,
 ) -> None:
+    from pages.lot_lifecycle_section import render_result_lot_choice,is_batch_writable
+    if not is_batch_writable("zscore",selected_batch_id):
+        return
     template = context["template"]
     input_value_type = context["input_value_type"]
     input_value_type_label = context["input_value_type_label"]
@@ -1335,6 +1341,7 @@ def render_zscore_entry_section(
                     value_key=value_key,
                     level_caption=level_caption,
                 )
+            lot_selection=render_result_lot_choice("zscore",selected_batch_id,test_time,"zscore_entry")
             submitted = st.form_submit_button(
                 "保存本次检测",
                 type="primary",
@@ -1383,6 +1390,7 @@ def render_zscore_entry_section(
                         template_id=template_id,
                         required_n=required_n,
                         manual_note="",
+                        lot_selection=lot_selection,
                     )
                 except ValueError as exc:
                     st.error(str(exc))
@@ -1921,7 +1929,7 @@ def _render_zscore_export_import_section_impl(
     st.caption("建靶期和正式期分别提供模板下载、审查和导入。")
     st.markdown("**建靶期 CSV 导入**")
     st.caption(
-        f"先下载当前批次标准模板，再上传 CSV 审查；只有无阻断错误时，才允许确认导入当前批次建靶期{input_value_type_label}检测记录。"
+        f"先下载当前批次标准模板，再上传 CSV 或单工作表 Excel 审查；只有无阻断错误时，才允许确认导入当前批次建靶期{input_value_type_label}检测记录。"
     )
     st.download_button(
         label="下载建靶期 CSV 模板",
@@ -1937,8 +1945,8 @@ def _render_zscore_export_import_section_impl(
         st.session_state.pop(zscore_building_import_review_state_key, None)
 
     uploaded_zscore_building_csv = st.file_uploader(
-        "上传建靶期 CSV",
-        type=["csv"],
+        "上传建靶期 CSV / Excel",
+        type=["csv", "xlsx"],
         key=zscore_building_import_uploader_key,
         disabled=zscore_building_import_disabled,
         help="模板会按当前批次的 2 水平 / 3 水平自动生成，目前仅支持 CSV。",
@@ -1984,6 +1992,7 @@ def _render_zscore_export_import_section_impl(
             target_n=required_n,
             input_value_type=input_value_type,
         )
+        zscore_building_import_review_state=review_import_lots(zscore_building_import_review_state,"zscore",selected_batch_id)
         zscore_building_import_review_state["file_signature"] = current_zscore_building_signature
         st.session_state[zscore_building_import_review_state_key] = (
             zscore_building_import_review_state
@@ -2024,17 +2033,7 @@ def _render_zscore_export_import_section_impl(
     ):
         imported_row_count = 0
         try:
-            for row in zscore_building_import_review_state["normalized_rows"]:
-                create_zscore_run(
-                    batch_id=selected_batch_id,
-                    test_time=row["test_time"],
-                    operator=row["operator"],
-                    level_results=deepcopy(row["level_results"]),
-                    template_id=template_id,
-                    required_n=required_n,
-                    manual_note=row["manual_note"],
-                )
-                imported_row_count += 1
+            imported_row_count=import_reviewed_results("zscore",selected_batch_id,zscore_building_import_review_state["normalized_rows"],template_id=template_id,required_n=required_n)
         except ValueError as exc:
             st.error(f"导入中断：{exc}。请重新审查当前文件后再试。")
         else:
@@ -2049,7 +2048,7 @@ def _render_zscore_export_import_section_impl(
 
     st.markdown("**正式期 CSV 导入**")
     st.caption(
-        f"先下载当前批次标准模板，再上传 CSV 审查；导入目标为当前批次正式期，只有无阻断错误时才允许确认导入当前批次{input_value_type_label}数据。"
+        f"先下载当前批次标准模板，再上传 CSV 或单工作表 Excel 审查；导入目标为当前批次正式期，只有无阻断错误时才允许确认导入当前批次{input_value_type_label}数据。"
     )
     st.download_button(
         label="下载正式期 CSV 模板",
@@ -2064,8 +2063,8 @@ def _render_zscore_export_import_section_impl(
         st.info("当前批次尚未完成建靶，不能导入正式期数据。你仍可先上传 CSV 做审查。")
 
     uploaded_zscore_formal_csv = st.file_uploader(
-        "上传正式期 CSV",
-        type=["csv"],
+        "上传正式期 CSV / Excel",
+        type=["csv", "xlsx"],
         key=zscore_formal_import_uploader_key,
         help="模板会按当前批次的 2 水平 / 3 水平自动生成，目前仅支持 CSV。",
     )
@@ -2111,6 +2110,7 @@ def _render_zscore_export_import_section_impl(
             existing_formal_count=len(existing_formal_runs),
             input_value_type=input_value_type,
         )
+        zscore_formal_import_review_state=review_import_lots(zscore_formal_import_review_state,"zscore",selected_batch_id)
         zscore_formal_import_review_state["file_signature"] = current_zscore_formal_signature
         st.session_state[zscore_formal_import_review_state_key] = (
             zscore_formal_import_review_state
@@ -2151,17 +2151,7 @@ def _render_zscore_export_import_section_impl(
     ):
         imported_formal_row_count = 0
         try:
-            for row in zscore_formal_import_review_state["normalized_rows"]:
-                create_zscore_run(
-                    batch_id=selected_batch_id,
-                    test_time=row["test_time"],
-                    operator=row["operator"],
-                    level_results=deepcopy(row["level_results"]),
-                    template_id=template_id,
-                    required_n=required_n,
-                    manual_note=row["manual_note"],
-                )
-                imported_formal_row_count += 1
+            imported_row_count=import_reviewed_results("zscore",selected_batch_id,zscore_formal_import_review_state["normalized_rows"],template_id=template_id,required_n=required_n)
         except ValueError as exc:
             st.error(f"正式期导入中断：{exc}。请重新审查当前文件后再试。")
         else:

@@ -12,6 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import database
+from tests.zscore_v12_fixtures import create_configured_zscore_batch
 from database import (
     create_zscore_batch,
     create_zscore_project,
@@ -82,17 +83,18 @@ def _make_three_level_results(level_1: float, level_2: float, level_3: float) ->
 
 
 def seed_zscore_batch_with_formal_monthly_data() -> tuple[int, int]:
-    project_id = create_zscore_project("Z-score 月报项目", level_count=2, input_value_type="raw")
-    batch_id = create_zscore_batch(
-        project_id=project_id,
-        instrument="AU5800",
-        reagent="Chemistry Reagent",
-        qc_material="Control A",
-        concentration="Normal",
-        lot_no="ZS-202604",
+    project_id, batch_id = create_configured_zscore_batch(
+        name='Z-score 月报项目',
+        level_count=2,
+        input_value_type='raw',
+        instrument='AU5800',
+        reagent='Chemistry Reagent',
+        qc_material='Control A',
+        concentration='Normal',
+        lot_no='ZS-202604',
         target_n=5,
-        level_1_label="水平 1",
-        level_2_label="水平 2",
+        level_1_label='水平 1',
+        level_2_label='水平 2',
         cv_limit=5.0,
     )
     template_id = get_template_id_for_level_count(2)
@@ -246,7 +248,8 @@ def test_zscore_monthly_report_builds_pdf_and_snapshot() -> None:
 
         reader = assert_uniform_a4_pages_without_watermark(pdf_bytes)
         pdf_text = "\n".join(page.extract_text() or "" for page in reader.pages).lower()
-        assert len(reader.pages) == 6
+        assert len(reader.pages) >= 7
+        assert "追溯" in reader.pages[-1].extract_text()
         assert str(reader.metadata.get("/Subject", "")) == REPORT_TYPE_ZSCORE_MONTHLY
         assert "run级" not in pdf_text
         assert "level明细" not in pdf_text
@@ -303,7 +306,8 @@ def test_zscore_monthly_report_outputs_three_single_level_chart_pages() -> None:
         pdf_bytes = build_zscore_monthly_report_pdf(package)
         reader = assert_uniform_a4_pages_without_watermark(pdf_bytes)
 
-        assert len(reader.pages) == 6
+        assert len(reader.pages) >= 7
+        assert "追溯" in reader.pages[-1].extract_text()
 
 
 def test_zscore_monthly_report_page_exposes_generate_and_download_flow() -> None:

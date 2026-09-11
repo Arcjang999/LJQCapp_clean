@@ -518,6 +518,8 @@ def _delete_projects(method_scope: str, project_ids: Iterable[int]) -> int:
         return 0
     placeholders = ", ".join("?" for _ in project_id_list)
     with get_connection() as connection:
+        from services.lot_lifecycle_service import purge_demo_provenance
+        purge_demo_provenance(connection,[] if method_scope==INSTANT_METHOD_SCOPE else project_id_list,project_id_list if method_scope==INSTANT_METHOD_SCOPE else [])
         if method_scope == INSTANT_METHOD_SCOPE:
             sql = f"DELETE FROM instant_projects WHERE id IN ({placeholders})"
             connection.execute(sql, tuple(project_id_list))

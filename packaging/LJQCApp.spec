@@ -30,7 +30,7 @@ PROJECT_PACKAGES = [
     "services",
     "ui",
 ]
-PROJECT_DATA_DIRS = ["data"]
+PROJECT_DATA_DIRS = ["data/dictionaries"]
 
 
 def collect_project_source_datas() -> list[tuple[str, str]]:

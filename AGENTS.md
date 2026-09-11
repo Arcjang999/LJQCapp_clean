@@ -7,8 +7,10 @@
 1. `docs/DEVELOPMENT_HANDOFF.md`
 2. `docs/v1_1_dictionary_project_management_spec.md`
 3. `docs/v1_2_lj_workbench_integration_spec.md`
+4. `docs/v1_2_lot_lifecycle_implementation.md`
+5. `docs/NEXT_SESSION_TASKS.md`
 
-`docs/DEVELOPMENT_HANDOFF.md` 记录当前远端分支、实际完成度、后续路线、Mac 启动与基线测试方式。不要只依据旧聊天摘要判断当前代码状态。
+`docs/DEVELOPMENT_HANDOFF.md` 记录当前远端分支、实际完成度、后续路线、Mac 启动与基线测试方式。不要只依据旧聊天摘要判断当前代码状态。2026-09-11 的批号生命周期首轮实现及本机数据库迁移已完成；新 session 先看任务书，不要把早期规格中的“尚未实现”当作现状。
 
 ## 1. 项目定位
 

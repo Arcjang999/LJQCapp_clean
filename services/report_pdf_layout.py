@@ -97,6 +97,7 @@ def render_lj_monthly_report_pdf(package: Any, font_name: str) -> bytes:
             for action_index, figure in enumerate(_build_action_pages(report), start=1):
                 pages.append((figure, f"说明页 {action_index}"))
 
+            pages.extend((figure,"批号与参数追溯") for figure in _build_lot_trace_pages(report))
             _write_pages(pdf, pages, report)
     return buffer.getvalue()
 
@@ -126,6 +127,7 @@ def render_zscore_monthly_report_pdf(package: Any, font_name: str) -> bytes:
             for action_index, figure in enumerate(_build_action_pages(report), start=1):
                 pages.append((figure, f"说明页 {action_index}"))
 
+            pages.extend((figure,"批号与参数追溯") for figure in _build_lot_trace_pages(report))
             _write_pages(pdf, pages, report)
     return buffer.getvalue()
 
@@ -187,7 +189,7 @@ def _build_lj_summary_page(report: Any):
         ["质控品批号", report.basic_info.lot_no, "仪器", report.basic_info.instrument],
         ["试剂", report.basic_info.reagent, "质控品", report.basic_info.qc_material],
         ["浓度", report.basic_info.concentration, "当前靶值来源", report.basic_info.target_source_label],
-        ["来源说明", _wrap_text(report.basic_info.target_source_detail, 28), "", ""],
+        ["来源说明", _wrap_text(report.basic_info.target_source_detail, 18), "", ""],
     ]
     _draw_table_section(
         canvas,
@@ -292,6 +294,7 @@ def _build_zscore_summary_page(report: Any):
     basic_rows = [
         ["方法", report.basic_info.method_label, "输入值类型", report.basic_info.input_value_type_label],
         ["水平数", report.basic_info.level_count_label, "各水平说明", _wrap_text(report.basic_info.level_summary, 20)],
+        ["单位", report.basic_info.unit_symbol, "检测方法", report.basic_info.detection_method],
         ["当前规则组合", report.basic_info.template_label, "质控品批号", report.basic_info.lot_no],
         ["仪器", report.basic_info.instrument, "试剂", report.basic_info.reagent],
         ["质控品", report.basic_info.qc_material, "浓度", report.basic_info.concentration],
@@ -360,11 +363,11 @@ def _build_zscore_level_summary_page(report: Any):
     )
     cell_text = [
         [
-            item.level_label,
+            _wrap_text(item.level_label, 9),
             str(item.monthly_count),
             _format_float(item.monthly_mean),
-            _format_zscore_metric(item, "sd"),
-            _format_zscore_metric(item, "cv"),
+            _wrap_text(_format_zscore_metric(item, "sd"), 6),
+            _wrap_text(_format_zscore_metric(item, "cv"), 6),
             _format_float(item.target_mean),
             _format_float(item.target_sd),
             _format_float(item.cv_limit, digits=2, suffix="%"),
@@ -854,3 +857,22 @@ def _style_table(table, *, header_rows: int, font_size: float) -> None:
         else:
             cell.set_facecolor("#ffffff")
         cell.PAD = 0.06
+
+
+def _build_lot_trace_pages(report):
+    trace=getattr(report,'lot_trace',{})
+    if not trace:return []
+    groups=trace.get('statistics_by_target_version',[])
+    rows=trace.get('actual_lots',[])
+    def number(value):return '未记录' if value is None else f'{value:.4f}'
+    source_labels={'manual':'实验室确认','manufacturer':'厂家赋值经确认','revision':'参数修订','building':'本批次建靶','legacy':'旧序列'}
+    event_labels={'reagent':'试剂换批','qc':'质控换批','target':'靶值确认/修订','correction':'更正','active':'启用','ended':'结束使用','parallel':'平行观察'}
+    parameters=[f"V{r['version']} / {format_level_id_display(r['level'])}：{r['count']} 点；月均值 {number(r['monthly_mean'])}，月 SD {number(r['monthly_sd'])}；靶均值 {number(r['target_mean'])}，靶 SD {number(r['target_sd'])}。来源 {source_labels.get(r['source'],r['source'])}；确认人 {r['confirmed_by'] or '未记录'}；生效 {r['effective_at'] or '未记录'}。依据：{r['evidence']}" for r in groups]
+    usage=[]
+    for lot in dict.fromkeys(r['reagent_lot_no'] for r in rows):
+        points=[r for r in rows if r['reagent_lot_no']==lot]
+        usage.append(f"试剂批号 {lot}：{len(points)} 条记录；{points[0]['test_time']} 至 {points[-1]['test_time']}。质控品批号：{' / '.join(dict.fromkeys(r['qc_lot_no'] for r in points))}。")
+    events=[f"事件 #{e['id']}，{e['effective_at']}，类型 {event_labels.get(e['event_type'],e['event_type'])}；操作人 {e['operator']}；依据：{e['reason']}。更正来源：{e['corrects_event_id'] or '-'}。" for e in trace.get('events',[])]
+    return _build_text_pages(report_title=report.title,page_title='实际批号与控制参数追溯',
+        subtitle_lines=[f"项目：{report.basic_info.project_name}  /  {report.report_month_label}",trace['basis']],
+        sections=[_TextSectionSpec('报告期实际使用批号',usage),_TextSectionSpec('按控制参数版本分组统计',parameters),_TextSectionSpec('换批及参数事件',events or ['报告期无已登记的换批或参数变更事件。'])])

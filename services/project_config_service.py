@@ -62,6 +62,7 @@ def create_project_template(
     lab_instrument_id: int,
     qc_material_id: int,
     notes: str = "",
+    default_reagent_id: int | None = None,
 ) -> int:
     with get_connection() as connection:
         instrument = connection.execute(
@@ -80,14 +81,16 @@ def create_project_template(
         ).fetchone()
         if material is None:
             raise ValueError("请选择启用中的质控品。")
+        if default_reagent_id is not None:
+            _require_active_reagent(connection, default_reagent_id)
         try:
             cursor = connection.execute(
                 """
                 INSERT INTO qc_project_templates (
                     uid, origin_type, template_name, lab_instrument_id,
-                    qc_material_id, department_name_snapshot, notes
+                    qc_material_id, department_name_snapshot, notes, default_reagent_id
                 )
-                VALUES (?, 'hospital', ?, ?, ?, ?, ?)
+                VALUES (?, 'hospital', ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     _new_uid(),
@@ -96,11 +99,38 @@ def create_project_template(
                     int(qc_material_id),
                     str(instrument["department_name"] or "").strip(),
                     _clean_optional(notes),
+                    default_reagent_id,
                 ),
             )
         except sqlite3.IntegrityError as exc:
             raise ValueError("已存在同名的启用项目模板。") from exc
         return int(cursor.lastrowid)
+
+
+def _require_active_reagent(connection: sqlite3.Connection, reagent_id: int) -> None:
+    if connection.execute(
+        "SELECT id FROM md_reagents WHERE id = ? AND is_disabled = 0", (int(reagent_id),)
+    ).fetchone() is None:
+        raise ValueError("请选择启用中的试剂。")
+
+
+def set_template_default_reagent(template_id: int, reagent_id: int) -> None:
+    """Set the choice for future additions without rewriting items or lot snapshots."""
+    with get_connection() as connection:
+        _require_active_reagent(connection, reagent_id)
+        template = connection.execute(
+            "SELECT default_reagent_id FROM qc_project_templates WHERE id = ? AND is_disabled = 0",
+            (int(template_id),),
+        ).fetchone()
+        if template is None:
+            raise ValueError("未找到启用中的项目模板。")
+        if template["default_reagent_id"] == int(reagent_id):
+            return
+        connection.execute(
+            "UPDATE qc_project_templates SET default_reagent_id = ?, "
+            "revision_no = revision_no + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (int(reagent_id), int(template_id)),
+        )
 
 
 def list_project_templates(include_disabled: bool = False) -> pd.DataFrame:
@@ -146,7 +176,10 @@ def get_project_template(template_id: int) -> sqlite3.Row:
                 instrument_manufacturers.display_name AS instrument_manufacturer_name,
                 materials.generic_name AS qc_material_name,
                 materials.trade_name AS qc_material_trade_name,
-                qc_manufacturers.display_name AS qc_manufacturer_name
+                qc_manufacturers.display_name AS qc_manufacturer_name,
+                reagents.generic_name AS default_reagent_name,
+                reagents.trade_name AS default_reagent_trade_name,
+                reagent_manufacturers.display_name AS default_reagent_manufacturer_name
             FROM qc_project_templates AS templates
             LEFT JOIN lab_instruments AS local ON local.id = templates.lab_instrument_id
             LEFT JOIN md_instrument_models AS models ON models.id = local.instrument_model_id
@@ -155,6 +188,9 @@ def get_project_template(template_id: int) -> sqlite3.Row:
             LEFT JOIN md_qc_materials AS materials ON materials.id = templates.qc_material_id
             LEFT JOIN md_manufacturers AS qc_manufacturers
                 ON qc_manufacturers.id = materials.manufacturer_id
+            LEFT JOIN md_reagents AS reagents ON reagents.id = templates.default_reagent_id
+            LEFT JOIN md_manufacturers AS reagent_manufacturers
+                ON reagent_manufacturers.id = reagents.manufacturer_id
             WHERE templates.id = ?
             """,
             (int(template_id),),
@@ -686,10 +722,10 @@ def save_lot_item_levels(
                 SELECT id
                 FROM md_qc_levels
                 WHERE id = ?
-                  AND qc_material_lot_id = ?
+                  AND (qc_material_lot_id = ? OR id IN (SELECT qc_level_id FROM qc_level_combination_members WHERE lot_config_item_id=?))
                   AND is_disabled = 0
                 """,
-                (level_id, int(item["qc_material_lot_id"])),
+                (level_id, int(item["qc_material_lot_id"]),lot_config_item_id),
             ).fetchone()
             if level is None:
                 raise ValueError("所选水平不属于当前质控品批号。")
@@ -808,6 +844,7 @@ def save_lot_item_levels(
 def validate_lot_config(lot_config_id: int) -> list[str]:
     config = get_lot_config(lot_config_id)
     items = list_lot_config_items(lot_config_id)
+    items=items[items["is_enabled"].astype(bool)] if not items.empty else items
     errors: list[str] = []
     if not str(config["expiry_date"] or "").strip():
         errors.append("质控品批号未填写效期。")
@@ -864,6 +901,7 @@ def copy_lot_config(
     source_lot_config_id: int,
     target_qc_material_lot_id: int,
     config_name: str = "",
+    combination_key: str = "",
 ) -> int:
     with get_connection() as connection:
         source = connection.execute(
@@ -899,9 +937,9 @@ def copy_lot_config(
                 INSERT INTO qc_lot_configs (
                     uid, origin_type, template_id, qc_material_lot_id,
                     lab_instrument_id, qc_material_id, config_name,
-                    copied_from_config_id
+                    copied_from_config_id, combination_key
                 )
-                VALUES (?, 'hospital', ?, ?, ?, ?, ?, ?)
+                VALUES (?, 'hospital', ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     _new_uid(),
@@ -910,7 +948,7 @@ def copy_lot_config(
                     int(source["lab_instrument_id"]),
                     int(source["qc_material_id"]),
                     normalized_name,
-                    int(source_lot_config_id),
+                    int(source_lot_config_id), str(combination_key),
                 ),
             )
         except sqlite3.IntegrityError as exc:
@@ -1172,7 +1210,11 @@ def _build_snapshot_payload(
                 assigned.*,
                 levels.uid AS qc_level_uid,
                 levels.level_name,
-                levels.level_code
+                levels.level_code,
+                levels.concentration_label,
+                levels.qc_material_lot_id,
+                (SELECT lot_no FROM md_qc_material_lots WHERE id=levels.qc_material_lot_id) AS lot_no,
+                (SELECT expiry_date FROM md_qc_material_lots WHERE id=levels.qc_material_lot_id) AS expiry_date
             FROM qc_lot_config_item_levels AS assigned
             INNER JOIN md_qc_levels AS levels ON levels.id = assigned.qc_level_id
             WHERE assigned.lot_config_item_id = ? AND assigned.is_disabled = 0

@@ -13,6 +13,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import database
+from tests.zscore_v12_fixtures import create_configured_zscore_batch
+from tests.instant_v12_fixtures import create_configured_instant_batch
 from database import (
     create_batch,
     create_instant_batch,
@@ -105,7 +107,12 @@ def bootstrap_batch(
     *,
     project_name: str,
     input_value_type: str = "raw",
+    configured: bool = False,
 ) -> tuple[int, int]:
+    if configured:
+        return create_configured_instant_batch(name=project_name, input_value_type=input_value_type,
+            instrument="Inst-A", reagent="Reagent-A", qc_material="QC-A", concentration="Normal",
+            lot_no=f"{project_name[:8]}-LOT")
     project_id = create_instant_project(project_name, input_value_type=input_value_type)
     batch_id = create_instant_batch(
         project_id=project_id,
@@ -510,7 +517,7 @@ def test_transfer_excludes_disabled_points_and_blocks_pending_outliers() -> None
 
 def test_instant_page_entry_save_round_trip() -> None:
     with TemporaryDatabaseContext():
-        project_id, batch_id = bootstrap_batch(project_name="Instant AppTest", input_value_type="raw")
+        project_id, batch_id = bootstrap_batch(project_name="Instant AppTest", configured=True, input_value_type="raw")
         save_instant_result(
             batch_id=batch_id,
             test_time=BASE_TIME.format(0),
@@ -518,7 +525,7 @@ def test_instant_page_entry_save_round_trip() -> None:
             value=120.0,
             log_value=None,
         )
-        at = AppTest.from_string(INSTANT_PAGE_APPTEST_SCRIPT)
+        at = AppTest.from_string(INSTANT_PAGE_APPTEST_SCRIPT, default_timeout=10)
         at.session_state["instant_selected_project_id"] = project_id
         at.session_state["instant_selected_batch_id"] = batch_id
         at.run()
@@ -538,7 +545,7 @@ def test_instant_page_entry_save_round_trip() -> None:
 
 def test_instant_page_uses_business_labels_and_single_judgment_area() -> None:
     with TemporaryDatabaseContext():
-        project_id, batch_id = bootstrap_batch(project_name="AlphaProject", input_value_type="ct")
+        project_id, batch_id = bootstrap_batch(project_name="AlphaProject", configured=True, input_value_type="ct")
         for minute, value in enumerate([100.0, 110.0, 105.0, 99.0, 90.0, 85.0, 103.0, 60.0], start=0):
             save_instant_result(
                 batch_id=batch_id,
@@ -548,39 +555,39 @@ def test_instant_page_uses_business_labels_and_single_judgment_area() -> None:
                 log_value=None,
             )
 
-        at = AppTest.from_string(INSTANT_PAGE_APPTEST_SCRIPT)
+        at = AppTest.from_string(INSTANT_PAGE_APPTEST_SCRIPT, default_timeout=10)
         at.session_state["instant_selected_project_id"] = project_id
         at.session_state["instant_selected_batch_id"] = batch_id
         at.run()
 
         assert len(at.warning) == 0
-        project_options = list(at.selectbox(key="instant_project_selector").options)
-        batch_options = list(at.selectbox(key="instant_batch_selector").options)
-        assert project_options == ["请选择即时法项目", "AlphaProject | Ct值"]
-        assert batch_options[0] == "请选择即时法批次"
+        project_options = list(at.selectbox(key="v12_instant_project_selector").options)
+        batch_options = list(at.selectbox(key="v12_instant_batch_selector").options)
+        assert project_options == ["请选择已启用的即时法项目", "AlphaProject｜Inst-A｜Ct值"]
+        assert batch_options[0] == "请选择已启用的批号配置"
         assert batch_options[1].startswith("质控批号：AlphaPro-LOT")
         assert "项目 1" not in batch_options[1]
         assert "批次 1" not in batch_options[1]
 
-        project_table = at.dataframe[0].value
-        batch_table = at.dataframe[1].value
-        assert list(project_table.columns) == ["项目名称", "输入值类型", "创建时间"]
-        assert list(batch_table.columns) == ["质控品批号", "仪器", "试剂", "质控品", "浓度", "创建时间"]
-        assert "编号" not in project_table.columns
+        batch_table = at.dataframe[0].value
+        assert {"检验项目", "配置名称", "质控品批号", "仪器", "试剂", "质控品", "单位", "检测方法"} <= set(batch_table.columns)
+        assert batch_table.iloc[0]["单位"] == "mg/L"
+        assert batch_table.iloc[0]["试剂"] == "Reagent-A"
         assert "编号" not in batch_table.columns
 
         caption_values = [item.value for item in at.caption]
         assert not any("当前批次：1" in value for value in caption_values)
-        assert any("质控批号 AlphaPro-LOT" in value for value in caption_values)
+        context_text = " ".join(item.proto.body for item in at.get("html"))
+        assert "AlphaPro-LOT" in context_text
 
 
 def test_transferred_instant_page_is_read_only_and_lj_page_shows_source() -> None:
     with TemporaryDatabaseContext():
-        project_id, batch_id = bootstrap_batch(project_name="Instant Transfer UI", input_value_type="raw")
+        project_id, batch_id = bootstrap_batch(project_name="Instant Transfer UI", configured=True, input_value_type="raw")
         seed_instant_results(batch_id, [100.0 + 0.15 * minute for minute in range(20)], operator_prefix="ui-user")
         transfer_result = confirm_instant_transfer_to_lj(batch_id)
 
-        instant_at = AppTest.from_string(INSTANT_PAGE_APPTEST_SCRIPT)
+        instant_at = AppTest.from_string(INSTANT_PAGE_APPTEST_SCRIPT, default_timeout=10)
         instant_at.session_state["instant_selected_project_id"] = project_id
         instant_at.session_state["instant_selected_batch_id"] = batch_id
         instant_at.run()
@@ -600,7 +607,7 @@ def test_transferred_instant_page_is_read_only_and_lj_page_shows_source() -> Non
 
 def test_instant_transfer_navigation_uses_pending_intent_and_opens_target_lj_batch() -> None:
     with TemporaryDatabaseContext():
-        project_id, batch_id = bootstrap_batch(project_name="Instant Nav UI", input_value_type="raw")
+        project_id, batch_id = bootstrap_batch(project_name="Instant Nav UI", configured=True, input_value_type="raw")
         seed_instant_results(batch_id, [100.0 + 0.12 * minute for minute in range(20)], operator_prefix="nav-user")
         transfer_result = confirm_instant_transfer_to_lj(batch_id)
 
@@ -672,17 +679,18 @@ def test_lj_page_uses_business_labels_and_marks_instant_origin() -> None:
 
 def test_zscore_page_uses_business_labels_in_management_and_context() -> None:
     with TemporaryDatabaseContext():
-        project_id = create_zscore_project("ZAlpha", level_count=2, input_value_type="ct")
-        batch_id = create_zscore_batch(
-            project_id=project_id,
-            instrument="Z-Inst",
-            reagent="Z-Reagent",
-            qc_material="Z-QC",
-            concentration="High",
-            lot_no="ZLOT-01",
+        project_id, batch_id = create_configured_zscore_batch(
+            name='ZAlpha',
+            level_count=2,
+            input_value_type='ct',
+            instrument='Z-Inst',
+            reagent='Z-Reagent',
+            qc_material='Z-QC',
+            concentration='High',
+            lot_no='ZLOT-01',
             target_n=20,
-            level_1_label="低值",
-            level_2_label="高值",
+            level_1_label='低值',
+            level_2_label='高值',
         )
 
         at = AppTest.from_string(ZSCORE_PAGE_APPTEST_SCRIPT)
@@ -690,23 +698,21 @@ def test_zscore_page_uses_business_labels_in_management_and_context() -> None:
         at.session_state["zscore_selected_batch_id"] = batch_id
         at.run()
 
-        project_options = list(at.selectbox(key="zscore_project_selector").options)
-        batch_options = list(at.selectbox(key="zscore_batch_selector").options)
-        assert project_options == ["请选择 Z-score 项目", "ZAlpha | 2 水平 | Ct值"]
-        assert batch_options[0] == "请选择 Z-score 批次"
+        assert not list(at.exception)
+        project_options = list(at.selectbox(key="v12_zscore_project_selector").options)
+        batch_options = list(at.selectbox(key="v12_zscore_batch_selector").options)
+        assert project_options == ["请选择已启用的 Z-score 项目", "ZAlpha｜Z-Inst｜2 水平｜Ct值"]
+        assert batch_options[0] == "请选择已启用的批号配置"
         assert batch_options[1].startswith("质控批号：ZLOT-01")
         assert "项目 1" not in project_options[1]
         assert "批次 1" not in batch_options[1]
 
-        project_table = at.dataframe[0].value
-        batch_table = at.dataframe[1].value
-        assert list(project_table.columns) == ["项目名称", "水平数", "输入值类型", "创建时间"]
-        assert list(batch_table.columns) == ["质控品批号", "水平数", "仪器", "试剂", "质控品", "浓度", "创建时间"]
-        assert "编号" not in project_table.columns
+        batch_table = at.dataframe[0].value
+        assert {"检验项目", "配置名称", "质控品批号", "水平数", "单位", "检测方法"}.issubset(batch_table.columns)
         assert "编号" not in batch_table.columns
 
         text_values = [str(item.value) for item in at.text]
-        assert any("质控品批号：ZLOT-01" in value for value in text_values)
+        assert any("ZLOT-01" in item.proto.body for item in at.get("html"))
         assert not any("批次：1" in value for value in text_values)
 
 

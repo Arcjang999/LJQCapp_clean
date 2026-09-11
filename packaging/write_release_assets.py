@@ -25,7 +25,7 @@ setlocal
 chcp 65001 >nul
 cd /d "%~dp0"
 
-echo 此工具会清除当前用户本地 LJQCApp 数据库。
+echo 此工具会清除当前配置的 LJQCApp 数据库。
 choice /C YN /M "确认清除数据库"
 if errorlevel 2 (
   echo 已取消。
@@ -46,7 +46,7 @@ if "%EXIT_CODE%"=="0" (
 
 echo.
 echo LJQCApp 维护命令执行失败，正在尝试直接清理默认数据库文件...
-set "DB_DIR=%LOCALAPPDATA%\LJQCApp"
+set "DB_DIR=%~dp0data"
 set "DB_FILE=%DB_DIR%\qc_lj_app.db"
 if exist "%DB_FILE%" del /f /q "%DB_FILE%" >nul 2>nul
 if exist "%DB_FILE%-wal" del /f /q "%DB_FILE%-wal" >nul 2>nul

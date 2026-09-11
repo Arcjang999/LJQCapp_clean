@@ -159,7 +159,7 @@ def plot_lj_chart(
         _plot_reagent_change_lines(axis, display_df)
 
         if stats.get("target_ready"):
-            _plot_control_lines(axis, stats["mean"], stats["sd"])
+            _plot_versioned_control_lines(axis, display_df, stats)
         if y_limits is not None:
             axis.set_ylim(y_limits)
             _plot_out_of_range_markers(axis, display_df, y_limits)
@@ -305,6 +305,8 @@ def _get_y_limits(plot_df: pd.DataFrame, stats: dict, y_axis_mode: str, standard
     if not stats.get("target_ready") or stats.get("mean") is None or stats.get("sd") is None:
         return None
 
+    if "target_mean_used" in plot_df and plot_df["target_mean_used"].dropna().nunique()>1:
+        return None
     mean = float(stats["mean"])
     sd = float(stats["sd"])
     if math.isclose(sd, 0.0, abs_tol=1e-12):
@@ -471,6 +473,7 @@ def plot_instant_chart(
 
     if "effective_sequence" not in plot_df.columns or plot_df["effective_sequence"].isna().all():
         plot_df["effective_sequence"] = range(1, len(plot_df) + 1)
+    plot_actual_lot_markers(axis,plot_df,"effective_sequence")
     x_values = plot_df["effective_sequence"].astype(float)
     y_values = plot_df["value"].astype(float)
 
@@ -596,3 +599,29 @@ def figure_to_png_bytes(figure, *, close: bool = False) -> bytes:
 def close_figure(figure) -> None:
     if figure is not None:
         plt.close(figure)
+
+
+def _plot_versioned_control_lines(axis, frame, stats):
+    if 'target_mean_used' not in frame or frame['target_mean_used'].notna().sum()==0:
+        _plot_control_lines(axis,stats['mean'],stats['sd']);return
+    for index,(_,group) in enumerate(frame.dropna(subset=['target_mean_used']).groupby('target_profile_id',dropna=False,sort=False)):
+        left,right=float(group.sequence.min())-.4,float(group.sequence.max())+.4
+        mean,sd=float(group.target_mean_used.iloc[0]),float(group.target_sd_used.iloc[0])
+        for multiple in range(-3,4):
+            axis.plot([left,right],[mean+multiple*sd]*2,color='#222222' if multiple==0 else '#76b7b2',
+                linestyle='-' if multiple==0 else '--',linewidth=1,label='版本靶均值' if index==0 and multiple==0 else None)
+        if index:
+            axis.axvline(left,color='#7d5ba6',linestyle=':',linewidth=1)
+
+
+def plot_actual_lot_markers(axis,frame,x_column):
+    if frame.empty or 'actual_reagent_lot' not in frame:return
+    ordered=frame.sort_values([x_column]).drop_duplicates(x_column)
+    previous=None
+    for _,row in ordered.iterrows():
+        label=row.get('actual_reagent_lot')
+        if not isinstance(label,str) or label=='未记录':continue
+        if previous is not None and label!=previous:
+            axis.axvline(float(row[x_column]),color='#b07c37',linestyle=':',linewidth=1,alpha=.8)
+            axis.annotate(label,(float(row[x_column]),1),xycoords=('data','axes fraction'),xytext=(3,-4),textcoords='offset points',va='top',rotation=90,fontsize=8,color='#795321')
+        previous=label

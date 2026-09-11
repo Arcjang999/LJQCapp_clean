@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 import math
 import re
@@ -141,6 +141,7 @@ class LjMonthlyReportBasicInfo:
     concentration: str
     target_source_label: str
     target_source_detail: str
+    config_snapshot_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -193,6 +194,7 @@ class LjMonthlyReportData:
     declaration: str
     chart_title: str
     chart_axis_label: str
+    lot_trace: dict = field(default_factory=dict)
 
     def to_snapshot_summary(self) -> dict[str, Any]:
         return {
@@ -219,6 +221,7 @@ class LjMonthlyReportData:
             "declaration": self.declaration,
             "chart_title": self.chart_title,
             "chart_axis_label": self.chart_axis_label,
+            "lot_trace": self.lot_trace,
         }
 
 
@@ -249,6 +252,9 @@ class ZScoreMonthlyReportBasicInfo:
     concentration: str
     target_source_label: str
     target_source_detail: str
+    unit_symbol: str = "-"
+    detection_method: str = "-"
+    config_snapshot_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -312,6 +318,7 @@ class ZScoreMonthlyReportData:
     declaration: str
     chart_title: str
     chart_axis_label: str
+    lot_trace: dict = field(default_factory=dict)
 
     def to_snapshot_summary(self) -> dict[str, Any]:
         return {
@@ -339,6 +346,7 @@ class ZScoreMonthlyReportData:
             "declaration": self.declaration,
             "chart_title": self.chart_title,
             "chart_axis_label": self.chart_axis_label,
+            "lot_trace": self.lot_trace,
         }
 
 
@@ -473,6 +481,7 @@ def build_lj_monthly_report_package(batch_id: int, report_month: str) -> LjMonth
             concentration=str(batch["concentration"] or "-"),
             target_source_label=target_source_label,
             target_source_detail=target_source_detail,
+            config_snapshot_id=dict(batch).get("config_snapshot_id"),
         ),
         statistics=statistics,
         abnormal_records=abnormal_records,
@@ -488,6 +497,17 @@ def build_lj_monthly_report_package(batch_id: int, report_month: str) -> LjMonth
         ),
         chart_axis_label=input_value_type_label,
     )
+    from services.lot_lifecycle_service import report_lot_trace
+    trace=report_lot_trace('lj',batch_id,normalized_month,formal_df)
+    report=replace(report,lot_trace=trace)
+    version_ids={item['profile_id'] for item in trace.get('statistics_by_target_version',[])}
+    if len(version_ids)>1:
+        report=replace(report,statistics=replace(report.statistics,monthly_mean=None,monthly_sd=None,monthly_cv=None,target_mean=None,target_sd=None),
+            basic_info=replace(report.basic_info,target_source_label='多参数版本（见追溯附页）',target_source_detail='各版本统计见追溯附页。'))
+    elif version_ids and next(iter(version_ids)) is not None:
+        group=trace['statistics_by_target_version'][0]
+        report=replace(report,basic_info=replace(report.basic_info,target_source_label=report.basic_info.target_source_label if group["source"]=="building" else f"已确认参数 V{group['version']}",target_source_detail=report.basic_info.target_source_detail if group["source"]=="building" else "参数依据及确认人见追溯附页。"),
+            statistics=replace(report.statistics,target_mean=group['target_mean'],target_sd=group['target_sd']))
     return LjMonthlyReportPackage(
         report=report,
         formal_df=formal_df.copy(),
@@ -592,6 +612,9 @@ def build_zscore_monthly_report_package(
     report_month_label = _format_report_month_label(normalized_month)
     report_period_label = _format_report_period_label(normalized_month)
     target_source_label, target_source_detail = _resolve_zscore_target_source()
+    if dict(batch).get("v11_target_source") == "building":
+        target_source_label = "新版配置：本批次建靶值"
+        target_source_detail = f"配置：{batch['v11_config_name']}；各水平按本批次有效建靶记录计算。"
     overview_text = _build_zscore_monthly_overview(statistics, template_label)
     corrective_actions_empty_text = _build_zscore_corrective_actions_empty_text(abnormal_records)
     abnormal_summary_text = _build_zscore_abnormal_summary_text(
@@ -618,6 +641,9 @@ def build_zscore_monthly_report_package(
         input_value_type=input_value_type,
         input_value_type_label=input_value_type_label,
         basic_info=ZScoreMonthlyReportBasicInfo(
+            unit_symbol=str(dict(batch).get("unit_symbol") or "-"),
+            detection_method=str(dict(batch).get("method_name") or "-"),
+            config_snapshot_id=dict(batch).get("config_snapshot_id"),
             project_name=str(batch["project_name"]),
             report_month_label=report_month_label,
             method_label=ZSCORE_METHOD_LABEL,
@@ -655,6 +681,18 @@ def build_zscore_monthly_report_package(
     )
     full_plot_df = build_zscore_plot_dataframe_logic(history_runs, draft_run=None, display_phase=None)
     monthly_plot_df = _filter_zscore_monthly_plot_df(full_plot_df, normalized_month)
+    from services.lot_lifecycle_service import report_lot_trace
+    formal_plot=monthly_plot_df[monthly_plot_df.phase==PHASE_FORMAL_QC]
+    trace=report_lot_trace('zscore',batch_id,normalized_month,formal_plot)
+    report=replace(report,lot_trace=trace)
+    version_ids={item['profile_id'] for item in trace.get('statistics_by_target_version',[])}
+    if len(version_ids)>1:
+        report=replace(report,level_statistics=[replace(item,monthly_mean=None,monthly_sd=None,monthly_cv=None,target_mean=None,target_sd=None) for item in report.level_statistics],
+            basic_info=replace(report.basic_info,target_source_label='多参数版本（见追溯附页）',target_source_detail='各水平分版本统计见追溯附页。'))
+    elif version_ids and next(iter(version_ids)) is not None:
+        groups={item['level']:item for item in trace['statistics_by_target_version']}
+        report=replace(report,level_statistics=[replace(item,target_mean=groups[item.level_id]['target_mean'],target_sd=groups[item.level_id]['target_sd']) for item in report.level_statistics],
+            basic_info=replace(report.basic_info,target_source_label=report.basic_info.target_source_label if all(g['source']=='building' for g in groups.values()) else '已确认版本参数',target_source_detail='各水平参数及依据见追溯附页。'))
     return ZScoreMonthlyReportPackage(
         report=report,
         monthly_plot_df=monthly_plot_df,
@@ -1209,9 +1247,11 @@ def _resolve_target_source(batch) -> tuple[str, str]:
         source_project = str(batch["source_instant_project_name"] or "").strip() or "即时法项目"
         source_batch = str(batch["source_instant_batch_lot_no"] or "").strip() or "未填写质控批号"
         transfer_time = str(batch["source_transfer_time"] or "").strip() or "-"
+        config_name = str(dict(batch).get("v11_config_name") or "").strip()
+        config_detail = f"；上游配置：{config_name}" if config_name else ""
         return (
             "即时法转入后形成的 LJ 靶值",
-            f"该批次由即时法转入形成；来源项目：{source_project}；来源批次：{source_batch}；转入时间：{transfer_time}",
+            f"该批次由即时法转入形成；来源项目：{source_project}；来源批次：{source_batch}；转入时间：{transfer_time}{config_detail}",
         )
     return ("本批次建靶值", "基于本批次建靶期有效建靶点计算。")
 

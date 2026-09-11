@@ -313,6 +313,8 @@ def delete_demo_data(dry_run: bool = False) -> DemoDeleteResult:
         project_ids = [int(row["id"]) for row in project_rows]
         instant_project_ids = [int(row["id"]) for row in instant_project_rows]
         if not dry_run:
+            from services.lot_lifecycle_service import purge_demo_provenance
+            purge_demo_provenance(connection,project_ids,instant_project_ids)
             if project_ids:
                 placeholders = ", ".join("?" for _ in project_ids)
                 connection.execute(

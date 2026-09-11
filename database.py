@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import re
 import shutil
 import sqlite3
+import sys
 from pathlib import Path
+from contextvars import ContextVar
+from contextlib import contextmanager
 
 import pandas as pd
 
@@ -24,6 +26,8 @@ from services.value_type_service import (
 )
 from migrations.v1_1_master_data import ensure_v11_schema
 from migrations.v1_2_workbench import ensure_v12_workbench_schema
+from migrations.v1_2_template_reagent import ensure_template_reagent_schema
+from migrations.v1_2_lot_lifecycle import ensure_lot_lifecycle_schema
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -37,10 +41,14 @@ PROJECT_METHOD_ZSCORE = "zscore"
 
 
 def _get_persistent_data_dir() -> Path:
-    local_app_data = os.environ.get("LOCALAPPDATA")
-    if local_app_data:
-        return Path(local_app_data) / "LJQCApp"
-    return Path.home() / ".ljqcapp"
+    if getattr(sys, "frozen", False):
+        executable = Path(sys.executable).resolve()
+        # Keep mutable data outside PyInstaller extraction folders and .app bundles.
+        for parent in executable.parents:
+            if parent.suffix.lower() == ".app":
+                return parent.parent / "data"
+        return executable.parent / "data"
+    return PROJECT_DATA_DIR
 
 
 DATA_DIR = _get_persistent_data_dir()
@@ -150,9 +158,43 @@ def reset_database() -> None:
             ) from exc
 
 
+_transaction_connection = ContextVar("qc_transaction_connection", default=None)
+
+
+class _DatabaseConnection(sqlite3.Connection):
+    def __exit__(self, exc_type, exc_value, traceback):
+        if _transaction_connection.get() is self:
+            return False
+        return super().__exit__(exc_type, exc_value, traceback)
+
+
+@contextmanager
+def atomic_write():
+    """Share one transaction across existing service/DAO calls for a logical write."""
+    existing = _transaction_connection.get()
+    if existing is not None:
+        yield existing
+        return
+    connection = get_connection()
+    token = _transaction_connection.set(connection)
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        yield connection
+        connection.commit()
+    except BaseException:
+        connection.rollback()
+        raise
+    finally:
+        _transaction_connection.reset(token)
+        connection.close()
+
+
 def get_connection() -> sqlite3.Connection:
+    existing = _transaction_connection.get()
+    if existing is not None:
+        return existing
     _migrate_legacy_db_file()
-    connection = sqlite3.connect(DB_PATH, check_same_thread=False)
+    connection = sqlite3.connect(DB_PATH, check_same_thread=False, factory=_DatabaseConnection)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
     return connection
@@ -176,7 +218,9 @@ def init_db() -> None:
         _ensure_report_exports_table(connection)
         _ensure_app_settings_table(connection)
         ensure_v11_schema(connection)
+        ensure_template_reagent_schema(connection)
         ensure_v12_workbench_schema(connection)
+        ensure_lot_lifecycle_schema(connection)
         _rebind_legacy_batches_foreign_keys(connection)
         connection.execute(
             """
@@ -564,7 +608,7 @@ def _ensure_batches_table(connection: sqlite3.Connection) -> None:
         "source_transfer_time",
         "created_at",
     }
-    if existing_columns == expected_columns:
+    if expected_columns <= existing_columns:
         return
 
     migration_project_id = _get_or_create_migration_project(connection)
@@ -589,6 +633,7 @@ def _ensure_batches_table(connection: sqlite3.Connection) -> None:
         source_instant_project_id = _legacy_value(row, legacy_columns, "source_instant_project_id", default=None)
         source_instant_batch_id = _legacy_value(row, legacy_columns, "source_instant_batch_id", default=None)
         source_transfer_time = _legacy_value(row, legacy_columns, "source_transfer_time", default=None)
+        source_config_snapshot_json = _legacy_value(row, legacy_columns, "source_config_snapshot_json", default="{}")
         project_id = int(_legacy_value(row, legacy_columns, "project_id", default=migration_project_id))
         created_at = row["created_at"] if "created_at" in legacy_columns else None
 
@@ -598,9 +643,9 @@ def _ensure_batches_table(connection: sqlite3.Connection) -> None:
                 id, project_id, instrument, reagent,
                 qc_material, concentration, lot_no, target_n, cv_limit, is_disabled,
                 source_method, source_instant_project_id, source_instant_batch_id, source_transfer_time,
-                created_at
+                source_config_snapshot_json, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
             """,
             (
                 row["id"],
@@ -617,6 +662,7 @@ def _ensure_batches_table(connection: sqlite3.Connection) -> None:
                 source_instant_project_id,
                 source_instant_batch_id,
                 source_transfer_time,
+                source_config_snapshot_json,
                 created_at,
             ),
         )
@@ -745,6 +791,7 @@ def _create_batches_table(connection: sqlite3.Connection) -> None:
             source_instant_project_id INTEGER,
             source_instant_batch_id INTEGER,
             source_transfer_time TEXT,
+            source_config_snapshot_json TEXT NOT NULL DEFAULT '{}',
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
         )
@@ -1651,17 +1698,19 @@ def get_batch(batch_id: int) -> sqlite3.Row:
             """
             SELECT
                 batches.*,
-                COALESCE(v11_tests.chinese_name, projects.name) AS project_name,
+                COALESCE(json_extract(batches.source_config_snapshot_json, '$.test_item_name'),
+                         v11_tests.chinese_name, projects.name) AS project_name,
                 projects.input_value_type AS input_value_type,
-                source_projects.name AS source_instant_project_name,
-                source_batches.lot_no AS source_instant_batch_lot_no,
+                COALESCE(json_extract(batches.source_config_snapshot_json, '$.test_item_name'), source_projects.name) AS source_instant_project_name,
+                COALESCE(json_extract(batches.source_config_snapshot_json, '$.lot_no'), source_batches.lot_no) AS source_instant_batch_lot_no,
                 v11_bindings.lot_config_id AS v11_lot_config_id,
                 v11_bindings.lot_config_item_id AS v11_lot_config_item_id,
-                v11_configs.config_name AS v11_config_name,
-                v11_lots.expiry_date AS v11_expiry_date,
-                v11_units.symbol AS unit_symbol,
-                v11_methods.method_name AS method_name,
-                v11_levels.target_source AS v11_target_source,
+                COALESCE(json_extract(batches.source_config_snapshot_json, '$.config_name'), v11_configs.config_name) AS v11_config_name,
+                COALESCE(json_extract(batches.source_config_snapshot_json, '$.expiry_date'), v11_lots.expiry_date) AS v11_expiry_date,
+                COALESCE(json_extract(batches.source_config_snapshot_json, '$.unit_symbol'), v11_units.symbol) AS unit_symbol,
+                COALESCE(json_extract(batches.source_config_snapshot_json, '$.method_name'), v11_methods.method_name) AS method_name,
+                json_extract(batches.source_config_snapshot_json, '$.config_snapshot_id') AS config_snapshot_id,
+                COALESCE(json_extract(batches.source_config_snapshot_json, '$.target_source'), v11_levels.target_source) AS v11_target_source,
                 v11_items.quality_target_source_text AS quality_target_source_text
             FROM batches
             LEFT JOIN projects ON projects.id = batches.project_id
@@ -2051,23 +2100,39 @@ def list_instant_batches(
 
 def get_instant_batch(batch_id: int) -> sqlite3.Row:
     with get_connection() as connection:
-        row = connection.execute(
-            """
-            SELECT
-                instant_batches.*,
-                instant_projects.name AS project_name,
-                target_projects.name AS transferred_to_lj_project_name,
-                target_batches.lot_no AS transferred_to_lj_batch_lot_no
-            FROM instant_batches
-            LEFT JOIN instant_projects ON instant_projects.id = instant_batches.project_id
-            LEFT JOIN projects AS target_projects
-                ON target_projects.id = instant_batches.transferred_to_lj_project_id
-            LEFT JOIN batches AS target_batches
-                ON target_batches.id = instant_batches.transferred_to_lj_batch_id
-            WHERE instant_batches.id = ?
-            """,
-            (batch_id,),
-        ).fetchone()
+        return get_instant_batch_with_connection(connection, batch_id)
+
+
+def get_instant_batch_with_connection(connection: sqlite3.Connection, batch_id: int) -> sqlite3.Row:
+    row = connection.execute(
+        """
+        SELECT
+            instant_batches.*,
+            COALESCE(json_extract(binding.source_snapshot_json, '$.test_item_name'), instant_projects.name) AS project_name,
+            COALESCE(binding.source_snapshot_json, '{}') AS source_snapshot_json,
+            binding.lot_config_item_id AS v11_lot_config_item_id,
+            json_extract(binding.source_snapshot_json, '$.unit_symbol') AS unit_symbol,
+            json_extract(binding.source_snapshot_json, '$.method_name') AS method_name,
+            json_extract(binding.source_snapshot_json, '$.config_name') AS v11_config_name,
+            json_extract(binding.source_snapshot_json, '$.expiry_date') AS v11_expiry_date,
+            json_extract(binding.source_snapshot_json, '$.config_snapshot_id') AS config_snapshot_id,
+            json_extract(binding.source_snapshot_json, '$.cv_limit') AS cv_limit,
+            COALESCE(json_extract(binding.source_snapshot_json, '$.target_n'), 20) AS target_n,
+            json_extract(binding.source_snapshot_json, '$.levels[0].level_name') AS level_name,
+            target_projects.name AS transferred_to_lj_project_name,
+            target_batches.lot_no AS transferred_to_lj_batch_lot_no
+        FROM instant_batches
+        LEFT JOIN instant_projects ON instant_projects.id = instant_batches.project_id
+        LEFT JOIN projects AS target_projects
+            ON target_projects.id = instant_batches.transferred_to_lj_project_id
+        LEFT JOIN batches AS target_batches
+            ON target_batches.id = instant_batches.transferred_to_lj_batch_id
+        LEFT JOIN qc_workbench_bindings binding
+            ON binding.runtime_batch_id = instant_batches.id AND binding.qc_method = 'instant'
+        WHERE instant_batches.id = ?
+        """,
+        (batch_id,),
+    ).fetchone()
     if row is None:
         raise ValueError(f"未找到即时法批次 {batch_id}")
     return row
@@ -2189,16 +2254,24 @@ def get_zscore_batch(batch_id: int) -> sqlite3.Row:
             """
             SELECT
                 batches.*,
-                projects.name AS project_name,
+                COALESCE(json_extract(binding.source_snapshot_json, '$.test_item_name'), projects.name) AS project_name,
                 projects.input_value_type AS input_value_type,
                 config.level_count,
                 config.level_1_label,
                 config.level_2_label,
                 config.level_3_label,
-                config.effective_building_count
+                config.effective_building_count,
+                json_extract(binding.source_snapshot_json, '$.unit_symbol') AS unit_symbol,
+                json_extract(binding.source_snapshot_json, '$.method_name') AS method_name,
+                json_extract(binding.source_snapshot_json, '$.config_name') AS v11_config_name,
+                json_extract(binding.source_snapshot_json, '$.expiry_date') AS v11_expiry_date,
+                json_extract(binding.source_snapshot_json, '$.config_snapshot_id') AS config_snapshot_id,
+                CASE WHEN binding.id IS NOT NULL THEN 'building' END AS v11_target_source
             FROM batches
             INNER JOIN zscore_batch_config AS config ON config.batch_id = batches.id
             LEFT JOIN projects ON projects.id = batches.project_id
+            LEFT JOIN qc_workbench_bindings binding
+                ON binding.runtime_batch_id = batches.id AND binding.qc_method = 'zscore'
             WHERE batches.id = ?
             """,
             (batch_id,),
@@ -2217,11 +2290,14 @@ def add_result(
     log_value=_UNSET,
     reagent_lot_changed: int = 0,
     manual_note: str = "",
-) -> None:
-    with get_connection() as connection:
+    lot_selection: dict | None = None,
+) -> int:
+    from services.lot_lifecycle_service import record_result_context, prepare_lj_target
+    with atomic_write() as connection:
+        lot_selection = prepare_lj_target(batch_id,test_time,lot_selection)
         if log_value is _UNSET:
             log_value = _safe_log10(value)
-        connection.execute(
+        cursor = connection.execute(
             """
             INSERT INTO results (
                 batch_id, test_time, operator, value, log_value, reagent_lot_changed, manual_note
@@ -2239,6 +2315,11 @@ def add_result(
             ),
         )
 
+        record_result_context(connection, "lj", int(cursor.lastrowid), batch_id, test_time, lot_selection)
+        from qc_logic import persist_lj_batch_outlier_snapshot
+        persist_lj_batch_outlier_snapshot(batch_id)
+        return int(cursor.lastrowid)
+
 
 def update_result(
     result_id: int,
@@ -2249,7 +2330,9 @@ def update_result(
     reagent_lot_changed: int = 0,
     manual_note: str | None = None,
 ) -> None:
-    with get_connection() as connection:
+    from services.lot_lifecycle_service import validate_result_edit
+    with atomic_write() as connection:
+        original=validate_result_edit(connection,"lj",result_id,test_time)
         if log_value is _UNSET:
             log_value = _safe_log10(value)
         assignments = [
@@ -2282,14 +2365,11 @@ def update_result(
             raise ValueError(f"未找到检测记录 {result_id}")
 
 
+        from qc_logic import persist_lj_batch_outlier_snapshot
+        persist_lj_batch_outlier_snapshot(original["batch_id"])
+
 def delete_result(result_id: int) -> None:
-    with get_connection() as connection:
-        cursor = connection.execute(
-            "DELETE FROM results WHERE id = ?",
-            (result_id,),
-        )
-        if cursor.rowcount == 0:
-            raise ValueError(f"未找到检测记录 {result_id}")
+    raise ValueError("原始记录须保留追溯，不允许删除；建靶期可使用禁用并保留原因。")
 
 
 def get_result(result_id: int) -> sqlite3.Row:
@@ -2357,7 +2437,8 @@ def get_results(batch_id: int, include_manual_note: bool = False) -> pd.DataFram
         dataframe["handled_at"] = pd.to_datetime(dataframe["handled_at"], errors="coerce")
         if include_manual_note:
             dataframe["manual_note"] = dataframe["manual_note"].fillna("")
-    return dataframe
+    from services.lot_lifecycle_service import attach_context_columns
+    return attach_context_columns(dataframe, "lj", batch_id)
 
 
 def set_result_building_inclusion_state(
@@ -2547,6 +2628,38 @@ def save_zscore_level_outlier_snapshot(batch_id: int, analysis_rows: list[dict[s
         )
 
 
+def require_active_instant_binding(connection: sqlite3.Connection, batch_id: int) -> None:
+    binding = connection.execute("""
+        SELECT b.binding_status, c.status, c.is_disabled, t.status AS template_status,
+               t.is_disabled AS template_disabled, i.is_enabled, i.is_disabled AS item_disabled, i.qc_method,
+               tests.is_disabled AS test_disabled, instruments.is_disabled AS instrument_disabled,
+               materials.is_disabled AS material_disabled, lots.is_disabled AS lot_disabled,
+               reagents.is_disabled AS reagent_disabled, units.is_disabled AS unit_disabled,
+               methods.is_disabled AS method_disabled
+        FROM qc_workbench_bindings b
+        JOIN qc_lot_configs c ON c.id = b.lot_config_id
+        JOIN qc_project_templates t ON t.id = c.template_id
+        JOIN qc_lot_config_items i ON i.id = b.lot_config_item_id
+        LEFT JOIN md_test_items tests ON tests.id = i.test_item_id
+        LEFT JOIN lab_instruments instruments ON instruments.id = c.lab_instrument_id
+        LEFT JOIN md_qc_materials materials ON materials.id = c.qc_material_id
+        LEFT JOIN md_qc_material_lots lots ON lots.id = c.qc_material_lot_id
+        LEFT JOIN md_reagents reagents ON reagents.id = i.reagent_id
+        LEFT JOIN md_units units ON units.id = i.unit_id
+        LEFT JOIN md_methods methods ON methods.id = i.method_id
+        WHERE b.qc_method = 'instant' AND b.runtime_batch_id = ?
+    """, (batch_id,)).fetchone()
+    if binding is not None and (
+        binding["binding_status"] != "active" or binding["status"] != "active"
+        or binding["template_status"] != "active" or binding["qc_method"] != "instant"
+        or binding["is_disabled"] or binding["template_disabled"] or binding["item_disabled"]
+        or not binding["is_enabled"]
+        or any(binding[key] != 0 for key in ("test_disabled", "instrument_disabled", "material_disabled",
+                                            "lot_disabled", "reagent_disabled", "unit_disabled", "method_disabled"))
+    ):
+        raise ValueError("当前即时法配置已停用或变更，请返回项目/批次管理确认后再操作。")
+
+
 def add_instant_result(
     *,
     batch_id: int,
@@ -2556,8 +2669,13 @@ def add_instant_result(
     log_value=_UNSET,
     manual_status: str = "normal",
     manual_note: str = "",
+    lot_selection: dict | None = None,
 ) -> int:
-    with get_connection() as connection:
+    from services.lot_lifecycle_service import record_result_context
+    with atomic_write() as connection:
+        if not connection.in_transaction:
+            connection.execute("BEGIN IMMEDIATE")
+        require_active_instant_binding(connection, batch_id)
         batch_row = connection.execute(
             """
             SELECT project_id,
@@ -2591,6 +2709,7 @@ def add_instant_result(
                 str(manual_note or ""),
             ),
         )
+        record_result_context(connection, "instant", int(cursor.lastrowid), batch_id, test_time, lot_selection)
         return int(cursor.lastrowid)
 
 
@@ -2616,6 +2735,8 @@ def set_instant_result_effective_state(
     manual_status: str,
 ) -> None:
     with get_connection() as connection:
+        if not connection.in_transaction:
+            connection.execute("BEGIN IMMEDIATE")
         result_row = connection.execute(
             """
             SELECT instant_results.batch_id,
@@ -2628,6 +2749,9 @@ def set_instant_result_effective_state(
         ).fetchone()
         if result_row is None:
             raise ValueError(f"未找到即时法检测记录 {result_id}")
+        require_active_instant_binding(connection, int(result_row["batch_id"]))
+        from services.lot_lifecycle_service import require_writable
+        require_writable(connection,"instant",int(result_row["batch_id"]))
         if str(result_row["transfer_status"] or "not_transferred").strip().lower() == "transferred":
             raise ValueError("该即时法批次已转入 LJ 法，当前批次已冻结为只读。")
         cursor = connection.execute(
@@ -2732,7 +2856,8 @@ def get_instant_results(batch_id: int, include_manual_note: bool = True) -> pd.D
         dataframe["manual_status"] = dataframe["manual_status"].fillna("normal")
         if include_manual_note:
             dataframe["manual_note"] = dataframe["manual_note"].fillna("")
-    return dataframe
+    from services.lot_lifecycle_service import attach_context_columns
+    return attach_context_columns(dataframe, "instant", batch_id)
 
 
 LJ_BUILDING_PHASE_LABEL = "建靶数据"
@@ -2823,13 +2948,14 @@ def export_batch_results(
     remaining_columns = [column for column in export_df.columns if column not in ordered_prefix]
     ordered_df = export_df[ordered_prefix + remaining_columns]
     if included_columns is not None:
-        selected_columns = [column for column in included_columns if column in ordered_df.columns]
+        selected_columns = [column for column in [*included_columns,"actual_reagent_lot","target_profile_id","context_id","target_mean_used","target_sd_used"] if column in ordered_df.columns]
         ordered_df = ordered_df[selected_columns]
     input_value_type = normalize_input_value_type(batch["input_value_type"] if "input_value_type" in batch.keys() else None)
     measurement_label = get_measurement_label(input_value_type)
     if not should_show_auxiliary_log_column(input_value_type) and "log_value" in ordered_df.columns:
         ordered_df = ordered_df.drop(columns=["log_value"])
     column_mapping = {
+        "actual_reagent_lot":"实际试剂批号", "target_profile_id":"靶值版本ID", "context_id":"上下文ID", "target_mean_used":"本次靶均值", "target_sd_used":"本次SD",
         "manual_note": "备注",
         "project_id": "项目ID",
         "project_name": "项目名称",
@@ -3140,13 +3266,7 @@ def update_zscore_level_results(run_id: int, level_results: list[dict]) -> None:
 
 
 def delete_zscore_run(run_id: int) -> None:
-    with get_connection() as connection:
-        cursor = connection.execute(
-            "DELETE FROM zscore_runs WHERE id = ?",
-            (run_id,),
-        )
-        if cursor.rowcount == 0:
-            raise ValueError(f"未找到 Z-score run {run_id}")
+    raise ValueError("原始记录须保留追溯，不允许删除；建靶期可使用禁用并保留原因。")
 
 
 def delete_zscore_level_results_by_run(run_id: int) -> None:
@@ -3736,13 +3856,15 @@ def add_zscore_run(
     error_type_hint: str,
     analysis_prompt: str,
     manual_note: str = "",
+    lot_selection: dict | None = None,
 ) -> int:
     normalized_level_count = int(level_count)
     if normalized_level_count not in {2, 3}:
         raise ValueError("Z-score 检测记录的水平数只能是 2 或 3。")
 
     serialized_rule_hits = json.dumps(rule_hits_run or [], ensure_ascii=False)
-    with get_connection() as connection:
+    from services.lot_lifecycle_service import record_result_context
+    with atomic_write() as connection:
         cursor = connection.execute(
             """
             INSERT INTO zscore_runs (
@@ -3778,4 +3900,5 @@ def add_zscore_run(
                 str(manual_note or ""),
             ),
         )
+        record_result_context(connection, "zscore", int(cursor.lastrowid), batch_id, test_time, lot_selection)
         return int(cursor.lastrowid)

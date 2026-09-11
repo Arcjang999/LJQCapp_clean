@@ -20,7 +20,7 @@ from scripts.generate_demo_qc_data import DEFAULT_SEED, load_demo_data
 class TemporaryCurrentAppDbContext:
     def __enter__(self):
         self._tempdir = TemporaryDirectory(ignore_cleanup_errors=True)
-        self.root = Path(self._tempdir.name)
+        self.root = Path(self._tempdir.name).resolve()
         self._original_db_path = database.DB_PATH
         self._original_default_db_path = database.DEFAULT_DB_PATH
         self._original_storage_config_path = database.STORAGE_CONFIG_PATH

@@ -163,23 +163,7 @@ def render_record_maintenance_dialog(
                             st.rerun()
 
             with maintenance_right:
-                st.caption("删除后会重新计算后续序号、建靶/正式阶段以及 Westgard 判定。")
-                confirm_delete = st.checkbox(
-                    "我确认删除这条检测记录",
-                    key=confirm_delete_key,
-                )
-                if st.button(
-                    "删除所选记录",
-                    key="delete_record_dialog_button",
-                    width="stretch",
-                    disabled=not confirm_delete,
-                ):
-                    delete_result(int(selected_result_id))
-                    st.session_state["selected_result_id"] = None
-                    bump_record_maintenance_dialog_nonce()
-                    st.session_state["show_record_maintenance_dialog"] = True
-                    st.session_state["record_maintenance_notice"] = "检测记录已删除。"
-                    st.rerun()
+                st.info("原始检测记录保留追溯，不提供删除。建靶期可通过禁用保留原值及维护原因。")
 
     st.divider()
     if st.button("关闭", key="close_record_dialog", width="stretch"):
@@ -407,37 +391,7 @@ def render_zscore_record_maintenance_dialog(
                                     st.rerun()
 
             with maintenance_right:
-                if is_locked_for_maintenance:
-                    st.caption("该记录为建靶期历史记录，删除和编辑均已禁用。")
-                else:
-                    st.caption("删除后会同步重算当前批次统计和图表数据。")
-                    confirm_delete = st.checkbox(
-                        "我确认删除这条检测记录",
-                        key=confirm_delete_key,
-                    )
-                    if st.button(
-                        "删除所选记录",
-                        key=delete_button_key,
-                        width="stretch",
-                        disabled=not confirm_delete,
-                    ):
-                        try:
-                            rebuild_state = delete_saved_zscore_run(int(selected_run_id))
-                        except ValueError as exc:
-                            st.error(str(exc))
-                        else:
-                            dialog_state = build_zscore_maintenance_dialog_state(
-                                action="delete",
-                                available_runs=rebuild_state.get("runs", []),
-                                preferred_run_id=int(selected_run_id),
-                            )
-                            st.session_state["show_zscore_record_maintenance_dialog"] = bool(
-                                dialog_state["keep_dialog_open"]
-                            )
-                            st.session_state["selected_zscore_run_id"] = dialog_state["selected_run_id"]
-                            st.session_state["zscore_record_maintenance_notice"] = dialog_state["dialog_notice"]
-                            bump_zscore_record_maintenance_dialog_nonce()
-                            st.rerun()
+                st.info("原始 run 及各水平结果保留追溯，不提供删除。建靶维护继续按整次 run 进行。")
 
     st.divider()
     if st.button("关闭", key="close_zscore_record_dialog", width="stretch"):

@@ -1,5 +1,7 @@
 # V1.2 LJ 工作台接入规格
 
+> 版本提示（2026-09-11）：本文记录工作台首次接入阶段。后续批号生命周期已实现，最新准入、控制参数版本及历史保护规则以 [实现与验收说明](v1_2_lot_lifecycle_implementation.md) 为准；新 session 从 [下一阶段任务书](NEXT_SESSION_TASKS.md) 接手。LJ/Z-score 已支持经确认的人工/厂家参数，即时法仍采用本批次建靶。
+
 状态：第一阶段已实现
 日期：2026-09-02
 开发分支：`codex/v1-2-lj-integration`

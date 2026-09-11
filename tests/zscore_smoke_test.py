@@ -16,6 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import database
+from tests.zscore_v12_fixtures import create_configured_zscore_batch
 from database import (
     create_zscore_batch,
     create_zscore_project,
@@ -49,6 +50,7 @@ from zscore_logic import (
     resolve_zscore_batch_context,
     should_enable_formal_rules,
     delete_saved_zscore_run,
+    rebuild_zscore_batch_state,
     update_saved_zscore_run,
     update_saved_zscore_run_manual_note,
     upsert_zscore_level_target,
@@ -1083,23 +1085,15 @@ def test_delete_saved_run_rebuilds_batch_and_plot_points() -> None:
 
         initial_runs = get_zscore_runs(batch_id, "2_level_classic")
         delete_run_id = int(initial_runs[5]["run_id"])
-        delete_saved_zscore_run(delete_run_id)
-
-        remaining_runs = get_zscore_runs(batch_id, "2_level_classic")
-        raw_runs = get_zscore_runs_with_levels_for_batch(batch_id)
-        targets = get_zscore_level_targets(batch_id, "2_level_classic", required_n=5)
-        plot_df = build_zscore_plot_dataframe(remaining_runs)
-
-        assert len(remaining_runs) == 5
-        assert {int(run["run_id"]) for run in raw_runs} == {1, 2, 3, 4, 5}
-        assert sum(len(run["level_results"]) for run in raw_runs) == 10
-        assert len(plot_df) == 10
-        assert round(targets["Level 1"]["final_target_mean"], 6) == round(
-            (100.0 + 101.0 + 99.0 + 100.0 + 100.5) / 5.0,
-            6,
-        )
-        assert targets["Level 1"]["realtime_mean"] is None
-        assert sorted(plot_df["test_sequence"].drop_duplicates().tolist()) == [1, 2, 3, 4, 5]
+        before = get_zscore_runs_with_levels_for_batch(batch_id)
+        try:
+            delete_saved_zscore_run(delete_run_id)
+        except ValueError as exc:
+            assert "保留追溯" in str(exc)
+        else:
+            raise AssertionError("Original results must not be deleted")
+        assert get_zscore_runs_with_levels_for_batch(batch_id) == before
+        assert len(build_zscore_plot_dataframe(get_zscore_runs(batch_id, "2_level_classic"))) == 12
 
 
 def test_saved_run_maintenance_respects_level_count_for_two_and_three_level_batches() -> None:
@@ -1187,7 +1181,11 @@ def test_saved_run_maintenance_respects_level_count_for_two_and_three_level_batc
                 {"level_id": "Level 3", "raw_value": 202.0},
             ],
         )
-        rebuild_state = delete_saved_zscore_run(int(runs_before_delete[6]["run_id"]))
+        try:
+            delete_saved_zscore_run(int(runs_before_delete[6]["run_id"]))
+        except ValueError as exc:assert '保留追溯' in str(exc)
+        else:raise AssertionError('Deletion must preserve originals')
+        rebuild_state = rebuild_zscore_batch_state(batch_id_3)
         saved_runs = get_zscore_runs(batch_id_3, "3_level_threes")
 
         assert rebuild_state["overall_phase"] == PHASE_FORMAL_QC
@@ -1378,7 +1376,10 @@ def test_test_sequence_keeps_incrementing_and_feeds_plot_axis() -> None:
         initial_runs = get_zscore_runs(batch_id, "2_level_classic")
         assert [get_zscore_display_sequence(run) for run in initial_runs] == [1, 2, 3]
 
-        delete_saved_zscore_run(int(initial_runs[1]["run_id"]))
+        try:
+            delete_saved_zscore_run(int(initial_runs[1]["run_id"]))
+        except ValueError as exc:assert '保留追溯' in str(exc)
+        else:raise AssertionError('Deletion must preserve originals')
         create_zscore_run(
             batch_id=batch_id,
             test_time=BASE_TIME + pd.Timedelta(hours=3),
@@ -1392,11 +1393,11 @@ def test_test_sequence_keeps_incrementing_and_feeds_plot_axis() -> None:
         )
 
         final_runs = get_zscore_runs(batch_id, "2_level_classic")
-        assert [get_zscore_display_sequence(run) for run in final_runs] == [1, 3, 4]
+        assert [get_zscore_display_sequence(run) for run in final_runs] == [1, 2, 3, 4]
 
         plot_df = build_zscore_plot_dataframe(final_runs)
-        assert sorted(plot_df["test_sequence"].drop_duplicates().tolist()) == [1, 3, 4]
-        assert sorted(plot_df["run_index"].drop_duplicates().tolist()) == [1, 3, 4]
+        assert sorted(plot_df["test_sequence"].drop_duplicates().tolist()) == [1, 2, 3, 4]
+        assert sorted(plot_df["run_index"].drop_duplicates().tolist()) == [1, 2, 3, 4]
 
 
 def test_plotting_uses_raw_value_axis_and_mean_sd_reference_lines() -> None:
@@ -1490,6 +1491,19 @@ def test_overlay_manual_legend_keeps_status_phase_and_level_keys() -> None:
     assert legend_anchor_map["水平"][0] >= 1.0
     plt.close(figure)
 
+    # A single formal run must still include every outside legend in tight exports.
+    frame = build_plot_df()
+    frame = frame[frame["run_index"] == frame["run_index"].min()]
+    figure = plot_zscore_overlay(frame, "Single run legend bounds", phase_scope="formal")
+    figure.canvas.draw()
+    renderer = figure.canvas.get_renderer()
+    export_bounds = figure.get_tightbbox(renderer).transformed(figure.dpi_scale_trans)
+    for legend in (artist for artist in figure.axes[0].artists if isinstance(artist, Legend)):
+        bounds = legend.get_window_extent(renderer)
+        assert export_bounds.x0 <= bounds.x0 and export_bounds.x1 >= bounds.x1
+        assert export_bounds.y0 <= bounds.y0 and export_bounds.y1 >= bounds.y1
+    plt.close(figure)
+
 
 def test_building_only_phase_legend_omits_formal_entry_and_control_lines() -> None:
     figure = plot_zscore_single_level(
@@ -1523,17 +1537,18 @@ def test_delete_feedback_keeps_maintenance_dialog_context() -> None:
 
 def test_entry_save_preserves_chart_controls_after_rerun() -> None:
     with TemporaryDatabaseContext():
-        project_id = create_zscore_project("AppTest Project", level_count=2, input_value_type="ct")
-        batch_id = create_zscore_batch(
-            project_id=project_id,
-            instrument="AppTest Inst",
-            reagent="AppTest Reagent",
-            qc_material="AppTest QC",
-            concentration="Normal",
-            lot_no="APPTEST-LOT",
+        project_id, batch_id = create_configured_zscore_batch(
+            name='AppTest Project',
+            level_count=2,
+            input_value_type='ct',
+            instrument='AppTest Inst',
+            reagent='AppTest Reagent',
+            qc_material='AppTest QC',
+            concentration='Normal',
+            lot_no='APPTEST-LOT',
             target_n=5,
-            level_1_label="S1",
-            level_2_label="S2",
+            level_1_label='S1',
+            level_2_label='S2',
         )
         template_id = get_template_id_for_level_count(2)
         for hour, values in enumerate(
@@ -1583,17 +1598,18 @@ def test_entry_save_preserves_chart_controls_after_rerun() -> None:
 
 def test_entry_save_preserves_overlay_view_after_rerun() -> None:
     with TemporaryDatabaseContext():
-        project_id = create_zscore_project("Overlay AppTest Project", level_count=2, input_value_type="ct")
-        batch_id = create_zscore_batch(
-            project_id=project_id,
-            instrument="Overlay Inst",
-            reagent="Overlay Reagent",
-            qc_material="Overlay QC",
-            concentration="Normal",
-            lot_no="OVERLAY-LOT",
+        project_id, batch_id = create_configured_zscore_batch(
+            name='Overlay AppTest Project',
+            level_count=2,
+            input_value_type='ct',
+            instrument='Overlay Inst',
+            reagent='Overlay Reagent',
+            qc_material='Overlay QC',
+            concentration='Normal',
+            lot_no='OVERLAY-LOT',
             target_n=5,
-            level_1_label="S1",
-            level_2_label="S2",
+            level_1_label='S1',
+            level_2_label='S2',
         )
         template_id = get_template_id_for_level_count(2)
         for hour, values in enumerate(
@@ -1643,14 +1659,15 @@ def test_entry_save_preserves_overlay_view_after_rerun() -> None:
 
 def test_building_maintenance_page_exposes_only_run_level_actions() -> None:
     with TemporaryDatabaseContext():
-        project_id = create_zscore_project("Run Maintenance AppTest Project", level_count=2, input_value_type="raw")
-        batch_id = create_zscore_batch(
-            project_id=project_id,
-            instrument="Run Maintenance Inst",
-            reagent="Run Maintenance Reagent",
-            qc_material="Run Maintenance QC",
-            concentration="Normal",
-            lot_no="RUN-MAINT-LOT",
+        project_id, batch_id = create_configured_zscore_batch(
+            name='Run Maintenance AppTest Project',
+            level_count=2,
+            input_value_type='raw',
+            instrument='Run Maintenance Inst',
+            reagent='Run Maintenance Reagent',
+            qc_material='Run Maintenance QC',
+            concentration='Normal',
+            lot_no='RUN-MAINT-LOT',
             target_n=5,
         )
         template_id = get_template_id_for_level_count(2)
@@ -1702,14 +1719,15 @@ def test_building_maintenance_page_exposes_only_run_level_actions() -> None:
 
 def test_formal_phase_hides_building_maintenance_section_and_keeps_locked_history_read_only() -> None:
     with TemporaryDatabaseContext():
-        project_id = create_zscore_project("Formal Hidden Maintenance Project", level_count=2, input_value_type="raw")
-        batch_id = create_zscore_batch(
-            project_id=project_id,
-            instrument="Formal Hidden Inst",
-            reagent="Formal Hidden Reagent",
-            qc_material="Formal Hidden QC",
-            concentration="Normal",
-            lot_no="FORMAL-HIDDEN-LOT",
+        project_id, batch_id = create_configured_zscore_batch(
+            name='Formal Hidden Maintenance Project',
+            level_count=2,
+            input_value_type='raw',
+            instrument='Formal Hidden Inst',
+            reagent='Formal Hidden Reagent',
+            qc_material='Formal Hidden QC',
+            concentration='Normal',
+            lot_no='FORMAL-HIDDEN-LOT',
             target_n=5,
         )
         template_id = get_template_id_for_level_count(2)

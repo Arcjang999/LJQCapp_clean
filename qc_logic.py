@@ -338,7 +338,44 @@ def calculate_qc_results(results_df: pd.DataFrame, target_count: int) -> tuple[p
         rows=0 if results_df is None else len(results_df),
         target_count=target_count,
     ):
+        if results_df is not None and not results_df.empty and "target_profile_id" in results_df and results_df["target_profile_id"].notna().any():
+            return _calculate_versioned_lj(results_df,target_count)
         return _calculate_qc_results_impl(results_df, target_count)
+
+
+def _calculate_versioned_lj(results_df,target_count):
+    from services.lot_lifecycle_service import target_profile
+    batch_id=int(results_df['batch_id'].iloc[0])
+    baseline=results_df[results_df.target_profile_id.isna()]
+    base,building_stats=_calculate_qc_results_impl(baseline,target_count)
+    base["target_mean_used"]=base["phase"].map(lambda phase:building_stats.get("mean") if phase==LJ_FORMAL_PHASE_LABEL else None)
+    base["target_sd_used"]=base["phase"].map(lambda phase:building_stats.get("sd") if phase==LJ_FORMAL_PHASE_LABEL else None)
+    parts=[base];latest_stats=building_stats
+    for profile_id,group in results_df[results_df.target_profile_id.notna()].groupby('target_profile_id',sort=True):
+        profile=target_profile('lj',batch_id,profile_id=int(profile_id))
+        if profile is None:
+            raise ValueError('结果引用的靶值版本缺失，不能按当前参数替代。')
+        level=profile['levels'][0]
+        if profile['version_no']==1 and profile['source']=='building':
+            legacy=base[base.phase==LJ_FORMAL_PHASE_LABEL]
+            if not legacy.empty:
+                group=pd.concat([legacy,group],ignore_index=True)
+                parts[0]=base[base.phase!=LJ_FORMAL_PHASE_LABEL]
+        frame=_normalize_lj_result_columns(group).sort_values(['test_time','id']).reset_index(drop=True)
+        frame['phase']=LJ_FORMAL_PHASE_LABEL;frame['sequence']=range(1,len(frame)+1)
+        frame['effective_sequence']=pd.NA;frame['z']=(frame['value']-float(level['mean']))/float(level['sd'])
+        frame['status']='符合质控';frame['rule_hits']='';frame['error_type']='无';frame['analysis_prompt']=''
+        frame['target_mean_used']=float(level['mean']);frame['target_sd_used']=float(level['sd'])
+        _apply_westgard_rules(frame,pd.Series(True,index=frame.index))
+        latest_stats={**building_stats,'mean':float(level['mean']),'sd':float(level['sd']),
+            'cv':abs(float(level['sd'])/float(level['mean'])*100) if level['mean'] else None,
+            'target_ready':True,'has_formal_started':True,'target_profile_id':profile['id'],
+            'message':'使用已确认的控制参数版本。','latest_analysis':_build_latest_analysis(frame.iloc[-1])}
+        parts.append(frame)
+    combined=pd.concat(parts,ignore_index=True).sort_values(['test_time','id']).reset_index(drop=True)
+    combined['sequence']=range(1,len(combined)+1)
+    latest_stats['rule_summary']=_build_rule_summary(combined[combined.phase==LJ_FORMAL_PHASE_LABEL])
+    return combined,latest_stats
 
 
 def calculate_target_building_cv_hint(
@@ -468,12 +505,19 @@ def persist_lj_batch_outlier_snapshot(
                 ]
             ].to_dict(orient="records"),
         )
+        from services.lot_lifecycle_service import append_evaluation
+        for row in qc_df.to_dict('records'):
+            append_evaluation("lj",int(row['id']),{'result':row,'target_mean':row.get('target_mean_used',stats.get('mean')),
+                'target_sd':row.get('target_sd_used',stats.get('sd'))},"current_review")
         return qc_df, stats
 
 
 def _get_lj_building_row_for_action(result_id: int) -> tuple[pd.Series, dict]:
     result_row = get_result(result_id)
     batch_id = int(result_row["batch_id"])
+    from database import get_connection
+    from services.lot_lifecycle_service import require_writable
+    with get_connection() as c:require_writable(c,"lj",batch_id)
     batch = get_batch(batch_id)
     results_df = get_results(batch_id, include_manual_note=True)
     qc_df, stats = calculate_qc_results(results_df, int(batch["target_n"]))
@@ -623,3 +667,7 @@ def _build_latest_analysis(latest_row: pd.Series) -> str:
         f"\u89e6\u53d1\u89c4\u5219\uff1a{rule_hits}\n"
         f"{latest_row.get('analysis_prompt', '')}"
     )
+
+from services.lot_lifecycle_service import atomic_action
+for _maintenance_action in ('disable_lj_building_result','restore_lj_building_result','keep_lj_building_result'):
+    globals()[_maintenance_action]=atomic_action(globals()[_maintenance_action])

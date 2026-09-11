@@ -27,6 +27,8 @@ logs/
 *.db-wal
 *.db-shm
 data/*.db
+data/backups/
+data/storage_config.json
 
 # Packaging/build output
 build/

@@ -206,6 +206,8 @@ def _plot_zscore_single_level_impl(
     if y_limits is not None:
         axis.set_ylim(y_limits)
         _plot_out_of_range_markers(axis, display_df, y_limits)
+    from plotting import plot_actual_lot_markers
+    plot_actual_lot_markers(axis,display_df,"run_index")
     _plot_manual_note_highlights(axis, display_df)
     _configure_x_axis(axis, display_df)
     axis.set_title(title, pad=10)
@@ -301,6 +303,8 @@ def _plot_zscore_overlay_impl(
     if y_limits is not None:
         axis.set_ylim(y_limits)
         _plot_out_of_range_markers(axis, display_df, y_limits)
+    from plotting import plot_actual_lot_markers
+    plot_actual_lot_markers(axis,display_df,"run_index")
     _plot_manual_note_highlights(axis, display_df)
     _configure_x_axis(axis, display_df)
     axis.set_title(title, pad=10)
@@ -395,14 +399,18 @@ def _ensure_plot_columns(plot_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _plot_reference_lines(axis, plot_df: pd.DataFrame, reference_mode: str) -> None:
+    if 'target_profile_id' in plot_df and plot_df.target_profile_id.fillna(-1).nunique()>1:
+        for _,group in plot_df.groupby('target_profile_id',dropna=False,sort=False):
+            _plot_reference_lines(axis,group,reference_mode)
+        return
     reference_profile = _resolve_reference_profile(plot_df, reference_mode)
     if plot_df.empty or reference_profile is None:
         return
     if "run_index" not in plot_df.columns:
         return
 
-    x_min = float(plot_df["run_index"].min())
-    x_max = float(plot_df["run_index"].max())
+    x_min = float(plot_df["run_index"].min()) - .35
+    x_max = float(plot_df["run_index"].max()) + .35
     mean_value = float(reference_profile["mean"])
     axis.plot(
         [x_min, x_max],
@@ -748,6 +756,7 @@ def _add_manual_legends(
             **legend_style,
             **status_legend_loc,
         )
+        status_legend.set_clip_on(False)
         axis.add_artist(status_legend)
 
     phase_handles = _build_phase_legend_handles(
@@ -761,6 +770,7 @@ def _add_manual_legends(
             **legend_style,
             **phase_legend_loc,
         )
+        phase_legend.set_clip_on(False)
         axis.add_artist(phase_legend)
 
     resolved_level_ids = [level_id for level_id in (level_ids or []) if level_id]
@@ -772,6 +782,7 @@ def _add_manual_legends(
             **level_legend_loc,
             ncol=min(3, len(resolved_level_ids)),
         )
+        level_legend.set_clip_on(False)
         axis.add_artist(level_legend)
 
 
@@ -1015,6 +1026,8 @@ def _resolve_reference_profile(plot_df: pd.DataFrame, reference_mode: str) -> di
 def _collect_reference_profiles(plot_df: pd.DataFrame, reference_mode: str) -> list[dict[str, float | None]]:
     if plot_df.empty or reference_mode == "none":
         return []
+    if "target_profile_id" in plot_df and plot_df.target_profile_id.fillna(-1).nunique()>1:
+        return [profile for _,group in plot_df.groupby("target_profile_id",dropna=False) for profile in _collect_reference_profiles(group,reference_mode)]
     if "level_id" not in plot_df.columns:
         reference_profile = _resolve_reference_profile(plot_df, reference_mode)
         return [] if reference_profile is None else [reference_profile]
