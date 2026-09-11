@@ -52,6 +52,7 @@ def _consume_pending_navigation_intent() -> None:
 
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 st.set_option("client.showSidebarNavigation", False)
+st.set_option("client.toolbarMode", "minimal")
 init_db()
 inject_global_styles()
 
@@ -76,7 +77,7 @@ if bool(st.session_state.get("show_project_management_page", False)):
     st.stop()
 
 selected_method = st.radio(
-    "功能入口",
+    "质控工作台",
     options=METHOD_ENTRY_OPTIONS,
     horizontal=True,
     key="top_level_method_selector",

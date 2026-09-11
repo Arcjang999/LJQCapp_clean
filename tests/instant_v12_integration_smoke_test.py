@@ -286,7 +286,7 @@ def test_page_selection_changes_clear_batch_and_disabled_actions():
         selector.set_value(next(option for option in selector.options if "第二项目" in option)).run()
         assert at.session_state["instant_selected_project_id"] == second["project_id"]
         assert at.session_state["instant_selected_batch_id"] is None
-        assert at.selectbox(key="v12_instant_batch_selector").value == "请选择已启用的批号配置"
+        assert at.selectbox(key="v12_instant_batch_selector").value == "请选择已启用的批次"
         selector = at.selectbox(key="v12_instant_batch_selector")
         selector.set_value(selector.options[1]).run()
         set_lot_config_disabled(second["config_id"], is_disabled=True, reason="测试")

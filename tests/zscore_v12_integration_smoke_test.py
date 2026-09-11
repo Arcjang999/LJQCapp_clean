@@ -201,7 +201,7 @@ def test_page_selection_and_disabled_selection_are_consistent():
         selector.set_value(next(option for option in selector.options if "第二个项目" in option)).run()
         assert at.session_state["zscore_selected_project_id"] == second["project_id"]
         assert at.session_state["zscore_selected_batch_id"] is None
-        assert at.selectbox(key="v12_zscore_batch_selector").value == "请选择已启用的批号配置"
+        assert at.selectbox(key="v12_zscore_batch_selector").value == "请选择已启用的批次"
         selector = at.selectbox(key="v12_zscore_project_selector")
         selector.set_value(next(option for option in selector.options if "V12 Z-score" in option)).run()
         selector = at.selectbox(key="v12_zscore_batch_selector")

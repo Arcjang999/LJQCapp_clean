@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from services.cv_service import calculate_cv_percent
+
 from collections import OrderedDict
 
 import pandas as pd
@@ -102,14 +104,14 @@ def _required_integer(value: object, label: str) -> int:
 def _instructions_dataframe() -> pd.DataFrame:
     return pd.DataFrame(
         [
-            ["用途", "在“项目配置”工作表批量维护项目模板；星号列为必填。"],
+            ["用途", "在“项目配置”工作表批量维护项目中的检验项目；星号列为必填。"],
             ["质控方法", "填写 LJ、Z-score 或 即时法。"],
-            ["输入值类型", "填写 真实检测值、Ct值 或 log值；同一项目配置只允许一种。"],
+            ["输入值类型", "填写 真实检测值、Ct值 或 log值；同一检验项目设置只允许一种。"],
             ["水平数", "LJ/即时法固定 1；Z-score 填 2 或 3。"],
             ["建靶点数", "LJ/Z-score 填 5–20；即时法固定按 20 个有效点。"],
             ["本地词条", "找不到的检验项目、单位、方法学、试剂及厂家会作为医院自定义词条新增。"],
-            ["导入方式", "合并会保留未出现在文件中的原项目；替换会以文件内容作为模板完整项目表。"],
-            ["启用规则", "导入后模板保持草稿，必须回到项目模板页校验并人工启用。"],
+            ["导入方式", "合并会保留未出现在文件中的原检验项目；替换会以文件内容作为完整的检验项目表。"],
+            ["启用规则", "导入后项目保持草稿，必须回到“新建项目”页校验并人工启用。"],
         ],
         columns=["项目", "说明"],
     )
@@ -188,7 +190,7 @@ def build_project_template_xlsx(template_id: int) -> bytes:
     template = get_project_template(template_id)
     overview = pd.DataFrame(
         [
-            ["模板名称", template["template_name"]],
+            ["项目名称", template["template_name"]],
             ["本地仪器", template["instrument_name"]],
             ["仪器厂家", template["instrument_manufacturer_name"]],
             ["仪器型号", template["instrument_model"]],
@@ -206,7 +208,7 @@ def build_project_template_xlsx(template_id: int) -> bytes:
     return dataframes_to_xlsx_bytes(
         OrderedDict(
             [
-                ("模板信息", overview),
+                ("项目信息", overview),
                 ("项目配置", _project_items_export_dataframe(template_id)),
                 ("填写说明", _instructions_dataframe()),
             ]
@@ -219,16 +221,16 @@ def build_lot_config_xlsx(lot_config_id: int) -> bytes:
     items = list_lot_config_items(lot_config_id)
     overview = pd.DataFrame(
         [
-            ["配置名称", config["config_name"]],
-            ["项目模板", config["template_name"]],
+            ["批次名称", config["config_name"]],
+            ["项目", config["template_name"]],
             ["本地仪器", config["instrument_name"]],
             ["质控品", config["qc_material_name"]],
             ["质控品商品名", config["qc_material_trade_name"]],
             ["批号", config["lot_no"]],
             ["效期", config["expiry_date"]],
-            ["状态", config["status"]],
+            ["状态", "已启用" if config["status"] == "active" else "草稿"],
             ["修订号", config["revision_no"]],
-            ["复制来源配置ID", config["copied_from_config_id"]],
+            ["复制来源批次编号", config["copied_from_config_id"]],
             ["启用时间", config["activated_at"]],
         ],
         columns=["字段", "值"],
@@ -281,13 +283,14 @@ def build_lot_config_xlsx(lot_config_id: int) -> bytes:
                     ),
                     "靶值": "" if pd.isna(level["target_mean"]) else float(level["target_mean"]),
                     "SD": "" if pd.isna(level["target_sd"]) else float(level["target_sd"]),
+                    "靶值 CV%": calculate_cv_percent(level["target_mean"], level["target_sd"]) if level["target_source"] != "building" else None,
                     "已确认": bool(level["target_confirmed"]),
                     "备注": _text(level["notes"]),
                 }
             )
     level_export = pd.DataFrame(
         level_rows,
-        columns=["检验项目", "水平顺序", "水平名称", "水平编码", "靶值来源", "靶值", "SD", "已确认", "备注"],
+        columns=["检验项目", "水平顺序", "水平名称", "水平编码", "靶值来源", "靶值", "SD", "靶值 CV%", "已确认", "备注"],
     )
     snapshots = list_config_snapshots(lot_config_id).rename(
         columns={
@@ -302,7 +305,7 @@ def build_lot_config_xlsx(lot_config_id: int) -> bytes:
     return dataframes_to_xlsx_bytes(
         OrderedDict(
             [
-                ("批号信息", overview),
+                ("批次信息", overview),
                 ("项目配置", item_export),
                 ("水平靶值", level_export),
                 ("修订记录", snapshots),

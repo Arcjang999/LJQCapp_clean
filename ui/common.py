@@ -24,7 +24,7 @@ from zscore_logic import PHASE_TARGET_BUILDING, build_zscore_batch_summary_items
 
 TEXT = {
     "app_title": "实验室室内质控管理工具",
-    "manage": "\u9879\u76ee\u4e0e\u6279\u6b21\u7ba1\u7406",
+    "manage": "项目与批次",
     "current_batch": "\u5f53\u524d\u6279\u6b21",
     "no_project": "\u5f53\u524d\u8fd8\u6ca1\u6709\u9879\u76ee\uff0c\u8bf7\u5148\u521b\u5efa\u9879\u76ee\u3002",
     "choose_project": "\u8bf7\u5148\u9009\u62e9\u9879\u76ee\u3002",
@@ -623,6 +623,9 @@ def inject_global_styles() -> None:
             box-shadow: none;
             min-height: 152px;
         }
+        .home-method-card {
+            min-height: 260px;
+        }
         .main-entry-card-eyebrow {
             display: inline-flex;
             align-items: center;
@@ -1096,7 +1099,7 @@ GLOBAL_PAGE_SESSION_KEYS = (
 )
 
 
-def open_global_page(page_key: str) -> None:
+def open_global_page(page_key: str, *, rerun: bool = True) -> None:
     if page_key not in GLOBAL_PAGE_SESSION_KEYS:
         raise ValueError(f"未知全局页面：{page_key}")
 
@@ -1104,24 +1107,28 @@ def open_global_page(page_key: str) -> None:
         st.session_state[session_key] = session_key == page_key
     if page_key == "show_settings_page":
         st.session_state["refresh_settings_form"] = True
-    st.rerun()
+    if rerun:
+        st.rerun()
+
+
+def _open_management_page(page_key: str) -> None:
+    st.session_state['global_management_menu'] = False
+    open_global_page(page_key, rerun=False)
 
 
 def render_page_chrome() -> None:
     title_column, action_column = st.columns([0.50, 0.50], gap="medium", vertical_alignment="top")
     with title_column:
         st.title(APP_TITLE)
-        st.caption("主导航只保留质控方法；基础资料、项目管理、报告历史和系统设置统一放在右上角全局入口。")
 
     with action_column:
-        st.caption("全局管理与支持入口")
-        master_column, project_column, history_column, settings_column, feedback_column = st.columns(5, gap="small")
-        with master_column:
-            if st.button("基础资料", key="open_master_data_page", use_container_width=True):
-                open_global_page("show_master_data_page")
-        with project_column:
-            if st.button("项目/批次", key="open_project_management_page", use_container_width=True):
-                open_global_page("show_project_management_page")
+        management_column, history_column, settings_column, feedback_column = st.columns(4, gap="small")
+        with management_column:
+            with st.popover("资料与批次", width="stretch", key="global_management_menu", on_change="rerun"):
+                st.button("基础资料", key="open_master_data_page", width="stretch",
+                          on_click=_open_management_page, args=("show_master_data_page",))
+                st.button("项目/批次管理", key="open_project_management_page", width="stretch",
+                          on_click=_open_management_page, args=("show_project_management_page",))
         with history_column:
             if st.button("报告历史", key="open_report_history_page", use_container_width=True):
                 open_global_page("show_report_history_page")
@@ -1129,14 +1136,13 @@ def render_page_chrome() -> None:
             if st.button("系统设置", key="open_system_settings", use_container_width=True):
                 open_global_page("show_settings_page")
         with feedback_column:
-            if hasattr(st, "link_button"):
+            with st.popover("帮助", width="stretch"):
+                st.caption("首页使用指南提供准备资料、日常录入、换批和报告操作说明。")
                 st.link_button(
                     "问题反馈",
                     "https://docs.qq.com/sheet/DY3V4b0FqS3psbkdK?tab=BB08J2",
                     use_container_width=True,
                 )
-            else:
-                st.markdown("[问题反馈](https://docs.qq.com/sheet/DY3V4b0FqS3psbkdK?tab=BB08J2)")
 
 def _stringify_display_value(value: Any, fallback: str = "-") -> str:
     if value is None:
@@ -1783,7 +1789,7 @@ def render_cv_limit_hint(current_cv: Any, cv_limit: float | None, subject: str) 
         resolved_current_cv = float(current_cv)
     except (TypeError, ValueError):
         return
-    if not math.isfinite(resolved_current_cv):
+    if not math.isfinite(resolved_current_cv) or resolved_current_cv < 0:
         return
 
     message = (

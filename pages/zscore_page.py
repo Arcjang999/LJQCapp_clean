@@ -162,7 +162,6 @@ def _render_zscore_level_summary_compact_section(context: dict[str, object]) -> 
 
     with st.container(border=True):
         st.markdown("**各水平统计摘要**")
-        st.caption("建靶统计与正式期实时统计压缩展示。")
         if range_text is not None:
             st.caption(f"正式期实时统计范围：{range_text}，仅包含正式期内在控数据。")
         else:
@@ -229,7 +228,7 @@ def render_zscore_page() -> None:
     st.subheader("多水平（Z-score法）")
     st.caption("适用于 2 水平或 3 水平项目的联合判断。")
     projects_df, selected_project_id, batches_df, selected_batch_id, issues = prepare_zscore_v12_project_batch_context()
-    manage_tab, work_tab, report_tab = st.tabs(["项目与批号", TEXT["current_batch"], "Z-score 月报"])
+    manage_tab, work_tab, report_tab = st.tabs(["项目与批次", TEXT["current_batch"], "Z-score 月报"])
     render_zscore_v12_configuration_selection(
         manage_tab,
         projects_df,
@@ -274,8 +273,8 @@ def render_zscore_page() -> None:
         )
 
         render_section_intro(
-            title="当前动作区",
-            caption="左侧用于结果录入，右侧用于查看图表、视图切换和最新分析。",
+            title="本次质控",
+            caption=None,
             badges=["多水平（Z-score法）", f"{level_count} 水平", context["overall_phase_label"], input_value_type_label],
             tone="accent",
         )
@@ -285,7 +284,7 @@ def render_zscore_page() -> None:
             with st.container():
                 render_section_intro(
                     title="图表与最新结果分析",
-                    caption="在同一区查看多水平质控图、当前判读和异常备注入口。",
+                    caption=None,
                     tone="accent",
                 )
                 phase_scope, view_mode, selected_level, y_axis_mode, standard_sd_limit = render_zscore_chart_controls(
@@ -314,7 +313,7 @@ def render_zscore_page() -> None:
                 _render_zscore_level_summary_compact_section(context)
 
         render_section_intro(
-            title="历史与次要操作区",
+            title="检测记录与数据管理",
             caption="下方可查看规则记录、厂家参考、维护和导入导出。",
             tone="muted",
         )

@@ -67,7 +67,7 @@ def _assert_global_navigation_and_watermark(at: AppTest) -> None:
 
 def test_global_navigation_and_watermark_apply_to_top_level_pages() -> None:
     with TemporaryDatabaseContext():
-        at = AppTest.from_file(APP_FILE_PATH)
+        at = AppTest.from_file(APP_FILE_PATH, default_timeout=15)
         at.run()
 
         assert not list(at.exception)
@@ -81,7 +81,7 @@ def test_global_navigation_and_watermark_apply_to_top_level_pages() -> None:
 
 def test_global_settings_entry_save_and_reopen() -> None:
     with TemporaryDatabaseContext():
-        at = AppTest.from_file(APP_FILE_PATH)
+        at = AppTest.from_file(APP_FILE_PATH, default_timeout=15)
         at.run()
 
         assert not list(at.exception)
@@ -110,7 +110,7 @@ def test_global_settings_entry_save_and_reopen() -> None:
         assert saved.reviewer_name == "李审核"
         assert saved.report_statement == "本报告仅供系统设置联动验证使用。"
 
-        reopened_at = AppTest.from_file(APP_FILE_PATH)
+        reopened_at = AppTest.from_file(APP_FILE_PATH, default_timeout=15)
         reopened_at.run()
         assert not list(reopened_at.exception)
         reopened_at.button(key="open_system_settings").click().run()

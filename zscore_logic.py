@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from services.cv_service import calculate_cv_percent
+
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
@@ -1781,7 +1783,7 @@ def build_zscore_analysis_prompt(
     phase: str = PHASE_FORMAL_QC,
 ) -> str:
     if status == "pending":
-        return "请完整录入当前模板要求的所有水平结果后再进行分析。"
+        return "请完整录入当前批次要求的所有水平结果后再进行分析。"
     if phase != PHASE_FORMAL_QC:
         return "当前处于建靶阶段，本次检测仅用于累计靶值和观察趋势，不进行正式规则判读。"
     if status == "accept":
@@ -1972,7 +1974,7 @@ def _build_run_shell(
     has_all_values = all(result["raw_value"] is not None for result in normalized_results)
     run_status = "accept" if has_all_values else "pending"
     analysis_prompt = (
-        "请完整录入当前模板要求的所有水平结果后再进行分析。"
+        "请完整录入当前批次要求的所有水平结果后再进行分析。"
         if run_status == "pending"
         else build_zscore_analysis_prompt(run_status, [], "unknown", phase=phase)
     )
@@ -2399,11 +2401,7 @@ def _string_or_none(value: Any) -> str | None:
 
 
 def _safe_cv(mean_value: float | None, sd_value: float | None) -> float | None:
-    if mean_value is None or sd_value is None:
-        return None
-    if math.isclose(float(mean_value), 0.0, abs_tol=1e-12):
-        return None
-    return float(float(sd_value) / float(mean_value) * 100)
+    return calculate_cv_percent(mean_value, sd_value)
 
 
 def _format_test_time(value: Any) -> str:

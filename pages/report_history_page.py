@@ -39,7 +39,7 @@ def render_report_history_page() -> None:
     render_section_intro(
         title="报告历史",
         caption="统一查看 LJ 与 Z-score 月报记录，可按项目、方法学、批次和月份筛选。",
-        eyebrow="全局入口",
+        eyebrow="报告管理",
         badges=["项目筛选", "摘要查看", "按当前数据重新生成"],
         tone="accent",
     )
@@ -52,7 +52,7 @@ def render_report_history_page() -> None:
             ("单水平（LJ法）", sum(1 for record in records if record.report_type == REPORT_TYPE_LJ_MONTHLY)),
             ("多水平（Z-score法）", sum(1 for record in records if record.report_type == REPORT_TYPE_ZSCORE_MONTHLY)),
         ],
-        badges=["快照摘要", "筛选定位", "当前数据重生成"],
+        badges=["报告摘要", "筛选定位", "重新生成报告"],
     )
 
     if not records:
@@ -240,7 +240,7 @@ def _render_report_history_card(record: ReportHistoryRecord) -> None:
 
         regeneration_state = st.session_state.get(regeneration_state_key)
         if isinstance(regeneration_state, dict):
-            st.caption("这是按当前数据重新生成的 PDF，内容可能与历史记录当时不同，并非下载历史原始旧 PDF。")
+            st.caption("此 PDF 根据当前数据生成，内容可能与原报告不同。")
             with action_right:
                 st.download_button(
                     label="下载重新生成的 PDF",
@@ -250,7 +250,7 @@ def _render_report_history_card(record: ReportHistoryRecord) -> None:
                     key=f"report_history_download_{record.export_id}",
                     use_container_width=True,
                 )
-            st.caption(f"本次重新生成已新增历史快照 #{regeneration_state['snapshot_id']}")
+            st.caption(f"已新增报告记录 #{regeneration_state['snapshot_id']}")
         else:
             with action_right:
                 st.button(

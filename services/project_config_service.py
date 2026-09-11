@@ -8,6 +8,7 @@ from uuid import uuid4
 import pandas as pd
 
 from database import get_connection
+from services.cv_service import normalize_cv_limit
 
 
 QC_METHOD_LABELS = {
@@ -94,7 +95,7 @@ def create_project_template(
                 """,
                 (
                     _new_uid(),
-                    _clean_required(template_name, "模板名称"),
+                    _clean_required(template_name, "项目名称"),
                     int(lab_instrument_id),
                     int(qc_material_id),
                     str(instrument["department_name"] or "").strip(),
@@ -103,7 +104,7 @@ def create_project_template(
                 ),
             )
         except sqlite3.IntegrityError as exc:
-            raise ValueError("已存在同名的启用项目模板。") from exc
+            raise ValueError("已存在同名的启用项目。") from exc
         return int(cursor.lastrowid)
 
 
@@ -123,7 +124,7 @@ def set_template_default_reagent(template_id: int, reagent_id: int) -> None:
             (int(template_id),),
         ).fetchone()
         if template is None:
-            raise ValueError("未找到启用中的项目模板。")
+            raise ValueError("未找到启用中的项目。")
         if template["default_reagent_id"] == int(reagent_id):
             return
         connection.execute(
@@ -196,7 +197,7 @@ def get_project_template(template_id: int) -> sqlite3.Row:
             (int(template_id),),
         ).fetchone()
     if row is None:
-        raise ValueError("未找到项目模板。")
+        raise ValueError("未找到项目。")
     return row
 
 
@@ -260,9 +261,7 @@ def _normalize_template_item(row: dict[str, object], sort_order: int) -> dict[st
     elif not 5 <= target_n <= 20:
         raise ValueError("LJ 和 Z-score 建靶有效点数必须在 5 至 20 之间。")
 
-    cv_limit = _optional_float(row.get("cv_limit"))
-    if cv_limit is not None and cv_limit <= 0:
-        raise ValueError("CV 要求必须大于 0。")
+    cv_limit = normalize_cv_limit(row.get("cv_limit"))
 
     return {
         "test_item_id": int(row["test_item_id"]),
@@ -294,7 +293,7 @@ def save_template_items(template_id: int, rows: list[dict[str, object]]) -> None
         for row in normalized_rows
     }
     if len(normalized_keys) != len(normalized_rows):
-        raise ValueError("同一模板内存在重复的项目、质控方法和输入值类型组合。")
+        raise ValueError("同一项目内存在重复的检验项目、质控方法和输入值类型组合。")
 
     with get_connection() as connection:
         template = connection.execute(
@@ -302,14 +301,14 @@ def save_template_items(template_id: int, rows: list[dict[str, object]]) -> None
             (int(template_id),),
         ).fetchone()
         if template is None:
-            raise ValueError("未找到启用中的项目模板。")
+            raise ValueError("未找到启用中的项目。")
 
         connection.execute(
             """
             UPDATE qc_project_template_items
             SET is_disabled = 1,
                 disabled_at = CURRENT_TIMESTAMP,
-                disabled_reason = '已从模板当前配置移除',
+                disabled_reason = '已从项目当前配置移除',
                 updated_at = CURRENT_TIMESTAMP
             WHERE template_id = ? AND is_disabled = 0
             """,
@@ -400,7 +399,7 @@ def validate_project_template(template_id: int) -> list[str]:
 def activate_project_template(template_id: int) -> None:
     errors = validate_project_template(template_id)
     if errors:
-        raise ValueError("模板暂不能启用：\n" + "\n".join(f"- {item}" for item in errors))
+        raise ValueError("项目暂不能启用：\n" + "\n".join(f"- {item}" for item in errors))
     with get_connection() as connection:
         connection.execute(
             """
@@ -443,7 +442,7 @@ def set_project_template_disabled(
                 ),
             )
     except sqlite3.IntegrityError as exc:
-        raise ValueError("存在同名启用模板，当前模板不能恢复。") from exc
+        raise ValueError("存在同名启用项目，当前项目不能恢复。") from exc
 
 
 def create_lot_config_from_template(
@@ -451,6 +450,7 @@ def create_lot_config_from_template(
     template_id: int,
     qc_material_lot_id: int,
     config_name: str = "",
+    quality_requirements: dict[int, dict] | None = None,
 ) -> int:
     with get_connection() as connection:
         template = connection.execute(
@@ -462,7 +462,7 @@ def create_lot_config_from_template(
             (int(template_id),),
         ).fetchone()
         if template is None:
-            raise ValueError("请选择已启用的项目模板。")
+            raise ValueError("请选择已启用的项目。")
         lot = connection.execute(
             """
             SELECT lots.*, materials.generic_name AS material_name
@@ -475,7 +475,7 @@ def create_lot_config_from_template(
         if lot is None:
             raise ValueError("请选择启用中的质控品批号。")
         if int(lot["qc_material_id"]) != int(template["qc_material_id"]):
-            raise ValueError("所选质控品批号与项目模板的质控品不一致。")
+            raise ValueError("所选质控品批号与项目的质控品不一致。")
         items = connection.execute(
             """
             SELECT *
@@ -486,7 +486,18 @@ def create_lot_config_from_template(
             (int(template_id),),
         ).fetchall()
         if not items:
-            raise ValueError("项目模板中没有可复制的启用项目。")
+            raise ValueError("项目中没有可用于创建批次的启用检验项目。")
+
+        requirements = quality_requirements or {}
+        if set(requirements) - {int(item['id']) for item in items}:
+            raise ValueError('CV 要求必须属于所选项目的检验项目。')
+        resolved = {}
+        for item in items:
+            override = requirements.get(int(item['id']), {})
+            resolved[int(item['id'])] = (
+                normalize_cv_limit(override.get('cv_limit', item['cv_limit'])),
+                _clean_optional(override.get('quality_target_source_text', item['quality_target_source_text'])),
+            )
 
         normalized_config_name = _clean_optional(config_name)
         if not normalized_config_name:
@@ -512,7 +523,7 @@ def create_lot_config_from_template(
                 ),
             )
         except sqlite3.IntegrityError as exc:
-            raise ValueError("当前模板与质控品批号已存在启用配置。") from exc
+            raise ValueError("当前项目与质控品批号已存在启用批次。") from exc
         lot_config_id = int(cursor.lastrowid)
 
         for item in items:
@@ -540,14 +551,33 @@ def create_lot_config_from_template(
                     item["reagent_id"],
                     int(item["level_count"]),
                     int(item["target_n"]),
-                    item["cv_limit"],
-                    str(item["quality_target_source_text"] or ""),
+                    resolved[int(item['id'])][0],
+                    resolved[int(item['id'])][1],
                     int(item["sort_order"]),
                     str(item["notes"] or ""),
                 ),
             )
-        _save_snapshot(connection, lot_config_id, action_type="create", change_summary="创建批号配置")
+        _save_snapshot(connection, lot_config_id, action_type="create", change_summary="创建批次")
         return lot_config_id
+
+
+def save_lot_item_cv_requirement(lot_config_item_id: int, cv_limit, source_text: str = '') -> None:
+    """Edit a never-activated draft only; established batches retain their requirement."""
+    from database import atomic_write
+    limit = normalize_cv_limit(cv_limit)
+    with atomic_write() as connection:
+        item = connection.execute('''SELECT i.lot_config_id,c.status FROM qc_lot_config_items i
+            JOIN qc_lot_configs c ON c.id=i.lot_config_id
+            WHERE i.id=? AND i.is_disabled=0 AND c.is_disabled=0''',(lot_config_item_id,)).fetchone()
+        if item is None:
+            raise ValueError('未找到可修改的批次检验项目。')
+        binding = connection.execute('SELECT 1 FROM qc_workbench_bindings WHERE lot_config_item_id=?',(lot_config_item_id,)).fetchone()
+        if item['status'] != 'draft' or binding:
+            raise ValueError('已启用批次的 CV 要求保持不变；请在新批次建立时设置。')
+        connection.execute('UPDATE qc_lot_config_items SET cv_limit=?,quality_target_source_text=? WHERE id=?',
+            (limit,_clean_optional(source_text),lot_config_item_id))
+        connection.execute('UPDATE qc_lot_configs SET revision_no=revision_no+1,updated_at=CURRENT_TIMESTAMP WHERE id=?',(item['lot_config_id'],))
+        _save_snapshot(connection,item['lot_config_id'],action_type='edit',change_summary='更新批次 CV 要求及依据')
 
 
 def list_lot_configs(
@@ -618,7 +648,7 @@ def get_lot_config(lot_config_id: int) -> sqlite3.Row:
             (int(lot_config_id),),
         ).fetchone()
     if row is None:
-        raise ValueError("未找到批号配置。")
+        raise ValueError("未找到批次。")
     return row
 
 
@@ -705,17 +735,17 @@ def save_lot_item_levels(
             (int(lot_config_item_id),),
         ).fetchone()
         if item is None:
-            raise ValueError("未找到批号项目配置。")
+            raise ValueError("未找到当前批次的检验项目。")
         expected_count = int(item["level_count"])
         if len(assignments) != expected_count:
-            raise ValueError(f"当前项目必须配置 {expected_count} 个水平。")
+            raise ValueError(f"当前检验项目必须配置 {expected_count} 个水平。")
 
         normalized: list[dict[str, object]] = []
         seen_levels: set[int] = set()
         for order, raw in enumerate(assignments, start=1):
             level_id = int(raw["qc_level_id"])
             if level_id in seen_levels:
-                raise ValueError("同一项目不能重复选择同一水平。")
+                raise ValueError("同一检验项目不能重复选择同一水平。")
             seen_levels.add(level_id)
             level = connection.execute(
                 """
@@ -837,7 +867,7 @@ def save_lot_item_levels(
             connection,
             config_id,
             action_type="edit",
-            change_summary="更新项目水平、靶值和 SD",
+            change_summary="更新检验项目水平、靶值和 SD",
         )
 
 
@@ -849,7 +879,7 @@ def validate_lot_config(lot_config_id: int) -> list[str]:
     if not str(config["expiry_date"] or "").strip():
         errors.append("质控品批号未填写效期。")
     if items.empty:
-        errors.append("批号配置没有检验项目。")
+        errors.append("批次没有检验项目。")
         return errors
 
     for _, item in items.iterrows():
@@ -875,7 +905,7 @@ def validate_lot_config(lot_config_id: int) -> list[str]:
 def activate_lot_config(lot_config_id: int) -> None:
     errors = validate_lot_config(lot_config_id)
     if errors:
-        raise ValueError("批号配置暂不能启用：\n" + "\n".join(f"- {item}" for item in errors))
+        raise ValueError("批次暂不能启用：\n" + "\n".join(f"- {item}" for item in errors))
     with get_connection() as connection:
         connection.execute(
             """
@@ -892,7 +922,7 @@ def activate_lot_config(lot_config_id: int) -> None:
             connection,
             int(lot_config_id),
             action_type="activate",
-            change_summary="启用批号配置",
+            change_summary="启用批次",
         )
 
 
@@ -913,7 +943,7 @@ def copy_lot_config(
             (int(source_lot_config_id),),
         ).fetchone()
         if source is None:
-            raise ValueError("未找到复制来源批号配置。")
+            raise ValueError("未找到复制来源批次。")
         target_lot = connection.execute(
             """
             SELECT lots.*, materials.generic_name AS material_name
@@ -927,6 +957,8 @@ def copy_lot_config(
             raise ValueError("未找到目标质控品批号。")
         if int(target_lot["qc_material_id"]) != int(source["qc_material_id"]):
             raise ValueError("目标批号必须属于与来源配置相同的质控品。")
+        if not combination_key and int(target_qc_material_lot_id) == int(source["qc_material_lot_id"]):
+            raise ValueError("请选择与旧批次不同的新质控品批号。")
 
         normalized_name = _clean_optional(config_name)
         if not normalized_name:
@@ -952,7 +984,7 @@ def copy_lot_config(
                 ),
             )
         except sqlite3.IntegrityError as exc:
-            raise ValueError("目标批号已存在当前模板的启用配置。") from exc
+            raise ValueError("目标批号已存在当前项目的启用批次。") from exc
         target_config_id = int(cursor.lastrowid)
 
         source_items = connection.execute(
@@ -1059,7 +1091,7 @@ def copy_lot_config(
             connection,
             target_config_id,
             action_type="copy",
-            change_summary=f"从批号配置 {source_lot_config_id} 复制",
+            change_summary=f"从批次 {source_lot_config_id} 复制",
         )
         return target_config_id
 
@@ -1077,7 +1109,7 @@ def set_lot_config_disabled(
                 (int(lot_config_id),),
             ).fetchone()
             if config is None:
-                raise ValueError("未找到批号配置。")
+                raise ValueError("未找到批次。")
             connection.execute(
                 """
                 UPDATE qc_lot_configs
@@ -1102,10 +1134,10 @@ def set_lot_config_disabled(
                 connection,
                 int(lot_config_id),
                 action_type="disable" if is_disabled else "reactivate",
-                change_summary="停用批号配置" if is_disabled else "恢复批号配置",
+                change_summary="停用批次" if is_disabled else "恢复批次",
             )
     except sqlite3.IntegrityError as exc:
-        raise ValueError("同一模板和批号已有启用配置，当前配置不能恢复。") from exc
+        raise ValueError("同一项目和批号已有启用批次，当前批次不能恢复。") from exc
 
 
 def list_config_snapshots(lot_config_id: int) -> pd.DataFrame:
@@ -1177,7 +1209,7 @@ def _build_snapshot_payload(
         (int(lot_config_id),),
     ).fetchone()
     if config is None:
-        raise ValueError("未找到批号配置，无法生成快照。")
+        raise ValueError("未找到批次，无法保存变更记录。")
 
     item_rows = connection.execute(
         """

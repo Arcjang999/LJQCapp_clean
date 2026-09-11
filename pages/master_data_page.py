@@ -165,7 +165,7 @@ def _render_disable_control(
                         is_disabled=True,
                         reason=reason,
                     )
-                    st.success("记录已软停用，历史引用不受影响。")
+                    st.success("已停用，已有项目和检测历史仍保留。")
                     st.rerun()
         with action_right:
             if st.button(
@@ -235,7 +235,7 @@ def _render_manufacturers_tab() -> None:
 def _render_test_items_tab() -> None:
     st.caption(
         "已内置已发布、将于 2026-11-01 实施的 WS/T 886—2026 中 296 个定量检验项目；"
-        "定性和定序项目留到 V1.3，医院仍可新增本地定量项目。"
+        "可按医院需要新增定量项目或添加常用别名。"
     )
     top_left, top_right = st.columns([0.72, 0.28])
     with top_left:
@@ -843,16 +843,16 @@ def render_master_data_page() -> None:
 
     render_section_intro(
         title="基础资料",
-        eyebrow="全局入口",
+        eyebrow="资料管理",
         caption=(
-            "维护新版项目管理使用的检验项目、厂家、仪器、试剂、质控品、方法学和单位。"
-            "本页面只使用 V1.1 新数据表，不导入旧测试项目。"
+            "维护医院使用的检验项目、厂家、仪器、试剂、质控品、检测方法和单位。"
+            "请先搜索已有资料，未找到时再新增。"
         ),
-        badges=["本地可新增", "软停用", "官方与本地隔离"],
+        badges=["资料查询", "新增资料", "停用与恢复"],
         tone="accent",
     )
     st.info(
-        "建议先按“厂家 → 仪器 / 试剂 / 质控品 → 检验项目 → 项目模板”的顺序维护。"
+        "建议先按“厂家 → 仪器 / 试剂 / 质控品 → 检验项目 → 项目”的顺序维护。"
         "官方词库后续更新时不会覆盖医院本地新增内容。"
     )
     tabs = st.tabs(["厂家", "检验项目", "仪器", "试剂", "质控品与批号", "方法与单位"])

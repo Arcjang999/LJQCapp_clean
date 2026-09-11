@@ -62,7 +62,7 @@ def render_lj_page() -> None:
     st.subheader("单水平（LJ法）")
     st.caption("适用于单水平项目的日常室内质控。建靶期重点查看离群值判断，进入正式期后按 Westgard 规则判读并生成月报。")
     projects_df, selected_project_id, batches_df, selected_batch_id = prepare_lj_v12_project_batch_context()
-    manage_tab, work_tab, report_tab = st.tabs(["项目与批号", TEXT["current_batch"], "LJ 月报"])
+    manage_tab, work_tab, report_tab = st.tabs(["项目与批次", TEXT["current_batch"], "LJ 月报"])
     render_lj_v12_configuration_selection(
         manage_tab,
         projects_df,
@@ -134,7 +134,7 @@ def render_lj_work_tab(
                 ("质控品批号", batch["lot_no"]),
                 ("单位", _clean_lj_display_part(batch_dict.get("unit_symbol")) or "-"),
                 ("检测方法", _clean_lj_display_part(batch_dict.get("method_name")) or "-"),
-                ("配置名称", _clean_lj_display_part(batch_dict.get("v11_config_name")) or "-"),
+                ("批次名称", _clean_lj_display_part(batch_dict.get("v11_config_name")) or "-"),
                 ("批号效期", _clean_lj_display_part(batch_dict.get("v11_expiry_date")) or "-"),
                 ("CV 要求", "-" if cv_limit is None else f"≤ {cv_limit:.2f}%"),
                 *(
@@ -160,8 +160,8 @@ def render_lj_work_tab(
             st.info(source_message)
 
         render_section_intro(
-            title="当前动作区",
-            caption="左侧用于结果录入与统计，右侧用于查看图表和最新分析。",
+            title="本次质控",
+            caption=None,
             badges=["单水平（LJ法）", phase_label, input_value_type_label],
             tone="accent",
         )
@@ -170,7 +170,7 @@ def render_lj_work_tab(
             with st.container():
                 render_section_intro(
                     title="结果录入与统计",
-                    caption=f"在同一区完成{input_value_type_label}录入、建靶统计和正式期实时统计查看。",
+                    caption=None,
                     tone="accent",
                 )
                 render_lj_entry_and_stats_section(context, selected_batch_id)
@@ -178,13 +178,13 @@ def render_lj_work_tab(
             with st.container():
                 render_section_intro(
                     title="图表与最新结果分析",
-                    caption="在同一区查看质控图、当前判读和异常备注入口。",
+                    caption=None,
                     tone="accent",
                 )
                 figure, chart_state = render_lj_chart_and_analysis_section(context)
 
         render_section_intro(
-            title="历史与次要操作区",
+            title="检测记录与数据管理",
             caption="下方可查看规则回顾、检测记录、维护和导入导出。",
             badges=["记录回顾", "维护", "导入导出"],
             tone="muted",

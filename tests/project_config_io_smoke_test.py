@@ -111,8 +111,15 @@ def test_project_import_export_and_lot_export_round_trip() -> None:
         exported_template = xlsx_bytes_to_dataframes(
             build_project_template_xlsx(template_id)
         )
-        assert list(exported_template) == ["模板信息", "项目配置", "填写说明"]
+        assert list(exported_template) == ["项目信息", "项目配置", "填写说明"]
         assert len(exported_template["项目配置"].index) == 2
+        assert "项目名称" in exported_template["项目信息"]["字段"].tolist()
+        for info_sheet in ("项目信息", "模板信息"):
+            # The descriptive sheet name changed; existing import files remain usable.
+            workbook = dict(exported_template)
+            workbook[info_sheet] = workbook.pop("项目信息")
+            preview, errors = preview_project_template_xlsx(dataframes_to_xlsx_bytes(workbook))
+            assert not errors and len(preview) == 2
 
         activate_project_template(template_id)
         lot_config_id = create_lot_config_from_template(
@@ -121,7 +128,7 @@ def test_project_import_export_and_lot_export_round_trip() -> None:
         )
         assert len(list_lot_config_items(lot_config_id).index) == 2
         exported_lot = xlsx_bytes_to_dataframes(build_lot_config_xlsx(lot_config_id))
-        assert list(exported_lot) == ["批号信息", "项目配置", "水平靶值", "修订记录"]
+        assert list(exported_lot) == ["批次信息", "项目配置", "水平靶值", "修订记录"]
         assert len(exported_lot["项目配置"].index) == 2
         assert exported_lot["水平靶值"].empty
 

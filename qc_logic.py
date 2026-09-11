@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from services.cv_service import calculate_cv_percent
+
 from datetime import datetime
 import math
 
@@ -282,7 +284,7 @@ def _apply_lj_building_outlier_snapshot(
             sd = float(effective_building_df["value"].std(ddof=1))
             stats["sd"] = sd
             if not math.isclose(mean, 0.0, abs_tol=1e-12):
-                stats["cv"] = float(sd / mean * 100)
+                stats["cv"] = calculate_cv_percent(mean, sd)
 
     stats["target_ready"] = int(len(effective_building_df)) >= int(target_count) and stats["sd"] is not None
     if stats["target_ready"]:
@@ -368,7 +370,7 @@ def _calculate_versioned_lj(results_df,target_count):
         frame['target_mean_used']=float(level['mean']);frame['target_sd_used']=float(level['sd'])
         _apply_westgard_rules(frame,pd.Series(True,index=frame.index))
         latest_stats={**building_stats,'mean':float(level['mean']),'sd':float(level['sd']),
-            'cv':abs(float(level['sd'])/float(level['mean'])*100) if level['mean'] else None,
+            'cv':calculate_cv_percent(level['mean'], level['sd']),
             'target_ready':True,'has_formal_started':True,'target_profile_id':profile['id'],
             'message':'使用已确认的控制参数版本。','latest_analysis':_build_latest_analysis(frame.iloc[-1])}
         parts.append(frame)
@@ -472,7 +474,7 @@ def calculate_realtime_stats(
         return {"mean": mean, "sd": None, "cv": None}, "\u6240\u9009\u533a\u95f4\u6570\u636e\u4e0d\u8db3 2 \u6761\uff0cSD \u548c CV% \u6682\u65f6\u65e0\u6cd5\u8ba1\u7b97\u3002"
 
     sd = float(filtered["value"].std(ddof=1))
-    cv = None if math.isclose(mean, 0.0, abs_tol=1e-12) else float(sd / mean * 100)
+    cv = None if math.isclose(mean, 0.0, abs_tol=1e-12) else calculate_cv_percent(mean, sd)
     return {"mean": mean, "sd": sd, "cv": cv}, ""
 
 

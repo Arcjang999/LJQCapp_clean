@@ -1,6 +1,8 @@
 """Shared, append-only lot usage and per-result provenance for the three workbenches."""
 from __future__ import annotations
 
+from services.cv_service import calculate_cv_percent
+
 import json
 import math
 from datetime import datetime
@@ -60,7 +62,7 @@ def source_context(connection, method, batch_id):
     return source, binding, batch
 
 
-def require_writable(connection, method, batch_id):
+def require_writable(connection, method, batch_id, test_time=None):
     source,binding,batch = source_context(connection,method,batch_id)
     if batch['is_disabled'] or (method=='instant' and batch['transfer_status']=='transferred'):
         raise ValueError('该批次已停用或已转入 LJ 法，当前为只读。')
@@ -74,6 +76,8 @@ def require_writable(connection, method, batch_id):
             or row['template_status']!='active' or row['template_disabled'] or not row['is_enabled']
             or row['item_disabled'] or effective_qc_state(connection,binding['lot_config_item_id']) in ('ended','pending')):
             raise ValueError('配置已变更、停用或结束使用，请刷新并重新确认；历史记录仍可查看。')
+        if test_time is not None and effective_qc_state(connection,binding['lot_config_item_id'],test_time) in ('ended','pending'):
+            raise ValueError('检测时间不在该质控批次的可使用期间，请核对开始平行及结束使用时间。')
         current=connection.execute("""SELECT c.lab_instrument_id,c.qc_material_id,c.qc_material_lot_id,i.test_item_id,i.input_value_type,i.unit_id,i.method_id,i.reagent_id
             FROM qc_lot_config_items i JOIN qc_lot_configs c ON c.id=i.lot_config_id WHERE i.id=?""",(binding['lot_config_item_id'],)).fetchone()
         if source.get('identity') and list(current)!=source['identity'][:8]:
@@ -153,6 +157,49 @@ def usage_revision(connection, system_id):
     return int(connection.execute('SELECT COALESCE(MAX(id),0) FROM qc_reagent_lot_usage WHERE system_id=?',(system_id,)).fetchone()[0])
 
 
+def qc_lots_for_source(connection, source):
+    """Resolve every actual lot in a combination, preserving the displayed level order."""
+    lots={}
+    for level in source.get('levels',[]):
+        row=connection.execute('''SELECT q.*,l.is_disabled AS level_disabled
+            FROM md_qc_levels l JOIN md_qc_material_lots q ON q.id=l.qc_material_lot_id
+            WHERE l.id=?''',(level.get('qc_level_id'),)).fetchone()
+        if row is None:
+            raise ValueError('质控水平或实际批号不存在，请核对配置。')
+        record=lots.setdefault(row['id'],{**dict(row),'level_names':[]})
+        record['level_disabled']=record['level_disabled'] or row['level_disabled']
+        record['level_names'].append(level.get('level_name',''))
+    if not lots:
+        lot_id=source.get('qc_material_lot_id') or source['identity'][2]
+        row=connection.execute('SELECT * FROM md_qc_material_lots WHERE id=?',(lot_id,)).fetchone()
+        if row is None:raise ValueError('实际质控批号不存在，请核对配置。')
+        lots[row['id']]={**dict(row),'level_disabled':False,'level_names':[]}
+    return lots
+
+
+def _require_qc_verification(connection, source, lot_id, verification_id, effective_at):
+    when=timestamp(effective_at)
+    lot=connection.execute('SELECT * FROM md_qc_material_lots WHERE id=?',(lot_id,)).fetchone()
+    if lot is None or lot['qc_material_id']!=source['identity'][1]:
+        raise ValueError('验证质控批号必须属于当前检测配置的质控品。')
+    if lot['is_disabled']:
+        raise ValueError('实际质控批号已停用，不能正式启用或建立换批组合。')
+    if not lot['expiry_date'] or lot['expiry_date']<when[:10]:
+        raise ValueError('生效时间不得晚于实际质控批号效期，请核对效期。')
+    verification=connection.execute('SELECT * FROM qc_lot_verifications WHERE id=?',(verification_id,)).fetchone()
+    if (verification is None or verification['system_id']!=source['system_id']
+        or verification['template_item_id']!=source['project_template_item_id']
+        or verification['qc_lot_id']!=lot_id or verification['conclusion']!='pass'
+        or verification['confirmed_at']>when):
+        raise ValueError('需关联本检测项、本实际质控批号已通过的验证记录，生效时间不得早于验证。')
+    latest=connection.execute('''SELECT id,conclusion FROM qc_lot_verifications
+        WHERE system_id=? AND qc_lot_id=? AND confirmed_at<=?
+        ORDER BY confirmed_at DESC,id DESC LIMIT 1''',(source['system_id'],lot_id,when)).fetchone()
+    if latest is None or latest['id']!=verification['id'] or latest['conclusion']!='pass':
+        raise ValueError('所选质控验证已被后续结论替代，请核对生效时间对应的最新验证结论。')
+    return verification['id']
+
+
 def switch_reagent_lots(*, selections, effective_at, operator, reason):
     """Selections explicitly name every assay, verification and optimistic revision."""
     operator=_required(operator,'操作者');reason=_required(reason,'换批原因');when=timestamp(effective_at)
@@ -205,7 +252,7 @@ def record_result_context(connection, method, result_id, batch_id, test_time, se
     item=source.get('project_template_item_id');system_id=source.get('system_id');lot=None;usage=None
     selection=selection or {}
     if provenance=='recorded':
-        require_writable(connection,method,batch_id)
+        require_writable(connection,method,batch_id,test_time)
         revision=usage_revision(connection,system_id) if system_id else 0
         # Legacy imports without explicit lot must remain unknown, never inherit today's default.
         if 'expected_revision' in selection and int(selection['expected_revision'])!=revision:
@@ -325,7 +372,7 @@ def change_qc_lot(*, source_config_id, target_qc_lot_id, template_item_ids, oper
                 if not existing:c.execute('UPDATE qc_lot_config_items SET is_enabled=0 WHERE id=?',(item['id'],))
                 continue
             if existing and item['is_enabled']:
-                raise ValueError('该检测项已经在目标批号配置中，请直接使用其已有批次或调整使用状态。')
+                raise ValueError('该检测项已经在目标批次中，请直接使用其已有批次或调整使用状态。')
             c.execute('UPDATE qc_lot_config_items SET is_enabled=1 WHERE id=?',(item['id'],))
             old_binding=c.execute('''SELECT b.* FROM qc_workbench_bindings b WHERE b.lot_config_id=?
                 AND b.project_template_item_id=?''',(source_config_id,item['source_template_item_id'])).fetchone()
@@ -344,7 +391,7 @@ def change_qc_lot(*, source_config_id, target_qc_lot_id, template_item_ids, oper
         return new_id
 
 
-def set_qc_usage_state(*, lot_config_item_id, state, effective_at, operator, reason, verification_id=None):
+def set_qc_usage_state(*, lot_config_item_id, state, effective_at, operator, reason, verification_id=None, verification_ids=None):
     if state not in ('parallel','active','ended'):
         raise ValueError('未知使用状态。')
     operator=_required(operator,'操作者');reason=_required(reason,'状态变更依据')
@@ -353,12 +400,17 @@ def set_qc_usage_state(*, lot_config_item_id, state, effective_at, operator, rea
         if binding is None:
             raise ValueError('该配置尚未接入工作台。')
         source,_,_=source_context(c,binding['qc_method'],binding['runtime_batch_id'])
+        confirmed_verifications={}
         if state=='active':
-            lot=c.execute('SELECT qc_material_lot_id FROM qc_lot_configs WHERE id=?',(binding['lot_config_id'],)).fetchone()[0]
-            verification=c.execute('SELECT * FROM qc_lot_verifications WHERE id=?',(verification_id,)).fetchone()
-            if (verification is None or verification['system_id']!=source['system_id'] or verification['qc_lot_id']!=lot
-                or verification['conclusion']!='pass' or verification['confirmed_at']>timestamp(effective_at)):
-                raise ValueError('正式启用需关联本检测项、本质控批号已通过的验证记录。')
+            lots=qc_lots_for_source(c,source)
+            selected={int(k):v for k,v in (verification_ids or {}).items()}
+            if verification_id is not None and len(lots)==1:
+                selected.setdefault(next(iter(lots)),verification_id)
+            if set(selected)!=set(lots) or any(v is None for v in selected.values()):
+                raise ValueError('正式启用需逐一关联全部实际质控批号的验证记录。')
+            for lot_id,lot in lots.items():
+                if lot['level_disabled']:raise ValueError('实际质控水平已停用，不能正式启用。')
+                confirmed_verifications[lot_id]=_require_qc_verification(c,source,lot_id,selected[lot_id],effective_at)
             if binding['qc_method']=='lj':
                 from database import get_results,get_batch
                 from qc_logic import calculate_qc_results
@@ -370,8 +422,10 @@ def set_qc_usage_state(*, lot_config_item_id, state, effective_at, operator, rea
                 context=resolve_zscore_batch_context(binding['runtime_batch_id'])
                 profiles=get_zscore_level_targets(binding['runtime_batch_id'],context['template_id'],at_time=effective_at)
                 if not should_enable_formal_rules(profiles,context['template']['level_ids']):raise ValueError('全部水平控制参数确认后才可启用正式联合判定。')
-        event=c.execute('''INSERT INTO qc_lot_change_events(system_id,template_item_id,event_type,next_id,effective_at,reason,operator,verification_id)
-            VALUES(?,?,?,?,?,?,?,?)''',(source['system_id'],source['project_template_item_id'],state,lot_config_item_id,timestamp(effective_at),reason,operator,verification_id)).lastrowid
+        event=c.execute('''INSERT INTO qc_lot_change_events(system_id,template_item_id,event_type,next_id,effective_at,reason,operator,verification_id,details_json)
+            VALUES(?,?,?,?,?,?,?,?,?)''',(source['system_id'],source['project_template_item_id'],state,lot_config_item_id,timestamp(effective_at),reason,operator,
+            next(iter(confirmed_verifications.values())) if len(confirmed_verifications)==1 else None,
+            json.dumps({'qc_verification_ids':confirmed_verifications} if confirmed_verifications else {}))).lastrowid
         c.execute('''INSERT INTO qc_config_item_lifecycle(lot_config_item_id,state,effective_at,event_id) VALUES(?,?,?,?)
             ON CONFLICT(lot_config_item_id) DO UPDATE SET state=excluded.state,effective_at=excluded.effective_at,event_id=excluded.event_id''',
             (lot_config_item_id,state,timestamp(effective_at),event))
@@ -433,12 +487,12 @@ def overlay_zscore_profiles(profiles,version):
     for level in version['levels']:
         p=profiles[level['level_id']]
         p.update({'target_mean':float(level['mean']),'target_sd':float(level['sd']),
-                  'target_cv':abs(float(level['sd'])/float(level['mean'])*100) if level['mean'] else None,
-                  'is_ready':True,'phase':'formal_qc','target_source':version['source'],'target_profile_id':version['id'],
+                  'target_cv':calculate_cv_percent(level['mean'], level['sd']),
+                  'is_ready':True,'phase':'formal_qc','phase_label':'正式质控','target_source':version['source'],'target_profile_id':version['id'],
                   'final_target_mean':float(level['mean']),'final_target_sd':float(level['sd']),
                   'target_mean_final':float(level['mean']),'target_sd_final':float(level['sd']),
-                  'final_target_cv':abs(float(level['sd'])/float(level['mean'])*100) if level['mean'] else None,
-                  'target_cv_final':abs(float(level['sd'])/float(level['mean'])*100) if level['mean'] else None})
+                  'final_target_cv':calculate_cv_percent(level['mean'], level['sd']),
+                  'target_cv_final':calculate_cv_percent(level['mean'], level['sd'])})
     return profiles
 
 
@@ -560,7 +614,7 @@ def import_reviewed_results(method,batch_id,rows,*,template_id=None,required_n=N
 def validate_result_edit(connection,method,result_id,new_time=None):
     row=connection.execute(f'SELECT * FROM {RESULT_TABLES[method]} WHERE id=?',(result_id,)).fetchone()
     if row is None:raise ValueError('未找到检测记录。')
-    require_writable(connection,method,row['batch_id'])
+    require_writable(connection,method,row['batch_id'],new_time)
     context=connection.execute(f'SELECT * FROM qc_result_contexts WHERE {CONTEXT_COLUMNS[method]}=?',(result_id,)).fetchone()
     if new_time and context:
         profile=target_profile(method,row['batch_id'],new_time) if method!='instant' else None
@@ -623,9 +677,7 @@ def create_level_combination(*,source_batch_id,level_ids,verification_ids,operat
                 raise ValueError('各水平必须属于同一质控产品、对应浓度顺序且未过期。')
             vid=verification_ids.get(lid)
             if lid!=old_ids[order-1]:
-                v=c.execute('SELECT * FROM qc_lot_verifications WHERE id=?',(vid,)).fetchone()
-                if v is None or v['system_id']!=source['system_id'] or v['qc_lot_id']!=level['qc_material_lot_id'] or v['conclusion']!='pass' or v['confirmed_at']>timestamp(effective_at):
-                    raise ValueError('更换的每个水平需先关联该系统、新质控批号通过的验证。')
+                _require_qc_verification(c,source,level['qc_material_lot_id'],vid,effective_at)
             chosen.append((level,vid))
         key=json.dumps(level_ids,separators=(',',':'))
         new=copy_lot_config(source_lot_config_id=binding['lot_config_id'],target_qc_material_lot_id=chosen[0][0]['qc_material_lot_id'],

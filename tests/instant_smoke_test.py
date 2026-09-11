@@ -564,13 +564,13 @@ def test_instant_page_uses_business_labels_and_single_judgment_area() -> None:
         project_options = list(at.selectbox(key="v12_instant_project_selector").options)
         batch_options = list(at.selectbox(key="v12_instant_batch_selector").options)
         assert project_options == ["请选择已启用的即时法项目", "AlphaProject｜Inst-A｜Ct值"]
-        assert batch_options[0] == "请选择已启用的批号配置"
+        assert batch_options[0] == "请选择已启用的批次"
         assert batch_options[1].startswith("质控批号：AlphaPro-LOT")
         assert "项目 1" not in batch_options[1]
         assert "批次 1" not in batch_options[1]
 
         batch_table = at.dataframe[0].value
-        assert {"检验项目", "配置名称", "质控品批号", "仪器", "试剂", "质控品", "单位", "检测方法"} <= set(batch_table.columns)
+        assert {"检验项目", "批次名称", "质控品批号", "仪器", "试剂", "质控品", "单位", "检测方法"} <= set(batch_table.columns)
         assert batch_table.iloc[0]["单位"] == "mg/L"
         assert batch_table.iloc[0]["试剂"] == "Reagent-A"
         assert "编号" not in batch_table.columns
@@ -702,13 +702,13 @@ def test_zscore_page_uses_business_labels_in_management_and_context() -> None:
         project_options = list(at.selectbox(key="v12_zscore_project_selector").options)
         batch_options = list(at.selectbox(key="v12_zscore_batch_selector").options)
         assert project_options == ["请选择已启用的 Z-score 项目", "ZAlpha｜Z-Inst｜2 水平｜Ct值"]
-        assert batch_options[0] == "请选择已启用的批号配置"
+        assert batch_options[0] == "请选择已启用的批次"
         assert batch_options[1].startswith("质控批号：ZLOT-01")
         assert "项目 1" not in project_options[1]
         assert "批次 1" not in batch_options[1]
 
         batch_table = at.dataframe[0].value
-        assert {"检验项目", "配置名称", "质控品批号", "水平数", "单位", "检测方法"}.issubset(batch_table.columns)
+        assert {"检验项目", "批次名称", "质控品批号", "水平数", "单位", "检测方法"}.issubset(batch_table.columns)
         assert "编号" not in batch_table.columns
 
         text_values = [str(item.value) for item in at.text]

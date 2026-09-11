@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from services.cv_service import calculate_cv_percent
+
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 import math
@@ -1153,7 +1155,7 @@ def _build_statistics(
     monthly_cv = (
         None
         if monthly_mean in (None, 0) or monthly_sd is None or math.isclose(float(monthly_mean), 0.0, abs_tol=1e-12)
-        else float(monthly_sd / monthly_mean * 100)
+        else calculate_cv_percent(monthly_mean, monthly_sd)
     )
     return LjMonthlyReportStatistics(
         formal_count=formal_count,
@@ -1453,7 +1455,7 @@ def _build_zscore_level_statistics(
         monthly_cv = (
             None
             if monthly_mean in (None, 0) or monthly_sd is None or math.isclose(float(monthly_mean), 0.0, abs_tol=1e-12)
-            else float(monthly_sd / monthly_mean * 100)
+            else calculate_cv_percent(monthly_mean, monthly_sd)
         )
         target_profile = level_target_profiles.get(level_id, {})
         target_mean = _safe_float(

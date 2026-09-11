@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from services.cv_service import calculate_cv_percent
+
 import math
 from datetime import datetime
 from typing import Any, Sequence
@@ -332,7 +334,7 @@ def analyze_instant_results(results_df: pd.DataFrame) -> tuple[pd.DataFrame, dic
     if effective_count >= 2:
         sd_value = float(pd.Series(effective_values).std(ddof=1))
         if mean_value is not None and not math.isclose(mean_value, 0.0, abs_tol=1e-12):
-            cv_value = float(sd_value / mean_value * 100.0)
+            cv_value = calculate_cv_percent(mean_value, sd_value)
 
     si_result = calculate_instant_si_test(effective_values)
     si_ready = bool(si_result.get("evaluation_ready"))

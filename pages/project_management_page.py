@@ -5,6 +5,9 @@ import math
 import pandas as pd
 import streamlit as st
 
+from database import get_connection
+from ui.cv import CV_REQUIREMENT_HELP, render_cv_requirement, render_target_cv
+
 from services.master_data_service import (
     list_lab_instruments,
     list_methods,
@@ -40,6 +43,7 @@ from services.project_config_service import (
     list_project_templates,
     list_template_items,
     save_lot_item_levels,
+    save_lot_item_cv_requirement,
     save_template_items,
     set_lot_config_disabled,
     set_project_template_disabled,
@@ -213,11 +217,11 @@ def _render_template_creation() -> None:
     reagent_labels, reagent_map, _ = _option_map(
         reagents, _reagent_label, placeholder="请选择试剂",
     )
-    with st.expander("新建项目模板", expanded=False):
+    with st.expander("新建项目", expanded=False):
         if instruments.empty or materials.empty or reagents.empty:
             st.warning("请先到“基础资料”完成本地仪器、试剂和质控品维护。")
         with st.form("v11_create_project_template_form", clear_on_submit=True):
-            template_name = st.text_input("模板名称 *")
+            template_name = st.text_input("项目名称 *")
             col1, col2, col3 = st.columns(3)
             with col1:
                 instrument_label = st.selectbox("本地仪器 *", instrument_labels)
@@ -226,9 +230,9 @@ def _render_template_creation() -> None:
             with col3:
                 material_label = st.selectbox("质控品 *", material_labels)
             st.caption("所选试剂将作为新增检验项目的默认试剂；不同检验项目可分别调整。")
-            notes = st.text_input("模板备注")
+            notes = st.text_input("项目备注")
             submitted = st.form_submit_button(
-                "创建模板",
+                "创建项目",
                 type="primary",
                 width="stretch",
             )
@@ -251,7 +255,7 @@ def _render_template_creation() -> None:
                         st.error(str(exc))
                     else:
                         st.session_state["v11_selected_template_id"] = template_id
-                        st.success("项目模板已创建，请继续批量添加检验项目。")
+                        st.success("项目已创建，请继续批量添加检验项目。")
                         st.rerun()
 
 
@@ -350,7 +354,7 @@ def _save_editor_rows(template_id: int, edited: pd.DataFrame, lookups: dict[str,
                 "reagent_id": lookups["reagent_id_by_label"].get(reagent_label),
                 "level_count": int(row.get("水平数") or 1),
                 "target_n": int(row.get("建靶点数") or 20),
-                "cv_limit": row.get("CV要求(%)"),
+                "cv_limit": None if pd.isna(row.get("CV要求(%)")) else row.get("CV要求(%)"),
                 "quality_target_source_text": str(row.get("质量目标来源") or ""),
                 "sort_order": index + 1,
             }
@@ -428,8 +432,13 @@ def _render_add_template_items(template_id: int, default_reagent_id: int | None)
             value=20,
             key=f"v11_bulk_target_n_{template_id}",
         )
+        cv_limit = st.number_input(
+            "CV 要求上限（%，选填）", value=None, min_value=0.0, format="%.4f",
+            help=CV_REQUIREMENT_HELP, key=f"v11_bulk_cv_limit_{template_id}",
+        )
+        cv_source = st.text_input("CV 要求依据（选填）", key=f"v11_bulk_cv_source_{template_id}")
         if st.button(
-            "添加到模板",
+            "添加到项目",
             key=f"v11_add_items_button_{template_id}",
             type="primary",
             width="stretch",
@@ -471,6 +480,8 @@ def _render_add_template_items(template_id: int, default_reagent_id: int | None)
                         "reagent_id": lookups["reagent_id_by_label"].get(reagent_label),
                         "level_count": normalized_level_count,
                         "target_n": 20 if selected_method == "instant" else int(target_n),
+                        "cv_limit": cv_limit,
+                        "quality_target_source_text": cv_source,
                         "sort_order": next_sort + offset,
                     }
                 )
@@ -489,10 +500,10 @@ def _render_template_default_reagent(template) -> None:
         list_reagents(), _reagent_label, placeholder="请选择试剂",
     )
     current = by_id.get(template["default_reagent_id"])
-    with st.expander("模板默认试剂", expanded=current is None):
-        st.caption("用于预填新增加的检验项目。修改默认值不会覆盖已有项目、批号配置或历史记录。")
+    with st.expander("项目默认试剂", expanded=current is None):
+        st.caption("用于预填新增加的检验项目。修改默认值不会覆盖已有检验项目、批次或历史记录。")
         if current is None:
-            st.warning("请从字典补选模板默认试剂；已有项目的试剂保留原配置。")
+            st.warning("请从字典补选项目默认试剂；已有检验项目的试剂保留原设置。")
         selected = st.selectbox(
             "默认试剂 *", labels, index=labels.index(current) if current else 0,
             key=f"v12_default_reagent_{template_id}_{template['revision_no']}",
@@ -512,7 +523,7 @@ def _render_template_editor(template_id: int) -> None:
     template = get_project_template(template_id)
     items = list_template_items(template_id)
     st.caption(
-        f"当前模板：{template['template_name']}｜仪器：{template['instrument_name']}｜"
+        f"当前项目：{template['template_name']}｜仪器：{template['instrument_name']}｜"
         f"默认试剂：{_safe_text(template['default_reagent_name'], '尚未设置')}｜"
         f"质控品：{template['qc_material_name']}｜"
         f"状态：{'已启用' if template['status'] == 'active' else '草稿'}"
@@ -590,7 +601,7 @@ def _render_template_editor(template_id: int) -> None:
             },
         )
         if st.button(
-            "保存项目配置表",
+            "保存检验项目设置",
             key=f"v11_save_template_editor_{template_id}",
             type="primary",
             width="stretch",
@@ -600,16 +611,16 @@ def _render_template_editor(template_id: int) -> None:
             except (ValueError, TypeError) as exc:
                 st.error(str(exc))
             else:
-                st.success("项目配置表已保存，模板回到草稿状态。")
+                st.success("检验项目设置已保存，项目回到草稿状态。")
                 st.rerun()
 
     errors = validate_project_template(template_id)
     if errors:
-        st.warning("模板尚未满足启用条件：\n\n" + "\n".join(f"- {item}" for item in errors))
+        st.warning("项目尚未满足启用条件：\n\n" + "\n".join(f"- {item}" for item in errors))
     action1, action2 = st.columns(2)
     with action1:
         if st.button(
-            "校验并启用模板",
+            "校验并启用项目",
             key=f"v11_activate_template_{template_id}",
             type="primary",
             width="stretch",
@@ -620,21 +631,21 @@ def _render_template_editor(template_id: int) -> None:
             except ValueError as exc:
                 st.error(str(exc))
             else:
-                st.success("项目模板已启用，可以创建批号配置。")
+                st.success("项目已启用，可以创建批次。")
                 st.rerun()
     with action2:
         if st.button(
-            "软停用模板",
+            "停用项目",
             key=f"v11_disable_template_{template_id}",
             width="stretch",
         ):
             set_project_template_disabled(
                 template_id,
                 is_disabled=True,
-                reason="用户在新版项目管理页停用",
+                reason="用户在项目管理页停用",
             )
             st.session_state["v11_selected_template_id"] = None
-            st.success("模板已软停用。")
+            st.success("项目已停用。")
             st.rerun()
 
 
@@ -642,13 +653,13 @@ def _render_templates_tab() -> None:
     _render_template_creation()
     templates = list_project_templates()
     if templates.empty:
-        st.info("当前没有新版项目模板。")
+        st.info("当前没有项目。")
     else:
         template_id = _select_current_entity(
             dataframe=templates,
             label_builder=_template_label,
-            placeholder="请选择项目模板",
-            label="选择模板",
+            placeholder="请选择项目",
+            label="选择项目",
             key="v11_template_selector",
             state_key="v11_selected_template_id",
         )
@@ -667,11 +678,11 @@ def _render_templates_tab() -> None:
         st.dataframe(
             display.rename(
                 columns={
-                    "template_name": "模板名称",
+                    "template_name": "项目名称",
                     "instrument_name": "本地仪器",
                     "qc_material_name": "质控品",
                     "status": "状态",
-                    "item_count": "项目数",
+                    "item_count": "检验项目数",
                     "revision_no": "修订号",
                     "created_at": "创建时间",
                 }
@@ -685,19 +696,19 @@ def _render_templates_tab() -> None:
     all_templates = list_project_templates(include_disabled=True)
     disabled_templates = all_templates[all_templates["is_disabled"].astype(int) == 1]
     if not disabled_templates.empty:
-        with st.expander("恢复已停用项目模板", expanded=False):
+        with st.expander("恢复已停用项目", expanded=False):
             labels, mapping, _ = _option_map(
                 disabled_templates,
                 _template_label,
-                placeholder="请选择已停用模板",
+                placeholder="请选择已停用项目",
             )
             selected = st.selectbox(
-                "已停用模板",
+                "已停用项目",
                 labels,
                 key="v11_restore_template_selector",
             )
             if st.button(
-                "恢复为草稿模板",
+                "恢复为草稿项目",
                 key="v11_restore_template_button",
                 width="stretch",
                 disabled=mapping[selected] is None,
@@ -710,7 +721,7 @@ def _render_templates_tab() -> None:
                 except ValueError as exc:
                     st.error(str(exc))
                 else:
-                    st.success("项目模板已恢复为草稿。")
+                    st.success("项目已恢复为草稿。")
                     st.rerun()
 
 
@@ -718,16 +729,16 @@ def _render_create_lot_config() -> None:
     active_templates = list_project_templates()
     active_templates = active_templates[active_templates["status"] == "active"].copy()
     if active_templates.empty:
-        st.info("请先启用至少一个项目模板。")
+        st.info("请先启用至少一个项目。")
         return
     template_labels, template_map, _ = _option_map(
         active_templates,
         _template_label,
-        placeholder="请选择已启用模板",
+        placeholder="请选择已启用项目",
     )
-    with st.expander("从模板创建新批号配置", expanded=False):
+    with st.expander("新建批次", expanded=False):
         template_label = st.selectbox(
-            "项目模板",
+            "项目",
             template_labels,
             key="v11_create_config_template",
         )
@@ -747,30 +758,47 @@ def _render_create_lot_config() -> None:
             key="v11_create_config_lot",
         )
         config_name = st.text_input(
-            "配置名称（留空自动生成）",
+            "批次名称（留空自动生成）",
             key="v11_create_config_name",
         )
+        quality_requirements = {}
+        if template_id is not None:
+            st.caption("各检验项目的 CV 要求默认沿用项目设置，可在本批次建立前调整。")
+            for _, item in list_template_items(int(template_id)).iterrows():
+                item_id = int(item["id"])
+                with st.container(border=True):
+                    st.write(item["test_item_name"])
+                    limit = st.number_input(
+                        "CV 要求上限（%，选填）", min_value=0.0, format="%.4f",
+                        value=None if pd.isna(item["cv_limit"]) else float(item["cv_limit"]),
+                        help=CV_REQUIREMENT_HELP, key=f"v12_create_cv_{template_id}_{item_id}",
+                    )
+                    source = st.text_input("CV 要求依据（选填）",
+                        value=_safe_text(item["quality_target_source_text"], ""),
+                        key=f"v12_create_cv_source_{template_id}_{item_id}")
+                    quality_requirements[item_id] = {"cv_limit": limit, "quality_target_source_text": source}
         if st.button(
-            "创建批号配置",
+            "创建批次",
             key="v11_create_config_button",
             type="primary",
             width="stretch",
         ):
             lot_id = lot_map[lot_label]
             if template_id is None or lot_id is None:
-                st.error("请选择项目模板和质控品批号。")
+                st.error("请选择项目和质控品批号。")
             else:
                 try:
                     config_id = create_lot_config_from_template(
                         template_id=int(template_id),
                         qc_material_lot_id=int(lot_id),
                         config_name=config_name,
+                        quality_requirements=quality_requirements,
                     )
                 except ValueError as exc:
                     st.error(str(exc))
                 else:
                     st.session_state["v11_selected_lot_config_id"] = config_id
-                    st.success("批号配置已创建，请继续配置各项目水平、靶值和 SD。")
+                    st.success("批次已创建，请继续设置各检验项目的水平、靶值和 SD。")
                     st.rerun()
 
 
@@ -800,6 +828,37 @@ def _render_item_level_form(lot_config_id: int, item: pd.Series) -> None:
         f"｜需要 {expected_count} 个水平"
     )
     with st.expander(title, expanded=int(item["assigned_level_count"] or 0) != expected_count):
+        limit = None if pd.isna(item["cv_limit"]) else float(item["cv_limit"])
+        source = _safe_text(item["quality_target_source_text"], "")
+        with get_connection() as connection:
+            has_binding = connection.execute("SELECT * FROM qc_workbench_bindings WHERE lot_config_item_id=?", (int(item["id"]),)).fetchone()
+        if config["status"] == "draft" and not has_binding:
+            limit = st.number_input("CV 要求上限（%，选填）", value=limit, min_value=0.0,
+                format="%.4f", help=CV_REQUIREMENT_HELP, key=f"v12_draft_cv_{item['id']}")
+            source = st.text_input("CV 要求依据（选填）", value=source, key=f"v12_draft_cv_source_{item['id']}")
+            if st.button("保存 CV 要求", key=f"v12_save_cv_{item['id']}"):
+                try:
+                    save_lot_item_cv_requirement(int(item["id"]), limit, source)
+                except ValueError as exc:
+                    st.error(str(exc))
+                else:
+                    st.rerun()
+        else:
+            render_cv_requirement(limit, source)
+        if has_binding and has_binding["qc_method"] != "instant":
+            from services.lot_lifecycle_service import target_profile
+            from services.cv_service import calculate_cv_percent
+            profile = target_profile(has_binding["qc_method"], has_binding["runtime_batch_id"])
+            if profile:
+                st.caption(f"当前生效参数 V{profile['version_no']}｜生效时间：{profile['effective_at']}")
+                level_names = {f"Level {int(row['level_order'])}": row['level_name'] for _, row in existing.iterrows()}
+                st.dataframe(pd.DataFrame([{
+                    "质控水平": level_names.get(level['level_id'], level['level_id']),
+                    "靶均值": level['mean'], "SD": level['sd'],
+                    "靶值 CV%": calculate_cv_percent(level['mean'], level['sd']),
+                } for level in profile['levels']]), hide_index=True, width="stretch")
+                st.caption("如需调整控制参数，请前往“批号使用与追溯 → 靶值版本”。")
+                return
         if len(selectable_labels) < expected_count:
             st.error(
                 f"当前质控品批号只有 {len(selectable_labels)} 个启用水平，"
@@ -825,7 +884,7 @@ def _render_item_level_form(lot_config_id: int, item: pd.Series) -> None:
                 if saved is not None
                 else TARGET_SOURCE_LABELS["building"]
             )
-            row1, row2, row3, row4 = st.columns([1.2, 1, 1, 0.8])
+            row1, row2 = st.columns(2)
             with row1:
                 st.text(selected_label)
             with row2:
@@ -835,6 +894,7 @@ def _render_item_level_form(lot_config_id: int, item: pd.Series) -> None:
                     index=list(TARGET_SOURCE_BY_LABEL).index(default_source),
                     key=f"v11_target_source_{item['id']}_{level_id}",
                 )
+            row3, row4, cv_column = st.columns(3)
             with row3:
                 target_mean = st.number_input(
                     "靶值",
@@ -856,6 +916,13 @@ def _render_item_level_form(lot_config_id: int, item: pd.Series) -> None:
                     ),
                     key=f"v11_target_sd_{item['id']}_{level_id}",
                 )
+            with cv_column:
+                if TARGET_SOURCE_BY_LABEL[source_label] == "building":
+                    st.metric("靶值 CV%", "建靶后计算")
+                else:
+                    render_target_cv(target_mean, target_sd, limit,
+                        input_value_type=str(item["input_value_type"]),
+                        pending=TARGET_SOURCE_BY_LABEL[source_label] == "copied_pending")
             confirmed_default = bool(
                 saved is not None and int(saved["target_confirmed"] or 0)
             )
@@ -874,7 +941,7 @@ def _render_item_level_form(lot_config_id: int, item: pd.Series) -> None:
                 }
             )
         if st.button(
-            "保存本项目水平配置",
+            "保存本检验项目水平配置",
             key=f"v11_save_item_levels_{item['id']}",
             width="stretch",
             disabled=len(selected_labels) != expected_count,
@@ -884,7 +951,7 @@ def _render_item_level_form(lot_config_id: int, item: pd.Series) -> None:
             except (ValueError, TypeError) as exc:
                 st.error(str(exc))
             else:
-                st.success("本项目水平配置已保存。")
+                st.success("本检验项目水平配置已保存。")
                 st.rerun()
 
 
@@ -892,12 +959,12 @@ def _render_lot_config_editor(lot_config_id: int) -> None:
     config = get_lot_config(lot_config_id)
     items = list_lot_config_items(lot_config_id)
     st.caption(
-        f"当前批号配置：{config['config_name']}｜模板：{config['template_name']}｜"
+        f"当前批次：{config['config_name']}｜项目：{config['template_name']}｜"
         f"批号：{config['lot_no']}｜效期：{_safe_text(config['expiry_date'], '未填写')}｜"
-        f"状态：{config['status']}｜修订 {config['revision_no']}"
+        f"状态：{'已启用' if config['status'] == 'active' else '草稿'}｜修订 {config['revision_no']}"
     )
     if items.empty:
-        st.error("当前批号配置没有项目。")
+        st.error("当前批次没有检验项目。")
         return
     summary = items[
         [
@@ -933,17 +1000,17 @@ def _render_lot_config_editor(lot_config_id: int) -> None:
         hide_index=True,
         width="stretch",
     )
-    st.markdown("**逐项目配置水平、靶值和 SD**")
+    st.markdown("**为各检验项目设置水平、靶值和 SD**")
     for _, item in items.iterrows():
         _render_item_level_form(lot_config_id, item)
 
     errors = validate_lot_config(lot_config_id)
     if errors:
-        st.warning("批号配置尚未满足启用条件：\n\n" + "\n".join(f"- {item}" for item in errors))
+        st.warning("批次尚未满足启用条件：\n\n" + "\n".join(f"- {item}" for item in errors))
     action1, action2 = st.columns(2)
     with action1:
         if st.button(
-            "校验并启用批号配置",
+            "校验并启用批次",
             key=f"v11_activate_lot_config_{lot_config_id}",
             type="primary",
             width="stretch",
@@ -954,24 +1021,28 @@ def _render_lot_config_editor(lot_config_id: int) -> None:
             except ValueError as exc:
                 st.error(str(exc))
             else:
-                st.success("批号配置已启用。")
+                st.success("批次已启用。")
                 st.rerun()
     with action2:
         if st.button(
-            "软停用批号配置",
+            "停用批次",
             key=f"v11_disable_lot_config_{lot_config_id}",
             width="stretch",
         ):
             set_lot_config_disabled(
                 lot_config_id,
                 is_disabled=True,
-                reason="用户在新版项目管理页停用",
+                reason="用户在项目管理页停用",
             )
             st.session_state["v11_selected_lot_config_id"] = None
-            st.success("批号配置已软停用。")
+            st.success("批次已停用。")
             st.rerun()
 
-    snapshots = list_config_snapshots(lot_config_id)
+    snapshots = list_config_snapshots(lot_config_id).copy()
+    snapshots["action_type"] = snapshots["action_type"].replace({
+        "create": "创建", "edit": "修改", "activate": "启用",
+        "copy": "复制", "disable": "停用", "reactivate": "恢复使用",
+    })
     with st.expander("配置修订记录", expanded=False):
         st.dataframe(
             snapshots.rename(
@@ -991,16 +1062,19 @@ def _render_lot_config_editor(lot_config_id: int) -> None:
 
 
 def _render_lot_configs_tab() -> None:
+    notice = st.session_state.pop("v11_copy_notice", "")
+    if notice:
+        st.success(notice)
     _render_create_lot_config()
     configs = list_lot_configs()
     if configs.empty:
-        st.info("当前没有新版批号配置。")
+        st.info("当前没有批次。")
     else:
         config_id = _select_current_entity(
             dataframe=configs,
             label_builder=_config_label,
-            placeholder="请选择批号配置",
-            label="选择批号配置",
+            placeholder="请选择批次",
+            label="选择批次",
             key="v11_lot_config_selector",
             state_key="v11_selected_lot_config_id",
         )
@@ -1028,14 +1102,14 @@ def _render_lot_configs_tab() -> None:
         st.dataframe(
             display.rename(
                 columns={
-                    "config_name": "配置名称",
-                    "template_name": "模板",
+                    "config_name": "批次名称",
+                    "template_name": "项目",
                     "instrument_name": "仪器",
                     "qc_material_name": "质控品",
                     "lot_no": "批号",
                     "expiry_date": "效期",
                     "status": "状态",
-                    "item_count": "项目数",
+                    "item_count": "检验项目数",
                     "revision_no": "修订号",
                 }
             ),
@@ -1048,14 +1122,14 @@ def _render_lot_configs_tab() -> None:
     all_configs = list_lot_configs(include_disabled=True)
     disabled_configs = all_configs[all_configs["is_disabled"].astype(int) == 1]
     if not disabled_configs.empty:
-        with st.expander("恢复已停用批号配置", expanded=False):
+        with st.expander("恢复已停用批次", expanded=False):
             labels, mapping, _ = _option_map(
                 disabled_configs,
                 _config_label,
-                placeholder="请选择已停用批号配置",
+                placeholder="请选择已停用批次",
             )
             selected = st.selectbox(
-                "已停用批号配置",
+                "已停用批次",
                 labels,
                 key="v11_restore_lot_config_selector",
             )
@@ -1073,83 +1147,91 @@ def _render_lot_configs_tab() -> None:
                 except ValueError as exc:
                     st.error(str(exc))
                 else:
-                    st.success("批号配置已恢复为草稿，请重新校验后启用。")
+                    st.success("批次已恢复为草稿，请重新校验后启用。")
                     st.rerun()
 
 
 def _render_copy_tab() -> None:
+    st.caption("换用新批号的质控品时，沿用旧批次的检验项目和设置，省去重新填写。")
     configs = list_lot_configs()
     if configs.empty:
-        st.info("还没有可复制的批号配置。")
+        st.info("还没有可沿用设置的批次，请先在“批次管理”中建立第一个批次。")
         return
     source_labels, source_map, _ = _option_map(
-        configs,
-        _config_label,
-        placeholder="请选择来源批号配置",
+        configs, _config_label, placeholder="请选择旧批次",
     )
     source_label = st.selectbox(
-        "来源批号配置",
-        source_labels,
-        key="v11_copy_source_config",
+        "沿用哪个批次的设置", source_labels, key="v11_copy_source_config",
     )
     source_id = source_map[source_label]
-    target_lots = pd.DataFrame()
-    if source_id is not None:
-        source = get_lot_config(int(source_id))
-        target_lots = list_qc_lots(int(source["qc_material_id"]))
+    if source_id is None:
+        return
+    source = get_lot_config(int(source_id))
+    target_lots = list_qc_lots(int(source["qc_material_id"]))
+    with get_connection() as connection:
+        occupied = {row[0] for row in connection.execute(
+            "SELECT qc_material_lot_id FROM qc_lot_configs WHERE template_id=? AND combination_key='' AND is_disabled=0",
+            (source["template_id"],),
+        )}
+    unavailable = occupied | {int(source["qc_material_lot_id"])}
+    target_lots = target_lots[~target_lots["id"].isin(unavailable)]
+    if target_lots.empty:
+        st.info("没有可选的新质控品批号。请先登记新批号及水平；已经建立过批次的批号，可直接在“批次管理”中打开。")
+        if st.button("去基础资料登记新批号", key="v11_copy_register_lot"):
+            open_global_page("show_master_data_page")
+        return
     lot_labels, lot_map, _ = _option_map(
-        target_lots,
-        _lot_label,
-        placeholder="请选择目标新批号",
+        target_lots, _lot_label, placeholder="请选择新质控品批号",
     )
     target_lot_label = st.selectbox(
-        "目标新批号",
-        lot_labels,
-        key="v11_copy_target_lot",
+        "新质控品批号", lot_labels, key=f"v11_copy_target_lot_{source_id}",
     )
+    target_lot_id = lot_map[target_lot_label]
+    if target_lot_id is None:
+        return
+    target = target_lots[target_lots["id"] == target_lot_id].iloc[0]
+    st.markdown(f"**{source['qc_material_name']}：{source['lot_no']} → {target['lot_no']}**")
     config_name = st.text_input(
-        "新配置名称（留空自动生成）",
-        key="v11_copy_config_name",
+        "新批次名称", value=f"{source['template_name']}｜{target['lot_no']}",
+        key=f"v11_copy_config_name_{source_id}_{target_lot_id}",
     )
-    st.info(
-        "复制会带入项目、单位、方法学、试剂、水平结构、建靶点数和 CV 要求。"
-        "人工或厂家靶值会作为待确认值；建靶计算项目会清空靶值与 SD，"
-        "由新批号重新建靶。结果、建靶状态、异常记录和报告不会复制。"
-    )
-    if st.button(
-        "复制为新批号配置",
-        key="v11_copy_config_button",
-        type="primary",
-        width="stretch",
-    ):
-        target_lot_id = lot_map[target_lot_label]
-        if source_id is None or target_lot_id is None:
-            st.error("请选择来源批号配置和目标新批号。")
+    items = list_lot_config_items(int(source_id))
+    preview = []
+    for _, item in items.iterrows():
+        levels = list_lot_item_levels(int(item["id"]))
+        manual = not levels.empty and (levels["target_source"] != "building").any()
+        preview.append({
+            "检验项目": item["test_item_name"],
+            "质控方法": QC_METHOD_LABELS.get(item["qc_method"], item["qc_method"]),
+            "水平数": int(item["level_count"]),
+            "CV 要求上限（%）": item["cv_limit"],
+            "新批次靶值": "参考值待核对" if manual else "重新收集数据建靶",
+        })
+    st.dataframe(pd.DataFrame(preview), hide_index=True, width="stretch")
+    st.caption("单位、方法学、试剂及建靶点数一并沿用。新批次从空白检测记录开始，旧批次及记录保留。")
+    if st.button("建立新批次草稿", key="v11_copy_config_button", type="primary", width="stretch"):
+        try:
+            new_config_id = copy_lot_config(
+                source_lot_config_id=int(source_id), target_qc_material_lot_id=int(target_lot_id),
+                config_name=config_name,
+            )
+        except ValueError as exc:
+            st.error(str(exc))
         else:
-            try:
-                new_config_id = copy_lot_config(
-                    source_lot_config_id=int(source_id),
-                    target_qc_material_lot_id=int(target_lot_id),
-                    config_name=config_name,
-                )
-            except ValueError as exc:
-                st.error(str(exc))
-            else:
-                st.session_state["v11_selected_lot_config_id"] = new_config_id
-                st.success("新批号配置已复制，请逐项确认靶值和 SD。")
-                st.rerun()
+            st.session_state["v11_pending_copied_config_id"] = new_config_id
+            st.rerun()
 
 
 def _render_import_export_tab() -> None:
     st.markdown("**批量导入项目配置**")
     st.caption(
-        "使用系统 XLSX 模板批量维护一个项目模板。搜索不到的检验项目、单位、"
+        "使用系统 XLSX 模板批量维护项目中的检验项目。搜索不到的检验项目、单位、"
         "方法学、试剂和厂家会作为医院本地词条新增；官方词条不会被覆盖。"
     )
     st.download_button(
         "下载项目配置导入模板",
         data=build_project_import_template_xlsx(),
-        file_name="LJQC_V1_1_project_import_template.xlsx",
+        file_name="LJQC_项目导入模板.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         width="stretch",
         key="v11_download_project_import_template",
@@ -1159,10 +1241,10 @@ def _render_import_export_tab() -> None:
     template_labels, template_map, _ = _option_map(
         templates,
         _template_label,
-        placeholder="请选择目标项目模板",
+        placeholder="请选择目标项目",
     )
     target_label = st.selectbox(
-        "导入到项目模板",
+        "导入到项目",
         template_labels,
         key="v11_import_target_template",
     )
@@ -1170,7 +1252,7 @@ def _render_import_export_tab() -> None:
     if target_template_id is not None:
         target_template = get_project_template(int(target_template_id))
         st.download_button(
-            "导出当前项目模板 XLSX",
+            "导出当前项目 XLSX",
             data=build_project_template_xlsx(int(target_template_id)),
             file_name=(
                 f"{_safe_file_fragment(target_template['template_name'], 'project_template')}.xlsx"
@@ -1203,10 +1285,10 @@ def _render_import_export_tab() -> None:
                     st.error("文件中存在以下问题：\n\n" + "\n".join(f"- {item}" for item in errors))
                 mode_label = st.radio(
                     "导入方式",
-                    options=["合并到现有项目", "替换模板全部项目"],
+                    options=["合并检验项目", "替换项目内全部检验项目"],
                     horizontal=True,
                     key="v11_project_import_mode",
-                    help="替换只会软停用未出现在文件中的模板项目，不删除字典词条。",
+                    help="替换只会停用当前项目内未出现在文件中的检验项目，不删除基础资料。",
                 )
                 if st.button(
                     "确认批量导入",
@@ -1221,7 +1303,7 @@ def _render_import_export_tab() -> None:
                             uploaded_bytes,
                             mode=(
                                 "replace"
-                                if mode_label == "替换模板全部项目"
+                                if mode_label == "替换项目内全部检验项目"
                                 else "merge"
                             ),
                         )
@@ -1235,23 +1317,23 @@ def _render_import_export_tab() -> None:
                         )
                         suffix = f"；新增本地词条：{created_text}" if created_text else ""
                         st.success(
-                            f"已导入 {result['imported_count']} 个项目，"
-                            f"模板当前共保存 {result['saved_count']} 个项目{suffix}。"
-                            "模板已回到草稿状态，请校验后启用。"
+                            f"已导入 {result['imported_count']} 个检验项目，"
+                            f"当前项目共包含 {result['saved_count']} 个检验项目{suffix}。"
+                            "项目已回到草稿状态，请校验后启用。"
                         )
                         st.rerun()
 
     st.divider()
-    st.markdown("**导出批号配置**")
+    st.markdown("**导出批次**")
     st.caption("导出批号、项目、水平靶值和修订记录；结果数据和质控计算不包含在此文件中。")
     configs = list_lot_configs()
     config_labels, config_map, _ = _option_map(
         configs,
         _config_label,
-        placeholder="请选择批号配置",
+        placeholder="请选择批次",
     )
     config_label = st.selectbox(
-        "要导出的批号配置",
+        "要导出的批次",
         config_labels,
         key="v11_export_lot_config_selector",
     )
@@ -1259,7 +1341,7 @@ def _render_import_export_tab() -> None:
     if export_config_id is not None:
         config = get_lot_config(int(export_config_id))
         st.download_button(
-            "导出批号配置 XLSX",
+            "导出批次 XLSX",
             data=build_lot_config_xlsx(int(export_config_id)),
             file_name=(
                 f"{_safe_file_fragment(config['config_name'], 'lot_configuration')}.xlsx"
@@ -1278,25 +1360,20 @@ def render_project_management_page() -> None:
             st.rerun()
 
     render_section_intro(
-        title="新版项目 / 批次管理",
-        eyebrow="全局入口",
+        title="项目 / 批次管理",
+        eyebrow="资料管理",
         caption=(
-            "从基础资料字典选择本地仪器、试剂和质控品，建立项目模板；"
-            "再为具体质控品批号配置水平、靶值和 SD。多项目模板中可分别调整各项目的试剂。"
+            "从基础资料字典选择本地仪器、试剂和质控品，建立项目；"
+            "再为具体质控品批号建立批次，设置水平、靶值和 SD。各检验项目可分别调整试剂。"
         ),
-        badges=["多项目批量配置", "复制上一批号", "配置快照"],
+        badges=["检验项目批量设置", "更换质控品批次", "变更记录"],
         tone="accent",
-    )
-    st.info(
-        "推荐顺序：先在“基础资料”维护字典，再创建项目模板，最后创建或复制批号配置。"
-        "仪器型号需先登记为本地仪器，才能用于项目模板。"
     )
     dictionary_counts = {
         "本地仪器": len(list_lab_instruments()),
         "试剂": len(list_reagents()),
         "质控品": len(list_qc_materials()),
     }
-    st.caption("当前可选字典：" + "｜".join(f"{name} {count} 条" for name, count in dictionary_counts.items()))
     missing = [name for name, count in dictionary_counts.items() if count == 0]
     if missing:
         st.warning(
@@ -1305,7 +1382,15 @@ def render_project_management_page() -> None:
         )
     if st.button("维护仪器、试剂和质控品字典", key="v11_open_product_dictionaries"):
         open_global_page("show_master_data_page")
-    tabs = st.tabs(["项目模板", "批号配置", "复制上一批号", "导入导出", "批号使用与追溯"])
+    copied_id = st.session_state.pop("v11_pending_copied_config_id", None)
+    if copied_id is not None:
+        copied = get_lot_config(int(copied_id))
+        st.session_state["v11_selected_lot_config_id"] = int(copied_id)
+        st.session_state["v11_lot_config_selector"] = _config_label(pd.Series(dict(copied)))
+        st.session_state["v11_management_tabs"] = "批次管理"
+        st.session_state["v11_copy_notice"] = f"已建立 {copied['lot_no']} 的新批次草稿。请展开各检验项目，核对水平和靶值后再启用。"
+    tabs = st.tabs(["新建项目", "批次管理", "更换质控品批次", "导入导出", "批号使用与追溯"],
+        key="v11_management_tabs", on_change="rerun")
     with tabs[0]:
         _render_templates_tab()
     with tabs[1]:

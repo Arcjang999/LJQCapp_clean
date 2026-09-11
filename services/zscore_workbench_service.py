@@ -51,17 +51,17 @@ def _configuration_sources(connection: sqlite3.Connection) -> tuple[list[dict], 
             WHERE lot_config_id = ? AND revision_no = ? ORDER BY id DESC LIMIT 1
         """, (row["lot_config_id"], row["revision_no"])).fetchone()
         if snapshot is None:
-            reject("未找到当前配置快照，请在项目/批次管理中重新保存并启用。")
+            reject("当前配置尚未保存完成，请在项目/批次管理中重新保存并启用。")
             continue
         payload = json.loads(snapshot["snapshot_json"])
         item = next((i for i in payload["items"] if i["id"] == row["id"]), None)
         live_level_ids = [level["qc_level_id"] for level in levels]
         if item is None or [level["qc_level_id"] for level in item["levels"]] != live_level_ids:
-            reject("水平配置与启用快照不一致，请重新保存并启用。")
+            reject("水平设置在启用后发生变化，请重新保存并启用。")
             continue
         if (item["qc_method"] != "zscore" or item["level_count"] != len(levels)
                 or any((level["target_source"] not in ("building","manual","manufacturer") or not level["target_confirmed"]) for level in item["levels"])):
-            reject("配置快照尚不满足多水平本批次建靶条件。")
+            reject("当前配置未完成，请检查水平数量、靶值来源及参数确认。")
             continue
         config = payload["config"]
         sources.append({
@@ -95,18 +95,18 @@ def sync_zscore_workbench_bindings() -> list[dict]:
             binding = connection.execute("SELECT * FROM qc_workbench_bindings WHERE lot_config_item_id = ?",
                                          (source["lot_config_item_id"],)).fetchone()
             if binding is not None and binding["qc_method"] != "zscore":
-                issues.append({"config_name": source["config_name"], "issue": "该配置已绑定其他方法，请新建批号配置。"})
+                issues.append({"config_name": source["config_name"], "issue": "该批次已用于其他质控方法，请新建批次。"})
                 continue
             if binding is not None:
                 previous = json.loads(binding["source_snapshot_json"])
                 if (previous.get("input_value_type") != source["input_value_type"]
                         or previous.get("level_count") != source["level_count"]):
-                    issues.append({"config_name": source["config_name"], "issue": "已绑定项目的输入值类型和水平数不能变更，请新建项目与批号配置。"})
+                    issues.append({"config_name": source["config_name"], "issue": "已使用项目的输入值类型和水平数不能变更，请新建项目与批次。"})
                     continue
                 has_results = connection.execute("SELECT 1 FROM zscore_runs WHERE batch_id = ? LIMIT 1",
                                                  (binding["runtime_batch_id"],)).fetchone() is not None
                 if has_results and previous.get("identity") != source["identity"]:
-                    issues.append({"config_name": source["config_name"], "issue": "已有检测记录，仪器、方法、单位、水平及建靶要求不能变更。请新建批号配置。"})
+                    issues.append({"config_name": source["config_name"], "issue": "已有检测记录，仪器、方法、单位、水平及建靶要求不能变更。请新建批次。"})
                     continue
                 if has_results:
                     source = previous

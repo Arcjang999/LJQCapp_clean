@@ -51,10 +51,10 @@ def _format_settings_path_summary(path: Path | None, *, tail_parts: int = 2) -> 
     if len(remainder_parts) <= tail_parts:
         return path_text
 
-    suffix = "\\".join(remainder_parts[-tail_parts:])
-    if anchor:
-        return f"{anchor}\\...\\{suffix}"
-    return f"...\\{suffix}"
+    separator = "\\" if "\\" in path_text else "/"
+    suffix = separator.join(remainder_parts[-tail_parts:])
+    return f"{anchor}{separator}...{separator}{suffix}" if anchor else f"...{separator}{suffix}"
+
 
 
 def render_settings_page() -> None:
@@ -74,7 +74,7 @@ def render_settings_page() -> None:
     render_section_intro(
         title="系统设置",
         caption="用于维护报告默认信息，以及数据存储、迁移、备份和恢复。",
-        eyebrow="全局入口",
+        eyebrow="系统设置",
         badges=["报告默认信息", "数据存储与备份", "迁移与恢复"],
         tone="accent",
     )
@@ -86,9 +86,9 @@ def render_settings_page() -> None:
             ("科室名称", current_settings.department_name or "未填写"),
             ("质控负责人", current_settings.qc_owner_name or "未填写"),
             ("审核人", current_settings.reviewer_name or "未填写"),
-            ("报告声明", "已配置" if current_settings.report_statement else "回退到系统默认声明"),
+            ("报告声明", "已配置" if current_settings.report_statement else "使用默认声明"),
         ],
-        badges=["全局功能", "影响后续新报告"],
+        badges=["实验室信息", "影响后续新报告"],
     )
 
     with st.container():
@@ -130,10 +130,10 @@ def render_settings_page() -> None:
             st.success(saved_notice)
 
         st.caption(
-            "空值策略：实验室名称、科室名称、质控负责人、审核人为空时，报告会显示“未填写”；"
-            "报告声明为空时，系统会回退到默认声明。"
+            "未填写时：实验室名称、科室名称、质控负责人、审核人为空时，报告会显示“未填写”；"
+            "报告声明为空时，报告会使用默认声明。"
         )
-        with st.expander("查看当前报告回退默认值", expanded=False):
+        with st.expander("查看未填写时的报告内容", expanded=False):
             st.write(f"实验室名称：{REPORT_SETTINGS_FALLBACKS['lab_name']}")
             st.write(f"科室名称：{REPORT_SETTINGS_FALLBACKS['department_name']}")
             st.write(f"质控负责人：{REPORT_SETTINGS_FALLBACKS['qc_owner_name']}")
@@ -164,12 +164,11 @@ def _render_storage_section() -> None:
         items=[
             ("当前数据库文件", _format_settings_path_summary(status.db_path)),
             ("当前数据库目录", _format_settings_path_summary(status.db_dir)),
-            ("路径配置文件", _format_settings_path_summary(status.config_path)),
             ("默认备份目录", _format_settings_path_summary(status.default_backup_dir)),
         ],
         badges=[
-            "已使用外部路径配置" if status.configured_db_path is not None else "使用默认数据库路径",
-            "SQLite 校验通过" if status.is_valid_sqlite or not status.exists else "数据库需检查",
+            "自选保存位置" if status.configured_db_path is not None else "默认保存位置",
+            "数据文件正常" if status.is_valid_sqlite or not status.exists else "数据库需检查",
         ],
     )
 
@@ -179,7 +178,7 @@ def _render_storage_section() -> None:
             [
                 ("数据库文件", str(status.db_path.name)),
                 ("目录可见性", "可读取" if status.is_readable or not status.exists else "需检查"),
-                ("SQLite 状态", "有效" if status.is_valid_sqlite or not status.exists else "异常"),
+                ("数据文件状态", "有效" if status.is_valid_sqlite or not status.exists else "异常"),
                 ("文件大小", f"{status.size_bytes} 字节" if status.exists else "-"),
             ]
         )
@@ -198,7 +197,7 @@ def _render_storage_section() -> None:
             except RuntimeError as exc:
                 st.error(str(exc))
             else:
-                st.success("已调用系统资源管理器打开数据库所在目录。")
+                st.success("已打开数据文件夹。")
         if st.button("打开默认备份目录", key="open_default_backup_dir", use_container_width=True):
             try:
                 status.default_backup_dir.mkdir(parents=True, exist_ok=True)
@@ -206,7 +205,7 @@ def _render_storage_section() -> None:
             except (RuntimeError, OSError) as exc:
                 st.error(str(exc))
             else:
-                st.success("已调用系统资源管理器打开默认备份目录。")
+                st.success("已打开备份文件夹。")
 
     if not status.exists:
         st.warning("当前数据库文件尚未生成；执行迁移、备份或恢复前，系统会先初始化当前数据库。")
@@ -255,10 +254,8 @@ def _render_storage_section() -> None:
                 st.error(str(exc))
             else:
                 st.success(result.message)
-                if result.config_path is not None:
-                    st.caption(f"数据库路径配置已写入：{result.config_path}")
     with migration_right:
-        st.info("迁移只切换数据库文件所在目录，不改变业务数据结构。")
+        st.info("更改保存位置后，现有项目和检测记录会一起保留。")
         st.caption("建议迁移前先做一次备份，迁移完成后按提示重启应用。")
 
     st.markdown("**数据备份**")

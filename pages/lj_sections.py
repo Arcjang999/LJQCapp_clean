@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+from services.cv_service import calculate_cv_percent
 from services.lot_lifecycle_service import review_import_lots, import_reviewed_results
 
 from datetime import datetime
@@ -138,7 +140,7 @@ def render_lj_building_outlier_panel(
     latest_source_text: str,
 ) -> None:
     panel_data = build_lj_building_outlier_panel_data(stats, latest_source_text)
-    st.markdown("**建靶期离群值判断模块**")
+    st.markdown("**建靶期离群值判断**")
     render_compact_stat_metrics(
         [
             ("当前阶段", str(panel_data["phase_label"])),
@@ -177,7 +179,7 @@ def render_lj_formal_westgard_panel(
     latest_rule_hits: str,
     latest_source_text: str,
 ) -> None:
-    st.markdown("**Westgard 分析模块**")
+    st.markdown("**Westgard 判读**")
     render_status_panel(
         latest_status,
         latest_compact_message,
@@ -300,9 +302,9 @@ def build_lj_workbench_context(selected_batch_id: int) -> dict[str, object]:
         )
         from services.lot_lifecycle_service import target_profile
         confirmed=target_profile('lj',selected_batch_id)
-        if qc_df.empty and confirmed:
+        if confirmed:
             level=confirmed['levels'][0]
-            stats.update(target_ready=True,mean=level['mean'],sd=level['sd'],cv=abs(level['sd']/level['mean']*100) if level['mean'] else None,
+            stats.update(target_ready=True,mean=level['mean'],sd=level['sd'],cv=calculate_cv_percent(level['mean'], level['sd']),
                 target_profile_id=confirmed['id'],message='控制参数已确认，可录入正式质控结果。')
         latest_status, latest_status_message = get_latest_status_context(qc_df)
         latest_rule_hits, latest_compact_message = get_latest_result_panel_content(qc_df, latest_status_message)
@@ -404,7 +406,6 @@ def render_lj_entry_and_stats_section(
 
     with st.container(border=True):
         st.markdown("**本次结果录入**")
-        st.caption(f"检测时间、检测人、{input_value_type_label} 与变更点集中在同一操作卡。")
         test_time = st.datetime_input(
             "检测时间",
             key="entry_test_time",
@@ -467,19 +468,20 @@ def render_lj_entry_and_stats_section(
                 st.rerun()
 
     with st.container(border=True):
-        st.markdown("**建靶统计**")
+        confirmed_target = bool(stats.get("target_profile_id"))
+        st.markdown("**当前控制参数**" if confirmed_target else "**建靶统计**")
         render_compact_stat_metrics(
             [
                 ("总记录数", f"{stats.get('building_total_count', 0)}"),
                 ("生效建靶点", f"{stats.get('effective_building_count', 0)}"),
                 ("已禁用点", f"{stats.get('disabled_building_count', 0)}"),
-                ("均值", "-" if stats["mean"] is None else f"{stats['mean']:.4f}"),
+                ("靶均值" if confirmed_target else "均值", "-" if stats["mean"] is None else f"{stats['mean']:.4f}"),
                 ("SD", "-" if stats["sd"] is None else f"{stats['sd']:.4f}"),
-                ("CV%", "-" if stats["cv"] is None else f"{stats['cv']:.2f}%"),
+                ("靶值 CV%" if confirmed_target else "建靶 CV%", "-" if stats["cv"] is None else f"{stats['cv']:.2f}%"),
             ]
         )
         st.caption(
-            "建靶进度："
+            "已使用确认的控制参数，后续结果按适用版本判读。" if confirmed_target else "建靶进度："
             + (
                 "已完成，后续结果自动进行 Westgard 判定。"
                 if stats.get("target_ready")
@@ -489,9 +491,9 @@ def render_lj_entry_and_stats_section(
         if cv_limit is not None:
             st.caption(f"当前批次已保存 CV 要求：≤ {cv_limit:.2f}%")
             render_cv_limit_hint(
-                building_cv_hint.get("cv"),
+                stats.get("cv") if confirmed_target else building_cv_hint.get("cv"),
                 cv_limit,
-                "当前累计建靶",
+                "当前靶值" if confirmed_target else "当前累计建靶",
             )
 
     with st.container(border=True):
@@ -687,9 +689,9 @@ def render_lj_maintenance_section(context: dict[str, object]) -> None:
                 ("总记录数", f"{stats.get('building_total_count', 0)}"),
                 ("生效建靶点", f"{stats.get('effective_building_count', 0)}"),
                 ("已禁用点", f"{stats.get('disabled_building_count', 0)}"),
-                ("均值", "-" if stats.get("mean") is None else f"{stats['mean']:.4f}"),
+                ("当前靶均值" if stats.get("target_profile_id") else "均值", "-" if stats.get("mean") is None else f"{stats['mean']:.4f}"),
                 ("SD", "-" if stats.get("sd") is None else f"{stats['sd']:.4f}"),
-                ("CV%", "-" if stats.get("cv") is None else f"{stats['cv']:.2f}%"),
+                ("靶值 CV%" if stats.get("target_profile_id") else "建靶 CV%", "-" if stats.get("cv") is None else f"{stats['cv']:.2f}%"),
             ]
         )
 
@@ -1045,7 +1047,7 @@ def _render_lj_export_import_section_impl(
         width="stretch",
     )
     if lj_building_import_disabled:
-        st.info("当前批次建靶已完成。V1 的 LJ 建靶期导入仅支持未完成建靶的当前批次。")
+        st.info("当前批次已完成建靶，请使用正式期导入。")
         st.session_state.pop(lj_import_review_state_key, None)
 
     uploaded_lj_building_csv = st.file_uploader(

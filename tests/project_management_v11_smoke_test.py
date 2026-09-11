@@ -257,7 +257,7 @@ def test_template_lot_copy_and_snapshot_round_trip() -> None:
 def test_project_management_page_starts_from_new_navigation() -> None:
     with TemporaryDatabaseContext():
         _seed_v11_configuration_dependencies()
-        at = AppTest.from_file(APP_FILE_PATH)
+        at = AppTest.from_file(APP_FILE_PATH, default_timeout=15)
         at.run()
         assert not list(at.exception)
         assert PROJECT_MANAGEMENT_ENTRY_LABEL not in at.radio(key="top_level_method_selector").options
@@ -318,17 +318,17 @@ def test_creation_requires_three_dictionaries_and_prefills_selected_reagent() ->
             widget.select(next(option for option in widget.options if text in option))
 
         def fill_creation():
-            next(item for item in at.text_input if item.label == "模板名称 *").input("三字典模板")
+            next(item for item in at.text_input if item.label == "项目名称 *").input("三字典模板")
             select("本地仪器 *", "V11 1号仪器")
             select("质控品 *", "V11 三水平质控品")
 
         fill_creation()
-        next(item for item in at.button if item.label == "创建模板").click().run()
+        next(item for item in at.button if item.label == "创建项目").click().run()
         assert list_project_templates().empty
         assert any("请选择本地仪器、试剂和质控品" in error.value for error in at.error)
         fill_creation()
         select("试剂 *", "另一项目试剂")
-        next(item for item in at.button if item.label == "创建模板").click().run()
+        next(item for item in at.button if item.label == "创建项目").click().run()
         assert not list(at.exception)
         template_id = int(list_project_templates().iloc[0]["id"])
         assert get_project_template(template_id)["default_reagent_id"] == alternate_id

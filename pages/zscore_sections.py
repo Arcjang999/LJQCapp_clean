@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+from services.cv_service import calculate_cv_percent
 from services.lot_lifecycle_service import review_import_lots, import_reviewed_results
 
 from copy import deepcopy
@@ -282,7 +284,7 @@ def render_zscore_vendor_reference_editor_body(
         vendor_sd, _, _ = parse_numeric_input(sd_text)
         vendor_cv = None
         if vendor_mean is not None and vendor_sd is not None and not math.isclose(vendor_mean, 0.0, abs_tol=1e-12):
-            vendor_cv = vendor_sd / vendor_mean * 100
+            vendor_cv = calculate_cv_percent(vendor_mean, vendor_sd)
         st.caption(f"参考 CV%：{format_optional_float(vendor_cv, digits=2, suffix='%')}")
         submitted = st.form_submit_button("保存厂家参考值", width="stretch")
 
@@ -1416,7 +1418,6 @@ def render_zscore_level_summary_section(
     cv_limit = context["cv_limit"]
 
     st.subheader("各水平统计摘要")
-    st.caption("各水平的建靶进度、正式靶值与实时统计集中展示在这里。")
     stat_cols = st.columns(len(required_level_ids), gap="large")
     for stat_col, level_id in zip(stat_cols, required_level_ids):
         profile = level_target_profiles[level_id]
@@ -1451,6 +1452,7 @@ def render_zscore_level_summary_section(
                     profile.get("final_target_sd"),
                     profile.get("final_target_cv"),
                 )
+                render_cv_limit_hint(profile.get("final_target_cv"), cv_limit, f"{display_label} 正式靶值")
                 render_zscore_profile_stat_line(
                     "实时统计",
                     profile.get("realtime_mean"),

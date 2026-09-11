@@ -47,24 +47,24 @@ def _configuration_sources(connection: sqlite3.Connection) -> tuple[list[dict], 
             reject("即时法必须配置 1 个有效水平，建靶有效点数固定为 20。")
             continue
         if any(level["target_source"] != "building" for level in levels):
-            reject("当前仅支持本批次建靶；人工、厂家及待确认靶值暂未接入。")
+            reject("即时法用于本批次建靶，需逐步积累检测数据。使用已确认的人工或厂家靶值时，请选择单水平 LJ 法。")
             continue
         snapshot = connection.execute("""
             SELECT id, snapshot_json FROM qc_config_snapshots
             WHERE lot_config_id = ? AND revision_no = ? ORDER BY id DESC LIMIT 1
         """, (row["lot_config_id"], row["revision_no"])).fetchone()
         if snapshot is None:
-            reject("未找到当前配置快照，请在项目/批次管理中重新保存并启用。")
+            reject("当前配置尚未保存完成，请在项目/批次管理中重新保存并启用。")
             continue
         payload = json.loads(snapshot["snapshot_json"])
         item = next((i for i in payload["items"] if i["id"] == row["id"]), None)
         live_level_ids = [level["qc_level_id"] for level in levels]
         if item is None or [level["qc_level_id"] for level in item["levels"]] != live_level_ids:
-            reject("水平配置与启用快照不一致，请重新保存并启用。")
+            reject("水平设置在启用后发生变化，请重新保存并启用。")
             continue
         if (item["qc_method"] != "instant" or item["level_count"] != 1 or item["target_n"] != 20
                 or any(level["target_source"] != "building" for level in item["levels"])):
-            reject("配置快照尚不满足即时法单水平、20 点本批次建靶条件。")
+            reject("请将即时法配置为单水平、本批次建靶，建靶次数设为 20。")
             continue
         config = payload["config"]
         sources.append({
@@ -104,16 +104,16 @@ def sync_instant_workbench_bindings() -> list[dict]:
             if binding is not None:
                 previous = json.loads(binding["source_snapshot_json"])
                 if binding["qc_method"] != "instant":
-                    issues.append({"config_name": source["config_name"], "issue": "该配置已绑定其他质控方法，请新建配置。"})
+                    issues.append({"config_name": source["config_name"], "issue": "该批次已用于其他质控方法，请新建批次。"})
                     continue
                 if previous.get("input_value_type") != source["input_value_type"]:
-                    issues.append({"config_name": source["config_name"], "issue": "已绑定项目的输入值类型不可更改，请新建模板项目。"})
+                    issues.append({"config_name": source["config_name"], "issue": "已使用项目的输入值类型不可更改，请新建项目。"})
                     continue
                 has_results = connection.execute(
                     "SELECT 1 FROM instant_results WHERE batch_id = ? LIMIT 1", (binding["runtime_batch_id"],)
                 ).fetchone() is not None
                 if has_results and previous.get("identity") != source["identity"]:
-                    issues.append({"config_name": source["config_name"], "issue": "已有检测记录，仪器、试剂、质控品、水平和计算配置不可变更，请新建批号配置。"})
+                    issues.append({"config_name": source["config_name"], "issue": "已有检测记录，仪器、试剂、质控品、水平和计算配置不可变更，请新建批次。"})
                     continue
                 if has_results:
                     source = previous

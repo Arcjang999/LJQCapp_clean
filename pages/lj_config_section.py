@@ -9,11 +9,11 @@ from services.workbench_config_service import (
     list_lj_workbench_configuration_issues,
     list_lj_workbench_projects,
 )
-from ui.common import open_global_page, render_section_intro, render_workbench_context_bar
+from ui.common import render_section_intro, render_workbench_context_bar
 
 
 PROJECT_PLACEHOLDER = "请选择已启用的 LJ 项目"
-BATCH_PLACEHOLDER = "请选择已启用的批号配置"
+BATCH_PLACEHOLDER = "请选择已启用的批次"
 
 
 def _clean(value: object, fallback: str = "-") -> str:
@@ -114,34 +114,24 @@ def render_lj_v12_configuration_selection(
 ) -> None:
     with manage_tab:
         render_section_intro(
-            title="LJ 项目与批号选择",
+            title="LJ 项目与批次选择",
             caption=(
-                "这里只显示全局“项目/批次管理”中已启用且使用本批次建靶的 LJ 新版配置，"
-                "以及已经确认转入的即时法批次。项目和批号不再在工作台内新建。"
+                "选择已启用的单水平项目与批次。支持本批次建靶、已确认的人工或厂家参数，以及即时法转入的批次。"
             ),
-            badges=["新版配置", "即时法转入", "只读选择", "不读取普通旧测试项目"],
+            badges=["单水平", "靶值确认", "即时法转入"],
             tone="accent",
         )
-
-        action_col1, action_col2, _ = st.columns([0.24, 0.24, 0.52], gap="small")
-        with action_col1:
-            if st.button("打开项目/批次管理", key="lj_open_v11_project_management", use_container_width=True):
-                open_global_page("show_project_management_page")
-        with action_col2:
-            if st.button("打开基础资料", key="lj_open_v11_master_data", use_container_width=True):
-                open_global_page("show_master_data_page")
 
         issues = list_lj_workbench_configuration_issues()
         if not issues.empty:
             st.warning(
-                f"另有 {len(issues)} 个已启用 LJ 配置使用人工或厂家靶值，"
-                "本轮为保持现有计算核心不变，暂不进入工作台。"
+                f"有 {len(issues)} 个 LJ 配置需要完善，请在顶部“资料与批次 → 项目/批次管理”检查。"
             )
-            with st.expander("查看暂未接入的配置", expanded=False):
+            with st.expander("查看需要完善的配置", expanded=False):
                 st.dataframe(
                     issues.rename(
                         columns={
-                            "config_name": "批号配置",
+                            "config_name": "批次",
                             "test_item_name": "检验项目",
                             "lot_no": "质控品批号",
                             "target_source": "靶值来源",
@@ -154,8 +144,8 @@ def render_lj_v12_configuration_selection(
 
         if projects.empty:
             st.info(
-                "当前没有可进入 LJ 工作台的新版配置。请先在全局项目/批次管理中"
-                "创建 LJ 项目、配置一个水平并启用批号配置，或从即时法确认转入。"
+                "当前没有可用的 LJ 项目。请先在顶部“资料与批次 → 项目/批次管理”中"
+                "创建 LJ 项目、配置一个水平并启用批次，或从即时法确认转入。"
             )
             return
 
@@ -179,7 +169,7 @@ def render_lj_v12_configuration_selection(
 
         with selector_col2:
             selected_batch_label = st.selectbox(
-                "批号配置",
+                "批次",
                 options=batch_labels,
                 index=_selector_index(batch_map, selected_batch_id),
                 key="v12_lj_batch_selector",
@@ -191,21 +181,21 @@ def render_lj_v12_configuration_selection(
                 st.rerun()
 
         if selected_batch_id is None or batches.empty:
-            st.info("请选择一个已启用的批号配置后进入“当前批次”。")
+            st.info("请选择一个已启用的批次后进入“当前批次”。")
             return
 
         selected = batches[batches["id"].astype(int) == int(selected_batch_id)].iloc[0]
         is_from_instant = _is_from_instant(selected)
         render_workbench_context_bar(
-            title="当前即时法转入批次" if is_from_instant else "当前新版配置",
+            title="当前即时法转入批次" if is_from_instant else "当前项目与批次",
             caption=(
                 "该批次由即时法确认转入，来源与转入记录保持可追溯。"
                 if is_from_instant
-                else "以下信息来自启用时的项目与批号配置，工作台内只读。"
+                else "以下信息来自启用时的项目与批次，工作台内只读。"
             ),
             items=[
                 ("检验项目", selected["project_name"]),
-                ("配置名称", _clean(selected["v11_config_name"])),
+                ("批次名称", _clean(selected["v11_config_name"])),
                 ("仪器", selected["instrument"]),
                 ("试剂", selected["reagent"]),
                 ("质控品", selected["qc_material"]),
@@ -226,7 +216,7 @@ def render_lj_v12_configuration_selection(
 
         display_batches = batches.copy()
         display_batches["source_label"] = display_batches["source_method"].map(
-            lambda value: "由即时法转入" if str(value or "").strip().lower() == "instant" else "新版配置"
+            lambda value: "由即时法转入" if str(value or "").strip().lower() == "instant" else "所属项目"
         )
         st.dataframe(
             display_batches[
@@ -248,7 +238,7 @@ def render_lj_v12_configuration_selection(
             ].rename(
                 columns={
                     "project_name": "检验项目",
-                    "v11_config_name": "配置名称",
+                    "v11_config_name": "批次名称",
                     "lot_no": "质控品批号",
                     "expiry_date": "效期",
                     "instrument": "仪器",

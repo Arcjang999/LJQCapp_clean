@@ -220,7 +220,7 @@ def _render_instant_entry_and_summary_section(
             st.session_state["instant_entry_test_time"] = datetime.now()
             st.session_state["instant_reset_entry_form"] = False
 
-        st.caption("即时法当前按单水平工作流录入检测时间、检测人和单个结果值。")
+        st.caption("填写检测时间、检测人和本次检测值。")
         test_time = st.datetime_input(
             "检测时间",
             key="instant_entry_test_time",
@@ -595,7 +595,7 @@ def render_instant_page() -> None:
     st.subheader("即时法")
     st.caption(
         "即时法是面向单水平项目的过渡方法，适用于短期内难以快速累积 20 个点的场景；"
-        "页面重点突出有效点累计、即刻法 SI 值提示和确认转入 LJ 法。"
+        "3 个有效点后开始检验，20 个有效建靶点后可人工确认转入 LJ。"
     )
     projects_df, selected_project_id, batches_df, selected_batch_id, issues = prepare_instant_v12_project_batch_context()
     manage_tab, work_tab = st.tabs([TEXT["manage"], TEXT["current_batch"]])
@@ -628,7 +628,7 @@ def render_instant_page() -> None:
             ("质控水平", batch["level_name"] or "-"),
             ("单位", batch["unit_symbol"] or "-"),
             ("检测方法", batch["method_name"] or "-"),
-            ("配置名称", batch["v11_config_name"] or "-"),
+            ("批次名称", batch["v11_config_name"] or "-"),
             ("批号效期", batch["v11_expiry_date"] or "-"),
         ]
         context_badges = [
@@ -667,8 +667,8 @@ def render_instant_page() -> None:
         if st.session_state.get("show_instant_transfer_dialog"):
             _render_instant_transfer_dialog(selected_batch_id)
         render_section_intro(
-            title="当前动作区",
-            caption="左侧用于结果录入与累计统计，右侧用于图表和最新判定。",
+            title="本次质控",
+            caption=None,
             badges=["即时法", "过渡方法", f"有效点 {summary['effective_count']}/{INSTANT_TRANSFER_READY_COUNT}", input_value_type_label],
             tone="accent",
         )
@@ -691,7 +691,7 @@ def render_instant_page() -> None:
                 _render_instant_chart_analysis_section(context)
 
         render_section_intro(
-            title="历史与次要操作区",
+            title="检测记录与数据管理",
             caption="下方可查看转入 LJ、记录回顾、维护和即刻法 SI 值说明。",
             badges=["转入 LJ", "记录回顾", "维护"],
             tone="muted",
@@ -717,7 +717,7 @@ def render_instant_page() -> None:
             with st.container(border=True):
                 render_section_intro(
                     title="记录维护区",
-                    caption="本阶段支持即时法记录禁用与恢复，已转入 LJ 后统一冻结为只读。",
+                    caption="可保留、禁用或恢复记录；转入 LJ 后仅供查看。",
                     tone="muted",
                 )
                 _render_instant_maintenance_section(context)

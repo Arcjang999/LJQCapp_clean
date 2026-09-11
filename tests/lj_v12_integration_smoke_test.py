@@ -226,7 +226,12 @@ def test_v12_lj_page_uses_global_configuration_selection() -> None:
         batch_selector = app.selectbox(key="v12_lj_batch_selector")
         batch_selector.set_value(batch_selector.options[1]).run()
         assert not list(app.exception)
-        assert any(button.key == "lj_open_v11_project_management" for button in app.button)
+        assert not any(button.key == "lj_open_v11_project_management" for button in app.button)
+        app.button(key="open_project_management_page").click().run()
+        assert not list(app.exception)
+        app.button(key="close_project_management_page").click().run()
+        assert not list(app.exception)
+        assert app.selectbox(key="v12_lj_batch_selector").value == batch_selector.value
 
 
 if __name__ == "__main__":
