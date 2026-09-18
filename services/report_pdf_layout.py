@@ -55,7 +55,7 @@ LJ_ABNORMAL_TABLE_COLUMNS = ["检测时间", "检测序号", "结果值", "状�
 LJ_ABNORMAL_TABLE_WIDTHS = [0.19, 0.10, 0.12, 0.10, 0.14, 0.35]
 ZSCORE_ABNORMAL_TABLE_COLUMNS = ["检测时间", "检测序号", "本次检测结论", "触发规则", "各水平触发证据", "误差类型", "手动备注"]
 ZSCORE_ABNORMAL_TABLE_WIDTHS = [0.135, 0.065, 0.095, 0.105, 0.335, 0.090, 0.170]
-ZSCORE_ABNORMAL_WRAP_WIDTHS = [10, 4, 5, 10, 15, 6, 9]
+ZSCORE_ABNORMAL_WRAP_WIDTHS = [10, 4, 5, 10, 15, 5, 9]
 
 
 @dataclass
@@ -98,6 +98,7 @@ def render_lj_monthly_report_pdf(package: Any, font_name: str) -> bytes:
                 pages.append((figure, f"说明页 {action_index}"))
 
             pages.extend((figure,"批号与参数追溯") for figure in _build_lot_trace_pages(report))
+            pages.extend((figure,"分析质量要求") for figure in _build_quality_pages(report))
             _write_pages(pdf, pages, report)
     return buffer.getvalue()
 
@@ -128,6 +129,7 @@ def render_zscore_monthly_report_pdf(package: Any, font_name: str) -> bytes:
                 pages.append((figure, f"说明页 {action_index}"))
 
             pages.extend((figure,"批号与参数追溯") for figure in _build_lot_trace_pages(report))
+            pages.extend((figure,"分析质量要求") for figure in _build_quality_pages(report))
             _write_pages(pdf, pages, report)
     return buffer.getvalue()
 
@@ -188,7 +190,7 @@ def _build_lj_summary_page(report: Any):
         ["检测方法", report.basic_info.detection_method, "单位", report.basic_info.unit_symbol],
         ["质控品批号", report.basic_info.lot_no, "仪器", report.basic_info.instrument],
         ["试剂", report.basic_info.reagent, "质控品", report.basic_info.qc_material],
-        ["浓度", report.basic_info.concentration, "当前靶值来源", report.basic_info.target_source_label],
+        ["浓度", report.basic_info.concentration, "均值和标准差\n来源", report.basic_info.target_source_label],
         ["来源说明", _wrap_text(report.basic_info.target_source_detail, 18), "", ""],
     ]
     _draw_table_section(
@@ -204,8 +206,8 @@ def _build_lj_summary_page(report: Any):
         ["月度正式期总记录数", str(report.statistics.formal_count), "在控记录数", str(report.statistics.in_control_count)],
         ["警告记录数", str(report.statistics.warning_count), "失控记录数", str(report.statistics.out_of_control_count)],
         ["月度均值", _format_float(report.statistics.monthly_mean), "月度 SD", _format_lj_metric(report.statistics, "sd")],
-        ["月度 CV%", _format_lj_metric(report.statistics, "cv"), "当前目标均值", _format_float(report.statistics.target_mean)],
-        ["当前目标 SD", _format_float(report.statistics.target_sd), "批次 CV 要求", _format_float(report.statistics.cv_limit, digits=2, suffix="%")],
+        ["实测变异系数（%）", _format_lj_metric(report.statistics, "cv"), "当前设定均值", _format_float(report.statistics.target_mean)],
+        ["当前设定 SD", _format_float(report.statistics.target_sd), "批次允许不精密度（CV）", _format_float(report.statistics.cv_limit, digits=2, suffix="%")],
     ]
     _draw_table_section(
         canvas,
@@ -298,7 +300,7 @@ def _build_zscore_summary_page(report: Any):
         ["当前规则组合", report.basic_info.template_label, "质控品批号", report.basic_info.lot_no],
         ["仪器", report.basic_info.instrument, "试剂", report.basic_info.reagent],
         ["质控品", report.basic_info.qc_material, "浓度", report.basic_info.concentration],
-        ["当前靶值来源", report.basic_info.target_source_label, "来源说明", _wrap_text(report.basic_info.target_source_detail, 20)],
+        ["均值和标准差\n来源", report.basic_info.target_source_label, "来源说明", _wrap_text(report.basic_info.target_source_detail, 20)],
     ]
     _draw_table_section(
         canvas,
@@ -313,7 +315,7 @@ def _build_zscore_summary_page(report: Any):
         ["本月正式期检测记录数", str(report.statistics.formal_count), "在控检测记录数", str(report.statistics.in_control_count)],
         ["警告检测记录数", str(report.statistics.warning_count), "失控检测记录数", str(report.statistics.out_of_control_count)],
         ["当前规则组合", report.statistics.template_label, "当前阶段", report.statistics.current_phase_label],
-        ["全部水平已完成建靶", "是" if report.statistics.all_levels_ready else "否", "", ""],
+        ["全部水平已完成\n均值和标准差建立", "是" if report.statistics.all_levels_ready else "否", "", ""],
     ]
     _draw_table_section(
         canvas,
@@ -378,15 +380,15 @@ def _build_zscore_level_summary_page(report: Any):
         canvas,
         title="各水平统计摘要",
         cell_text=cell_text,
-        col_labels=["水平", "记录数", "月度均值", "月度 SD", "月度 CV%", "目标均值", "目标 SD", "CV 要求"],
-        col_widths=[0.18, 0.09, 0.13, 0.13, 0.14, 0.12, 0.11, 0.10],
+        col_labels=["水平", "记录数", "月度均值", "月度 SD", "实测变异\n系数（%）", "设定均值", "设定 SD", "允许不精密度\n（CV%）"],
+        col_widths=[0.16, 0.07, 0.12, 0.12, 0.14, 0.11, 0.11, 0.17],
         font_size=8.4,
     )
     _draw_text_section(
         canvas,
         "统计说明",
-        "各水平月度均值、SD、CV%按所选月份内正式期数据计算；当前目标均值和目标 SD 取当前批次已生效建靶值。",
-        width=60,
+        "各水平月度均值、SD、CV%按所选月份内正式期数据计算；设定均值与 SD 取当前批次已生效参数。",
+        width=44,
     )
     return canvas.figure
 
@@ -578,6 +580,9 @@ def _draw_table_section(
     column_count = len(col_labels) if col_labels else (len(cell_text[0]) if cell_text else 1)
     rows = cell_text or [["-"] + [""] * (column_count - 1)]
     row_units = _build_row_units(rows, include_header=col_labels is not None)
+    if col_labels:
+        header_lines = max(str(label).count("\n") + 1 for label in col_labels)
+        row_units[0] += (header_lines - 1) * TABLE_EXTRA_LINE_UNITS
     table_height = _estimate_table_height(row_units)
     table_bottom = canvas.cursor_y - table_height
     table = canvas.axis.table(
@@ -865,9 +870,9 @@ def _build_lot_trace_pages(report):
     groups=trace.get('statistics_by_target_version',[])
     rows=trace.get('actual_lots',[])
     def number(value):return '未记录' if value is None else f'{value:.4f}'
-    source_labels={'manual':'实验室确认','manufacturer':'厂家赋值经确认','revision':'参数修订','building':'本批次建靶','legacy':'旧序列'}
-    event_labels={'reagent':'试剂换批','qc':'质控换批','target':'靶值确认/修订','correction':'更正','active':'启用','ended':'结束使用','parallel':'平行观察'}
-    parameters=[f"V{r['version']} / {format_level_id_display(r['level'])}：{r['count']} 点；月均值 {number(r['monthly_mean'])}，月 SD {number(r['monthly_sd'])}；靶均值 {number(r['target_mean'])}，靶 SD {number(r['target_sd'])}。来源 {source_labels.get(r['source'],r['source'])}；确认人 {r['confirmed_by'] or '未记录'}；生效 {r['effective_at'] or '未记录'}。依据：{r['evidence']}" for r in groups]
+    source_labels={'manual':'实验室确认','manufacturer':'厂家赋值经确认','revision':'参数修订','building':'本批次均值和标准差建立','legacy':'旧序列'}
+    event_labels={'reagent':'试剂换批','qc':'质控换批','target':'均值和标准差确认/修订','correction':'更正','active':'正式使用','ended':'停止使用','parallel':'新旧批同时使用观察'}
+    parameters=[f"V{r['version']} / {format_level_id_display(r['level'])}：{r['count']} 点；月均值 {number(r['monthly_mean'])}，月 SD {number(r['monthly_sd'])}；设定均值 {number(r['target_mean'])}，设定 SD {number(r['target_sd'])}。来源 {source_labels.get(r['source'],r['source'])}；确认人 {r['confirmed_by'] or '未记录'}；生效 {r['effective_at'] or '未记录'}。依据：{r['evidence']}" for r in groups]
     usage=[]
     for lot in dict.fromkeys(r['reagent_lot_no'] for r in rows):
         points=[r for r in rows if r['reagent_lot_no']==lot]
@@ -876,3 +881,20 @@ def _build_lot_trace_pages(report):
     return _build_text_pages(report_title=report.title,page_title='实际批号与控制参数追溯',
         subtitle_lines=[f"项目：{report.basic_info.project_name}  /  {report.report_month_label}",trace['basis']],
         sections=[_TextSectionSpec('报告期实际使用批号',usage),_TextSectionSpec('按控制参数版本分组统计',parameters),_TextSectionSpec('换批及参数事件',events or ['报告期无已登记的换批或参数变更事件。'])])
+
+
+def _build_quality_pages(report):
+    summary=getattr(report,'quality_summary',{})
+    if not summary:return []
+    goal=summary['goal'];spec=goal['spec']
+    rows=[]
+    for r in summary['rows']:
+        value='未计算' if r['cv'] is None else f"{r['cv']:.3f}%"
+        rows.append(f"{r['level']}：{r['requirement']}；类别 {r['category'] or '未限定'}；采用浓度 {r['concentration'] if r['concentration'] is not None else '未限定'} {goal['unit']}。在控点 {r['count']}，检测日 {r['days']}；实测 CV {value}；{r['decision']}。")
+    return _build_text_pages(report_title=report.title,page_title='分析质量要求与实测 CV',
+        subtitle_lines=[f"项目：{report.basic_info.project_name} / {report.report_month_label}"],
+        sections=[
+            _TextSectionSpec('采用来源与依据',[f"{spec['name']}；{spec['standard']} / {spec['version']}；实施 {spec['effective_date']}；{spec['source_clause']}；PDF页码 {spec.get('source_page') or '未提供'}。",
+                f"确认人 {goal['confirmed_by']}；采用时间 {goal['adopted_at']}；依据：{goal['evidence']}"]),
+            _TextSectionSpec('不精密度比较',rows+[summary['statistics_scope']+'。仅比较统计值与所选限值，不代表完成标准规定的全部验证。']),
+            _TextSectionSpec('其他要求（未自动评价）',[f"允许偏倚：{spec['bias_text'] or '原条款未规定'}",f"允许总误差/可比性偏差：{spec['tea_text'] or '原条款未规定'}",spec['notes'] or '无补充说明'])])

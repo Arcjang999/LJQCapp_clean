@@ -158,7 +158,7 @@ def _render_report_preview(package: LjMonthlyReportPackage) -> None:
             ("试剂", report.basic_info.reagent),
             ("质控品", report.basic_info.qc_material),
             ("浓度", report.basic_info.concentration),
-            ("当前靶值来源", report.basic_info.target_source_label.removeprefix("新版配置：")),
+            ("当前均值和标准差来源", report.basic_info.target_source_label.removeprefix("新版配置：")),
             ("来源说明", report.basic_info.target_source_detail),
         ],
         columns=["字段", "内容"],

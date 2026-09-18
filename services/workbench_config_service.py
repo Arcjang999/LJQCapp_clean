@@ -34,6 +34,7 @@ def _active_lj_source_rows(connection: sqlite3.Connection) -> list[sqlite3.Row]:
             items.target_n,
             items.cv_limit,
             items.quality_target_source_text,
+            items.quality_goal_json,
             configs.revision_no AS source_revision_no,
             configs.config_name,
             configs.lab_instrument_id, configs.qc_material_id, configs.qc_material_lot_id,
@@ -334,7 +335,7 @@ def list_lj_workbench_configuration_issues() -> pd.DataFrame:
             tests.chinese_name AS test_item_name,
             lots.lot_no,
             assigned.target_source,
-            '控制参数尚未完整确认，请先完成水平配置。人工或厂家赋值另需在靶值版本中确认依据、人员和生效时间。' AS issue
+            '控制参数尚未完整确认，请先完成水平配置。人工或厂家赋值另需在均值和标准差管理中确认依据、人员和生效时间。' AS issue
         FROM qc_lot_config_items AS items
         INNER JOIN qc_lot_configs AS configs ON configs.id = items.lot_config_id
         INNER JOIN qc_project_templates AS templates ON templates.id = configs.template_id

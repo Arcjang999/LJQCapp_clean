@@ -563,8 +563,8 @@ def test_instant_page_uses_business_labels_and_single_judgment_area() -> None:
         assert len(at.warning) == 0
         project_options = list(at.selectbox(key="v12_instant_project_selector").options)
         batch_options = list(at.selectbox(key="v12_instant_batch_selector").options)
-        assert project_options == ["请选择已启用的即时法项目", "AlphaProject｜Inst-A｜Ct值"]
-        assert batch_options[0] == "请选择已启用的批次"
+        assert project_options == ["请选择设置已确认的即时法项目", "AlphaProject｜Inst-A｜Ct值"]
+        assert batch_options[0] == "请选择设置已确认的批次"
         assert batch_options[1].startswith("质控批号：AlphaPro-LOT")
         assert "项目 1" not in batch_options[1]
         assert "批次 1" not in batch_options[1]
@@ -701,8 +701,8 @@ def test_zscore_page_uses_business_labels_in_management_and_context() -> None:
         assert not list(at.exception)
         project_options = list(at.selectbox(key="v12_zscore_project_selector").options)
         batch_options = list(at.selectbox(key="v12_zscore_batch_selector").options)
-        assert project_options == ["请选择已启用的 Z-score 项目", "ZAlpha｜Z-Inst｜2 水平｜Ct值"]
-        assert batch_options[0] == "请选择已启用的批次"
+        assert project_options == ["请选择设置已确认的 Z-score 项目", "ZAlpha｜Z-Inst｜2 水平｜Ct值"]
+        assert batch_options[0] == "请选择设置已确认的批次"
         assert batch_options[1].startswith("质控批号：ZLOT-01")
         assert "项目 1" not in project_options[1]
         assert "批次 1" not in batch_options[1]

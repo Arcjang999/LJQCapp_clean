@@ -75,9 +75,9 @@ def require_writable(connection, method, batch_id, test_time=None):
         if (binding['binding_status']!='active' or row is None or row['status']!='active' or row['is_disabled']
             or row['template_status']!='active' or row['template_disabled'] or not row['is_enabled']
             or row['item_disabled'] or effective_qc_state(connection,binding['lot_config_item_id']) in ('ended','pending')):
-            raise ValueError('配置已变更、停用或结束使用，请刷新并重新确认；历史记录仍可查看。')
+            raise ValueError('配置已变更、停用或停止使用，请刷新并重新确认；历史记录仍可查看。')
         if test_time is not None and effective_qc_state(connection,binding['lot_config_item_id'],test_time) in ('ended','pending'):
-            raise ValueError('检测时间不在该质控批次的可使用期间，请核对开始平行及结束使用时间。')
+            raise ValueError('检测时间不在该质控批次的可使用期间，请核对新旧批同时使用及停止使用时间。')
         current=connection.execute("""SELECT c.lab_instrument_id,c.qc_material_id,c.qc_material_lot_id,i.test_item_id,i.input_value_type,i.unit_id,i.method_id,i.reagent_id
             FROM qc_lot_config_items i JOIN qc_lot_configs c ON c.id=i.lot_config_id WHERE i.id=?""",(binding['lot_config_item_id'],)).fetchone()
         if source.get('identity') and list(current)!=source['identity'][:8]:
@@ -183,7 +183,7 @@ def _require_qc_verification(connection, source, lot_id, verification_id, effect
     if lot is None or lot['qc_material_id']!=source['identity'][1]:
         raise ValueError('验证质控批号必须属于当前检测配置的质控品。')
     if lot['is_disabled']:
-        raise ValueError('实际质控批号已停用，不能正式启用或建立换批组合。')
+        raise ValueError('实际质控批号已停用，不能正式使用或建立换批组合。')
     if not lot['expiry_date'] or lot['expiry_date']<when[:10]:
         raise ValueError('生效时间不得晚于实际质控批号效期，请核对效期。')
     verification=connection.execute('SELECT * FROM qc_lot_verifications WHERE id=?',(verification_id,)).fetchone()
@@ -268,9 +268,9 @@ def record_result_context(connection, method, result_id, batch_id, test_time, se
             raise ValueError('请明确选择本次实际使用的试剂批号；旧资料导入可明确标记未记录。')
     target=selection.get('target_profile_id')
     if provenance=='recorded' and method in ('lj','zscore') and target is None and any(level.get('target_source','building')!='building' for level in source.get('levels',[])):
-        raise ValueError('请先在项目管理的靶值版本中确认全部水平参数、依据、确认人及生效时间。')
+        raise ValueError('请先在项目管理的均值和标准差管理中确认全部水平参数、依据、确认人及生效时间。')
     if target is not None and not connection.execute('SELECT 1 FROM qc_target_profiles WHERE id=? AND qc_method=? AND batch_id=?',(target,method,batch_id)).fetchone():
-        raise ValueError('靶值版本不属于当前批次。')
+        raise ValueError('参数版本不属于当前批次。')
     context_id=connection.execute(f'''INSERT INTO qc_result_contexts({CONTEXT_COLUMNS[method]},config_snapshot_json,reagent_lot_id,
         reagent_lot_no,reagent_expiry_date,usage_id,target_profile_id,provenance,source_context_id) VALUES(?,?,?,?,?,?,?,?,?)''',
         (result_id,json.dumps(source,ensure_ascii=False),lot['id'] if lot else None,lot['lot_no'] if lot else '',
@@ -386,7 +386,8 @@ def change_qc_lot(*, source_config_id, target_qc_lot_id, template_item_ids, oper
                 (item['id'],timestamp(effective_at),event))
         # Building configs can immediately collect parallel observations. Copied targets stay draft for explicit confirmation.
         pending=c.execute("SELECT 1 FROM qc_lot_config_item_levels l JOIN qc_lot_config_items i ON i.id=l.lot_config_item_id WHERE i.lot_config_id=? AND i.is_enabled=1 AND l.target_source='copied_pending'",(new_id,)).fetchone()
-        if not pending:
+        goal_pending=c.execute("SELECT 1 FROM qc_lot_config_items WHERE lot_config_id=? AND is_enabled=1 AND json_extract(quality_goal_json,'$.pending')=1",(new_id,)).fetchone()
+        if not pending and not goal_pending:
             activate_lot_config(new_id)
         return new_id
 
@@ -407,16 +408,16 @@ def set_qc_usage_state(*, lot_config_item_id, state, effective_at, operator, rea
             if verification_id is not None and len(lots)==1:
                 selected.setdefault(next(iter(lots)),verification_id)
             if set(selected)!=set(lots) or any(v is None for v in selected.values()):
-                raise ValueError('正式启用需逐一关联全部实际质控批号的验证记录。')
+                raise ValueError('正式使用需逐一关联全部实际质控批号的验证记录。')
             for lot_id,lot in lots.items():
-                if lot['level_disabled']:raise ValueError('实际质控水平已停用，不能正式启用。')
+                if lot['level_disabled']:raise ValueError('实际质控水平已停用，不能正式使用。')
                 confirmed_verifications[lot_id]=_require_qc_verification(c,source,lot_id,selected[lot_id],effective_at)
             if binding['qc_method']=='lj':
                 from database import get_results,get_batch
                 from qc_logic import calculate_qc_results
                 if target_profile('lj',binding['runtime_batch_id'],effective_at) is None:
                     _,stats=calculate_qc_results(get_results(binding['runtime_batch_id']),get_batch(binding['runtime_batch_id'])['target_n'])
-                    if not stats.get('target_ready'):raise ValueError('该批次控制参数尚未确认，继续平行观察或确认靶值后再启用。')
+                    if not stats.get('target_ready'):raise ValueError('该批次控制参数尚未确认，继续新旧批同时使用观察或确认均值和标准差后再正式使用。')
             elif binding['qc_method']=='zscore':
                 from zscore_logic import get_zscore_level_targets,resolve_zscore_batch_context,should_enable_formal_rules
                 context=resolve_zscore_batch_context(binding['runtime_batch_id'])
@@ -457,19 +458,19 @@ def create_target_profile(*, method,batch_id,levels,source,evidence,confirmed_by
             if not all(math.isfinite(float(level[k])) for k in ('mean','sd')) or float(level['sd'])<=0:
                 raise ValueError('所有水平均须填写有限均值及大于 0 的 SD。')
             if snapshot.get('input_value_type')=='raw' and float(level['mean'])<=0:
-                raise ValueError('真实检测值的靶均值必须大于 0。')
+                raise ValueError('真实检测值的设定均值必须大于 0。')
         when=timestamp(effective_at)
         previous=c.execute('SELECT * FROM qc_target_profiles WHERE qc_method=? AND batch_id=? ORDER BY version_no DESC LIMIT 1',(method,batch_id)).fetchone()
         if previous and when<=previous['effective_at']:
-            raise ValueError('新靶值版本生效时间必须晚于已有版本。')
+            raise ValueError('新参数版本生效时间必须晚于已有版本。')
         latest=c.execute(f'SELECT MAX(test_time) FROM {RESULT_TABLES[method]} WHERE batch_id=?',(batch_id,)).fetchone()[0]
         if latest and when<timestamp(latest):
             raise ValueError('不能追溯修改已有检测的参数；请选择不早于最后一条检测的生效时间。')
         if source=='building' and not source_result_ids:
-            raise ValueError('本批次建靶版本必须关联实际有效建靶记录。')
+            raise ValueError('本批次均值和标准差建立版本必须关联实际有效参数建立记录。')
         for result_id in source_result_ids or []:
             if not c.execute(f'SELECT 1 FROM {RESULT_TABLES[method]} WHERE id=? AND batch_id=?',(result_id,batch_id)).fetchone():
-                raise ValueError('靶值来源记录必须属于当前方法和质控批次。')
+                raise ValueError('均值和标准差来源记录必须属于当前方法和质控批次。')
         profile_id=c.execute('''INSERT INTO qc_target_profiles(qc_method,batch_id,version_no,effective_at,source,levels_json,evidence,confirmed_by,source_result_ids_json)
             VALUES(?,?,?,?,?,?,?,?,?)''',(method,batch_id,1 if previous is None else previous['version_no']+1,when,source,
             json.dumps(levels,ensure_ascii=False),evidence,confirmed_by,json.dumps(source_result_ids or []))).lastrowid
@@ -697,7 +698,9 @@ def create_level_combination(*,source_batch_id,level_ids,verification_ids,operat
             VALUES(?,?,'qc',?,?,?,?)''',(source['system_id'],source['project_template_item_id'],timestamp(effective_at),reason,operator,
             json.dumps({'source_batch_id':source_batch_id,'new_config_id':new,'old_level_ids':old_ids,'new_level_ids':level_ids,'retained_target_profile_id':old_target['id'] if old_target else None}))).lastrowid
         c.execute("INSERT INTO qc_config_item_lifecycle VALUES(?,'parallel',?,?)",(selected,timestamp(effective_at),event))
-        activate_lot_config(new);sync_zscore_workbench_bindings()
+        goal_pending=c.execute("SELECT 1 FROM qc_lot_config_items WHERE id=? AND json_extract(quality_goal_json,'$.pending')=1",(selected,)).fetchone()
+        if not goal_pending:
+            activate_lot_config(new);sync_zscore_workbench_bindings()
         return new
 
 

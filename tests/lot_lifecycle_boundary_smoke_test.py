@@ -147,7 +147,7 @@ def test_result_timestamp_obeys_qc_state_without_unlocking_ended_batch():
         rejected(lambda:save('2099-01-01'),'检测时间')
         assert counts()==before
         state(b['lot_config_item_id'],target='ended',when='2026-09-04')
-        rejected(lambda:save('2026-09-03 12:00'),'结束')
+        rejected(lambda:save('2026-09-03 12:00'),'停止使用')
 
 
 def test_verification_cannot_cross_system_lot_or_confirmation_time():

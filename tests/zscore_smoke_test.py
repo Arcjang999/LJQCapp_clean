@@ -1515,7 +1515,7 @@ def test_building_only_phase_legend_omits_formal_entry_and_control_lines() -> No
     legend_map = collect_legend_texts(figure)
 
     assert "状态" not in legend_map
-    assert legend_map["阶段 / 样式"] == ["建靶期（虚线 / 方形点）", "描边点=含手动备注"]
+    assert legend_map["阶段 / 样式"] == ["参数建立期（虚线 / 方形点）", "描边点=含手动备注"]
     plt.close(figure)
 
 
@@ -1779,8 +1779,8 @@ def test_formal_phase_hides_building_maintenance_section_and_keeps_locked_histor
         ]
         assert maintenance_tables
         maintenance_df = maintenance_tables[0]
-        assert "建靶中" in maintenance_df["阶段"].tolist()
-        assert "建靶期只读" in maintenance_df["维护状态"].tolist()
+        assert "均值和标准差建立中" in maintenance_df["阶段"].tolist()
+        assert "参数建立期只读" in maintenance_df["维护状态"].tolist()
 
         run_options = list(at.selectbox(key="zscore_run_selector").options)
         assert len(run_options) > 1
@@ -1808,7 +1808,7 @@ def test_plotting_all_view_visually_splits_building_and_formal_phases() -> None:
     )
     assert_is_figure(figure)
     _, labels = figure.axes[0].get_legend_handles_labels()
-    assert "水平 1 | 建靶期" in labels
+    assert "水平 1 | 参数建立期" in labels
     assert "水平 1 | 正式期" in labels
     plt.close(figure)
 

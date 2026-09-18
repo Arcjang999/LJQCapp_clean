@@ -12,8 +12,8 @@ from services.workbench_config_service import (
 from ui.common import render_section_intro, render_workbench_context_bar
 
 
-PROJECT_PLACEHOLDER = "请选择已启用的 LJ 项目"
-BATCH_PLACEHOLDER = "请选择已启用的批次"
+PROJECT_PLACEHOLDER = "请选择设置已确认的 LJ 项目"
+BATCH_PLACEHOLDER = "请选择设置已确认的批次"
 
 
 def _clean(value: object, fallback: str = "-") -> str:
@@ -116,9 +116,9 @@ def render_lj_v12_configuration_selection(
         render_section_intro(
             title="LJ 项目与批次选择",
             caption=(
-                "选择已启用的单水平项目与批次。支持本批次建靶、已确认的人工或厂家参数，以及即时法转入的批次。"
+                "选择设置已确认的单水平项目与批次。支持本批次均值和标准差建立、已确认的人工或厂家参数，以及即时法转入的批次。"
             ),
-            badges=["单水平", "靶值确认", "即时法转入"],
+            badges=["单水平", "均值和标准差确认", "即时法转入"],
             tone="accent",
         )
 
@@ -134,7 +134,7 @@ def render_lj_v12_configuration_selection(
                             "config_name": "批次",
                             "test_item_name": "检验项目",
                             "lot_no": "质控品批号",
-                            "target_source": "靶值来源",
+                            "target_source": "均值和标准差来源",
                             "issue": "说明",
                         }
                     ),
@@ -181,7 +181,7 @@ def render_lj_v12_configuration_selection(
                 st.rerun()
 
         if selected_batch_id is None or batches.empty:
-            st.info("请选择一个已启用的批次后进入“当前批次”。")
+            st.info("请选择一个设置已确认的批次后进入“当前批次”。")
             return
 
         selected = batches[batches["id"].astype(int) == int(selected_batch_id)].iloc[0]
@@ -204,11 +204,11 @@ def render_lj_v12_configuration_selection(
                 ("单位", _clean(selected.get("unit_symbol"))),
                 ("检测方法", _clean(selected.get("method_name"))),
                 ("输入值类型", get_input_value_type_label(selected["input_value_type"])),
-                ("建靶有效点数", f"{int(selected['target_n'])} 个"),
-                ("CV 要求", "-" if pd.isna(selected["cv_limit"]) else f"≤ {float(selected['cv_limit']):.2f}%"),
+                ("参数建立有效点数", f"{int(selected['target_n'])} 个"),
+                ("允许不精密度（CV）", "-" if pd.isna(selected["cv_limit"]) else f"≤ {float(selected['cv_limit']):.2f}%"),
             ],
             badges=[
-                "由即时法转入" if is_from_instant else "已启用",
+                "由即时法转入" if is_from_instant else "设置已确认",
                 "LJ",
                 f"批号 {selected['lot_no']}",
             ],
@@ -247,8 +247,8 @@ def render_lj_v12_configuration_selection(
                     "concentration": "水平",
                     "unit_symbol": "单位",
                     "method_name": "检测方法",
-                    "target_n": "建靶点数",
-                    "cv_limit": "CV要求(%)",
+                    "target_n": "参数建立点数",
+                    "cv_limit": "允许不精密度(CV%)",
                     "source_label": "来源",
                 }
             ),

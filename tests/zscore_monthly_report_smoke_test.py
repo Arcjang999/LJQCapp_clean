@@ -220,7 +220,7 @@ def test_zscore_monthly_report_builds_pdf_and_snapshot() -> None:
         assert package.report.statistics.warning_count == 1
         assert package.report.statistics.out_of_control_count == 1
         assert preview_summary["当前阶段"] == "正式质控"
-        assert preview_summary["全部水平已完成建靶"] == "是"
+        assert preview_summary["全部水平已完成均值和标准差建立"] == "是"
         assert len(package.report.level_statistics) == 2
         assert all(item.monthly_count == 3 for item in package.report.level_statistics)
         assert len(package.report.abnormal_records) == 2

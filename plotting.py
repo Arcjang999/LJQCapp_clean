@@ -150,7 +150,7 @@ def plot_lj_chart(
                 target_df["display_value"],
                 color="#4e79a7",
                 s=42,
-                label="\u5efa\u9776\u6570\u636e",
+                label="参数建立数据",
                 zorder=3,
             )
 
@@ -272,7 +272,7 @@ def _filter_view_data(qc_df: pd.DataFrame, view_mode: str) -> pd.DataFrame:
             & (filtered_df["is_building_included"].fillna(1).astype(int) == 0)
         )
         filtered_df = filtered_df.loc[~disabled_build_mask].copy()
-    if view_mode == "\u5efa\u9776\u56fe":
+    if view_mode in ("\u5efa\u9776\u56fe", "参数建立图"):
         return filtered_df[filtered_df["phase"] == "\u5efa\u9776\u6570\u636e"].copy()
     if view_mode == "\u6b63\u5f0f\u8d28\u63a7\u56fe":
         return filtered_df[filtered_df["phase"] == "\u6b63\u5f0f\u6570\u636e"].copy()
@@ -609,7 +609,7 @@ def _plot_versioned_control_lines(axis, frame, stats):
         mean,sd=float(group.target_mean_used.iloc[0]),float(group.target_sd_used.iloc[0])
         for multiple in range(-3,4):
             axis.plot([left,right],[mean+multiple*sd]*2,color='#222222' if multiple==0 else '#76b7b2',
-                linestyle='-' if multiple==0 else '--',linewidth=1,label='版本靶均值' if index==0 and multiple==0 else None)
+                linestyle='-' if multiple==0 else '--',linewidth=1,label='版本设定均值' if index==0 and multiple==0 else None)
         if index:
             axis.axvline(left,color='#7d5ba6',linestyle=':',linewidth=1)
 

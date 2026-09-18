@@ -28,6 +28,7 @@ from migrations.v1_1_master_data import ensure_v11_schema
 from migrations.v1_2_workbench import ensure_v12_workbench_schema
 from migrations.v1_2_template_reagent import ensure_template_reagent_schema
 from migrations.v1_2_lot_lifecycle import ensure_lot_lifecycle_schema
+from migrations.quality_targets import ensure_quality_target_schema
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -221,6 +222,7 @@ def init_db() -> None:
         ensure_template_reagent_schema(connection)
         ensure_v12_workbench_schema(connection)
         ensure_lot_lifecycle_schema(connection)
+        ensure_quality_target_schema(connection)
         _rebind_legacy_batches_foreign_keys(connection)
         connection.execute(
             """

@@ -44,7 +44,7 @@ def _configuration_sources(connection: sqlite3.Connection) -> tuple[list[dict], 
             reject("有效水平必须完整匹配项目的 2 或 3 个水平。")
             continue
         if any((level["target_source"] not in ("building","manual","manufacturer") or not level["target_confirmed"]) for level in levels):
-            reject("所有水平均须使用建靶或已确认的人工／厂家参数；复制待确认参数不能使用。")
+            reject("所有水平均须使用均值和标准差建立或已确认的人工／厂家参数；复制待确认参数不能使用。")
             continue
         snapshot = connection.execute("""
             SELECT id, snapshot_json FROM qc_config_snapshots
@@ -61,7 +61,7 @@ def _configuration_sources(connection: sqlite3.Connection) -> tuple[list[dict], 
             continue
         if (item["qc_method"] != "zscore" or item["level_count"] != len(levels)
                 or any((level["target_source"] not in ("building","manual","manufacturer") or not level["target_confirmed"]) for level in item["levels"])):
-            reject("当前配置未完成，请检查水平数量、靶值来源及参数确认。")
+            reject("当前配置未完成，请检查水平数量、均值和标准差来源及参数确认。")
             continue
         config = payload["config"]
         sources.append({
@@ -71,6 +71,7 @@ def _configuration_sources(connection: sqlite3.Connection) -> tuple[list[dict], 
             "config_name": config["config_name"], "test_item_name": item["test_item_name"],
             "input_value_type": item["input_value_type"], "level_count": item["level_count"],
             "target_n": item["target_n"], "cv_limit": item["cv_limit"],
+            "quality_goal_json": item.get("quality_goal_json", "{}"),
             "unit_symbol": item["unit_symbol"], "method_name": item["method_name"],
             "instrument_name": config["instrument_name"], "reagent_name": item["reagent_name"],
             "reagent_manufacturer_name": "", "qc_material_name": config["qc_material_name"],
@@ -106,7 +107,7 @@ def sync_zscore_workbench_bindings() -> list[dict]:
                 has_results = connection.execute("SELECT 1 FROM zscore_runs WHERE batch_id = ? LIMIT 1",
                                                  (binding["runtime_batch_id"],)).fetchone() is not None
                 if has_results and previous.get("identity") != source["identity"]:
-                    issues.append({"config_name": source["config_name"], "issue": "已有检测记录，仪器、方法、单位、水平及建靶要求不能变更。请新建批次。"})
+                    issues.append({"config_name": source["config_name"], "issue": "已有检测记录，仪器、方法、单位、水平及参数建立要求不能变更。请新建批次。"})
                     continue
                 if has_results:
                     source = previous

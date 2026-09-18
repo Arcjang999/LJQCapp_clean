@@ -189,7 +189,7 @@ def test_lj_building_maintenance_shows_current_effective_status_after_restore() 
         assert any("疑似离群" in option for option in restored_options)
         assert not any("已恢复" in option for option in restored_options)
         assert not any("已恢复" in value for value in restored_captions if "当前状态：" in value)
-        assert any("建靶点已恢复" in value for value in success_values)
+        assert any("参数建立点已恢复" in value for value in success_values)
 
 
 def test_lj_latest_analysis_switches_between_building_and_formal() -> None:
@@ -249,7 +249,7 @@ def test_lj_latest_analysis_switches_between_building_and_formal() -> None:
             "最近已保存检测序号 #4",
         )
         assert resolve_lj_latest_analysis_mode(building_context["stats"]) == "building"
-        assert building_panel_data["phase_label"] == "建靶期"
+        assert building_panel_data["phase_label"] == "参数建立期"
         assert building_panel_data["grubbs_ready"] is True
         assert building_panel_data["suspect_details"] is None
 

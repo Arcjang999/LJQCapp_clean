@@ -439,12 +439,12 @@ def render_project_batch_management(
                     concentration = st.text_input("浓度")
                     lot_no = st.text_input("质控品批号")
                     target_n = st.selectbox(
-                        "建靶所需次数",
+                        "均值和标准差建立所需次数",
                         options=list(range(5, 21)),
                         index=15,
                     )
                     cv_limit_text = st.text_input(
-                        "CV 要求（%）（可选）",
+                        "允许不精密度（CV%）（可选）",
                         placeholder="例如：5.00",
                     )
                     create_submitted = st.form_submit_button("创建批次", width="stretch")
@@ -513,9 +513,9 @@ def render_project_batch_management(
                         st.text(f"质控品：{current_batch['qc_material']}")
                         st.text(f"浓度：{current_batch['concentration']}")
                         st.text(f"输入值类型：{get_input_value_type_label(current_batch['input_value_type'])}")
-                        st.text(f"建靶所需次数：{current_batch['target_n']}")
+                        st.text(f"均值和标准差建立所需次数：{current_batch['target_n']}")
                         st.text(
-                            f"CV 要求：{format_optional_float(get_saved_batch_cv_limit(current_batch), digits=2, suffix='%')}"
+                            f"允许不精密度（CV）：{format_optional_float(get_saved_batch_cv_limit(current_batch), digits=2, suffix='%')}"
                         )
                         st.markdown("**可编辑信息**")
                         with st.form("edit_batch_form"):
@@ -524,7 +524,7 @@ def render_project_batch_management(
                                 value=current_batch["lot_no"],
                             )
                             edit_cv_limit_text = st.text_input(
-                                "CV 要求（%）（可选）",
+                                "允许不精密度（CV%）（可选）",
                                 value=format_optional_input_value(
                                     get_saved_batch_cv_limit(current_batch),
                                     digits=2,
@@ -695,12 +695,12 @@ def render_zscore_project_batch_management(
                     if project_level_count == 3:
                         level_3_label = st.text_input("水平 3 说明", placeholder="例如：高值质控")
                     target_n = st.selectbox(
-                        "建靶所需次数",
+                        "均值和标准差建立所需次数",
                         options=list(range(5, 21)),
                         index=15,
                     )
                     cv_limit_text = st.text_input(
-                        "CV 要求（%）（可选）",
+                        "允许不精密度（CV%）（可选）",
                         placeholder="例如：5.00",
                     )
                     create_submitted = st.form_submit_button("创建 Z-score 批次", width="stretch")
@@ -772,9 +772,9 @@ def render_zscore_project_batch_management(
                         st.text(f"水平数：{int(current_batch['level_count'])} 水平")
                         st.text(f"输入值类型：{get_input_value_type_label(current_batch['input_value_type'])}")
                         st.text(f"水平说明：{format_zscore_level_label_summary(current_batch, current_level_ids)}")
-                        st.text(f"建靶所需次数：{current_batch['target_n']}")
+                        st.text(f"均值和标准差建立所需次数：{current_batch['target_n']}")
                         st.text(
-                            f"CV 要求：{format_optional_float(get_saved_batch_cv_limit(current_batch), digits=2, suffix='%')}"
+                            f"允许不精密度（CV）：{format_optional_float(get_saved_batch_cv_limit(current_batch), digits=2, suffix='%')}"
                         )
                         with st.form("edit_zscore_batch_form"):
                             edit_lot_no = st.text_input(
@@ -782,7 +782,7 @@ def render_zscore_project_batch_management(
                                 value=current_batch["lot_no"],
                             )
                             edit_cv_limit_text = st.text_input(
-                                "CV 要求（%）（可选）",
+                                "允许不精密度（CV%）（可选）",
                                 value=format_optional_input_value(
                                     get_saved_batch_cv_limit(current_batch),
                                     digits=2,

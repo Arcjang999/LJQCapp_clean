@@ -205,7 +205,7 @@ def test_v12_lj_binding_ignores_old_projects_and_keeps_algorithms() -> None:
         report = build_lj_monthly_report_package(runtime_batch_id, "2026-04").report
         assert report.basic_info.unit_symbol == "mg/L"
         assert report.basic_info.detection_method == "V12 免疫比浊法"
-        assert report.basic_info.target_source_label == "新版配置：本批次建靶值"
+        assert report.basic_info.target_source_label == "新版配置：本批次数据计算"
 
 
 def test_v12_lj_page_uses_global_configuration_selection() -> None:

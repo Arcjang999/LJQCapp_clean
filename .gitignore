@@ -44,6 +44,9 @@ packaging/desktop_launcher/obj/
 /output/
 /outputs/
 
+# Vendor manuals retained locally for session handoff; do not publish by default
+/docs/references/manuals/*.pdf
+
 # Local editor/OS files
 .idea/
 .vscode/

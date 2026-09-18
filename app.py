@@ -18,6 +18,7 @@ from pages.master_data_page import render_master_data_page
 from pages.project_management_page import render_project_management_page
 from pages.report_history_page import render_report_history_page
 from pages.settings_page import render_settings_page
+from pages.quality_targets_page import render_quality_targets_page
 from pages.zscore_page import render_zscore_page
 from ui.common import APP_TITLE, inject_global_styles, render_page_chrome
 
@@ -59,6 +60,10 @@ inject_global_styles()
 normalize_top_level_method_selection()
 _consume_pending_navigation_intent()
 render_page_chrome()
+
+if bool(st.session_state.get("show_quality_targets_page", False)):
+    render_quality_targets_page()
+    st.stop()
 
 if bool(st.session_state.get("show_settings_page", False)):
     render_settings_page()

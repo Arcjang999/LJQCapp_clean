@@ -1,0 +1,2638 @@
+{
+  "schema_version": 1,
+  "catalog_version": "2026-09-17",
+  "sources": [
+    {
+      "standard": "WS/T 403—2024",
+      "url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "sha256": "7b9d8c904ccaea73aced0fb725b204754f3c50a06305fba432490a29fc08c6ed"
+    },
+    {
+      "standard": "WS/T 406—2024",
+      "url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821990695_59250.pdf",
+      "sha256": "c2b73ecd97909e4b8ef0c5e063aed5f2dc63f4193e784a7894f3439e8b08dfe0"
+    }
+  ],
+  "requirements": [
+    {
+      "id": "wst403-2024-001",
+      "name": "钾",
+      "aliases": [
+        "K"
+      ],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "mmol/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 2.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "2.0％",
+      "tea_text": "0.2 mmol/L (≤3.3 mmol/L)；6.0％ (＞3.3 mmol/L)",
+      "imprecision_text": "2.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-002",
+      "name": "钠",
+      "aliases": [
+        "Na"
+      ],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 1.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "1.5％",
+      "tea_text": "4.0％",
+      "imprecision_text": "1.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-003",
+      "name": "氯",
+      "aliases": [
+        "Cl"
+      ],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 1.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "1.5％",
+      "tea_text": "4.0％",
+      "imprecision_text": "1.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-004",
+      "name": "钙",
+      "aliases": [
+        "Ca"
+      ],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "mmol/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 2.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "2.0％",
+      "tea_text": "0.1 mmol/L (≤2 mmol/L)；5.0％ (＞2 mmol/L)",
+      "imprecision_text": "2.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-005",
+      "name": "磷酸根离子",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 4.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "3.0％",
+      "tea_text": "10.0％",
+      "imprecision_text": "4.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-006",
+      "name": "葡萄糖",
+      "aliases": [
+        "GLU"
+      ],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "mmol/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 3.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "2.0％",
+      "tea_text": "0.21 mmol/L (≤3 mmol/L)；7.0％ (＞3 mmol/L)",
+      "imprecision_text": "3.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-007",
+      "name": "尿素",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "mmol/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 3.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "3.0％",
+      "tea_text": "0.32 mmol/L (≤4 mmol/L)；8.0％ (＞4 mmol/L)",
+      "imprecision_text": "3.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-008",
+      "name": "尿酸",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 4.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "4.5％",
+      "tea_text": "12.0％",
+      "imprecision_text": "4.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-009",
+      "name": "肌酐",
+      "aliases": [
+        "CREA",
+        "Cr"
+      ],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "μmol/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 4.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "5.5％",
+      "tea_text": "6 μmol/L (≤50 μmol/L)；12.0％ (＞50 μmol/L)",
+      "imprecision_text": "4.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-010",
+      "name": "总蛋白",
+      "aliases": [
+        "TP"
+      ],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 2.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "2.0％",
+      "tea_text": "5.0％",
+      "imprecision_text": "2.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-011",
+      "name": "白蛋白",
+      "aliases": [
+        "ALB"
+      ],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 2.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "2.0％",
+      "tea_text": "6.0％",
+      "imprecision_text": "2.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-012",
+      "name": "总胆固醇",
+      "aliases": [
+        "TC"
+      ],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 3.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "4.0％",
+      "tea_text": "9.0％",
+      "imprecision_text": "3.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-013",
+      "name": "甘油三酯",
+      "aliases": [
+        "TG"
+      ],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 5.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "5.0％",
+      "tea_text": "14.0％",
+      "imprecision_text": "5.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-014",
+      "name": "高密度脂蛋白胆固醇",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "mmol/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 6.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "8.0％",
+      "tea_text": "0.16 mmol/L (≤0.8 mmol/L)；20.0％ (＞0.8 mmol/L)",
+      "imprecision_text": "6.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-015",
+      "name": "低密度脂蛋白胆固醇",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "mmol/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 6.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "8.0％",
+      "tea_text": "0.4 mmol/L (≤ 2 mmol/L)；20.0％ (＞2 mmol/L)",
+      "imprecision_text": "6.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-016",
+      "name": "载脂蛋白 AⅠ",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "g/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 8.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "0.2 g/L (≤0.8 g/L)；25.0％ (＞0.8 g/L)",
+      "imprecision_text": "8.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-017",
+      "name": "载脂蛋白 B",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "g/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 8.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "0.15 g/L (≤0.6 g/L)；25.0％ (＞0.6 g/L)",
+      "imprecision_text": "8.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-018",
+      "name": "脂蛋白(a)",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "mg/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 10.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "45 mg/L (≤150 mg/L)；30.0％ (＞150 mg/L)",
+      "imprecision_text": "10.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-019",
+      "name": "总胆红素",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "μmol/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 6.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "5.0％",
+      "tea_text": "2.4 μmol/L (≤16 μmol/L)；15.0％ (＞16 μmol/L)",
+      "imprecision_text": "6.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-020",
+      "name": "直接胆红素/结合胆红素",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "μmol/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 8.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "6.7％",
+      "tea_text": "1 μmol/L (≤5 μmol/L)；20.0％ (＞5 μmol/L)",
+      "imprecision_text": "8.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-021",
+      "name": "丙氨酸氨基转移酶",
+      "aliases": [
+        "ALT"
+      ],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "U/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 6.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "5.0％",
+      "tea_text": "6 U/L (≤40 U/L)；15.0％ (＞40 U/L)",
+      "imprecision_text": "6.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-022",
+      "name": "天门冬氨酸氨基转移酶",
+      "aliases": [
+        "AST"
+      ],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "U/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 6.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "5.0％",
+      "tea_text": "6 U/L (≤40 U/L)；15.0％ (＞40 U/L)",
+      "imprecision_text": "6.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-023",
+      "name": "碱性磷酸酶",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "U/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 5.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "9 U/L (≤50 U/L)；18.0％ (＞50 U/L)",
+      "imprecision_text": "5.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-024",
+      "name": "淀粉酶",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "U/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 4.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "7.5％",
+      "tea_text": "9 U/L (≤60 U/L)；15.0％ (＞60 U/L)",
+      "imprecision_text": "4.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-025",
+      "name": "肌酸激酶",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 5.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "5.5％",
+      "tea_text": "15.0％",
+      "imprecision_text": "5.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-026",
+      "name": "乳酸脱氢酶",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 4.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "4.0％",
+      "tea_text": "11.0％",
+      "imprecision_text": "4.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-027",
+      "name": "γ-谷氨酰基转移酶",
+      "aliases": [
+        "GGT"
+      ],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "U/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 3.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "5.5％",
+      "tea_text": "4.4 U/L (≤40 U/L)；11.0％ (＞40 U/L)",
+      "imprecision_text": "3.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-028",
+      "name": "α-羟丁酸脱氢酶",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 6,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "25.0％",
+      "imprecision_text": "7.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-029",
+      "name": "胆碱酯酶",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 6.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "8.0％",
+      "tea_text": "20.0％",
+      "imprecision_text": "6.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-030",
+      "name": "铁",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "μmol/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 6.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "4.5％",
+      "tea_text": "2.1 μmol/L (≤14 μmol/L)；15.0％ (＞14 μmol/L)",
+      "imprecision_text": "6.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-031",
+      "name": "镁",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "mmol/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 5.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "5.5％",
+      "tea_text": "0.12 mmol/L (≤0.8 mmol/L)；15.0％ (＞0.8 mmol/L)",
+      "imprecision_text": "5.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-032",
+      "name": "胱抑素C",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 6.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "8.0％",
+      "tea_text": "20.0％",
+      "imprecision_text": "6.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-033",
+      "name": "肌酸激酶-MB(μg/L)",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "μg/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 10.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "4.5 μg/L (≤15 μg/L)；30.0％ (＞15 μg/L)",
+      "imprecision_text": "10.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-034",
+      "name": "肌酸激酶-MB(U/L)",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "U/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 10.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "8.0％",
+      "tea_text": "3.75 U/L (≤15 U/L)；25.0％ (＞15 U/L)",
+      "imprecision_text": "10.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-035",
+      "name": "肌红蛋白",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 10.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "30.0％",
+      "imprecision_text": "10.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-036",
+      "name": "同型半胱氨酸",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "μmol/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 8.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "3 μmol/L (≤12 μmol/L)；25.0％ (＞12 μmol/L)",
+      "imprecision_text": "8.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-037",
+      "name": "HbA1c（NGSP单位）",
+      "aliases": [
+        "HbA1c",
+        "糖化血红蛋白"
+      ],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "%",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 2.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "3.0％",
+      "tea_text": "0.4％ HbA1c (≤6.7％ HbA1c)；6.0％ (＞6.7％ HbA1c)",
+      "imprecision_text": "2.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-038",
+      "name": "HbA1c（IFCC单位）",
+      "aliases": [
+        "HbA1c",
+        "糖化血红蛋白"
+      ],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "mmol/mol",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 3.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "3.6％",
+      "tea_text": "4.3 mmol/mol (≤50 mmol/mol)；8.6％ (＞50 mmol/mol)",
+      "imprecision_text": "3.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-039",
+      "name": "pH（血气）",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "pH",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "sd",
+          "value": 0.02,
+          "unit": "pH",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "0.015",
+      "tea_text": "0.04",
+      "imprecision_text": "0.02",
+      "notes": "表内不精密度为绝对值（无百分号），按 SD 保存；本版仅展示，不自动评价 SD。"
+    },
+    {
+      "id": "wst403-2024-040",
+      "name": "CO2分压",
+      "aliases": [
+        "二氧化碳分压",
+        "pCO2"
+      ],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "mmHg",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 4.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "4.0％",
+      "tea_text": "5 mmHg (≤62.5 mmHg)；8.0％ (＞62.5 mmHg)",
+      "imprecision_text": "4.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-041",
+      "name": "O2分压",
+      "aliases": [
+        "氧分压",
+        "pO2"
+      ],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "mmHg",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 5.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "5.0％",
+      "tea_text": "6 mmHg (≤60 mmHg)；10.0％ (＞60 mmHg)",
+      "imprecision_text": "5.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-042",
+      "name": "免疫球蛋白G",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 6.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "8.0％",
+      "tea_text": "20.0％",
+      "imprecision_text": "6.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-043",
+      "name": "免疫球蛋白A",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 6.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "8.0％",
+      "tea_text": "20.0％",
+      "imprecision_text": "6.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-044",
+      "name": "免疫球蛋白M",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "25.0％",
+      "imprecision_text": "7.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-045",
+      "name": "补体C3",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 6.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "8.0％",
+      "tea_text": "20.0％",
+      "imprecision_text": "6.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-046",
+      "name": "补体C4",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "25.0％",
+      "imprecision_text": "7.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-047",
+      "name": "C-反应蛋白",
+      "aliases": [
+        "C反应蛋白",
+        "CRP"
+      ],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "25.0％",
+      "imprecision_text": "7.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-048",
+      "name": "类风湿因子",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "25.0％",
+      "imprecision_text": "7.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-049",
+      "name": "抗链球菌溶血素O",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "25.0％",
+      "imprecision_text": "7.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-050",
+      "name": "前白蛋白",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "25.0％",
+      "imprecision_text": "7.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-051",
+      "name": "游离三碘甲状腺原氨酸",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "pmol/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "8.0％",
+      "tea_text": "0.7 pmol/L (≤3.5 pmol/L)；20.0％ (＞3.5 pmol/L)",
+      "imprecision_text": "7.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-052",
+      "name": "总三碘甲状腺原氨酸",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "nmol/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "8.0％",
+      "tea_text": "0.26 nmol/L (≤1.3 nmol/L)；20.0％ (＞1.3 nmol/L)",
+      "imprecision_text": "7.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-053",
+      "name": "游离甲状腺素",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "pmol/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "8.0％",
+      "tea_text": "2.4 pmol/L (≤12 pmol/L)；20.0％ (＞12 pmol/L)",
+      "imprecision_text": "7.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-054",
+      "name": "总甲状腺素",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "nmol/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "8.0％",
+      "tea_text": "24 nmol/L (≤120 nmol/L)；20.0％ (＞120 nmol/L)",
+      "imprecision_text": "7.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-055",
+      "name": "促甲状腺刺激激素",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "mU/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "8.0％",
+      "tea_text": "0.1 U/L (≤0.5 mU/L)；20.0％ (＞0.5 mU/L)",
+      "imprecision_text": "7.0％",
+      "notes": "原文 TEa 低值限为 0.1 U/L，分界浓度使用 mU/L，保留原文，不自动换算或判定 TEa。"
+    },
+    {
+      "id": "wst403-2024-056",
+      "name": "皮质醇",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "nmol/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "8.0％",
+      "tea_text": "20 nmol/L (≤100 nmol/L)；20.0％ (＞100 nmol/L)",
+      "imprecision_text": "7.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-057",
+      "name": "雌二醇",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "pmol/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 8.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "50 pmol/L (≤200 pmol/L)；25.0％ (＞200 pmol/L)",
+      "imprecision_text": "8.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-058",
+      "name": "卵泡刺激素",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 7,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "IU/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "8.0％",
+      "tea_text": "2 IU/L (≤10 IU/L)；20.0％ (＞10 IU/L)",
+      "imprecision_text": "7.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-059",
+      "name": "黄体生成素",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 8,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "IU/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "8.0％",
+      "tea_text": "2 IU/L (≤10 IU/L)；20.0％ (＞10 IU/L)",
+      "imprecision_text": "7.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-060",
+      "name": "孕酮",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 8,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "nmol/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "8.0％",
+      "tea_text": "2 nmol/L (≤10 nmol/L)；20.0％ (＞10 nmol/L)",
+      "imprecision_text": "7.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-061",
+      "name": "催乳素",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 8,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "mIU/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "8.0％",
+      "tea_text": "20 mIU/L (≤100 mIU/L)；20.0％ (＞100 mIU/L)",
+      "imprecision_text": "7.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-062",
+      "name": "睾酮",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 8,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "nmol/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "8.0％",
+      "tea_text": "1 nmol/L (≤5 nmol/L)；20.0％ (＞5 nmol/L)",
+      "imprecision_text": "7.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-063",
+      "name": "C-肽",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 8,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "nmol/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "8.0％",
+      "tea_text": "0.25 nmol/L (≤1.25 nmol/L)；20.0％ (＞1.25 nmol/L)",
+      "imprecision_text": "7.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-064",
+      "name": "胰岛素",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 8,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "pmol/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 8.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "12.0％",
+      "tea_text": "35 pmol/L (≤140 pmol/L)；25.0％ (＞140 pmol/L)",
+      "imprecision_text": "8.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-065",
+      "name": "叶酸",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 8,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "nmol/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 9.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "12.0％",
+      "tea_text": "2.4 nmol/L (≤8 nmol/L)；30.0％ (＞8 nmol/L)",
+      "imprecision_text": "9.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-066",
+      "name": "维生素B12",
+      "aliases": [
+        "维生素 B12"
+      ],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 8,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 8.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "25.0％",
+      "imprecision_text": "8.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-067",
+      "name": "甲状腺球蛋白",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 8,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "μg/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 8.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "2 μg/L (≤8 μg/L)；25.0％ (＞8 μg/L)",
+      "imprecision_text": "8.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-068",
+      "name": "甲状旁腺激素",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 8,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "pmol/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 10.0,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "3 pmol/L (≤10 pmol/L)；30.0％ (＞10 pmol/L)",
+      "imprecision_text": "10.0％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-069",
+      "name": "总前列腺特异抗原",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 8,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "μg/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "0.75 μg/L (≤3 μg/L)；25.0％ (＞3 μg/L)",
+      "imprecision_text": "7.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-070",
+      "name": "游离前列腺特异抗原",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 8,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "μg/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "0.35 μg/L (≤1.4 μg/L)；25.0％ (＞1.4 μg/L)",
+      "imprecision_text": "7.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-071",
+      "name": "癌胚抗原",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 8,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "μg/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "1.5 μg/L (≤6 μg/L)；25.0％ (＞6 μg/L)",
+      "imprecision_text": "7.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-072",
+      "name": "甲胎蛋白",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 8,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "ng/mL",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "2.5 ng/mL (≤10 ng/mL )；25.0％ (＞10 ng/mL )",
+      "imprecision_text": "7.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-073",
+      "name": "糖链抗原19-9",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 8,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "kIU/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "5 kIU/L (≤20 kIU/L)；25.0％ (＞20 kIU/L)",
+      "imprecision_text": "7.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-074",
+      "name": "糖链抗原125",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 8,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "kIU/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "10 kIU/L (≤40 kIU/L)；25.0％ (＞40 kIU/L)",
+      "imprecision_text": "7.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-075",
+      "name": "糖链抗原15-3",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 8,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "kIU/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "7.5 kIU/L (≤30 kIU/L)；25.0％ (＞30 kIU/L)",
+      "imprecision_text": "7.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-076",
+      "name": "β2-微球蛋白",
+      "aliases": [
+        "β2微球蛋白"
+      ],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 8,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "mg/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "0.5 mg/L (≤2 mg/L)；25.0％ (＞2 mg/L)",
+      "imprecision_text": "7.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-077",
+      "name": "铁蛋白",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 8,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "μg/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "6 μg/L (≤24 μg/L)；25.0％ (＞24 μg/L)",
+      "imprecision_text": "7.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-078",
+      "name": "糖链抗原72-4",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 8,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "25.0％",
+      "imprecision_text": "7.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-079",
+      "name": "细胞角蛋白19片段",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 8,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "25.0％",
+      "imprecision_text": "7.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-080",
+      "name": "特异性神经元烯醇酶",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 8,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "25.0％",
+      "imprecision_text": "7.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-081",
+      "name": "鳞状细胞癌抗原",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 8,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 7.5,
+          "unit": "%",
+          "operator": "<="
+        }
+      ],
+      "bias_text": "10.0％",
+      "tea_text": "25.0％",
+      "imprecision_text": "7.5％",
+      "notes": ""
+    },
+    {
+      "id": "wst403-2024-082",
+      "name": "葡萄糖（便携式血糖仪）",
+      "aliases": [],
+      "standard": "WS/T 403—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "source_page": 8,
+      "source_clause": "附录 A 表 A.1",
+      "origin": "builtin",
+      "measurement_unit": "mmol/L",
+      "scope": "室内不精密度",
+      "imprecision": [
+        {
+          "kind": "sd",
+          "value": 0.42,
+          "unit": "mmol/L",
+          "operator": "<",
+          "upper": 5.5,
+          "upper_inclusive": false
+        },
+        {
+          "kind": "cv",
+          "value": 7.5,
+          "unit": "%",
+          "operator": "<",
+          "lower": 5.5,
+          "lower_inclusive": true
+        }
+      ],
+      "bias_text": "0.83 mmol/L (＜5.5 mmol/L)；15.0％ (≥5.5 mmol/L)",
+      "tea_text": "1.1 mmol/L (＜5.5 mmol/L)；20.0％ (≥5.5 mmol/L)",
+      "imprecision_text": "标准差（SD）＜0.42 mmol/L (＜5.5 mmol/L)；变异系数（CV）＜7.5％ (≥5.5 mmol/L)",
+      "notes": ""
+    },
+    {
+      "id": "wst406-2024-wbc",
+      "name": "白细胞计数",
+      "aliases": [
+        "WBC"
+      ],
+      "standard": "WS/T 406—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821990695_59250.pdf",
+      "source_page": 6,
+      "source_clause": "6.4 表5；6.6 表6；6.9 表9",
+      "origin": "builtin",
+      "measurement_unit": "10^9/L",
+      "scope": "日间精密度（在控结果）",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 6.0,
+          "unit": "%",
+          "operator": "<=",
+          "category": "低浓度"
+        },
+        {
+          "kind": "cv",
+          "value": 4.5,
+          "unit": "%",
+          "operator": "<=",
+          "category": "中/高浓度"
+        }
+      ],
+      "imprecision_text": "低浓度 ≤6%；中/高浓度 ≤4.5%",
+      "bias_text": "±5%（正确度验证；表6，PDF第7页）",
+      "tea_text": "±15%（实验室间可比性；表9，PDF第9页）",
+      "notes": "表5未给出低/中高浓度数值分界，须按质控品资料和实验室 SOP 确认类别。使用至少两个浓度水平，按批号或月份计算在控数据 CV；产品说明书要求更高时遵循说明书。"
+    },
+    {
+      "id": "wst406-2024-rbc",
+      "name": "红细胞计数",
+      "aliases": [
+        "RBC"
+      ],
+      "standard": "WS/T 406—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821990695_59250.pdf",
+      "source_page": 6,
+      "source_clause": "6.4 表5；6.6 表6；6.9 表9",
+      "origin": "builtin",
+      "measurement_unit": "10^12/L",
+      "scope": "日间精密度（在控结果）",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 3.0,
+          "unit": "%",
+          "operator": "<=",
+          "category": "低浓度"
+        },
+        {
+          "kind": "cv",
+          "value": 2.5,
+          "unit": "%",
+          "operator": "<=",
+          "category": "中/高浓度"
+        }
+      ],
+      "imprecision_text": "低浓度 ≤3%；中/高浓度 ≤2.5%",
+      "bias_text": "±2.5%（正确度验证；表6，PDF第7页）",
+      "tea_text": "±6%（实验室间可比性；表9，PDF第9页）",
+      "notes": "表5未给出低/中高浓度数值分界，须按质控品资料和实验室 SOP 确认类别。使用至少两个浓度水平，按批号或月份计算在控数据 CV；产品说明书要求更高时遵循说明书。"
+    },
+    {
+      "id": "wst406-2024-hb",
+      "name": "血红蛋白",
+      "aliases": [
+        "Hb"
+      ],
+      "standard": "WS/T 406—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821990695_59250.pdf",
+      "source_page": 6,
+      "source_clause": "6.4 表5；6.6 表6；6.9 表9",
+      "origin": "builtin",
+      "measurement_unit": "g/L",
+      "scope": "日间精密度（在控结果）",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 2.5,
+          "unit": "%",
+          "operator": "<=",
+          "category": "低浓度"
+        },
+        {
+          "kind": "cv",
+          "value": 2.0,
+          "unit": "%",
+          "operator": "<=",
+          "category": "中/高浓度"
+        }
+      ],
+      "imprecision_text": "低浓度 ≤2.5%；中/高浓度 ≤2%",
+      "bias_text": "±2.5%（正确度验证；表6，PDF第7页）",
+      "tea_text": "±6%（实验室间可比性；表9，PDF第9页）",
+      "notes": "表5未给出低/中高浓度数值分界，须按质控品资料和实验室 SOP 确认类别。使用至少两个浓度水平，按批号或月份计算在控数据 CV；产品说明书要求更高时遵循说明书。"
+    },
+    {
+      "id": "wst406-2024-hct",
+      "name": "血细胞比容",
+      "aliases": [
+        "Hct"
+      ],
+      "standard": "WS/T 406—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821990695_59250.pdf",
+      "source_page": 6,
+      "source_clause": "6.4 表5；6.6 表6；6.9 表9",
+      "origin": "builtin",
+      "measurement_unit": "%",
+      "scope": "日间精密度（在控结果）",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 5.0,
+          "unit": "%",
+          "operator": "<=",
+          "category": "低浓度"
+        },
+        {
+          "kind": "cv",
+          "value": 4.0,
+          "unit": "%",
+          "operator": "<=",
+          "category": "中/高浓度"
+        }
+      ],
+      "imprecision_text": "低浓度 ≤5%；中/高浓度 ≤4%",
+      "bias_text": "±5%（正确度验证；表6，PDF第7页）",
+      "tea_text": "±9%（实验室间可比性；表9，PDF第9页）",
+      "notes": "表5未给出低/中高浓度数值分界，须按质控品资料和实验室 SOP 确认类别。使用至少两个浓度水平，按批号或月份计算在控数据 CV；产品说明书要求更高时遵循说明书。"
+    },
+    {
+      "id": "wst406-2024-plt",
+      "name": "血小板计数",
+      "aliases": [
+        "Plt"
+      ],
+      "standard": "WS/T 406—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821990695_59250.pdf",
+      "source_page": 6,
+      "source_clause": "6.4 表5；6.6 表6；6.9 表9",
+      "origin": "builtin",
+      "measurement_unit": "10^9/L",
+      "scope": "日间精密度（在控结果）",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 10.0,
+          "unit": "%",
+          "operator": "<=",
+          "category": "低浓度"
+        },
+        {
+          "kind": "cv",
+          "value": 8.0,
+          "unit": "%",
+          "operator": "<=",
+          "category": "中/高浓度"
+        }
+      ],
+      "imprecision_text": "低浓度 ≤10%；中/高浓度 ≤8%",
+      "bias_text": "±10%（正确度验证；表6，PDF第7页）",
+      "tea_text": "±20%（实验室间可比性；表9，PDF第9页）",
+      "notes": "表5未给出低/中高浓度数值分界，须按质控品资料和实验室 SOP 确认类别。使用至少两个浓度水平，按批号或月份计算在控数据 CV；产品说明书要求更高时遵循说明书。"
+    },
+    {
+      "id": "wst406-2024-mcv",
+      "name": "平均红细胞体积",
+      "aliases": [
+        "MCV"
+      ],
+      "standard": "WS/T 406—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821990695_59250.pdf",
+      "source_page": 6,
+      "source_clause": "6.4 表5；6.6 表6；6.9 表9",
+      "origin": "builtin",
+      "measurement_unit": "fL",
+      "scope": "日间精密度（在控结果）",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 3.0,
+          "unit": "%",
+          "operator": "<=",
+          "category": "低浓度"
+        },
+        {
+          "kind": "cv",
+          "value": 2.5,
+          "unit": "%",
+          "operator": "<=",
+          "category": "中/高浓度"
+        }
+      ],
+      "imprecision_text": "低浓度 ≤3%；中/高浓度 ≤2.5%",
+      "bias_text": "±5%（正确度验证；表6，PDF第7页）",
+      "tea_text": "±7%（实验室间可比性；表9，PDF第9页）",
+      "notes": "表5未给出低/中高浓度数值分界，须按质控品资料和实验室 SOP 确认类别。使用至少两个浓度水平，按批号或月份计算在控数据 CV；产品说明书要求更高时遵循说明书。"
+    },
+    {
+      "id": "wst406-2024-mch",
+      "name": "平均红细胞血红蛋白含量",
+      "aliases": [
+        "MCH"
+      ],
+      "standard": "WS/T 406—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821990695_59250.pdf",
+      "source_page": 6,
+      "source_clause": "6.4 表5；6.6 表6；6.9 表9",
+      "origin": "builtin",
+      "measurement_unit": "pg",
+      "scope": "日间精密度（在控结果）",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 3.0,
+          "unit": "%",
+          "operator": "<=",
+          "category": "低浓度"
+        },
+        {
+          "kind": "cv",
+          "value": 2.5,
+          "unit": "%",
+          "operator": "<=",
+          "category": "中/高浓度"
+        }
+      ],
+      "imprecision_text": "低浓度 ≤3%；中/高浓度 ≤2.5%",
+      "bias_text": "",
+      "tea_text": "±7%（实验室间可比性；表9，PDF第9页）",
+      "notes": "表5未给出低/中高浓度数值分界，须按质控品资料和实验室 SOP 确认类别。使用至少两个浓度水平，按批号或月份计算在控数据 CV；产品说明书要求更高时遵循说明书。"
+    },
+    {
+      "id": "wst406-2024-mchc",
+      "name": "平均红细胞血红蛋白浓度",
+      "aliases": [
+        "MCHC"
+      ],
+      "standard": "WS/T 406—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821990695_59250.pdf",
+      "source_page": 6,
+      "source_clause": "6.4 表5；6.6 表6；6.9 表9",
+      "origin": "builtin",
+      "measurement_unit": "g/L",
+      "scope": "日间精密度（在控结果）",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 4.0,
+          "unit": "%",
+          "operator": "<=",
+          "category": "低浓度"
+        },
+        {
+          "kind": "cv",
+          "value": 3.0,
+          "unit": "%",
+          "operator": "<=",
+          "category": "中/高浓度"
+        }
+      ],
+      "imprecision_text": "低浓度 ≤4%；中/高浓度 ≤3%",
+      "bias_text": "",
+      "tea_text": "±8%（实验室间可比性；表9，PDF第9页）",
+      "notes": "表5未给出低/中高浓度数值分界，须按质控品资料和实验室 SOP 确认类别。使用至少两个浓度水平，按批号或月份计算在控数据 CV；产品说明书要求更高时遵循说明书。"
+    },
+    {
+      "id": "wst406-2024-pt",
+      "name": "凝血酶原时间",
+      "aliases": [
+        "PT"
+      ],
+      "standard": "WS/T 406—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821990695_59250.pdf",
+      "source_page": 10,
+      "source_clause": "7.2 表11；7.5；7.6 表12",
+      "origin": "builtin",
+      "measurement_unit": "s",
+      "scope": "日间精密度（在控结果）",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 6.5,
+          "unit": "%",
+          "operator": "<=",
+          "category": "正常"
+        },
+        {
+          "kind": "cv",
+          "value": 10.0,
+          "unit": "%",
+          "operator": "<=",
+          "category": "异常"
+        }
+      ],
+      "imprecision_text": "正常 ≤6.5%；异常 ≤10%",
+      "bias_text": "",
+      "tea_text": "±15%（实验室间可比性；表12，PDF第11页）",
+      "notes": "异常样品水平大于参考区间中位值的1.5～2倍。 使用至少两个水平，按批号或月份计算在控数据 CV；产品说明书要求更高时遵循说明书。"
+    },
+    {
+      "id": "wst406-2024-aptt",
+      "name": "活化部分凝血活酶时间",
+      "aliases": [
+        "APTT"
+      ],
+      "standard": "WS/T 406—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821990695_59250.pdf",
+      "source_page": 10,
+      "source_clause": "7.2 表11；7.5；7.6 表12",
+      "origin": "builtin",
+      "measurement_unit": "s",
+      "scope": "日间精密度（在控结果）",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 6.5,
+          "unit": "%",
+          "operator": "<=",
+          "category": "正常"
+        },
+        {
+          "kind": "cv",
+          "value": 10.0,
+          "unit": "%",
+          "operator": "<=",
+          "category": "异常"
+        }
+      ],
+      "imprecision_text": "正常 ≤6.5%；异常 ≤10%",
+      "bias_text": "",
+      "tea_text": "±15%（实验室间可比性；表12，PDF第11页）",
+      "notes": "异常样品水平大于参考区间中位值的1.5～2倍。 使用至少两个水平，按批号或月份计算在控数据 CV；产品说明书要求更高时遵循说明书。"
+    },
+    {
+      "id": "wst406-2024-fib",
+      "name": "纤维蛋白原",
+      "aliases": [
+        "Fib"
+      ],
+      "standard": "WS/T 406—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821990695_59250.pdf",
+      "source_page": 10,
+      "source_clause": "7.2 表11；7.5；7.6 表12",
+      "origin": "builtin",
+      "measurement_unit": "g/L",
+      "scope": "日间精密度（在控结果）",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 9.0,
+          "unit": "%",
+          "operator": "<=",
+          "category": "正常"
+        },
+        {
+          "kind": "cv",
+          "value": 12.0,
+          "unit": "%",
+          "operator": "<=",
+          "category": "异常"
+        }
+      ],
+      "imprecision_text": "正常 ≤9%；异常 ≤12%",
+      "bias_text": "±10%（Fib正确度验证，7.5）",
+      "tea_text": "±20%（实验室间可比性；表12，PDF第11页）",
+      "notes": "异常样品浓度 >6 g/L 或 <1.5 g/L。 使用至少两个水平，按批号或月份计算在控数据 CV；产品说明书要求更高时遵循说明书。"
+    },
+    {
+      "id": "wst406-2024-tt",
+      "name": "凝血酶时间",
+      "aliases": [
+        "TT"
+      ],
+      "standard": "WS/T 406—2024",
+      "version": "2024",
+      "effective_date": "2024-11-01",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821990695_59250.pdf",
+      "source_page": 10,
+      "source_clause": "7.2 表11；7.5；7.6 表12",
+      "origin": "builtin",
+      "measurement_unit": "s",
+      "scope": "日间精密度（在控结果）",
+      "imprecision": [
+        {
+          "kind": "cv",
+          "value": 10.0,
+          "unit": "%",
+          "operator": "<=",
+          "category": "正常"
+        },
+        {
+          "kind": "cv",
+          "value": 12.0,
+          "unit": "%",
+          "operator": "<=",
+          "category": "异常"
+        }
+      ],
+      "imprecision_text": "正常 ≤10%；异常 ≤12%",
+      "bias_text": "",
+      "tea_text": "±20%（实验室间可比性；表12，PDF第11页）",
+      "notes": "异常样品水平超出参考区间。 使用至少两个水平，按批号或月份计算在控数据 CV；产品说明书要求更高时遵循说明书。"
+    }
+  ]
+}

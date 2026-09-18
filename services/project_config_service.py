@@ -24,7 +24,7 @@ INPUT_VALUE_TYPE_LABELS = {
 }
 
 TARGET_SOURCE_LABELS = {
-    "building": "建靶计算",
+    "building": "均值和标准差建立计算",
     "manufacturer": "厂家赋值",
     "manual": "手工设定",
     "copied_pending": "复制待确认",
@@ -226,6 +226,7 @@ def list_template_items(template_id: int, include_disabled: bool = False) -> pd.
             items.target_n,
             items.cv_limit,
             items.quality_target_source_text,
+            items.quality_goal_json,
             items.sort_order,
             items.notes,
             items.is_disabled
@@ -259,7 +260,7 @@ def _normalize_template_item(row: dict[str, object], sort_order: int) -> dict[st
     if qc_method == "instant":
         target_n = 20
     elif not 5 <= target_n <= 20:
-        raise ValueError("LJ 和 Z-score 建靶有效点数必须在 5 至 20 之间。")
+        raise ValueError("LJ 和 Z-score 参数建立有效点数必须在 5 至 20 之间。")
 
     cv_limit = normalize_cv_limit(row.get("cv_limit"))
 
@@ -329,6 +330,10 @@ def save_template_items(template_id: int, rows: list[dict[str, object]]) -> None
                 )
                 ON CONFLICT(template_id, test_item_id, qc_method, input_value_type)
                 DO UPDATE SET
+                    quality_goal_json = CASE WHEN qc_project_template_items.unit_id IS NOT excluded.unit_id
+                        OR qc_project_template_items.cv_limit IS NOT excluded.cv_limit
+                        OR qc_project_template_items.quality_target_source_text IS NOT excluded.quality_target_source_text
+                        THEN '{}' ELSE qc_project_template_items.quality_goal_json END,
                     unit_id = excluded.unit_id,
                     method_id = excluded.method_id,
                     reagent_id = excluded.reagent_id,
@@ -490,7 +495,7 @@ def create_lot_config_from_template(
 
         requirements = quality_requirements or {}
         if set(requirements) - {int(item['id']) for item in items}:
-            raise ValueError('CV 要求必须属于所选项目的检验项目。')
+            raise ValueError('允许不精密度（CV）必须属于所选项目的检验项目。')
         resolved = {}
         for item in items:
             override = requirements.get(int(item['id']), {})
@@ -557,6 +562,10 @@ def create_lot_config_from_template(
                     str(item["notes"] or ""),
                 ),
             )
+        from services.quality_target_service import pending_copy
+        for item in items:
+            connection.execute('UPDATE qc_lot_config_items SET quality_goal_json=? WHERE lot_config_id=? AND source_template_item_id=?',
+                (pending_copy(item['quality_goal_json']),lot_config_id,item['id']))
         _save_snapshot(connection, lot_config_id, action_type="create", change_summary="创建批次")
         return lot_config_id
 
@@ -566,14 +575,16 @@ def save_lot_item_cv_requirement(lot_config_item_id: int, cv_limit, source_text:
     from database import atomic_write
     limit = normalize_cv_limit(cv_limit)
     with atomic_write() as connection:
-        item = connection.execute('''SELECT i.lot_config_id,c.status FROM qc_lot_config_items i
+        item = connection.execute('''SELECT i.lot_config_id,i.quality_goal_json,c.status FROM qc_lot_config_items i
             JOIN qc_lot_configs c ON c.id=i.lot_config_id
             WHERE i.id=? AND i.is_disabled=0 AND c.is_disabled=0''',(lot_config_item_id,)).fetchone()
         if item is None:
             raise ValueError('未找到可修改的批次检验项目。')
+        if json.loads(item['quality_goal_json'] or '{}'):
+            raise ValueError('已选择质量目标；请在质量目标中调整，或取消后再手动设置 CV。')
         binding = connection.execute('SELECT 1 FROM qc_workbench_bindings WHERE lot_config_item_id=?',(lot_config_item_id,)).fetchone()
         if item['status'] != 'draft' or binding:
-            raise ValueError('已启用批次的 CV 要求保持不变；请在新批次建立时设置。')
+            raise ValueError('已启用批次的 允许不精密度（CV）保持不变；请在新批次建立时设置。')
         connection.execute('UPDATE qc_lot_config_items SET cv_limit=?,quality_target_source_text=? WHERE id=?',
             (limit,_clean_optional(source_text),lot_config_item_id))
         connection.execute('UPDATE qc_lot_configs SET revision_no=revision_no+1,updated_at=CURRENT_TIMESTAMP WHERE id=?',(item['lot_config_id'],))
@@ -671,6 +682,7 @@ def list_lot_config_items(lot_config_id: int) -> pd.DataFrame:
             items.target_n,
             items.cv_limit,
             items.quality_target_source_text,
+            items.quality_goal_json,
             items.sort_order,
             items.is_enabled,
             COUNT(
@@ -762,7 +774,7 @@ def save_lot_item_levels(
 
             target_source = str(raw.get("target_source") or "building").strip().lower()
             if target_source not in TARGET_SOURCE_LABELS:
-                raise ValueError("不支持的靶值来源。")
+                raise ValueError("不支持的均值和标准差来源。")
             target_mean = _optional_float(raw.get("target_mean"))
             target_sd = _optional_float(raw.get("target_sd"))
             if target_sd is not None and target_sd <= 0:
@@ -884,6 +896,8 @@ def validate_lot_config(lot_config_id: int) -> list[str]:
 
     for _, item in items.iterrows():
         item_name = str(item["test_item_name"])
+        from services.quality_target_service import validate_lot_goal
+        errors.extend(f"{item_name}：{message}" for message in validate_lot_goal(int(item['id'])))
         expected_count = int(item["level_count"])
         assigned = list_lot_item_levels(int(item["id"]))
         if len(assigned.index) != expected_count:
@@ -894,9 +908,9 @@ def validate_lot_config(lot_config_id: int) -> list[str]:
             source = str(level["target_source"])
             if source in {"manufacturer", "manual", "copied_pending"}:
                 if pd.isna(level["target_mean"]) or pd.isna(level["target_sd"]):
-                    errors.append(f"{item_name} / {level_label}：靶值和 SD 未完整填写。")
+                    errors.append(f"{item_name} / {level_label}：均值和标准差 未完整填写。")
                 if not bool(int(level["target_confirmed"] or 0)):
-                    errors.append(f"{item_name} / {level_label}：靶值和 SD 尚未确认。")
+                    errors.append(f"{item_name} / {level_label}：均值和标准差 尚未确认。")
             if source == "copied_pending":
                 errors.append(f"{item_name} / {level_label}：复制值仍处于待确认状态。")
     return list(dict.fromkeys(errors))
@@ -1041,6 +1055,9 @@ def copy_lot_config(
                 ),
             )
             target_item_id = int(item_cursor.lastrowid)
+            from services.quality_target_service import pending_copy
+            connection.execute('UPDATE qc_lot_config_items SET quality_goal_json=? WHERE id=?',
+                (pending_copy(source_item['quality_goal_json']),target_item_id))
             source_levels = connection.execute(
                 """
                 SELECT *

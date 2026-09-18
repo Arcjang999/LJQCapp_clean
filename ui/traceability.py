@@ -1,6 +1,7 @@
 """User-facing views of saved audit records. Stored payloads are never rewritten."""
 from __future__ import annotations
 
+from services.terminology_service import display_generated_text
 from services.cv_service import calculate_cv_percent
 
 import json
@@ -14,14 +15,14 @@ from services.outlier_service import get_outlier_manual_status_label
 STATUS_LABELS = {
     'accept': '在控', 'warning': '警告', 'reject': '失控', 'pending': '待判读',
     'normal': '正常', 'kept': '已保留', 'disabled': '已禁用', 'restored': '已恢复',
-    'target_building': '建靶期', 'formal_qc': '正式质控',
+    'target_building': '参数建立期', 'formal_qc': '正式质控',
     'manual': '实验室确认', 'manufacturer': '厂家赋值（已确认）',
-    'building': '本批次建靶', 'revision': '靶值修订',
+    'building': '本批次均值和标准差建立', 'revision': '均值和标准差修订',
     'copied_pending': '复制参数（待确认）',
 }
 EVENT_LABELS = {'reagent': '试剂换批', 'correction': '试剂换批更正',
                 'qc': '质控品换批', 'target': '控制参数确认',
-                'parallel': '开始平行使用', 'active': '正式启用', 'ended': '结束使用'}
+                'parallel': '开始新旧批同时使用', 'active': '正式使用', 'ended': '停止使用'}
 
 
 def _display(value):
@@ -42,12 +43,14 @@ def evaluation_tables(payload, input_value_type='raw', level_names=None):
     fields=[('test_time','检测时间'),('operator','检测人'),('phase','阶段'),
             ('status','记录状态'),('run_status','本次检测结论'),('value',value_label),
             ('rule_hits','触发规则'),('rule_hits_run','本次触发规则'),('z','Z 值'),
-            ('is_building_included','参与建靶'),('is_effective','参与有效统计'),
+            ('is_building_included','参与参数建立'),('is_effective','参与有效统计'),
             ('manual_status','人工处理状态'),('grubbs_statistic','格拉布斯统计量'),
             ('grubbs_threshold','格拉布斯临界值'),('si_upper','上侧 SI'),('si_lower','下侧 SI'),
             ('si_n2s','SI 警告界限'),('si_n3s','SI 失控界限'),
             ('analysis_prompt','判读说明'),('manual_note','人工备注')]
     def saved_value(key, value):
+        if key in ('phase', 'status', 'run_status', 'analysis_prompt'):
+            return display_generated_text(_display(value))
         if key == 'manual_status':
             return get_outlier_manual_status_label(value) if value is not None else '未记录'
         if key in ('is_building_included', 'is_effective') and value is not None:
@@ -55,18 +58,18 @@ def evaluation_tables(payload, input_value_type='raw', level_names=None):
         return _display(value)
     summary=[{'项目':label,'记录内容':saved_value(key,result[key])} for key,label in fields
              if key in result and not (formal and key == 'is_building_included')]
-    for key,label in [('target_mean','判读靶均值'),('target_sd','判读 SD')]:
+    for key,label in [('target_mean','判读设定均值'),('target_sd','判读 SD')]:
         if key in payload:summary.append({'项目':label,'记录内容':_display(payload[key])})
     levels=[]
     for level in result.get('level_results',[]):
         lid=level.get('level_id','')
         levels.append({
             '质控水平':(level_names or {}).get(lid,lid.replace('Level ','水平 ')),
-            value_label:level.get('raw_value'), '靶均值':level.get('target_mean'),
+            value_label:level.get('raw_value'), '设定均值':level.get('target_mean'),
             'SD':level.get('target_sd'),'Z-score':level.get('zscore'),
             '状态':_display(level.get('status')),
             '触发规则':_display(level.get('rule_hits_local',[])),
-            '参与建靶':'不适用（正式期）' if formal else saved_value('is_building_included',level.get('is_building_included')),
+            '参与参数建立':'不适用（正式期）' if formal else saved_value('is_building_included',level.get('is_building_included')),
             '人工处理状态':saved_value('manual_status',level.get('manual_status')),
         })
     return pd.DataFrame(summary),pd.DataFrame(levels)
@@ -79,8 +82,8 @@ def target_history_table(versions, level_names=None):
             lid=level['level_id']
             rows.append({'参数版本':f"V{version['version_no']}",
                 '质控水平':(level_names or {}).get(lid,lid.replace('Level ','水平 ')),
-                '靶均值':level['mean'],'SD':level['sd'],
-                '靶值 CV%':calculate_cv_percent(level['mean'],level['sd']),
+                '设定均值':level['mean'],'SD':level['sd'],
+                '设定变异系数（%）':calculate_cv_percent(level['mean'],level['sd']),
                 '来源':_display(version['source']), '生效时间':version['effective_at'],
                 '确认依据':version['evidence'],'确认人':version['confirmed_by']})
     return pd.DataFrame(rows)

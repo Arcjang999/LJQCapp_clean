@@ -43,7 +43,7 @@ def build_zscore_level_value_columns(
 ) -> list[str]:
     normalized_level_count = int(level_count)
     if normalized_level_count not in {2, 3}:
-        raise ValueError("Z-score 建靶期模板仅支持 2 水平或 3 水平。")
+        raise ValueError("Z-score 参数建立期模板仅支持 2 水平或 3 水平。")
 
     return [
         build_level_measurement_label(f"Level {index}", input_value_type)
@@ -198,8 +198,8 @@ def _review_zscore_import_csv(
         issues.append(
             _make_issue(
                 row_label=FILE_LEVEL_ROW_LABEL,
-                field_name="建靶状态",
-                message="当前批次尚未完成建靶，不能导入正式期数据。",
+                field_name="参数建立状态",
+                message="当前批次尚未完成均值和标准差建立，不能导入正式期数据。",
                 is_blocking=True,
             )
         )
@@ -412,9 +412,9 @@ def _review_zscore_import_csv(
             issues.append(
                 _make_issue(
                     row_label=FILE_LEVEL_ROW_LABEL,
-                    field_name="建靶进度",
+                    field_name="参数建立进度",
                     message=(
-                        f"导入后当前批次建靶 run 将达到 {projected_total} 条，超过建靶所需次数 {int(target_n or 0)} 条；"
+                        f"导入后当前批次参数建立记录 将达到 {projected_total} 条，超过参数建立所需点数 {int(target_n or 0)} 条；"
                         "继续导入会进入正式期，本次版本不支持正式期导入，请拆分文件后重试。"
                     ),
                     is_blocking=True,
@@ -424,10 +424,10 @@ def _review_zscore_import_csv(
             issues.append(
                 _make_issue(
                     row_label=FILE_LEVEL_ROW_LABEL,
-                    field_name="建靶期序列",
+                    field_name="参数建立期序列",
                     message=(
-                        f"导入后将继续追加到现有建靶期序列；"
-                        f"当前批次已有 {int(existing_phase_count)} 条建靶期 run。"
+                        f"导入后将继续追加到现有参数建立期序列；"
+                        f"当前批次已有 {int(existing_phase_count)} 条参数建立期 run。"
                     ),
                     is_blocking=False,
                 )
@@ -471,8 +471,8 @@ def _review_lj_import_csv(
         issues.append(
             _make_issue(
                 row_label=FILE_LEVEL_ROW_LABEL,
-                field_name="建靶状态",
-                message="当前批次尚未完成建靶，不能导入正式期数据。",
+                field_name="参数建立状态",
+                message="当前批次尚未完成均值和标准差建立，不能导入正式期数据。",
                 is_blocking=True,
             )
         )
@@ -649,10 +649,10 @@ def _review_lj_import_csv(
         issues.append(
             _make_issue(
                 row_label=FILE_LEVEL_ROW_LABEL,
-                field_name="建靶进度",
+                field_name="参数建立进度",
                 message=(
                     f"导入后当前批次记录数将达到 {projected_total} 条，"
-                    f"超过建靶所需次数 {int(target_n)} 条。"
+                    f"超过参数建立所需点数 {int(target_n)} 条。"
                 ),
                 is_blocking=False,
             )

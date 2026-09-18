@@ -161,7 +161,7 @@ def _render_report_preview(package: ZScoreMonthlyReportPackage) -> None:
             ("试剂", report.basic_info.reagent),
             ("质控品", report.basic_info.qc_material),
             ("浓度", report.basic_info.concentration),
-            ("当前靶值来源", report.basic_info.target_source_label.removeprefix("新版配置：")),
+            ("当前均值和标准差来源", report.basic_info.target_source_label.removeprefix("新版配置：")),
             ("来源说明", report.basic_info.target_source_detail),
         ],
         columns=["字段", "内容"],
@@ -193,10 +193,10 @@ def _render_report_preview(package: ZScoreMonthlyReportPackage) -> None:
                 "本月正式期记录数": item.monthly_count,
                 "月度均值": _format_optional_number(item.monthly_mean),
                 "月度 SD": _format_level_stat_text(item.monthly_count, item.monthly_sd, "sd"),
-                "月度 CV%": _format_level_stat_text(item.monthly_count, item.monthly_cv, "cv"),
-                "当前目标均值": _format_optional_number(item.target_mean),
-                "当前目标 SD": _format_optional_number(item.target_sd),
-                "当前 CV 要求": _format_optional_percent(item.cv_limit),
+                "实测变异系数（%）": _format_level_stat_text(item.monthly_count, item.monthly_cv, "cv"),
+                "当前设定均值": _format_optional_number(item.target_mean),
+                "当前设定 SD": _format_optional_number(item.target_sd),
+                "当前 允许不精密度（CV）": _format_optional_percent(item.cv_limit),
             }
         )
     st.dataframe(pd.DataFrame(level_rows), hide_index=True, width="stretch")

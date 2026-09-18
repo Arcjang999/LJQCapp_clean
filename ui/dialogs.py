@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from services.terminology_service import display_generated_text
+
 from html import escape as html_escape
 from textwrap import dedent
 from typing import Any
@@ -163,7 +165,7 @@ def render_record_maintenance_dialog(
                             st.rerun()
 
             with maintenance_right:
-                st.info("原始检测记录保留追溯，不提供删除。建靶期可通过禁用保留原值及维护原因。")
+                st.info("原始检测记录保留追溯，不提供删除。参数建立期可通过禁用保留原值及维护原因。")
 
     st.divider()
     if st.button("关闭", key="close_record_dialog", width="stretch"):
@@ -194,7 +196,7 @@ def render_zscore_record_maintenance_dialog(
     input_value_type = normalize_input_value_type(batch_context["batch"]["input_value_type"])
     input_value_type_label = get_input_value_type_label(input_value_type)
     st.caption(
-        f"在此查看当前批次已保存的检测记录。未锁定记录仍可维护检测时间、检测人和各水平{input_value_type_label}；建靶期记录在正式期后仅支持查看。"
+        f"在此查看当前批次已保存的检测记录。未锁定记录仍可维护检测时间、检测人和各水平{input_value_type_label}；参数建立期记录在正式期后仅支持查看。"
     )
     if not saved_runs:
         st.info("当前批次暂无已保存的检测记录可维护。")
@@ -251,11 +253,11 @@ def render_zscore_record_maintenance_dialog(
                 st.caption(
                     f"当前选中：第 {sequence_number} 次检测 | "
                     f"{pd.Timestamp(selected_run['test_time']).strftime('%Y-%m-%d %H:%M:%S')} | "
-                    f"阶段 {selected_run.get('phase_label')} | 判定 {format_zscore_status_label(selected_run.get('run_status'))} | "
+                    f"阶段 {display_generated_text(selected_run.get('phase_label'))} | 判定 {format_zscore_status_label(selected_run.get('run_status'))} | "
                     f"触发规则 {format_zscore_rule_hits(selected_run.get('rule_hits_run', []))}"
                 )
                 if is_locked_for_maintenance:
-                    st.info("该建靶期检测记录已锁定为只读，可查看，但不能修改或删除。")
+                    st.info("该参数建立期检测记录已锁定为只读，可查看，但不能修改或删除。")
                     readonly_prefix = f"readonly_zscore_run_{dialog_nonce}_{int(selected_run_id)}"
                     st.datetime_input(
                         "检测时间",
@@ -391,7 +393,7 @@ def render_zscore_record_maintenance_dialog(
                                     st.rerun()
 
             with maintenance_right:
-                st.info("原始 run 及各水平结果保留追溯，不提供删除。建靶维护继续按整次 run 进行。")
+                st.info("原始 run 及各水平结果保留追溯，不提供删除。参数建立维护继续按整次 run 进行。")
 
     st.divider()
     if st.button("关闭", key="close_zscore_record_dialog", width="stretch"):
@@ -405,7 +407,7 @@ def render_records_table(display_df: pd.DataFrame) -> None:
         return
 
     def resolve_column_class(column_name: str) -> str:
-        if column_name in {"检测序号", "生效建靶序号", "阶段", "判定结果", "疑似离群", "参与建靶统计"}:
+        if column_name in {"检测序号", "有效建立序号", "阶段", "判定结果", "疑似离群", "参与参数建立统计"}:
             return "qc-records-col-narrow"
         if column_name in {"检测时间", "检测人", "处理时间", "触发规则", "分析提示", "备注"}:
             return "qc-records-col-wide"
@@ -547,9 +549,9 @@ def build_zscore_record_maintenance_dataframe(
                 "检测序号": get_zscore_display_sequence(run),
                 "检测时间": pd.Timestamp(run["test_time"]).strftime("%Y-%m-%d %H:%M:%S"),
                 "检测人": str(run.get("operator", "") or ""),
-                "阶段": str(run.get("phase_label") or get_phase_label(run.get("phase"))),
+                "阶段": display_generated_text(str(run.get("phase_label") or get_phase_label(run.get("phase")))),
                 "判定": format_zscore_status_label(run.get("run_status", "pending")),
-                "维护状态": "建靶期只读" if bool(run.get("is_locked_for_maintenance")) else "可维护",
+                "维护状态": "参数建立期只读" if bool(run.get("is_locked_for_maintenance")) else "可维护",
                 "水平摘要": build_zscore_run_level_summary(run.get("level_results", []), level_label_map),
                 "备注": summarize_note_for_table(run.get("manual_note", "")),
             }

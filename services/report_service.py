@@ -85,7 +85,7 @@ ZSCORE_ERROR_TYPE_LABELS = {
     "shift": "系统偏移风险",
     "trend": "趋势性漂移风险",
     "mixed": "混合误差风险",
-    "not_applicable": "建靶阶段不适用",
+    "not_applicable": "均值和标准差建立阶段不适用",
     "unknown": "待进一步判断",
 }
 ZSCORE_RULE_DISPLAY_NAMES = {
@@ -197,6 +197,7 @@ class LjMonthlyReportData:
     chart_title: str
     chart_axis_label: str
     lot_trace: dict = field(default_factory=dict)
+    quality_summary: dict = field(default_factory=dict)
 
     def to_snapshot_summary(self) -> dict[str, Any]:
         return {
@@ -224,6 +225,7 @@ class LjMonthlyReportData:
             "chart_title": self.chart_title,
             "chart_axis_label": self.chart_axis_label,
             "lot_trace": self.lot_trace,
+            "quality_summary": self.quality_summary,
         }
 
 
@@ -321,6 +323,7 @@ class ZScoreMonthlyReportData:
     chart_title: str
     chart_axis_label: str
     lot_trace: dict = field(default_factory=dict)
+    quality_summary: dict = field(default_factory=dict)
 
     def to_snapshot_summary(self) -> dict[str, Any]:
         return {
@@ -349,6 +352,7 @@ class ZScoreMonthlyReportData:
             "chart_title": self.chart_title,
             "chart_axis_label": self.chart_axis_label,
             "lot_trace": self.lot_trace,
+            "quality_summary": self.quality_summary,
         }
 
 
@@ -501,7 +505,8 @@ def build_lj_monthly_report_package(batch_id: int, report_month: str) -> LjMonth
     )
     from services.lot_lifecycle_service import report_lot_trace
     trace=report_lot_trace('lj',batch_id,normalized_month,formal_df)
-    report=replace(report,lot_trace=trace)
+    from services.quality_target_service import batch_quality_summary
+    report=replace(report,lot_trace=trace,quality_summary=batch_quality_summary('lj',batch_id,normalized_month))
     version_ids={item['profile_id'] for item in trace.get('statistics_by_target_version',[])}
     if len(version_ids)>1:
         report=replace(report,statistics=replace(report.statistics,monthly_mean=None,monthly_sd=None,monthly_cv=None,target_mean=None,target_sd=None),
@@ -545,10 +550,10 @@ def build_lj_monthly_preview_summary(report: LjMonthlyReportData) -> list[tuple[
         ("失控记录数", str(statistics.out_of_control_count)),
         ("月度均值", _format_float(statistics.monthly_mean)),
         ("月度 SD", _format_monthly_stat_text(statistics, "sd")),
-        ("月度 CV%", _format_monthly_stat_text(statistics, "cv")),
-        ("当前目标均值", _format_float(statistics.target_mean)),
-        ("当前目标 SD", _format_float(statistics.target_sd)),
-        ("批次 CV 要求", _format_float(statistics.cv_limit, digits=2, suffix="%")),
+        ("实测变异系数（%）", _format_monthly_stat_text(statistics, "cv")),
+        ("当前设定均值", _format_float(statistics.target_mean)),
+        ("当前设定 SD", _format_float(statistics.target_sd)),
+        ("批次允许不精密度（CV）", _format_float(statistics.cv_limit, digits=2, suffix="%")),
     ]
 
 
@@ -615,8 +620,8 @@ def build_zscore_monthly_report_package(
     report_period_label = _format_report_period_label(normalized_month)
     target_source_label, target_source_detail = _resolve_zscore_target_source()
     if dict(batch).get("v11_target_source") == "building":
-        target_source_label = "新版配置：本批次建靶值"
-        target_source_detail = f"配置：{batch['v11_config_name']}；各水平按本批次有效建靶记录计算。"
+        target_source_label = "新版配置：本批次数据计算"
+        target_source_detail = f"配置：{batch['v11_config_name']}；各水平按本批次有效参数建立记录计算。"
     overview_text = _build_zscore_monthly_overview(statistics, template_label)
     corrective_actions_empty_text = _build_zscore_corrective_actions_empty_text(abnormal_records)
     abnormal_summary_text = _build_zscore_abnormal_summary_text(
@@ -686,7 +691,8 @@ def build_zscore_monthly_report_package(
     from services.lot_lifecycle_service import report_lot_trace
     formal_plot=monthly_plot_df[monthly_plot_df.phase==PHASE_FORMAL_QC]
     trace=report_lot_trace('zscore',batch_id,normalized_month,formal_plot)
-    report=replace(report,lot_trace=trace)
+    from services.quality_target_service import batch_quality_summary
+    report=replace(report,lot_trace=trace,quality_summary=batch_quality_summary('zscore',batch_id,normalized_month))
     version_ids={item['profile_id'] for item in trace.get('statistics_by_target_version',[])}
     if len(version_ids)>1:
         report=replace(report,level_statistics=[replace(item,monthly_mean=None,monthly_sd=None,monthly_cv=None,target_mean=None,target_sd=None) for item in report.level_statistics],
@@ -730,7 +736,7 @@ def build_zscore_monthly_preview_summary(report: ZScoreMonthlyReportData) -> lis
         ("失控检测记录数", str(statistics.out_of_control_count)),
         ("当前规则组合", statistics.template_label),
         ("当前阶段", statistics.current_phase_label),
-        ("全部水平已完成建靶", "是" if statistics.all_levels_ready else "否"),
+        ("全部水平已完成均值和标准差建立", "是" if statistics.all_levels_ready else "否"),
     ]
 
 
@@ -864,7 +870,7 @@ def build_report_history_statistics_summary(record: ReportHistoryRecord) -> list
             ("失控检测记录数", str(_coerce_report_history_int(statistics.get("out_of_control_count")))),
             ("规则组合", str(statistics.get("template_label") or "-")),
             ("当前阶段", str(statistics.get("current_phase_label") or "-")),
-            ("全部水平已完成建靶", "是" if bool(statistics.get("all_levels_ready")) else "否"),
+            ("全部水平已完成均值和标准差建立", "是" if bool(statistics.get("all_levels_ready")) else "否"),
         ]
 
     return [
@@ -874,8 +880,8 @@ def build_report_history_statistics_summary(record: ReportHistoryRecord) -> list
         ("失控记录数", str(_coerce_report_history_int(statistics.get("out_of_control_count")))),
         ("月度均值", _format_float(_coerce_report_history_float(statistics.get("monthly_mean")))),
         ("月度 SD", _format_float(_coerce_report_history_float(statistics.get("monthly_sd")))),
-        ("月度 CV%", _format_float(_coerce_report_history_float(statistics.get("monthly_cv")), digits=2, suffix="%")),
-        ("当前目标均值", _format_float(_coerce_report_history_float(statistics.get("target_mean")))),
+        ("实测变异系数（%）", _format_float(_coerce_report_history_float(statistics.get("monthly_cv")), digits=2, suffix="%")),
+        ("当前设定均值", _format_float(_coerce_report_history_float(statistics.get("target_mean")))),
     ]
 
 
@@ -1241,10 +1247,10 @@ def _resolve_target_source(batch) -> tuple[str, str]:
         source_label = str(batch_dict.get("v11_target_source") or "building").strip().lower()
         config_name = str(batch_dict.get("v11_config_name") or "").strip()
         if source_label == "building":
-            detail = "基于本批次有效建靶点计算。"
+            detail = "基于本批次有效建立点计算。"
             if config_name:
                 detail += f" 上游配置：{config_name}。"
-            return ("新版配置：本批次建靶值", detail)
+            return ("新版配置：本批次数据计算", detail)
     if source_method == "instant":
         source_project = str(batch["source_instant_project_name"] or "").strip() or "即时法项目"
         source_batch = str(batch["source_instant_batch_lot_no"] or "").strip() or "未填写质控批号"
@@ -1255,7 +1261,7 @@ def _resolve_target_source(batch) -> tuple[str, str]:
             "即时法转入后形成的 LJ 靶值",
             f"该批次由即时法转入形成；来源项目：{source_project}；来源批次：{source_batch}；转入时间：{transfer_time}{config_detail}",
         )
-    return ("本批次建靶值", "基于本批次建靶期有效建靶点计算。")
+    return ("本批次数据计算", "基于本批次参数建立期有效建立点计算。")
 
 
 def _build_monthly_overview(
@@ -1549,7 +1555,7 @@ def _build_zscore_abnormal_summary_text(
 
 
 def _resolve_zscore_target_source() -> tuple[str, str]:
-    return ("本批次各水平建靶值", "基于本批次各水平建靶期有效点计算。")
+    return ("本批次各水平数据计算", "基于本批次各水平参数建立期有效点计算。")
 
 
 def _build_zscore_monthly_overview(

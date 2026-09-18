@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from services.terminology_service import display_generated_text
+
 import pandas as pd
 import streamlit as st
 
@@ -148,15 +150,16 @@ def _render_zscore_level_summary_compact_section(context: dict[str, object]) -> 
         rows.append(
             {
                 "水平": display_label,
-                "建靶点": int(summary_item.get("effective_n", 0) or 0),
+                "参数建立点": int(summary_item.get("effective_n", 0) or 0),
                 "禁用": int(summary_item.get("disabled_n", 0) or 0),
-                "阶段": str(profile.get("phase_label") or "-"),
-                "靶均值": format_optional_float(building_mean),
-                "靶SD": format_optional_float(building_sd),
-                "靶CV%": format_optional_float(building_cv, digits=2, suffix="%"),
+                "阶段": display_generated_text(str(profile.get("phase_label") or "-")),
+                "当前均值": format_optional_float(building_mean),
+                "当前 SD": format_optional_float(building_sd),
+                "设定变异系数（%）": format_optional_float(building_cv if profile.get("is_ready") else None, digits=2, suffix="%"),
+                "建立期实测变异系数（%）": format_optional_float(profile.get("provisional_cv"), digits=2, suffix="%"),
                 "实时均值": format_optional_float(realtime_profile.get("realtime_mean")),
                 "实时SD": format_optional_float(realtime_profile.get("realtime_sd")),
-                "实时CV%": format_optional_float(realtime_profile.get("realtime_cv"), digits=2, suffix="%"),
+                "实测变异系数（%）": format_optional_float(realtime_profile.get("realtime_cv"), digits=2, suffix="%"),
             }
         )
 
@@ -212,7 +215,7 @@ def _render_zscore_maintenance_summary(context: dict[str, object]) -> None:
                 "title": "维护概览",
                 "chips": [
                     f"当前记录 {len(history_runs)} 次",
-                    f"生效建靶点 {effective_total} 个",
+                    f"生效参数建立点 {effective_total} 个",
                     f"已禁用点 {disabled_total} 个",
                     f"异常记录 {abnormal_run_count} 次",
                     f"最新检测 {latest_test_time}",
@@ -278,6 +281,8 @@ def render_zscore_page() -> None:
             badges=["多水平（Z-score法）", f"{level_count} 水平", context["overall_phase_label"], input_value_type_label],
             tone="accent",
         )
+        from ui.quality_targets import render_batch_quality
+        render_batch_quality("zscore", selected_batch_id)
         entry_col, chart_col = st.columns([0.94, 1.24], gap="large")
 
         with chart_col:
@@ -333,7 +338,7 @@ def render_zscore_page() -> None:
                 if context["overall_phase"] == PHASE_FORMAL_QC:
                     render_section_intro(
                         title="检测记录维护",
-                        caption="建靶记录已锁定，可在维护记录中查看。",
+                        caption="参数建立记录已锁定，可在维护记录中查看。",
                         tone="muted",
                     )
                     render_zscore_record_maintenance_entry(context["history_runs"], context["batch_context"])

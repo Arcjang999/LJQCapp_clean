@@ -109,7 +109,7 @@ def build_lj_building_outlier_panel_data(
             ),
         }
     return {
-        "phase_label": "建靶期",
+        "phase_label": "参数建立期",
         "effective_building_count": int(stats.get("effective_building_count", 0) or 0),
         "disabled_building_count": int(stats.get("disabled_building_count", 0) or 0),
         "mean": stats.get("mean"),
@@ -140,15 +140,15 @@ def render_lj_building_outlier_panel(
     latest_source_text: str,
 ) -> None:
     panel_data = build_lj_building_outlier_panel_data(stats, latest_source_text)
-    st.markdown("**建靶期离群值判断**")
+    st.markdown("**参数建立期离群值判断**")
     render_compact_stat_metrics(
         [
             ("当前阶段", str(panel_data["phase_label"])),
-            ("当前有效建靶点数", str(panel_data["effective_building_count"])),
+            ("当前有效建立点数", str(panel_data["effective_building_count"])),
             ("当前已禁用点数", str(panel_data["disabled_building_count"])),
-            ("当前建靶均值", _format_lj_stat_text(panel_data["mean"])),
-            ("当前建靶 SD", _format_lj_stat_text(panel_data["sd"])),
-            ("当前建靶 CV%", _format_lj_stat_text(panel_data["cv"], digits=2, suffix="%")),
+            ("当前建设定均值", _format_lj_stat_text(panel_data["mean"])),
+            ("当前建设定 SD", _format_lj_stat_text(panel_data["sd"])),
+            ("实测变异系数（%）", _format_lj_stat_text(panel_data["cv"], digits=2, suffix="%")),
         ]
     )
     st.caption(str(panel_data["source_text"]))
@@ -156,13 +156,13 @@ def render_lj_building_outlier_panel(
         st.info("当前点数不足，暂不进行格拉布斯法判断。")
     elif panel_data["suspect_details"] is None:
         if bool(panel_data["target_ready"]):
-            st.success("当前未发现疑似离群建靶点，建靶统计已可用于进入正式期。")
+            st.success("当前未发现疑似离群参数建立点，参数建立统计已可用于进入正式期。")
         else:
-            st.success("当前未发现疑似离群建靶点。")
+            st.success("当前未发现疑似离群参数建立点。")
     else:
         suspect_details = panel_data["suspect_details"]
         st.warning(
-            "发现疑似离群建靶点："
+            "发现疑似离群参数建立点："
             f"序号 #{suspect_details['sequence']} | "
             f"时间 {suspect_details['test_time']} | "
             f"G={float(suspect_details['grubbs_statistic'] or 0.0):.4f} | "
@@ -342,7 +342,7 @@ def _build_lj_chart_title(batch, view_mode: str) -> str:
 
 
 def _get_lj_chart_state(batch) -> dict[str, object]:
-    view_options = ["建靶图", "正式质控图", "全部数据图"]
+    view_options = ["参数建立图", "正式质控图", "全部数据图"]
     view_mode = st.session_state.get("chart_view_mode", "全部数据图")
     if view_mode not in view_options:
         view_mode = view_options[2]
@@ -469,19 +469,19 @@ def render_lj_entry_and_stats_section(
 
     with st.container(border=True):
         confirmed_target = bool(stats.get("target_profile_id"))
-        st.markdown("**当前控制参数**" if confirmed_target else "**建靶统计**")
+        st.markdown("**当前控制参数**" if confirmed_target else "**参数建立统计**")
         render_compact_stat_metrics(
             [
                 ("总记录数", f"{stats.get('building_total_count', 0)}"),
-                ("生效建靶点", f"{stats.get('effective_building_count', 0)}"),
+                ("生效参数建立点", f"{stats.get('effective_building_count', 0)}"),
                 ("已禁用点", f"{stats.get('disabled_building_count', 0)}"),
-                ("靶均值" if confirmed_target else "均值", "-" if stats["mean"] is None else f"{stats['mean']:.4f}"),
+                ("设定均值" if confirmed_target else "均值", "-" if stats["mean"] is None else f"{stats['mean']:.4f}"),
                 ("SD", "-" if stats["sd"] is None else f"{stats['sd']:.4f}"),
-                ("靶值 CV%" if confirmed_target else "建靶 CV%", "-" if stats["cv"] is None else f"{stats['cv']:.2f}%"),
+                ("设定变异系数（%）" if confirmed_target else "实测变异系数（%）", "-" if stats["cv"] is None else f"{stats['cv']:.2f}%"),
             ]
         )
         st.caption(
-            "已使用确认的控制参数，后续结果按适用版本判读。" if confirmed_target else "建靶进度："
+            "已使用确认的控制参数，后续结果按适用版本判读。" if confirmed_target else "参数建立进度："
             + (
                 "已完成，后续结果自动进行 Westgard 判定。"
                 if stats.get("target_ready")
@@ -489,11 +489,11 @@ def render_lj_entry_and_stats_section(
             )
         )
         if cv_limit is not None:
-            st.caption(f"当前批次已保存 CV 要求：≤ {cv_limit:.2f}%")
+            st.caption(f"当前批次已保存允许不精密度（CV）：≤ {cv_limit:.2f}%")
             render_cv_limit_hint(
                 stats.get("cv") if confirmed_target else building_cv_hint.get("cv"),
                 cv_limit,
-                "当前靶值" if confirmed_target else "当前累计建靶",
+                "当前控制参数" if confirmed_target else "当前累计均值和标准差建立",
             )
 
     with st.container(border=True):
@@ -532,7 +532,7 @@ def render_lj_entry_and_stats_section(
             [
                 ("实时均值", "-" if realtime_stats["mean"] is None else f"{realtime_stats['mean']:.4f}"),
                 ("实时 SD", "-" if realtime_stats["sd"] is None else f"{realtime_stats['sd']:.4f}"),
-                ("实时 CV%", "-" if realtime_stats["cv"] is None else f"{realtime_stats['cv']:.2f}%"),
+                ("实测变异系数（%）", "-" if realtime_stats["cv"] is None else f"{realtime_stats['cv']:.2f}%"),
             ]
         )
         if realtime_message:
@@ -644,7 +644,7 @@ def render_lj_chart_and_analysis_section(
 
 def render_lj_rule_summary_section(stats: dict[str, object]) -> None:
     if not bool(stats.get("target_ready")):
-        st.info("当前仍在建靶期，上方最新分析仅显示离群值判断；Westgard 规则汇总会在正式期启用后显示。")
+        st.info("当前仍在参数建立期，上方最新分析仅显示离群值判断；Westgard 规则汇总会在正式期启用后显示。")
         return
 
     st.markdown("**本批次规则汇总**")
@@ -652,7 +652,7 @@ def render_lj_rule_summary_section(stats: dict[str, object]) -> None:
 
     with st.expander("Westgard 规则说明", expanded=False):
         st.caption(
-            "建靶期可参考，正式质控期会输出规则结论。"
+            "参数建立期可参考，正式质控期会输出规则结论。"
         )
         for rule_id in ["1_2s", "1_3s", "2_2s", "R_4s", "4_1s", "10x"]:
             st.markdown(f"- `{format_rule_code(rule_id)}`：{format_rule_description(rule_id)}")
@@ -687,11 +687,11 @@ def render_lj_maintenance_section(context: dict[str, object]) -> None:
         render_compact_stat_metrics(
             [
                 ("总记录数", f"{stats.get('building_total_count', 0)}"),
-                ("生效建靶点", f"{stats.get('effective_building_count', 0)}"),
+                ("生效参数建立点", f"{stats.get('effective_building_count', 0)}"),
                 ("已禁用点", f"{stats.get('disabled_building_count', 0)}"),
-                ("当前靶均值" if stats.get("target_profile_id") else "均值", "-" if stats.get("mean") is None else f"{stats['mean']:.4f}"),
+                ("当前设定均值" if stats.get("target_profile_id") else "均值", "-" if stats.get("mean") is None else f"{stats['mean']:.4f}"),
                 ("SD", "-" if stats.get("sd") is None else f"{stats['sd']:.4f}"),
-                ("靶值 CV%" if stats.get("target_profile_id") else "建靶 CV%", "-" if stats.get("cv") is None else f"{stats['cv']:.2f}%"),
+                ("设定变异系数（%）" if stats.get("target_profile_id") else "实测变异系数（%）", "-" if stats.get("cv") is None else f"{stats['cv']:.2f}%"),
             ]
         )
 
@@ -699,7 +699,7 @@ def render_lj_maintenance_section(context: dict[str, object]) -> None:
         if suspect_row is not None:
             suspect_time = pd.Timestamp(suspect_row["test_time"]).strftime("%Y-%m-%d %H:%M")
             st.warning(
-                "当前存在疑似离群建靶点："
+                "当前存在疑似离群参数建立点："
                 f"序号 #{int(suspect_row.get('sequence', 0) or 0)} | "
                 f"时间 {suspect_time} | "
                 f"G={float(suspect_row.get('grubbs_statistic') or 0.0):.4f} | "
@@ -709,7 +709,7 @@ def render_lj_maintenance_section(context: dict[str, object]) -> None:
             )
 
         if building_df.empty:
-            st.info("当前批次暂无建靶期记录可维护。")
+            st.info("当前批次暂无参数建立期记录可维护。")
         else:
             option_map: dict[str, int] = {}
             option_labels: list[str] = []
@@ -723,7 +723,7 @@ def render_lj_maintenance_section(context: dict[str, object]) -> None:
                 option_map[label] = int(row["id"])
 
             selected_label = st.selectbox(
-                "选择需要处理的建靶点",
+                "选择需要处理的参数建立点",
                 options=option_labels,
                 key="lj_outlier_record_selector",
             )
@@ -742,7 +742,7 @@ def render_lj_maintenance_section(context: dict[str, object]) -> None:
                 f"alpha={DEFAULT_GRUBBS_ALPHA:.2f}"
             )
             if stats.get("has_formal_started"):
-                st.info("正式期启用后，LJ 建靶期离群值状态将锁定，不再允许保留、禁用或恢复。")
+                st.info("正式期启用后，LJ 参数建立期离群值状态将锁定，不再允许保留、禁用或恢复。")
 
             action_cols = st.columns(3)
             keep_disabled = bool(stats.get("has_formal_started"))
@@ -751,15 +751,15 @@ def render_lj_maintenance_section(context: dict[str, object]) -> None:
 
             if action_cols[0].button("保留", key=f"lj_keep_{selected_result_id}", width="stretch", disabled=keep_disabled):
                 keep_lj_building_result(int(selected_result_id))
-                st.session_state["lj_outlier_notice"] = "建靶点已标记为保留，并已重算建靶统计。"
+                st.session_state["lj_outlier_notice"] = "参数建立点已标记为保留，并已重算参数建立统计。"
                 st.rerun()
             if action_cols[1].button("禁用", key=f"lj_disable_{selected_result_id}", width="stretch", disabled=disable_disabled):
                 disable_lj_building_result(int(selected_result_id))
-                st.session_state["lj_outlier_notice"] = "建靶点已禁用，并已重算建靶统计。"
+                st.session_state["lj_outlier_notice"] = "参数建立点已禁用，并已重算参数建立统计。"
                 st.rerun()
             if action_cols[2].button("恢复", key=f"lj_restore_{selected_result_id}", width="stretch", disabled=restore_disabled):
                 restore_lj_building_result(int(selected_result_id))
-                st.session_state["lj_outlier_notice"] = "建靶点已恢复，并已重算建靶统计。"
+                st.session_state["lj_outlier_notice"] = "参数建立点已恢复，并已重算参数建立统计。"
                 st.rerun()
 
         if st.button(
@@ -832,7 +832,7 @@ def _render_lj_export_import_section_impl(
 
     st.markdown("**导出**")
     st.markdown("**分阶段数据导出**")
-    st.caption(f"可分别导出当前批次的建靶期或正式期数据，主值列统一为“{input_value_type_label}”。")
+    st.caption(f"可分别导出当前批次的参数建立期或正式期数据，主值列统一为“{input_value_type_label}”。")
     export_format = st.radio(
         "导出数据格式",
         options=["Excel (.xlsx)", "CSV (.csv)"],
@@ -888,7 +888,7 @@ def _render_lj_export_import_section_impl(
     png_bytes = png_payload["data"] if png_payload is not None else b""
     phase_export_cols = st.columns(2)
     phase_export_cols[0].download_button(
-        label="导出建靶期数据",
+        label="导出参数建立期数据",
         data=building_xlsx_bytes if export_format == "Excel (.xlsx)" else building_csv_bytes,
         file_name=(
             f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_target_building_results.xlsx"
@@ -1030,15 +1030,15 @@ def _render_lj_export_import_section_impl(
 
     st.divider()
     st.markdown("**CSV 导入**")
-    st.caption("建靶期和正式期分别提供模板下载、审查和导入。")
-    st.markdown("**建靶期 CSV 导入**")
-    st.caption(f"先下载标准模板，再上传 CSV 或单工作表 Excel 审查；只有无阻断错误时，才允许确认导入当前批次建靶期{input_value_type_label}数据。")
-    st.markdown("- `试剂批号变更（可选）` 在建靶期一般不填。")
+    st.caption("参数建立期和正式期分别提供模板下载、审查和导入。")
+    st.markdown("**参数建立期 CSV 导入**")
+    st.caption(f"先下载标准模板，再上传 CSV 或单工作表 Excel 审查；只有无阻断错误时，才允许确认导入当前批次参数建立期{input_value_type_label}数据。")
+    st.markdown("- `试剂批号变更（可选）` 在参数建立期一般不填。")
     st.markdown("- 正式期仅在“更换试剂批号后的第一条记录”填写“是”。")
     st.markdown("- 其余记录填“否”或留空。")
     st.markdown("- 该字段表示“变更点”，不是持续状态。")
     st.download_button(
-        label="下载建靶期 CSV 模板",
+        label="下载参数建立期 CSV 模板",
         data=lj_building_template_csv_bytes,
         file_name=(
             f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_target_building_import_template.csv"
@@ -1047,11 +1047,11 @@ def _render_lj_export_import_section_impl(
         width="stretch",
     )
     if lj_building_import_disabled:
-        st.info("当前批次已完成建靶，请使用正式期导入。")
+        st.info("当前批次已完成均值和标准差建立，请使用正式期导入。")
         st.session_state.pop(lj_import_review_state_key, None)
 
     uploaded_lj_building_csv = st.file_uploader(
-        "上传建靶期 CSV / Excel",
+        "上传参数建立期 CSV / Excel",
         type=["csv", "xlsx"],
         key=lj_import_uploader_key,
         disabled=lj_building_import_disabled,
@@ -1111,7 +1111,7 @@ def _render_lj_export_import_section_impl(
         )
 
     confirm_lj_import_clicked = import_action_cols[1].button(
-        "确认导入建靶期数据",
+        "确认导入参数建立期数据",
         key=f"{lj_import_scope}_confirm_button",
         width="stretch",
         disabled=confirm_lj_import_disabled,
@@ -1126,14 +1126,14 @@ def _render_lj_export_import_section_impl(
         st.session_state.pop(lj_import_review_state_key, None)
         st.session_state[lj_import_uploader_nonce_key] = lj_import_uploader_nonce + 1
         st.session_state[lj_import_success_key] = (
-            f"已追加导入 {imported_row_count} 条建靶期记录，并自动重算当前建靶统计。"
+            f"已追加导入 {imported_row_count} 条参数建立期记录，并自动重算当前参数建立统计。"
         )
         st.rerun()
 
     st.divider()
     st.markdown("**LJ 正式期 CSV 导入**")
     st.caption(f"先下载标准模板，再上传 CSV 或单工作表 Excel 审查；导入目标为当前批次正式期，只有无阻断错误时才允许确认导入当前批次{input_value_type_label}数据。")
-    st.markdown("- `试剂批号变更（可选）` 在建靶期一般不填。")
+    st.markdown("- `试剂批号变更（可选）` 在参数建立期一般不填。")
     st.markdown("- 正式期仅在“更换试剂批号后的第一条记录”填写“是”。")
     st.markdown("- 其余记录填“否”或留空。")
     st.markdown("- 该字段表示“变更点”，不是持续状态。")
@@ -1147,7 +1147,7 @@ def _render_lj_export_import_section_impl(
         width="stretch",
     )
     if not lj_target_ready:
-        st.info("当前批次尚未完成建靶，不能导入正式期数据。你仍可先上传 CSV 做审查。")
+        st.info("当前批次尚未完成均值和标准差建立，不能导入正式期数据。你仍可先上传 CSV 做审查。")
 
     uploaded_lj_formal_csv = st.file_uploader(
         "上传正式期 CSV / Excel",

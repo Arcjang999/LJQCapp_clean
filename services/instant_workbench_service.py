@@ -44,10 +44,10 @@ def _configuration_sources(connection: sqlite3.Connection) -> tuple[list[dict], 
             ORDER BY assigned.level_order, assigned.id
         """, (row["id"], row["qc_material_lot_id"])).fetchall()
         if row["level_count"] != 1 or len(levels) != 1 or row["target_n"] != 20:
-            reject("即时法必须配置 1 个有效水平，建靶有效点数固定为 20。")
+            reject("即时法必须配置 1 个有效水平，参数建立有效点数固定为 20。")
             continue
         if any(level["target_source"] != "building" for level in levels):
-            reject("即时法用于本批次建靶，需逐步积累检测数据。使用已确认的人工或厂家靶值时，请选择单水平 LJ 法。")
+            reject("即时法用于本批次均值和标准差建立，需逐步积累检测数据。使用已确认的人工或厂家靶值时，请选择单水平 LJ 法。")
             continue
         snapshot = connection.execute("""
             SELECT id, snapshot_json FROM qc_config_snapshots
@@ -64,7 +64,7 @@ def _configuration_sources(connection: sqlite3.Connection) -> tuple[list[dict], 
             continue
         if (item["qc_method"] != "instant" or item["level_count"] != 1 or item["target_n"] != 20
                 or any(level["target_source"] != "building" for level in item["levels"])):
-            reject("请将即时法配置为单水平、本批次建靶，建靶次数设为 20。")
+            reject("请将即时法配置为单水平、本批次均值和标准差建立，参数建立点数设为 20。")
             continue
         config = payload["config"]
         sources.append({
@@ -74,6 +74,7 @@ def _configuration_sources(connection: sqlite3.Connection) -> tuple[list[dict], 
             "config_name": config["config_name"], "test_item_name": item["test_item_name"],
             "input_value_type": item["input_value_type"], "level_count": item["level_count"],
             "target_n": item["target_n"], "cv_limit": item["cv_limit"],
+            "quality_goal_json": item.get("quality_goal_json", "{}"),
             "unit_symbol": item["unit_symbol"], "method_name": item["method_name"],
             "instrument_name": config["instrument_name"], "reagent_name": item["reagent_name"],
             "reagent_manufacturer_name": "", "qc_material_name": config["qc_material_name"],

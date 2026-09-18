@@ -24,7 +24,7 @@ def render_instant_v12_configuration_selection(manage_tab, projects, project_id,
     with manage_tab:
         render_section_intro(
             title="即时法项目与批次选择",
-            caption="请选择在项目/批次管理中已启用、使用本批次建靶的单水平即时法配置。",
+            caption="请选择在项目/批次管理中设置已确认、使用本批次均值和标准差建立的单水平即时法配置。",
             badges=["单水平", "3 点开始检验", "20 点后可转 LJ"], tone="accent",
         )
         if issues:
@@ -35,13 +35,13 @@ def render_instant_v12_configuration_selection(manage_tab, projects, project_id,
             st.info("当前没有可用的即时法配置。请先在项目/批次管理中建立并启用项目与批次。")
             return
 
-        project_map = {"请选择已启用的即时法项目": None}
+        project_map = {"请选择设置已确认的即时法项目": None}
         for row in projects.to_dict("records"):
             label = f"{row['name']}｜{row['instrument_name']}｜{get_input_value_type_label(row['input_value_type'])}"
             if label in project_map:
                 label += f"｜#{row['id']}"
             project_map[label] = row["id"]
-        batch_map = {"请选择已启用的批次": None}
+        batch_map = {"请选择设置已确认的批次": None}
         for row in batches.to_dict("records"):
             label = f"质控批号：{row['lot_no']}｜{_clean(row['v11_config_name'])}｜效期 {_clean(row['v11_expiry_date'])}"
             if label in batch_map:
@@ -54,7 +54,7 @@ def render_instant_v12_configuration_selection(manage_tab, projects, project_id,
             if project_map[label] != project_id:
                 st.session_state["instant_selected_project_id"] = project_map[label]
                 st.session_state["instant_selected_batch_id"] = None
-                st.session_state["v12_instant_batch_selector"] = "请选择已启用的批次"
+                st.session_state["v12_instant_batch_selector"] = "请选择设置已确认的批次"
                 st.rerun()
         with batch_col:
             label = st.selectbox("批次", list(batch_map), index=_selector_index(batch_map, batch_id), key="v12_instant_batch_selector", disabled=project_id is None)

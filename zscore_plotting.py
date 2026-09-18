@@ -870,7 +870,7 @@ def _build_phase_legend_handles(
                 markeredgecolor="#ffffff",
                 markeredgewidth=0.9,
                 markersize=7,
-                label="建靶期（虚线 / 方形点）",
+                label="参数建立期（虚线 / 方形点）",
             )
         )
     if PHASE_FORMAL_QC in visible_phases:
@@ -1051,4 +1051,4 @@ def _phase_linestyle(phase: str) -> str:
 
 
 def _phase_label(phase: str) -> str:
-    return "建靶期" if phase == PHASE_TARGET_BUILDING else "正式期"
+    return "参数建立期" if phase == PHASE_TARGET_BUILDING else "正式期"

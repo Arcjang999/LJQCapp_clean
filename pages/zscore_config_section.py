@@ -24,7 +24,7 @@ def render_zscore_v12_configuration_selection(manage_tab, projects, project_id, 
     with manage_tab:
         render_section_intro(
             title="Z-score 项目与批次选择",
-            caption="请选择已启用的 2 或 3 水平配置。可按本批建靶，或在靶值版本中确认全部水平的控制参数。",
+            caption="请选择设置已确认的 2 或 3 水平配置。可按本批均值和标准差建立，或在均值和标准差管理中确认全部水平的控制参数。",
             badges=["多水平", "参数版本"], tone="accent",
         )
         if issues:
@@ -35,13 +35,13 @@ def render_zscore_v12_configuration_selection(manage_tab, projects, project_id, 
             st.info("当前没有可用的多水平配置。请先在项目/批次管理中建立并启用项目与批次。")
             return
 
-        project_map = {"请选择已启用的 Z-score 项目": None}
+        project_map = {"请选择设置已确认的 Z-score 项目": None}
         for row in projects.to_dict("records"):
             label = f"{row['name']}｜{row['instrument_name']}｜{row['level_count']} 水平｜{get_input_value_type_label(row['input_value_type'])}"
             if label in project_map:
                 label += f"｜#{row['id']}"
             project_map[label] = row["id"]
-        batch_map = {"请选择已启用的批次": None}
+        batch_map = {"请选择设置已确认的批次": None}
         for row in batches.to_dict("records"):
             label = f"质控批号：{row['lot_no']}｜{_clean(row['v11_config_name'])}｜效期 {_clean(row['v11_expiry_date'])}"
             if label in batch_map:
@@ -54,7 +54,7 @@ def render_zscore_v12_configuration_selection(manage_tab, projects, project_id, 
             if project_map[label] != project_id:
                 st.session_state["zscore_selected_project_id"] = project_map[label]
                 st.session_state["zscore_selected_batch_id"] = None
-                st.session_state["v12_zscore_batch_selector"] = "请选择已启用的批次"
+                st.session_state["v12_zscore_batch_selector"] = "请选择设置已确认的批次"
                 st.rerun()
         with batch_col:
             label = st.selectbox("批次", list(batch_map), index=_selector_index(batch_map, batch_id), key="v12_zscore_batch_selector", disabled=project_id is None)
@@ -66,5 +66,5 @@ def render_zscore_v12_configuration_selection(manage_tab, projects, project_id, 
         elif not batches.empty:
             st.dataframe(batches[["project_name", "v11_config_name", "lot_no", "level_count", "instrument", "reagent", "qc_material", "unit_symbol", "method_name", "target_n"]].rename(columns={
                 "project_name": "检验项目", "v11_config_name": "批次名称", "lot_no": "质控品批号", "level_count": "水平数",
-                "instrument": "仪器", "reagent": "试剂", "qc_material": "质控品", "unit_symbol": "单位", "method_name": "检测方法", "target_n": "建靶次数",
+                "instrument": "仪器", "reagent": "试剂", "qc_material": "质控品", "unit_symbol": "单位", "method_name": "检测方法", "target_n": "参数建立点数",
             }), hide_index=True, width="stretch")

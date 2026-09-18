@@ -53,8 +53,8 @@ def test_saved_evidence_is_readable_and_unchanged():
                 summary, levels = evaluation_tables(payload, 'raw', {'Level 1': '低值', 'Level 2': '高值'})
                 assert not summary.empty
                 if payload.get('phase') == 'formal_qc':
-                    assert '参与建靶' not in summary['项目'].tolist()
-                    assert set(levels['参与建靶']) == {'不适用（正式期）'}
+                    assert '参与参数建立' not in summary['项目'].tolist()
+                    assert set(levels['参与参数建立']) == {'不适用（正式期）'}
                 assert json.dumps(payload, sort_keys=True) == original
                 summaries.append(summary)
                 if not levels.empty: level_tables.append(levels)

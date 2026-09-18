@@ -115,16 +115,16 @@ def test_creation_to_workbench_and_live_target_preview():
             assert connection.execute('SELECT source_snapshot_json FROM qc_workbench_bindings WHERE lot_config_item_id=?', (item_id,)).fetchone()[0] == saved_snapshot
             history_before = connection.execute('SELECT levels_json FROM qc_target_profiles').fetchall()
             table = target_history_table(pd.read_sql_query('SELECT * FROM qc_target_profiles', connection))
-        assert table['靶值 CV%'].tolist() == [2.0]
-        export = xlsx_bytes_to_dataframes(build_lot_config_xlsx(config_id))['水平靶值']
-        assert export['靶值 CV%'].tolist() == [2]
+        assert table['设定变异系数（%）'].tolist() == [2.0]
+        export = xlsx_bytes_to_dataframes(build_lot_config_xlsx(config_id))['水平均值和标准差']
+        assert export['设定变异系数（%）'].tolist() == [2]
         app = AppTest.from_function(target_page, default_timeout=15).run()
-        mean = next(x for x in app.number_input if x.label == '靶均值')
+        mean = next(x for x in app.number_input if x.label == '均值')
         sd = next(x for x in app.number_input if x.label == 'SD')
         mean.set_value(100)
         sd.set_value(3).run()
         assert not list(app.exception)
-        assert next(x for x in app.metric if x.label == '靶值 CV%').value == '3.00%'
+        assert next(x for x in app.metric if x.label == '设定变异系数（%）').value == '3.00%'
         assert any('超出' in x.value for x in app.warning)
         with get_connection() as connection:
             assert connection.execute('SELECT levels_json FROM qc_target_profiles').fetchall() == history_before
@@ -134,7 +134,7 @@ def test_creation_to_workbench_and_live_target_preview():
         assert '1_3s' in qc.iloc[-1]['rule_hits']
         with get_connection() as connection:
             evidence_before = connection.execute('SELECT evaluation_json FROM qc_result_evaluations').fetchall()
-        next(x for x in app.number_input if x.label == '靶均值').set_value(110)
+        next(x for x in app.number_input if x.label == '均值').set_value(110)
         app.text_area[0].set_value('修订参数')
         app.text_input[0].set_value('CV 测试')
         app.checkbox[0].set_value(True)
@@ -145,10 +145,10 @@ def test_creation_to_workbench_and_live_target_preview():
         assert math.isclose(context['stats']['cv'], 3 / 110 * 100)
         app = AppTest.from_function(batch_parameters_page, args=(config_id, item_id), default_timeout=15).run()
         assert not list(app.exception)
-        assert app.dataframe[0].value.iloc[0]['靶均值'] == 110
-        assert math.isclose(app.dataframe[0].value.iloc[0]['靶值 CV%'], context['stats']['cv'])
+        assert app.dataframe[0].value.iloc[0]['设定均值'] == 110
+        assert math.isclose(app.dataframe[0].value.iloc[0]['设定变异系数（%）'], context['stats']['cv'])
         app = AppTest.from_function(target_page, default_timeout=15).run()
-        assert next(x for x in app.number_input if x.label == '靶均值').value == 110
+        assert next(x for x in app.number_input if x.label == '均值').value == 110
         assert next(x for x in app.number_input if x.label == 'SD').value == 3
         with get_connection() as connection:
             assert connection.execute('SELECT evaluation_json FROM qc_result_evaluations').fetchall() == evidence_before

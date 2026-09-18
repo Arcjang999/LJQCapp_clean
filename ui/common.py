@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from services.terminology_service import display_generated_text
+
 import math
 from html import escape as html_escape
 from textwrap import dedent
@@ -46,8 +48,8 @@ DISPLAY_COLUMN_LABELS = {
     "qc_material": "\u8d28\u63a7\u54c1",
     "concentration": "\u6d53\u5ea6",
     "lot_no": "\u8d28\u63a7\u54c1\u6279\u53f7",
-    "target_n": "\u5efa\u9776\u6240\u9700\u6b21\u6570",
-    "cv_limit": "CV 要求（%）",
+    "target_n": "参数建立所需点数",
+    "cv_limit": "允许不精密度（CV%）",
     "level_1_label": "水平 1 说明",
     "level_2_label": "水平 2 说明",
     "level_3_label": "水平 3 说明",
@@ -85,7 +87,7 @@ ZSCORE_STATUS_LABELS = {
     "warning": "警告",
     "reject": "失控",
     "pending": "待判读",
-    PHASE_TARGET_BUILDING: "建靶期观察",
+    PHASE_TARGET_BUILDING: "参数建立期观察",
 }
 
 ERROR_TYPE_LABELS = {
@@ -94,12 +96,12 @@ ERROR_TYPE_LABELS = {
     "shift": "系统偏移风险",
     "trend": "趋势性漂移风险",
     "mixed": "混合误差风险",
-    "not_applicable": "建靶阶段不适用",
+    "not_applicable": "均值和标准差建立阶段不适用",
     "unknown": "待进一步判断",
 }
 
 ZSCORE_PHASE_VIEW_OPTIONS = {
-    "building": "建靶期图",
+    "building": "参数建立期图",
     "formal": "正式质控图",
     "all": "全图",
 }
@@ -1093,6 +1095,7 @@ def inject_global_styles() -> None:
 
 GLOBAL_PAGE_SESSION_KEYS = (
     "show_master_data_page",
+    "show_quality_targets_page",
     "show_project_management_page",
     "show_report_history_page",
     "show_settings_page",
@@ -1129,6 +1132,8 @@ def render_page_chrome() -> None:
                           on_click=_open_management_page, args=("show_master_data_page",))
                 st.button("项目/批次管理", key="open_project_management_page", width="stretch",
                           on_click=_open_management_page, args=("show_project_management_page",))
+                st.button("质量目标", key="open_quality_targets_page", width="stretch",
+                          on_click=_open_management_page, args=("show_quality_targets_page",))
         with history_column:
             if st.button("报告历史", key="open_report_history_page", use_container_width=True):
                 open_global_page("show_report_history_page")
@@ -1238,7 +1243,7 @@ def render_zscore_batch_header(
         ("批次标识", batch_display),
         ("当前阶段", phase_label),
         ("水平数", f"{int(level_count)} 水平"),
-        ("建靶要求次数", f"{int(required_n)} 次"),
+        ("参数建立所需点数", f"{int(required_n)} 次"),
         ("输入值类型", input_value_type_label),
         ("规则组合", template_label),
         ("仪器", instrument),
@@ -1251,7 +1256,7 @@ def render_zscore_batch_header(
         ("检测方法", method_name),
         ("配置名称", config_name),
         ("批号效期", expiry_date),
-        ("CV 要求", "-" if cv_limit is None else f"≤ {float(cv_limit):.2f}%"),
+        ("允许不精密度（CV）", "-" if cv_limit is None else f"≤ {float(cv_limit):.2f}%"),
     ]
     cards = []
     for label, value in detail_items:
@@ -1268,11 +1273,11 @@ def render_zscore_batch_header(
 
     side_chips = [
         f"{int(level_count)} 水平",
-        f"建靶要求 {int(required_n)} 次",
+        f"参数建立要求 {int(required_n)} 次",
         input_value_type_label,
     ]
     if cv_limit is not None:
-        side_chips.append(f"CV 要求 ≤ {float(cv_limit):.2f}%")
+        side_chips.append(f"允许不精密度（CV） ≤ {float(cv_limit):.2f}%")
     side_chip_html = "".join(
         f'<div class="zscore-batch-header-side-chip">{html_escape(chip)}</div>'
         for chip in side_chips
@@ -1462,6 +1467,8 @@ def render_latest_analysis_card(
     source_text: str | None = None,
     tone_key: str | None = None,
 ) -> None:
+    status_label = display_generated_text(status_label)
+    summary_text = display_generated_text(summary_text)
     palette = {
         "符合质控": {"background": "#edf8ef", "border": "#59a14f", "text": "#1d5f2a", "badge": "#59a14f"},
         "在控": {"background": "#edf8ef", "border": "#59a14f", "text": "#1d5f2a", "badge": "#59a14f"},
@@ -1471,9 +1478,9 @@ def render_latest_analysis_card(
         "失控": {"background": "#fdeaea", "border": "#e15759", "text": "#8f1f28", "badge": "#c23b3d"},
         "reject": {"background": "#fdeaea", "border": "#e15759", "text": "#8f1f28", "badge": "#c23b3d"},
         PHASE_TARGET_BUILDING: {"background": "#eef4fb", "border": "#4e79a7", "text": "#24476d", "badge": "#4e79a7"},
-        "建靶中": {"background": "#eef4fb", "border": "#4e79a7", "text": "#24476d", "badge": "#4e79a7"},
-        "建靶期": {"background": "#eef4fb", "border": "#4e79a7", "text": "#24476d", "badge": "#4e79a7"},
-        "建靶期观察": {"background": "#eef4fb", "border": "#4e79a7", "text": "#24476d", "badge": "#4e79a7"},
+        "均值和标准差建立中": {"background": "#eef4fb", "border": "#4e79a7", "text": "#24476d", "badge": "#4e79a7"},
+        "参数建立期": {"background": "#eef4fb", "border": "#4e79a7", "text": "#24476d", "badge": "#4e79a7"},
+        "参数建立期观察": {"background": "#eef4fb", "border": "#4e79a7", "text": "#24476d", "badge": "#4e79a7"},
     }
     style = palette.get(
         tone_key or status_label,
@@ -1612,6 +1619,10 @@ def prepare_display_records(
     if "manual_status" in display_df.columns:
         display_df["manual_status"] = display_df["manual_status"].map(get_outlier_manual_status_label)
 
+    for column in ("phase", "status", "analysis_prompt"):
+        if column in display_df.columns:
+            display_df[column] = display_df[column].map(display_generated_text)
+
     preferred_columns = [
         "sequence",
         "effective_sequence",
@@ -1639,14 +1650,14 @@ def prepare_display_records(
         preferred_columns.insert(4, "log_value")
     column_mapping = {
         "sequence": "\u68c0\u6d4b\u5e8f\u53f7",
-        "effective_sequence": "生效建靶序号",
+        "effective_sequence": "有效建立序号",
         "test_time": "\u68c0\u6d4b\u65f6\u95f4",
         "operator": "\u68c0\u6d4b\u4eba",
         "value": measurement_label,
         "log_value": "log\u503c",
         "manual_note": "\u5907\u6ce8",
         "reagent_lot_changed": "\u8bd5\u5242\u6279\u53f7\u53d8\u66f4",
-        "is_building_included": "参与建靶统计",
+        "is_building_included": "参与参数建立统计",
         "is_outlier_suspect": "疑似离群",
         "outlier_status": "离群状态",
         "manual_status": "手工处理状态",
@@ -1754,10 +1765,10 @@ def parse_optional_cv_limit_input(raw_value: str | None) -> tuple[float | None, 
     try:
         numeric = float(text)
     except ValueError:
-        return None, "CV 要求（%）必须为有效数字。"
+        return None, "允许不精密度（CV%）必须为有效数字。"
 
     if not math.isfinite(numeric) or numeric <= 0:
-        return None, "CV 要求（%）必须大于 0。"
+        return None, "允许不精密度（CV%）必须大于 0。"
     return float(numeric), None
 
 def get_saved_batch_cv_limit(batch: Any) -> float | None:
@@ -2037,7 +2048,7 @@ def render_batch_summary_row(batch) -> None:
         ("\u8d28\u63a7\u54c1", batch["qc_material"]),
         ("\u6d53\u5ea6", batch["concentration"]),
         ("\u8d28\u63a7\u54c1\u6279\u53f7", batch["lot_no"]),
-        ("\u5efa\u9776\u6240\u9700\u6b21\u6570", batch["target_n"]),
+        ("参数建立所需点数", batch["target_n"]),
     ]
     cards = []
     for label, value in summary_items:

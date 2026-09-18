@@ -6,6 +6,7 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
+from services.terminology_service import QC_USAGE_LABELS
 from ui.cv import render_target_cv, render_cv_requirement
 from database import get_connection
 from ui.traceability import evaluation_tables, target_history_table, event_history_table
@@ -57,12 +58,12 @@ def render_result_provenance(method,batch_id):
             return
         names={'result_id':'记录编号','test_time':'检测时间','context_id':'追溯编号','actual_reagent_lot':'试剂批号',
                'reagent_lot_no':'试剂批号','reagent_expiry_date':'试剂效期','qc_lot_no':'质控品批号','instrument':'仪器',
-               'reagent':'试剂产品','unit_symbol':'单位','method_name':'检测方法','target_profile_id':'靶值版本',
+               'reagent':'试剂产品','unit_symbol':'单位','method_name':'检测方法','target_profile_id':'参数版本',
                'provenance':'资料来源','source_context_id':'转入来源编号'}
         display=df.rename(columns=names).copy()
         with get_connection() as c:
             profile_versions={r['id']:f"V{r['version_no']}" for r in c.execute('SELECT id,version_no FROM qc_target_profiles WHERE qc_method=? AND batch_id=?',(method,batch_id))}
-        display['靶值版本']=display['靶值版本'].map(profile_versions).fillna('未关联版本')
+        display['参数版本']=display['参数版本'].map(profile_versions).fillna('未关联版本')
         display['资料来源']=display['资料来源'].map({'recorded':'检测时保存','migration_snapshot':'历史配置资料',
             'migration_available':'历史保留资料','instant_transfer':'即时法转入'}).fillna('历史保留资料')
         st.dataframe(display.drop(columns=['追溯编号','转入来源编号']),hide_index=True,width='stretch')
@@ -110,8 +111,8 @@ def render_lot_management():
     from services.instant_workbench_service import sync_instant_workbench_bindings
     sync_lj_workbench_bindings();sync_zscore_workbench_bindings();sync_instant_workbench_bindings()
     systems=_systems()
-    st.caption('试剂换批、质控品换批和靶值修订分别记录。先完成本检测项的适用性验证，再确认启用；验证依据按实验室 SOP 填写。')
-    reagent_tab,qc_tab,target_tab,history_tab=st.tabs(['试剂批号与换批','质控品换批与并行','靶值版本','历史记录'])
+    st.caption('批次设置确认、均值和标准差确认、质控品使用状态分别管理。试剂与质控品换批验证依据按实验室 SOP 填写。')
+    reagent_tab,qc_tab,target_tab,history_tab=st.tabs(['试剂批号与换批','新旧批号比对','均值和标准差管理','历史记录'])
     with reagent_tab:
         products=list_reagents()
         if not products.empty:
@@ -167,7 +168,7 @@ def render_lot_management():
             st.dataframe(pd.DataFrame(preview)[['检测项','验证结论','验证依据']] if preview else pd.DataFrame(),hide_index=True)
             with st.form('lot_switch_reagent'):
                 person=st.text_input('换批操作者')
-                reason=st.text_input('换批原因与原靶值仍适用的依据')
+                reason=st.text_input('换批原因与原均值和标准差仍适用的依据')
                 confirmed=st.checkbox('已核对所选检测项、各项验证和启用时间；原控制参数继续适用')
                 if st.form_submit_button('确认切换所选检测项'):
                     if not confirmed:
@@ -175,6 +176,7 @@ def render_lot_management():
                     else:
                         _save(lambda:switch_reagent_lots(selections=preview,effective_at=when,operator=person,reason=reason))
     with qc_tab:
+        st.caption('用于同一质控品的新旧批同时检测及使用状态管理。目前可分别查看各批数据，尚未提供专门的比对图表或比对报告。更换质控品产品请另建项目。')
         with get_connection() as c:
             configs=pd.read_sql_query('SELECT * FROM qc_lot_configs WHERE is_disabled=0 ORDER BY id',c)
         if not configs.empty:
@@ -187,24 +189,44 @@ def render_lot_management():
                     WHERE i.lot_config_id=? AND i.is_disabled=0''',(cid,)).fetchall()
             items={r['source_template_item_id']:r['chinese_name'] for r in rows}
             if not target_lots.empty:
-                with st.form('lot_switch_qc'):
-                    target=st.selectbox('新质控品批号',target_lots.id.tolist(),format_func=lambda i:target_lots.loc[target_lots.id==i,'lot_no'].iloc[0])
-                    chosen=st.multiselect('本次更换质控批号的检测项',list(items),format_func=items.get)
-                    when=st.datetime_input('开始平行使用时间')
-                    operator=st.text_input('质控换批操作者')
-                    reason=st.text_input('质控品换批原因')
-                    st.caption('沿用项目，只新建质控批次；新批检测值从零开始。旧批仍可使用，完成验证后按检测项结束旧批。')
-                    if st.form_submit_button('创建新批并行批次'):
-                        result=_save(lambda:change_qc_lot(source_config_id=int(cid),target_qc_lot_id=int(target),template_item_ids=chosen,operator=operator,reason=reason,effective_at=when))
-                        if result: st.info(f'新批次已创建：{result}。复制的人工／厂家参数需在批次中重新确认。')
+                target=st.selectbox('新质控品批号',target_lots.id.tolist(),format_func=lambda i:target_lots.loc[target_lots.id==i,'lot_no'].iloc[0])
+                existing=configs[(configs.template_id==current['template_id']) & (configs.qc_material_lot_id==target) & (configs.combination_key=='')]
+                if not existing.empty:
+                    st.info('该新批号已有批次。请继续核对已有批次，在下方登记“新旧批同时使用”；其已积累数据会保留。')
+                    if st.button('打开已有新批次核对', key='lot_open_existing_config'):
+                        st.session_state['v11_pending_existing_config_id']=int(existing.iloc[0]['id'])
+                        st.rerun()
+                    with get_connection() as c:
+                        disabled_items={r[0] for r in c.execute(
+                            'SELECT source_template_item_id FROM qc_lot_config_items WHERE lot_config_id=? AND is_enabled=0 AND is_disabled=0',
+                            (int(existing.iloc[0]['id']),))}
+                    remaining={i:label for i,label in items.items() if i in disabled_items}
+                    if remaining:
+                        st.caption('以下检验项目尚未在该新批次使用，可单独加入同时使用。')
+                        _render_new_parallel_form(cid, target, remaining)
+                else:
+                    _render_new_parallel_form(cid, target, items)
             else:
                 st.info('请先在基础资料中登记该质控品的新批号及水平。')
         _render_level_combination(systems)
         _render_qc_state(systems)
     with target_tab:
+        st.caption('均值和标准差建立期间简称“参数建立期”。当前按设定的有效点数计算，尚未区分暂定与常用参数，也未按独立分析批计数。')
         _render_target_versions()
     with history_tab:
         _render_history(systems)
+
+
+def _render_new_parallel_form(cid, target, items):
+    with st.form('lot_switch_qc'):
+        chosen=st.multiselect('本次更换质控批号的检测项',list(items),format_func=items.get)
+        when=st.datetime_input('开始新旧批同时使用时间')
+        operator=st.text_input('质控换批操作者')
+        reason=st.text_input('质控品换批原因')
+        st.caption('沿用项目，只新建质控批次；新批检测值从零开始。旧批仍可使用，完成验证后按检测项结束旧批。')
+        if st.form_submit_button('创建新批同时使用批次'):
+            result=_save(lambda:change_qc_lot(source_config_id=int(cid),target_qc_lot_id=int(target),template_item_ids=chosen,operator=operator,reason=reason,effective_at=when))
+            if result: st.info(f'新批次已创建：{result}。复制的人工／厂家参数及质量目标需在新批次中重新确认，完成后再确认批次设置。')
 
 
 def _binding_options():
@@ -228,7 +250,12 @@ def _render_qc_state(systems):
         state=c.execute('SELECT state FROM qc_config_item_lifecycle WHERE lot_config_item_id=?',(b['lot_config_item_id'],)).fetchone()
     from services.lot_lifecycle_service import effective_qc_state
     with get_connection() as c:effective=effective_qc_state(c,b['lot_config_item_id'])
-    st.write('当前状态：'+{'parallel':'平行使用','active':'已启用','ended':'结束使用','pending':'尚未到开始使用时间'}[effective])
+    st.caption('批次资料状态：' + ('批次设置已确认' if b['binding_status'] == 'active' else '当前设置不可用于录入'))
+    profile = target_profile(b['qc_method'], b['runtime_batch_id']) if b['qc_method'] != 'instant' else None
+    st.caption('均值和标准差确认状态：' + (f"已生效 V{profile['version_no']}（{profile['effective_at']}）" if profile else '按本批次数据建立；尚无生效的确认版本'))
+    st.write('质控品使用状态：'+QC_USAGE_LABELS[effective])
+    if state is None:
+        st.caption('尚未登记使用状态变更，按初始使用状态显示；不表示换批验证已通过。')
     if state and state[0]!=effective:
         st.caption('另有待生效的状态计划；按所登记的生效时间切换。')
     st.caption('实际质控批号：'+'；'.join(f"{lot['lot_no']}（{'、'.join(lot['level_names'])}）" for lot in actual_lots.values()))
@@ -237,14 +264,14 @@ def _render_qc_state(systems):
     verify_lot=st.selectbox('待验证的质控批号',list(available_qc),format_func=available_qc.get,key='qc_verify_actual_lot')
     with st.form('lot_verify_qc'):
         conclusion=st.selectbox('质控新批验证结论',['pass','fail'],format_func=lambda x:'通过' if x=='pass' else '未通过')
-        evidence=st.text_area('平行观察、控制参数及适用性验证依据')
+        evidence=st.text_area('新旧批同时使用观察、控制参数及适用性验证依据')
         person=st.text_input('质控验证确认人');when=st.datetime_input('质控验证完成时间')
         if st.form_submit_button('保存质控批号验证'):
             _save(lambda:record_lot_verification(template_item_id=s['project_template_item_id'],system_id=s['system_id'],qc_lot_id=verify_lot,
                 conclusion=conclusion,evidence=evidence,confirmed_by=person,confirmed_at=when))
     with st.form('lot_qc_state'):
-        state=st.selectbox('目标使用状态',['parallel','active','ended'],format_func=lambda x:{'parallel':'平行使用','active':'已启用','ended':'结束使用（只读）'}[x])
-        st.caption('正式启用时须核对每个实际批号；按状态生效时间检查最新结论和效期。平行或结束使用无需关联验证。')
+        state=st.selectbox('目标使用状态',['parallel','active','ended'],format_func=lambda x:QC_USAGE_LABELS[x])
+        st.caption('正式使用时须核对每个实际批号；按状态生效时间检查最新结论和效期。新旧批同时使用或停止使用无需关联验证。')
         selected_verifications={}
         for lot_id,lot in actual_lots.items():
             with get_connection() as c:
@@ -261,18 +288,18 @@ def _render_qc_state(systems):
 def _render_target_versions():
     options={i:b for i,b in _binding_options().items() if b['qc_method']!='instant'}
     if not options:
-        st.caption('启用 LJ 或 Z-score 配置后可确认靶值。即时法继续按 3/20 点规则累计。');return
+        st.caption('确认 LJ 或 Z-score 批次设置后可确认均值和标准差。即时法继续按 3/20 点规则累计。');return
     selected=st.selectbox('控制参数所属批次',list(options),format_func=lambda i:options[i]['label'])
     b=options[selected];method=b['qc_method'];batch_id=b['runtime_batch_id'];levels=b['snapshot'].get('levels') or [{}]
     current = target_profile(method, batch_id)
     current_levels = {level['level_id']: level for level in current['levels']} if current else {}
     with get_connection() as c:
         existing=pd.read_sql_query('SELECT version_no,effective_at,source,levels_json,evidence,confirmed_by FROM qc_target_profiles WHERE qc_method=? AND batch_id=? ORDER BY version_no',c,params=(method,batch_id))
-    if existing.empty:st.caption('尚未确认控制参数，请在下方填写并核对全部水平。')
+    if existing.empty:st.caption('均值和标准差确认状态：尚未确认，请核对全部水平。')
     else:st.dataframe(target_history_table(existing,{f'Level {i}':l.get('level_name',f'水平 {i}') for i,l in enumerate(levels,1)}),hide_index=True,width='stretch')
-    render_cv_requirement(b['snapshot'].get('cv_limit'), b['snapshot'].get('quality_target_source_text', ''))
+    render_cv_requirement(b['snapshot'].get('cv_limit'), b['snapshot'].get('quality_target_source_text', ''), b['snapshot'].get('quality_goal_json'))
     with st.container(border=True):
-        source=st.selectbox('控制参数来源',['manual','manufacturer','revision'],format_func=lambda x:{'manual':'实验室确认','manufacturer':'经实验室确认的厂家赋值','revision':'已有靶值修订'}[x])
+        source=st.selectbox('控制参数来源',['manual','manufacturer','revision'],format_func=lambda x:{'manual':'实验室确认','manufacturer':'经实验室确认的厂家赋值','revision':'已有均值和标准差修订'}[x])
         parameters=[]
         for i,original in enumerate(levels,1):
             level=dict(original)
@@ -288,7 +315,7 @@ def _render_target_versions():
                 st.caption(f'未更换水平的原参数 V{retained["version_no"]} 已预填，仅作为本次确认依据；保存前仍需核对。')
             st.write(f"{level.get('level_name') or f'水平 {i}'}｜实际批号：{level.get('lot_no') or b['snapshot'].get('lot_no','未记录')}")
             a,bc,cv_column=st.columns(3)
-            mean=a.number_input('靶均值',key=f'target_mean_{selected}_{i}',value=float(level.get('target_mean') or 0),format='%.6f')
+            mean=a.number_input('均值',key=f'target_mean_{selected}_{i}',value=float(level.get('target_mean') or 0),format='%.6f')
             sd=bc.number_input('SD',key=f'target_sd_{selected}_{i}',value=float(level.get('target_sd') or 0),min_value=0.0,format='%.6f')
             with cv_column:
                 render_target_cv(mean, sd, b['snapshot'].get('cv_limit'), input_value_type=b['snapshot'].get('input_value_type', 'raw'))
@@ -326,7 +353,7 @@ def _render_history(systems):
                     _save(lambda:correct_reagent_event(event_id=event,reagent_lot_id=verifications[v]['reagent_lot_id'],verification_id=v,effective_at=when,operator=person,reason=reason,expected_revision=st.session_state['event_correction_revision']))
     options=_binding_options()
     if options:
-        selected=st.selectbox('查看历史批次（含停用／结束使用）',list(options),format_func=lambda i:options[i]['label'])
+        selected=st.selectbox('查看历史批次（含停用／停止使用）',list(options),format_func=lambda i:options[i]['label'])
         b=options[selected];render_result_provenance(b['qc_method'],b['runtime_batch_id'])
 
 
@@ -349,8 +376,9 @@ def _render_level_combination(systems):
                 with get_connection() as c:
                     verifications=[dict(r) for r in c.execute("SELECT * FROM qc_lot_verifications WHERE system_id=? AND qc_lot_id=? AND conclusion='pass' ORDER BY id DESC",(s['system_id'],options[lid]['qc_material_lot_id']))]
                 verification_ids[lid]=st.selectbox(f'水平 {i} 换批验证',[None]+[r['id'] for r in verifications],format_func=lambda v:'请选择通过的验证' if v is None else f'验证 {v}',key=f'combo_verify_{selected}_{i}')
-        st.caption('更换水平的新批验证可在下方质控验证区登记。新组合独立收集数据；未变更水平的既有参数保留来源，可在靶值版本中复核使用。所有水平参数确认前不输出正式联合结论。')
+        st.caption('更换水平的新批验证可在下方质控验证区登记。新组合独立收集数据；未变更水平的既有参数保留来源，可在均值和标准差管理中复核使用。所有水平参数确认前不输出正式联合结论。')
         with st.form('lot_level_combination'):
             when=st.datetime_input('新水平组合生效时间');person=st.text_input('水平换批确认人');reason=st.text_input('水平换批依据')
             if st.form_submit_button('建立新的水平组合'):
-                _save(lambda:create_level_combination(source_batch_id=b['runtime_batch_id'],level_ids=chosen,verification_ids=verification_ids,operator=person,reason=reason,effective_at=when))
+                result=_save(lambda:create_level_combination(source_batch_id=b['runtime_batch_id'],level_ids=chosen,verification_ids=verification_ids,operator=person,reason=reason,effective_at=when))
+                if result:st.info('新水平组合已创建；如沿用了质量目标，请到“质量目标 → 批次采用要求”逐水平确认，再确认批次设置。')

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from services.terminology_service import display_generated_text
+
 from services.cv_service import calculate_cv_percent
 from services.lot_lifecycle_service import review_import_lots, import_reviewed_results
 
@@ -180,7 +182,7 @@ def render_zscore_latest_analysis_panel(
         if overall_phase == PHASE_FORMAL_QC:
             st.info("控制参数已确认，正式规则已启用。请录入首条正式质控检测记录。")
         else:
-            st.info("当前处于建靶期，请先录入检测记录，用于累计实验室靶值并观察多水平趋势。")
+            st.info("当前处于参数建立期，请先录入检测记录，用于建立均值和标准差并观察多水平趋势。")
         return
 
     is_building_phase = (not formal_rules_enabled) or latest_run.get("phase") != PHASE_FORMAL_QC
@@ -190,15 +192,15 @@ def render_zscore_latest_analysis_panel(
         if latest_run.get("is_preview")
         else f"最近已保存检测序号 #{get_zscore_display_sequence(latest_run)}"
     )
-    phase_label = str(latest_run.get("phase_label") or get_phase_label(latest_run.get("phase", overall_phase)))
+    phase_label = display_generated_text(str(latest_run.get("phase_label") or get_phase_label(latest_run.get("phase", overall_phase))))
     badge_text = phase_label if is_building_phase else format_zscore_status_label(status)
     trigger_rule_text = (
-        "建靶期不启用正式规则"
+        "参数建立期不启用正式规则"
         if is_building_phase
         else format_zscore_rule_hits(latest_run.get("rule_hits_run", []))
     )
     summary_text = (
-        "本次结果纳入建靶观察，不作为正式质控结论。"
+        "本次结果纳入均值和标准差建立观察，不作为正式质控结论。"
         if is_building_phase
         else str(latest_run.get("analysis_prompt", "") or "暂无分析提示。").splitlines()[0].strip()
     )
@@ -248,10 +250,10 @@ def render_zscore_rules_config_expander(
         template_display_name = format_zscore_template_display_name(template)
         st.caption(template["note"])
         st.markdown(f"- 当前规则组合：`{template_display_name}`")
-        st.markdown(f"- 当前阶段：`{get_phase_label(overall_phase)}`")
+        st.markdown(f"- 当前阶段：`{display_generated_text(get_phase_label(overall_phase))}`")
         st.markdown(f"- 正式规则已启用：`{'是' if formal_rules_enabled else '否'}`")
         if not formal_rules_enabled:
-            st.info("当前仍处于建靶期，以下规则说明仅供进入正式质控期后的判读参考。")
+            st.info("当前仍处于参数建立期，以下规则说明仅供进入正式质控期后的判读参考。")
         for rule_id in template["rule_ids"]:
             st.markdown(f"- `{format_rule_code(rule_id)}`：{format_rule_description(rule_id)}")
 
@@ -285,7 +287,7 @@ def render_zscore_vendor_reference_editor_body(
         vendor_cv = None
         if vendor_mean is not None and vendor_sd is not None and not math.isclose(vendor_mean, 0.0, abs_tol=1e-12):
             vendor_cv = calculate_cv_percent(vendor_mean, vendor_sd)
-        st.caption(f"参考 CV%：{format_optional_float(vendor_cv, digits=2, suffix='%')}")
+        st.caption(f"参考变异系数（%）：{format_optional_float(vendor_cv, digits=2, suffix='%')}")
         submitted = st.form_submit_button("保存厂家参考值", width="stretch")
 
         if submitted:
@@ -404,7 +406,7 @@ def build_zscore_building_run_evidence_dataframe(
                 input_value_type_label: format_optional_input_value(level_result.get("raw_value")),
                 "当前状态": get_zscore_level_current_status_label(level_result),
                 "手工处理": get_outlier_manual_status_label(level_result.get("manual_status")),
-                "参与建靶统计": "是" if int(level_result.get("is_building_included", 1) or 0) == 1 else "否",
+                "参与参数建立统计": "是" if int(level_result.get("is_building_included", 1) or 0) == 1 else "否",
                 "G": format_optional_float(level_result.get("grubbs_statistic"), digits=4),
                 "G临界值": format_optional_float(level_result.get("grubbs_threshold"), digits=4),
                 "状态": format_zscore_status_label(level_result.get("status", PHASE_TARGET_BUILDING)),
@@ -486,7 +488,7 @@ def _build_zscore_abnormal_records_dataframe(
                 "本次判定结果": format_zscore_status_label(run.get("run_status", "pending")),
                 "触发规则": format_zscore_rule_hits(run.get("rule_hits_run", [])),
                 "误差类型": format_error_type_label(run.get("error_type_hint", "unknown")),
-                "分析提示": str(run.get("analysis_prompt", "") or ""),
+                "分析提示": display_generated_text(str(run.get("analysis_prompt", "") or "")),
                 "手动备注": str(run.get("manual_note", "") or ""),
                 "各水平结果摘要": _format_zscore_level_result_summary(run, level_label_map),
             }
@@ -506,13 +508,13 @@ def _build_zscore_run_records_dataframe(
         }
         row: dict[str, Any] = {
             "检测序号": get_zscore_display_sequence(run),
-            "阶段": str(run.get("phase_label") or get_phase_label(run.get("phase"))),
+            "阶段": display_generated_text(str(run.get("phase_label") or get_phase_label(run.get("phase")))),
             "检测时间": _format_zscore_export_datetime(run.get("test_time")),
             "检测人": str(run.get("operator", "") or ""),
             "本次判定结果": format_zscore_status_label(run.get("run_status", "pending")),
             "触发规则": format_zscore_rule_hits(run.get("rule_hits_run", [])),
             "误差类型": format_error_type_label(run.get("error_type_hint", "unknown")),
-            "分析提示": str(run.get("analysis_prompt", "") or ""),
+            "分析提示": display_generated_text(str(run.get("analysis_prompt", "") or "")),
             "备注": str(run.get("manual_note", "") or ""),
         }
         for level_id in required_level_ids:
@@ -554,7 +556,7 @@ def render_zscore_rule_records_overview_section(context: dict[str, object]) -> N
         st.markdown("**规则与记录概览**")
         st.caption(
             "正式期重点查看多水平规则命中、警告 / 失控记录和完整检测记录；"
-            "建靶期重点查看各水平建靶状态。"
+            "参数建立期重点查看各水平参数建立状态。"
         )
 
         st.markdown("**本批次规则汇总**")
@@ -588,7 +590,7 @@ def render_zscore_rule_records_overview_section(context: dict[str, object]) -> N
                 st.dataframe(abnormal_records_df, hide_index=True, width="stretch")
 
         with st.expander("当前批次检测记录", expanded=False):
-            st.caption("查看当前批次建靶期与正式期的完整检测记录。")
+            st.caption("查看当前批次参数建立期与正式期的完整检测记录。")
             if run_records_df.empty:
                 st.info("当前批次暂无检测记录。")
             else:
@@ -1118,7 +1120,7 @@ def build_zscore_phase_export_dataframe(
             ]
         )
 
-    export_columns.extend(["实际试剂批号","靶值版本ID","上下文ID"])
+    export_columns.extend(["实际试剂批号","参数版本ID","上下文ID"])
     rows: list[dict[str, Any]] = []
     for run in export_runs:
         level_results_by_id = {
@@ -1126,7 +1128,7 @@ def build_zscore_phase_export_dataframe(
             for level_result in run.get("level_results", [])
         }
         row: dict[str, Any] = {
-            "实际试剂批号":run.get("actual_reagent_lot","未记录"),"靶值版本ID":run.get("target_profile_id"),"上下文ID":run.get("context_id"),
+            "实际试剂批号":run.get("actual_reagent_lot","未记录"),"参数版本ID":run.get("target_profile_id"),"上下文ID":run.get("context_id"),
             "检测序号": get_zscore_display_sequence(run),
             "检测时间": _format_zscore_export_datetime(run.get("test_time")),
             "检测人": str(run.get("operator", "") or ""),
@@ -1149,9 +1151,9 @@ def build_zscore_phase_export_dataframe(
             row["本次检测判定结果"] = format_zscore_status_label(run.get("run_status", "pending"))
             row["触发规则"] = format_zscore_rule_hits(run.get("rule_hits_run", []))
             row["误差类型"] = format_error_type_label(run.get("error_type_hint", "unknown"))
-            row["分析提示"] = str(run.get("analysis_prompt", "") or "")
+            row["分析提示"] = display_generated_text(str(run.get("analysis_prompt", "") or ""))
         row["备注"] = str(run.get("manual_note", "") or "")
-        row["阶段"] = str(run.get("phase_label") or get_phase_label(run.get("phase")))
+        row["阶段"] = display_generated_text(str(run.get("phase_label") or get_phase_label(run.get("phase"))))
         rows.append(row)
 
     return pd.DataFrame(rows, columns=export_columns)
@@ -1235,7 +1237,7 @@ def build_zscore_workbench_context(selected_batch_id: int) -> dict[str, object]:
         required_n = int(batch_context["required_n"])
         level_target_profiles = get_zscore_level_targets(selected_batch_id, template_id, required_n=required_n)
         overall_phase = determine_zscore_phase(level_target_profiles, required_level_ids)
-        overall_phase_label = get_phase_label(overall_phase)
+        overall_phase_label = display_generated_text(get_phase_label(overall_phase))
         formal_rules_enabled = should_enable_formal_rules(level_target_profiles, required_level_ids)
         default_phase_scope = "building" if overall_phase == PHASE_TARGET_BUILDING else "formal"
         sync_zscore_workbench_state(selected_batch_id, template, default_phase_scope)
@@ -1306,7 +1308,7 @@ def render_zscore_entry_section(
         "完成录入后可查看图表与最新结果分析。"
     )
     if cv_limit is not None:
-        st.caption(f"当前批次已保存 CV 要求：≤ {cv_limit:.2f}%")
+        st.caption(f"当前批次已保存允许不精密度（CV）：≤ {cv_limit:.2f}%")
 
     with st.container(border=True):
         st.markdown("**录入信息**")
@@ -1430,13 +1432,13 @@ def render_zscore_level_summary_section(
                 render_compact_stat_metrics(
                     [
                         ("已收集", f"{profile['collected_n']}"),
-                        ("建靶要求", f"{profile['required_n']} 次"),
-                        ("已达建靶条件", "是" if profile["is_ready"] else "否"),
-                        ("当前阶段", profile["phase_label"]),
+                        ("参数建立要求", f"{profile['required_n']} 次"),
+                        ("已达参数建立条件", "是" if profile["is_ready"] else "否"),
+                        ("当前阶段", display_generated_text(profile["phase_label"])),
                     ]
                 )
                 render_zscore_profile_stat_line(
-                    "建靶统计",
+                    "参数建立统计",
                     profile.get("provisional_mean"),
                     profile.get("provisional_sd"),
                     profile.get("provisional_cv"),
@@ -1444,15 +1446,15 @@ def render_zscore_level_summary_section(
                 render_cv_limit_hint(
                     profile.get("provisional_cv"),
                     cv_limit,
-                    f"{display_label} 建靶",
+                    f"{display_label} 均值和标准差建立",
                 )
                 render_zscore_profile_stat_line(
-                    "正式靶值",
+                    "正式控制参数",
                     profile.get("final_target_mean"),
                     profile.get("final_target_sd"),
                     profile.get("final_target_cv"),
                 )
-                render_cv_limit_hint(profile.get("final_target_cv"), cv_limit, f"{display_label} 正式靶值")
+                render_cv_limit_hint(profile.get("final_target_cv"), cv_limit, f"{display_label} 正式控制参数")
                 render_zscore_profile_stat_line(
                     "实时统计",
                     profile.get("realtime_mean"),
@@ -1517,7 +1519,7 @@ def render_zscore_chart_analysis_section(
     level_label_map = context["level_label_map"]
 
     phase_title = {
-        "building": "建靶期图",
+        "building": "参数建立期图",
         "formal": "正式质控图",
         "all": "全图",
     }[phase_scope]
@@ -1596,7 +1598,7 @@ def render_zscore_maintenance_section(context: dict[str, object]) -> None:
 
     with st.container(border=True):
         if not building_runs:
-            st.info("当前批次暂无建靶期检测记录。")
+            st.info("当前批次暂无参数建立期检测记录。")
         else:
             ordered_runs = sorted(
                 building_runs,
@@ -1618,7 +1620,7 @@ def render_zscore_maintenance_section(context: dict[str, object]) -> None:
                 run_labels.append(label)
                 run_options[label] = int(run["run_id"])
 
-            st.markdown("**选择建靶期检测记录**")
+            st.markdown("**选择参数建立期检测记录**")
             selected_run_label = st.selectbox(
                 "检测记录",
                 options=run_labels,
@@ -1648,7 +1650,7 @@ def render_zscore_maintenance_section(context: dict[str, object]) -> None:
             )
             render_compact_stat_metrics(
                 [
-                    ("当前阶段", str(selected_run.get("phase_label") or get_phase_label(selected_run.get("phase")))),
+                    ("当前阶段", display_generated_text(str(selected_run.get("phase_label") or get_phase_label(selected_run.get("phase"))))),
                     ("当前状态", str(run_status_summary["current_status_label"])),
                     ("疑似离群水平", "、".join(suspect_levels) if suspect_levels else "无"),
                     ("涉及水平", f"{len(selected_level_results)} 个水平"),
@@ -1671,7 +1673,7 @@ def render_zscore_maintenance_section(context: dict[str, object]) -> None:
 
             st.markdown("**本次检测维护操作**")
             if formal_rules_enabled:
-                st.caption("当前批次已满足正式期条件，建靶维护已锁定。")
+                st.caption("当前批次已满足正式期条件，参数建立维护已锁定。")
             else:
                 st.caption("以下操作会同时更新本次检测的全部水平。")
             action_cols = st.columns(3)
@@ -1837,7 +1839,7 @@ def _render_zscore_export_import_section_impl(
 
     st.caption(f"导出当前批次数据与图表，并按模板导入 CSV；各水平主值列统一为“{input_value_type_label}”。")
     st.markdown("**导出**")
-    st.caption("当前批次数据按每次检测展开为宽表，建靶期与正式期可分别导出。")
+    st.caption("当前批次数据按每次检测展开为宽表，参数建立期与正式期可分别导出。")
     zscore_export_format = st.radio(
         "导出数据格式",
         options=["Excel (.xlsx)", "CSV (.csv)"],
@@ -1895,7 +1897,7 @@ def _render_zscore_export_import_section_impl(
     formal_xlsx_bytes = formal_payload["data"] if formal_payload is not None and zscore_export_format == "Excel (.xlsx)" else b""
     zscore_data_export_cols = st.columns(2)
     zscore_data_export_cols[0].download_button(
-        label="导出建靶期数据",
+        label="导出参数建立期数据",
         data=building_xlsx_bytes if zscore_export_format == "Excel (.xlsx)" else building_csv_bytes,
         file_name=(
             f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_zscore_building_runs.xlsx"
@@ -1928,13 +1930,13 @@ def _render_zscore_export_import_section_impl(
     )
 
     st.markdown("**CSV 导入**")
-    st.caption("建靶期和正式期分别提供模板下载、审查和导入。")
-    st.markdown("**建靶期 CSV 导入**")
+    st.caption("参数建立期和正式期分别提供模板下载、审查和导入。")
+    st.markdown("**参数建立期 CSV 导入**")
     st.caption(
-        f"先下载当前批次标准模板，再上传 CSV 或单工作表 Excel 审查；只有无阻断错误时，才允许确认导入当前批次建靶期{input_value_type_label}检测记录。"
+        f"先下载当前批次标准模板，再上传 CSV 或单工作表 Excel 审查；只有无阻断错误时，才允许确认导入当前批次参数建立期{input_value_type_label}检测记录。"
     )
     st.download_button(
-        label="下载建靶期 CSV 模板",
+        label="下载参数建立期 CSV 模板",
         data=zscore_building_template_csv_bytes,
         file_name=(
             f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_zscore_building_import_template.csv"
@@ -1943,11 +1945,11 @@ def _render_zscore_export_import_section_impl(
         width="stretch",
     )
     if zscore_building_import_disabled:
-        st.info("当前批次已完成建靶。当前入口仅支持建靶期 CSV 导入，不支持继续追加正式期检测记录。")
+        st.info("当前批次已完成均值和标准差建立。当前入口仅支持参数建立期 CSV 导入，不支持继续追加正式期检测记录。")
         st.session_state.pop(zscore_building_import_review_state_key, None)
 
     uploaded_zscore_building_csv = st.file_uploader(
-        "上传建靶期 CSV / Excel",
+        "上传参数建立期 CSV / Excel",
         type=["csv", "xlsx"],
         key=zscore_building_import_uploader_key,
         disabled=zscore_building_import_disabled,
@@ -2024,7 +2026,7 @@ def _render_zscore_export_import_section_impl(
         )
 
     confirm_zscore_building_import_clicked = zscore_import_action_cols[1].button(
-        "确认导入建靶期数据",
+        "确认导入参数建立期数据",
         key=f"{zscore_building_import_scope}_confirm_button",
         width="stretch",
         disabled=confirm_zscore_building_import_disabled,
@@ -2044,7 +2046,7 @@ def _render_zscore_export_import_section_impl(
                 zscore_building_import_uploader_nonce + 1
             )
             st.session_state[zscore_building_import_success_key] = (
-                f"已追加导入 {imported_row_count} 条建靶期检测记录，并自动更新当前建靶统计与建靶进度。"
+                f"已追加导入 {imported_row_count} 条参数建立期检测记录，并自动更新当前参数建立统计与参数建立进度。"
             )
             st.rerun()
 
@@ -2062,7 +2064,7 @@ def _render_zscore_export_import_section_impl(
         width="stretch",
     )
     if not zscore_target_ready:
-        st.info("当前批次尚未完成建靶，不能导入正式期数据。你仍可先上传 CSV 做审查。")
+        st.info("当前批次尚未完成均值和标准差建立，不能导入正式期数据。你仍可先上传 CSV 做审查。")
 
     uploaded_zscore_formal_csv = st.file_uploader(
         "上传正式期 CSV / Excel",

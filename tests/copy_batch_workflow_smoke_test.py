@@ -58,7 +58,7 @@ def test_ui_guides_to_new_draft_and_preserves_old_results():
         new = get_lot_config(new_id)
         assert new['status'] == 'draft' and new['qc_material_lot_id'] == data['target_lot_id']
         assert 'V11-LOT-002' in app.selectbox(key='v11_lot_config_selector').value
-        assert any('核对水平和靶值' in item.value for item in app.success)
+        assert any('核对水平、均值和标准差' in item.value for item in app.success)
         assert 'v11_copy_config_button' not in [button.key for button in app.button]
         assert any(button.key == 'v11_copy_register_lot' for button in app.button)
         items = list_lot_config_items(new_id)

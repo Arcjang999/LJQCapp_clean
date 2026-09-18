@@ -141,16 +141,16 @@ def _render_instant_transfer_dialog(batch_id: int) -> None:
         [
             ("均值", format_optional_float(summary["mean"])),
             ("SD", format_optional_float(summary["sd"])),
-            ("CV%", format_optional_float(summary["cv"], digits=2, suffix="%")),
+            ("实测变异系数（%）", format_optional_float(summary["cv"], digits=2, suffix="%")),
             ("目标 LJ 项目", target_project_summary),
             ("将新建的 LJ 批次", f"质控品批号：{target_batch_summary}"),
-            ("建靶有效点数", str(INSTANT_TRANSFER_READY_COUNT)),
+            ("参数建立有效点数", str(INSTANT_TRANSFER_READY_COUNT)),
         ]
     )
     st.markdown(
         "\n".join(
             [
-                "- 前 20 个有效点将作为 LJ 建靶数据。",
+                "- 前 20 个有效点将作为 LJ 参数建立数据。",
                 "- 第 21 个及之后的有效点将作为 LJ 正式期数据。",
                 "- 转入后当前即时法批次将冻结为只读，不可继续录入、维护或再次转入。",
             ]
@@ -280,7 +280,7 @@ def _render_instant_entry_and_summary_section(
             ("有效点数", str(summary["effective_count"])),
             ("均值", format_optional_float(summary["mean"])),
             ("SD", format_optional_float(summary["sd"])),
-            ("CV%", format_optional_float(summary["cv"], digits=2, suffix="%")),
+            ("实测变异系数（%）", format_optional_float(summary["cv"], digits=2, suffix="%")),
         ]
     )
     st.caption("统计说明：均值、SD、CV 仅基于当前有效点计算；疑似离群点在未手工禁用前仍计入有效统计。")
@@ -330,7 +330,7 @@ def _render_instant_transfer_section(context: dict[str, object]) -> None:
         st.caption(f"达到 {INSTANT_TRANSFER_READY_COUNT} 个有效点后，才可执行“确认转入 LJ 法”。")
 
     st.caption(
-        "转入规则：前 20 个有效点作为 LJ 建靶数据；第 21 个及之后的有效点作为 LJ 正式期数据；"
+        "转入规则：前 20 个有效点作为 LJ 参数建立数据；第 21 个及之后的有效点作为 LJ 正式期数据；"
         "转入后当前即时法批次将冻结为只读。"
     )
     if st.button(
@@ -355,7 +355,7 @@ def _resolve_instant_tone_key(status: str) -> str | None:
     if status == "有效点":
         return "accept"
     if status == "继续累计":
-        return "建靶期"
+        return "参数建立期"
     return None
 
 
@@ -512,7 +512,7 @@ def _render_instant_maintenance_section(context: dict[str, object]) -> None:
     render_compact_stat_metrics(
         [
             ("总记录数", str(summary["total_count"])),
-            ("有效建靶点数", str(summary["effective_count"])),
+            ("有效建立点数", str(summary["effective_count"])),
             ("已禁用点数", str(summary["disabled_count"])),
         ]
     )
@@ -595,7 +595,7 @@ def render_instant_page() -> None:
     st.subheader("即时法")
     st.caption(
         "即时法是面向单水平项目的过渡方法，适用于短期内难以快速累积 20 个点的场景；"
-        "3 个有效点后开始检验，20 个有效建靶点后可人工确认转入 LJ。"
+        "3 个有效点后开始检验，20 个有效建立点后可人工确认转入 LJ。"
     )
     projects_df, selected_project_id, batches_df, selected_batch_id, issues = prepare_instant_v12_project_batch_context()
     manage_tab, work_tab = st.tabs([TEXT["manage"], TEXT["current_batch"]])
@@ -672,6 +672,8 @@ def render_instant_page() -> None:
             badges=["即时法", "过渡方法", f"有效点 {summary['effective_count']}/{INSTANT_TRANSFER_READY_COUNT}", input_value_type_label],
             tone="accent",
         )
+        from ui.quality_targets import render_batch_quality
+        render_batch_quality("instant", selected_batch_id)
         entry_col, chart_col = st.columns([0.98, 1.12], gap="large")
         with entry_col:
             with st.container():

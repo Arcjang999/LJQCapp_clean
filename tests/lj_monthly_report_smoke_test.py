@@ -169,7 +169,7 @@ def test_lj_monthly_report_builds_pdf_and_snapshot() -> None:
         assert package.report.method_label == LJ_METHOD_LABEL
         assert package.report.report_period_label == "2026-04-01 至 2026-04-30"
         assert package.report.input_value_type_label == "真实检测值"
-        assert package.report.basic_info.target_source_label == "本批次建靶值"
+        assert package.report.basic_info.target_source_label == "本批次数据计算"
         assert package.report.statistics.formal_count == 3
         assert package.report.statistics.in_control_count == 1
         assert package.report.statistics.warning_count == 1
@@ -225,7 +225,7 @@ def test_lj_monthly_report_uses_business_text_for_single_record_and_no_abnormal(
         assert package.report.report_period_label == "2026-04-01 至 2026-04-30"
         assert package.report.statistics.formal_count == 1
         assert preview_summary["月度 SD"] == "暂不计算（样本数不足）"
-        assert preview_summary["月度 CV%"] == "暂不计算（样本数不足）"
+        assert preview_summary["实测变异系数（%）"] == "暂不计算（样本数不足）"
         assert package.report.corrective_actions == []
         assert package.report.corrective_actions_empty_text == "本月无异常记录，无需原因与纠正措施。"
         assert package.report.abnormal_summary_text == "本月无异常记录，无需原因与纠正措施。"

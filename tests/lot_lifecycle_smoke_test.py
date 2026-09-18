@@ -99,7 +99,7 @@ def test_qc_new_batch_same_project_parallel_ended_readonly():
             assert effective_qc_state(c,f['item_id'],'2099-09-04')=='ended'
             require_writable(c,'instant',f['batch_id'])
         set_qc_usage_state(lot_config_item_id=f['item_id'],state='ended',effective_at='2026-09-03',operator='测试',reason='结束旧批')
-        rejected(lambda:save_instant_result(batch_id=f['batch_id'],test_time='2026-09-04',value=100,log_value=None,operator='测试'),'结束')
+        rejected(lambda:save_instant_result(batch_id=f['batch_id'],test_time='2026-09-04',value=100,log_value=None,operator='测试'),'停止使用')
 
 
 def test_instant_transfer_preserves_each_actual_lot():

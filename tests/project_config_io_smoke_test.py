@@ -128,9 +128,9 @@ def test_project_import_export_and_lot_export_round_trip() -> None:
         )
         assert len(list_lot_config_items(lot_config_id).index) == 2
         exported_lot = xlsx_bytes_to_dataframes(build_lot_config_xlsx(lot_config_id))
-        assert list(exported_lot) == ["批次信息", "项目配置", "水平靶值", "修订记录"]
+        assert list(exported_lot) == ["批次信息", "项目配置", "水平均值和标准差", "修订记录"]
         assert len(exported_lot["项目配置"].index) == 2
-        assert exported_lot["水平靶值"].empty
+        assert exported_lot["水平均值和标准差"].empty
 
 
 if __name__ == "__main__":

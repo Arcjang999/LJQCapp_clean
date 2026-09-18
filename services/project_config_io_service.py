@@ -45,8 +45,8 @@ PROJECT_IMPORT_COLUMNS = [
     "试剂通用名*",
     "试剂商品名",
     "水平数*",
-    "建靶点数*",
-    "CV要求(%)",
+    "参数建立点数*",
+    "允许不精密度(CV%)",
     "质量目标来源",
     "备注",
 ]
@@ -108,10 +108,10 @@ def _instructions_dataframe() -> pd.DataFrame:
             ["质控方法", "填写 LJ、Z-score 或 即时法。"],
             ["输入值类型", "填写 真实检测值、Ct值 或 log值；同一检验项目设置只允许一种。"],
             ["水平数", "LJ/即时法固定 1；Z-score 填 2 或 3。"],
-            ["建靶点数", "LJ/Z-score 填 5–20；即时法固定按 20 个有效点。"],
+            ["参数建立点数", "LJ/Z-score 填 5–20；即时法固定按 20 个有效点。"],
             ["本地词条", "找不到的检验项目、单位、方法学、试剂及厂家会作为医院自定义词条新增。"],
             ["导入方式", "合并会保留未出现在文件中的原检验项目；替换会以文件内容作为完整的检验项目表。"],
-            ["启用规则", "导入后项目保持草稿，必须回到“新建项目”页校验并人工启用。"],
+            ["设置确认", "导入后项目保持待确认，必须回到“新建项目”页校验并人工确认设置。"],
         ],
         columns=["项目", "说明"],
     )
@@ -177,8 +177,8 @@ def _project_items_export_dataframe(template_id: int) -> pd.DataFrame:
                 "试剂通用名*": _text(row["reagent_name"]),
                 "试剂商品名": _text(row["reagent_trade_name"]),
                 "水平数*": int(row["level_count"]),
-                "建靶点数*": int(row["target_n"]),
-                "CV要求(%)": "" if pd.isna(row["cv_limit"]) else float(row["cv_limit"]),
+                "参数建立点数*": int(row["target_n"]),
+                "允许不精密度(CV%)": "" if pd.isna(row["cv_limit"]) else float(row["cv_limit"]),
                 "质量目标来源": _text(row["quality_target_source_text"]),
                 "备注": _text(row["notes"]),
             }
@@ -200,7 +200,7 @@ def build_project_template_xlsx(template_id: int) -> bytes:
             ["质控品", template["qc_material_name"]],
             ["质控品商品名", template["qc_material_trade_name"]],
             ["质控品厂家", template["qc_manufacturer_name"]],
-            ["状态", "已启用" if template["status"] == "active" else "草稿"],
+            ["状态", "项目设置已确认" if template["status"] == "active" else "待确认"],
             ["修订号", template["revision_no"]],
         ],
         columns=["字段", "值"],
@@ -228,10 +228,10 @@ def build_lot_config_xlsx(lot_config_id: int) -> bytes:
             ["质控品商品名", config["qc_material_trade_name"]],
             ["批号", config["lot_no"]],
             ["效期", config["expiry_date"]],
-            ["状态", "已启用" if config["status"] == "active" else "草稿"],
+            ["状态", "批次设置已确认" if config["status"] == "active" else "待确认"],
             ["修订号", config["revision_no"]],
             ["复制来源批次编号", config["copied_from_config_id"]],
-            ["启用时间", config["activated_at"]],
+            ["设置确认时间", config["activated_at"]],
         ],
         columns=["字段", "值"],
     )
@@ -245,8 +245,8 @@ def build_lot_config_xlsx(lot_config_id: int) -> bytes:
             "reagent_name": "试剂",
             "level_count": "水平数",
             "assigned_level_count": "已配置水平数",
-            "target_n": "建靶点数",
-            "cv_limit": "CV要求(%)",
+            "target_n": "参数建立点数",
+            "cv_limit": "允许不精密度(CV%)",
             "quality_target_source_text": "质量目标来源",
         }
     ).copy()
@@ -262,8 +262,8 @@ def build_lot_config_xlsx(lot_config_id: int) -> bytes:
         "试剂",
         "水平数",
         "已配置水平数",
-        "建靶点数",
-        "CV要求(%)",
+        "参数建立点数",
+        "允许不精密度(CV%)",
         "质量目标来源",
     ]
     item_export = item_export.reindex(columns=item_columns)
@@ -278,19 +278,19 @@ def build_lot_config_xlsx(lot_config_id: int) -> bytes:
                     "水平顺序": int(level["level_order"]),
                     "水平名称": _text(level["level_name"]),
                     "水平编码": _text(level["level_code"]),
-                    "靶值来源": TARGET_SOURCE_LABELS.get(
+                    "均值和标准差来源": TARGET_SOURCE_LABELS.get(
                         _text(level["target_source"]), _text(level["target_source"])
                     ),
-                    "靶值": "" if pd.isna(level["target_mean"]) else float(level["target_mean"]),
+                    "设定均值": "" if pd.isna(level["target_mean"]) else float(level["target_mean"]),
                     "SD": "" if pd.isna(level["target_sd"]) else float(level["target_sd"]),
-                    "靶值 CV%": calculate_cv_percent(level["target_mean"], level["target_sd"]) if level["target_source"] != "building" else None,
+                    "设定变异系数（%）": calculate_cv_percent(level["target_mean"], level["target_sd"]) if level["target_source"] != "building" else None,
                     "已确认": bool(level["target_confirmed"]),
                     "备注": _text(level["notes"]),
                 }
             )
     level_export = pd.DataFrame(
         level_rows,
-        columns=["检验项目", "水平顺序", "水平名称", "水平编码", "靶值来源", "靶值", "SD", "靶值 CV%", "已确认", "备注"],
+        columns=["检验项目", "水平顺序", "水平名称", "水平编码", "均值和标准差来源", "设定均值", "SD", "设定变异系数（%）", "已确认", "备注"],
     )
     snapshots = list_config_snapshots(lot_config_id).rename(
         columns={
@@ -307,7 +307,7 @@ def build_lot_config_xlsx(lot_config_id: int) -> bytes:
             [
                 ("批次信息", overview),
                 ("项目配置", item_export),
-                ("水平靶值", level_export),
+                ("水平均值和标准差", level_export),
                 ("修订记录", snapshots),
             ]
         )
@@ -319,6 +319,12 @@ def preview_project_template_xlsx(data: bytes) -> tuple[pd.DataFrame, list[str]]
     if "项目配置" not in sheets:
         raise ValueError("XLSX 必须包含名为“项目配置”的工作表。")
     source = sheets["项目配置"].copy()
+    # Accept older exported templates; reject ambiguous duplicate old/new fields.
+    for old, new in {"建靶点数*": "参数建立点数*", "CV要求(%)": "允许不精密度(CV%)"}.items():
+        if old in source.columns:
+            if new in source.columns:
+                raise ValueError(f"项目配置同时包含旧列“{old}”与新列“{new}”，请保留一列后导入。")
+            source = source.rename(columns={old: new})
     missing_columns = [column for column in PROJECT_IMPORT_COLUMNS if column not in source.columns]
     if missing_columns:
         raise ValueError("项目配置工作表缺少列：" + "、".join(missing_columns))
@@ -354,7 +360,7 @@ def preview_project_template_xlsx(data: bytes) -> tuple[pd.DataFrame, list[str]]
             if not unit_symbol or not method_name or not reagent_name:
                 raise ValueError("单位、方法学和试剂通用名均为必填。")
             level_count = _required_integer(row["水平数*"], "水平数")
-            target_n = _required_integer(row["建靶点数*"], "建靶点数")
+            target_n = _required_integer(row["参数建立点数*"], "参数建立点数")
             if qc_method in {"lj", "instant"} and level_count != 1:
                 raise ValueError("LJ 和即时法只能配置 1 个水平。")
             if qc_method == "zscore" and level_count not in {2, 3}:
@@ -362,10 +368,10 @@ def preview_project_template_xlsx(data: bytes) -> tuple[pd.DataFrame, list[str]]
             if qc_method == "instant":
                 target_n = 20
             elif not 5 <= target_n <= 20:
-                raise ValueError("LJ 和 Z-score 建靶点数必须在 5 至 20 之间。")
-            cv_limit = _optional_float(row["CV要求(%)"])
+                raise ValueError("LJ 和 Z-score 参数建立点数必须在 5 至 20 之间。")
+            cv_limit = _optional_float(row["允许不精密度(CV%)"])
             if cv_limit is not None and cv_limit <= 0:
-                raise ValueError("CV要求必须大于 0。")
+                raise ValueError("允许不精密度（CV）必须大于 0。")
             normalized_rows.append(
                 {
                     "检验项目": item_name,
@@ -379,8 +385,8 @@ def preview_project_template_xlsx(data: bytes) -> tuple[pd.DataFrame, list[str]]
                     "试剂通用名": reagent_name,
                     "试剂商品名": _text(row["试剂商品名"]),
                     "水平数": level_count,
-                    "建靶点数": target_n,
-                    "CV要求(%)": cv_limit,
+                    "参数建立点数": target_n,
+                    "允许不精密度(CV%)": cv_limit,
                     "质量目标来源": _text(row["质量目标来源"]),
                     "备注": _text(row["备注"]),
                 }
@@ -413,8 +419,8 @@ def _normalized_import_rows(data: bytes) -> list[dict[str, object]]:
                 "reagent_name": _text(row["试剂通用名"]),
                 "reagent_trade_name": _text(row["试剂商品名"]),
                 "level_count": int(row["水平数"]),
-                "target_n": int(row["建靶点数"]),
-                "cv_limit": None if pd.isna(row["CV要求(%)"]) else float(row["CV要求(%)"]),
+                "target_n": int(row["参数建立点数"]),
+                "cv_limit": None if pd.isna(row["允许不精密度(CV%)"]) else float(row["允许不精密度(CV%)"]),
                 "quality_target_source_text": _text(row["质量目标来源"]),
                 "notes": _text(row["备注"]),
             }

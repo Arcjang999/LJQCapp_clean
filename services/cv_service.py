@@ -24,7 +24,7 @@ def normalize_cv_limit(value):
     try:
         limit = float(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError('CV 要求须为大于 0 的有限数值，或留空。') from exc
+        raise ValueError('允许不精密度（CV）须为大于 0 的有限数值，或留空。') from exc
     if not math.isfinite(limit) or limit <= 0:
-        raise ValueError('CV 要求须为大于 0 的有限数值，或留空。')
+        raise ValueError('允许不精密度（CV）须为大于 0 的有限数值，或留空。')
     return limit

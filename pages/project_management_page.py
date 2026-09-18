@@ -136,7 +136,7 @@ def _test_item_label(row: pd.Series) -> str:
 
 
 def _template_label(row: pd.Series) -> str:
-    status = "已启用" if str(row.get("status")) == "active" else "草稿"
+    status = "设置已确认" if str(row.get("status")) == "active" else "待确认"
     return (
         f"{_safe_text(row.get('template_name'))}｜"
         f"{_safe_text(row.get('instrument_name'))}｜"
@@ -153,8 +153,8 @@ def _lot_label(row: pd.Series) -> str:
 
 def _config_label(row: pd.Series) -> str:
     status_labels = {
-        "draft": "草稿",
-        "active": "已启用",
+        "draft": "待确认",
+        "active": "设置已确认",
         "superseded": "已替代",
         "disabled": "已停用",
     }
@@ -272,8 +272,8 @@ def _template_item_editor_rows(items: pd.DataFrame, lookups: dict[str, object]) 
                 "方法学",
                 "试剂",
                 "水平数",
-                "建靶点数",
-                "CV要求(%)",
+                "参数建立点数",
+                "允许不精密度(CV%)",
                 "质量目标来源",
             ]
         )
@@ -292,8 +292,8 @@ def _template_item_editor_rows(items: pd.DataFrame, lookups: dict[str, object]) 
                 )
             ),
             "水平数": items["level_count"].astype(int),
-            "建靶点数": items["target_n"].astype(int),
-            "CV要求(%)": items["cv_limit"],
+            "参数建立点数": items["target_n"].astype(int),
+            "允许不精密度(CV%)": items["cv_limit"],
             "质量目标来源": items["quality_target_source_text"].fillna("").astype(str),
         }
     )
@@ -353,8 +353,8 @@ def _save_editor_rows(template_id: int, edited: pd.DataFrame, lookups: dict[str,
                 "method_id": lookups["method_id_by_label"].get(method_label),
                 "reagent_id": lookups["reagent_id_by_label"].get(reagent_label),
                 "level_count": int(row.get("水平数") or 1),
-                "target_n": int(row.get("建靶点数") or 20),
-                "cv_limit": None if pd.isna(row.get("CV要求(%)")) else row.get("CV要求(%)"),
+                "target_n": int(row.get("参数建立点数") or 20),
+                "cv_limit": None if pd.isna(row.get("允许不精密度(CV%)")) else row.get("允许不精密度(CV%)"),
                 "quality_target_source_text": str(row.get("质量目标来源") or ""),
                 "sort_order": index + 1,
             }
@@ -426,17 +426,17 @@ def _render_add_template_items(template_id: int, default_reagent_id: int | None)
                 key=f"v11_bulk_level_count_{template_id}",
             )
         target_n = st.slider(
-            "批量建靶有效点数",
+            "批量参数建立有效点数",
             min_value=5,
             max_value=20,
             value=20,
             key=f"v11_bulk_target_n_{template_id}",
         )
         cv_limit = st.number_input(
-            "CV 要求上限（%，选填）", value=None, min_value=0.0, format="%.4f",
+            "允许不精密度（CV%，选填）", value=None, min_value=0.0, format="%.4f",
             help=CV_REQUIREMENT_HELP, key=f"v11_bulk_cv_limit_{template_id}",
         )
-        cv_source = st.text_input("CV 要求依据（选填）", key=f"v11_bulk_cv_source_{template_id}")
+        cv_source = st.text_input("允许不精密度依据（选填）", key=f"v11_bulk_cv_source_{template_id}")
         if st.button(
             "添加到项目",
             key=f"v11_add_items_button_{template_id}",
@@ -526,7 +526,7 @@ def _render_template_editor(template_id: int) -> None:
         f"当前项目：{template['template_name']}｜仪器：{template['instrument_name']}｜"
         f"默认试剂：{_safe_text(template['default_reagent_name'], '尚未设置')}｜"
         f"质控品：{template['qc_material_name']}｜"
-        f"状态：{'已启用' if template['status'] == 'active' else '草稿'}"
+        f"资料状态：{'设置已确认' if template['status'] == 'active' else '待确认'}"
     )
     _render_template_default_reagent(template)
     _render_add_template_items(template_id, template["default_reagent_id"])
@@ -584,16 +584,16 @@ def _render_template_editor(template_id: int) -> None:
                     required=True,
                     width="small",
                 ),
-                "建靶点数": st.column_config.NumberColumn(
-                    "建靶点数",
+                "参数建立点数": st.column_config.NumberColumn(
+                    "参数建立点数",
                     min_value=5,
                     max_value=20,
                     step=1,
                     required=True,
                     width="small",
                 ),
-                "CV要求(%)": st.column_config.NumberColumn(
-                    "CV要求(%)",
+                "允许不精密度(CV%)": st.column_config.NumberColumn(
+                    "允许不精密度(CV%)",
                     min_value=0.01,
                     format="%.2f",
                     width="small",
@@ -611,7 +611,7 @@ def _render_template_editor(template_id: int) -> None:
             except (ValueError, TypeError) as exc:
                 st.error(str(exc))
             else:
-                st.success("检验项目设置已保存，项目回到草稿状态。")
+                st.success("检验项目设置已保存，项目回到待确认状态。")
                 st.rerun()
 
     errors = validate_project_template(template_id)
@@ -620,7 +620,7 @@ def _render_template_editor(template_id: int) -> None:
     action1, action2 = st.columns(2)
     with action1:
         if st.button(
-            "校验并启用项目",
+            "校验并确认项目设置",
             key=f"v11_activate_template_{template_id}",
             type="primary",
             width="stretch",
@@ -631,7 +631,7 @@ def _render_template_editor(template_id: int) -> None:
             except ValueError as exc:
                 st.error(str(exc))
             else:
-                st.success("项目已启用，可以创建批次。")
+                st.success("项目设置已确认，可以创建批次。")
                 st.rerun()
     with action2:
         if st.button(
@@ -674,7 +674,7 @@ def _render_templates_tab() -> None:
                 "created_at",
             ]
         ].copy()
-        display["status"] = display["status"].map({"draft": "草稿", "active": "已启用"})
+        display["status"] = display["status"].map({"draft": "待确认", "active": "设置已确认"})
         st.dataframe(
             display.rename(
                 columns={
@@ -708,7 +708,7 @@ def _render_templates_tab() -> None:
                 key="v11_restore_template_selector",
             )
             if st.button(
-                "恢复为草稿项目",
+                "恢复项目并重新确认",
                 key="v11_restore_template_button",
                 width="stretch",
                 disabled=mapping[selected] is None,
@@ -721,7 +721,7 @@ def _render_templates_tab() -> None:
                 except ValueError as exc:
                     st.error(str(exc))
                 else:
-                    st.success("项目已恢复为草稿。")
+                    st.success("项目已恢复为待确认。")
                     st.rerun()
 
 
@@ -734,7 +734,7 @@ def _render_create_lot_config() -> None:
     template_labels, template_map, _ = _option_map(
         active_templates,
         _template_label,
-        placeholder="请选择已启用项目",
+        placeholder="请选择设置已确认项目",
     )
     with st.expander("新建批次", expanded=False):
         template_label = st.selectbox(
@@ -763,17 +763,17 @@ def _render_create_lot_config() -> None:
         )
         quality_requirements = {}
         if template_id is not None:
-            st.caption("各检验项目的 CV 要求默认沿用项目设置，可在本批次建立前调整。")
+            st.caption("各检验项目的 允许不精密度（CV）默认沿用项目设置，可在本批次建立前调整。")
             for _, item in list_template_items(int(template_id)).iterrows():
                 item_id = int(item["id"])
                 with st.container(border=True):
                     st.write(item["test_item_name"])
                     limit = st.number_input(
-                        "CV 要求上限（%，选填）", min_value=0.0, format="%.4f",
+                        "允许不精密度（CV%，选填）", min_value=0.0, format="%.4f",
                         value=None if pd.isna(item["cv_limit"]) else float(item["cv_limit"]),
                         help=CV_REQUIREMENT_HELP, key=f"v12_create_cv_{template_id}_{item_id}",
                     )
-                    source = st.text_input("CV 要求依据（选填）",
+                    source = st.text_input("允许不精密度依据（选填）",
                         value=_safe_text(item["quality_target_source_text"], ""),
                         key=f"v12_create_cv_source_{template_id}_{item_id}")
                     quality_requirements[item_id] = {"cv_limit": limit, "quality_target_source_text": source}
@@ -798,7 +798,7 @@ def _render_create_lot_config() -> None:
                     st.error(str(exc))
                 else:
                     st.session_state["v11_selected_lot_config_id"] = config_id
-                    st.success("批次已创建，请继续设置各检验项目的水平、靶值和 SD。")
+                    st.success("批次已创建，请继续设置各检验项目的水平、均值和标准差。")
                     st.rerun()
 
 
@@ -832,11 +832,16 @@ def _render_item_level_form(lot_config_id: int, item: pd.Series) -> None:
         source = _safe_text(item["quality_target_source_text"], "")
         with get_connection() as connection:
             has_binding = connection.execute("SELECT * FROM qc_workbench_bindings WHERE lot_config_item_id=?", (int(item["id"]),)).fetchone()
-        if config["status"] == "draft" and not has_binding:
-            limit = st.number_input("CV 要求上限（%，选填）", value=limit, min_value=0.0,
+        from services.quality_target_service import decode
+        quality_goal = decode(item.get("quality_goal_json", "{}"))
+        if quality_goal:
+            st.caption("质量目标：" + quality_goal['spec']['name'] + " / " + quality_goal['spec']['standard'])
+            st.caption("请在“资料与批次 → 质量目标 → 批次采用要求”核对各水平。" if quality_goal.get('pending') else "已确认各水平质量要求；采用版本保留在本批次。")
+        if config["status"] == "draft" and not has_binding and not quality_goal:
+            limit = st.number_input("允许不精密度（CV%，选填）", value=limit, min_value=0.0,
                 format="%.4f", help=CV_REQUIREMENT_HELP, key=f"v12_draft_cv_{item['id']}")
-            source = st.text_input("CV 要求依据（选填）", value=source, key=f"v12_draft_cv_source_{item['id']}")
-            if st.button("保存 CV 要求", key=f"v12_save_cv_{item['id']}"):
+            source = st.text_input("允许不精密度依据（选填）", value=source, key=f"v12_draft_cv_source_{item['id']}")
+            if st.button("保存允许不精密度（CV）", key=f"v12_save_cv_{item['id']}"):
                 try:
                     save_lot_item_cv_requirement(int(item["id"]), limit, source)
                 except ValueError as exc:
@@ -844,7 +849,7 @@ def _render_item_level_form(lot_config_id: int, item: pd.Series) -> None:
                 else:
                     st.rerun()
         else:
-            render_cv_requirement(limit, source)
+            render_cv_requirement(limit, source, quality_goal)
         if has_binding and has_binding["qc_method"] != "instant":
             from services.lot_lifecycle_service import target_profile
             from services.cv_service import calculate_cv_percent
@@ -854,10 +859,10 @@ def _render_item_level_form(lot_config_id: int, item: pd.Series) -> None:
                 level_names = {f"Level {int(row['level_order'])}": row['level_name'] for _, row in existing.iterrows()}
                 st.dataframe(pd.DataFrame([{
                     "质控水平": level_names.get(level['level_id'], level['level_id']),
-                    "靶均值": level['mean'], "SD": level['sd'],
-                    "靶值 CV%": calculate_cv_percent(level['mean'], level['sd']),
+                    "设定均值": level['mean'], "SD": level['sd'],
+                    "设定变异系数（%）": calculate_cv_percent(level['mean'], level['sd']),
                 } for level in profile['levels']]), hide_index=True, width="stretch")
-                st.caption("如需调整控制参数，请前往“批号使用与追溯 → 靶值版本”。")
+                st.caption("如需调整控制参数，请前往“批号使用与追溯 → 均值和标准差管理”。")
                 return
         if len(selectable_labels) < expected_count:
             st.error(
@@ -889,7 +894,7 @@ def _render_item_level_form(lot_config_id: int, item: pd.Series) -> None:
                 st.text(selected_label)
             with row2:
                 source_label = st.selectbox(
-                    "靶值来源",
+                    "均值和标准差来源",
                     options=list(TARGET_SOURCE_BY_LABEL),
                     index=list(TARGET_SOURCE_BY_LABEL).index(default_source),
                     key=f"v11_target_source_{item['id']}_{level_id}",
@@ -897,7 +902,7 @@ def _render_item_level_form(lot_config_id: int, item: pd.Series) -> None:
             row3, row4, cv_column = st.columns(3)
             with row3:
                 target_mean = st.number_input(
-                    "靶值",
+                    "均值",
                     value=(
                         None
                         if saved is None or pd.isna(saved["target_mean"])
@@ -918,7 +923,7 @@ def _render_item_level_form(lot_config_id: int, item: pd.Series) -> None:
                 )
             with cv_column:
                 if TARGET_SOURCE_BY_LABEL[source_label] == "building":
-                    st.metric("靶值 CV%", "建靶后计算")
+                    st.metric("设定变异系数（%）", "均值和标准差建立后计算")
                 else:
                     render_target_cv(target_mean, target_sd, limit,
                         input_value_type=str(item["input_value_type"]),
@@ -927,7 +932,7 @@ def _render_item_level_form(lot_config_id: int, item: pd.Series) -> None:
                 saved is not None and int(saved["target_confirmed"] or 0)
             )
             confirmed = st.checkbox(
-                f"确认 {selected_label} 的靶值与 SD",
+                f"确认 {selected_label} 的均值和标准差",
                 value=confirmed_default,
                 key=f"v11_target_confirmed_{item['id']}_{level_id}",
             )
@@ -961,7 +966,7 @@ def _render_lot_config_editor(lot_config_id: int) -> None:
     st.caption(
         f"当前批次：{config['config_name']}｜项目：{config['template_name']}｜"
         f"批号：{config['lot_no']}｜效期：{_safe_text(config['expiry_date'], '未填写')}｜"
-        f"状态：{'已启用' if config['status'] == 'active' else '草稿'}｜修订 {config['revision_no']}"
+        f"资料状态：{'设置已确认' if config['status'] == 'active' else '待确认'}｜修订 {config['revision_no']}"
     )
     if items.empty:
         st.error("当前批次没有检验项目。")
@@ -993,14 +998,14 @@ def _render_lot_config_editor(lot_config_id: int) -> None:
                 "reagent_name": "试剂",
                 "level_count": "所需水平数",
                 "assigned_level_count": "已配置水平数",
-                "target_n": "建靶点数",
-                "cv_limit": "CV要求(%)",
+                "target_n": "参数建立点数",
+                "cv_limit": "允许不精密度(CV%)",
             }
         ),
         hide_index=True,
         width="stretch",
     )
-    st.markdown("**为各检验项目设置水平、靶值和 SD**")
+    st.markdown("**为各检验项目设置水平、均值和标准差**")
     for _, item in items.iterrows():
         _render_item_level_form(lot_config_id, item)
 
@@ -1010,7 +1015,7 @@ def _render_lot_config_editor(lot_config_id: int) -> None:
     action1, action2 = st.columns(2)
     with action1:
         if st.button(
-            "校验并启用批次",
+            "校验并确认批次设置",
             key=f"v11_activate_lot_config_{lot_config_id}",
             type="primary",
             width="stretch",
@@ -1021,7 +1026,7 @@ def _render_lot_config_editor(lot_config_id: int) -> None:
             except ValueError as exc:
                 st.error(str(exc))
             else:
-                st.success("批次已启用。")
+                st.success("批次设置已确认。")
                 st.rerun()
     with action2:
         if st.button(
@@ -1093,8 +1098,8 @@ def _render_lot_configs_tab() -> None:
         ].copy()
         display["status"] = display["status"].map(
             {
-                "draft": "草稿",
-                "active": "已启用",
+                "draft": "待确认",
+                "active": "设置已确认",
                 "superseded": "已替代",
                 "disabled": "已停用",
             }
@@ -1134,7 +1139,7 @@ def _render_lot_configs_tab() -> None:
                 key="v11_restore_lot_config_selector",
             )
             if st.button(
-                "恢复为草稿配置",
+                "恢复为待确认批次",
                 key="v11_restore_lot_config_button",
                 width="stretch",
                 disabled=mapping[selected] is None,
@@ -1147,7 +1152,7 @@ def _render_lot_configs_tab() -> None:
                 except ValueError as exc:
                     st.error(str(exc))
                 else:
-                    st.success("批次已恢复为草稿，请重新校验后启用。")
+                    st.success("批次已恢复为待确认，请重新校验后确认设置。")
                     st.rerun()
 
 
@@ -1204,12 +1209,12 @@ def _render_copy_tab() -> None:
             "检验项目": item["test_item_name"],
             "质控方法": QC_METHOD_LABELS.get(item["qc_method"], item["qc_method"]),
             "水平数": int(item["level_count"]),
-            "CV 要求上限（%）": item["cv_limit"],
-            "新批次靶值": "参考值待核对" if manual else "重新收集数据建靶",
+            "允许不精密度（CV%）": item["cv_limit"],
+            "新批次参数": "参考值待核对" if manual else "重新收集数据均值和标准差建立",
         })
     st.dataframe(pd.DataFrame(preview), hide_index=True, width="stretch")
-    st.caption("单位、方法学、试剂及建靶点数一并沿用。新批次从空白检测记录开始，旧批次及记录保留。")
-    if st.button("建立新批次草稿", key="v11_copy_config_button", type="primary", width="stretch"):
+    st.caption("单位、方法学、试剂及参数建立点数一并沿用。新批次从空白检测记录开始，旧批次及记录保留。")
+    if st.button("建立待确认新批次", key="v11_copy_config_button", type="primary", width="stretch"):
         try:
             new_config_id = copy_lot_config(
                 source_lot_config_id=int(source_id), target_qc_material_lot_id=int(target_lot_id),
@@ -1319,13 +1324,13 @@ def _render_import_export_tab() -> None:
                         st.success(
                             f"已导入 {result['imported_count']} 个检验项目，"
                             f"当前项目共包含 {result['saved_count']} 个检验项目{suffix}。"
-                            "项目已回到草稿状态，请校验后启用。"
+                            "项目已回到待确认状态，请校验后确认设置。"
                         )
                         st.rerun()
 
     st.divider()
     st.markdown("**导出批次**")
-    st.caption("导出批号、项目、水平靶值和修订记录；结果数据和质控计算不包含在此文件中。")
+    st.caption("导出批号、项目、各水平均值和标准差及修订记录；结果数据和质控计算不包含在此文件中。")
     configs = list_lot_configs()
     config_labels, config_map, _ = _option_map(
         configs,
@@ -1364,7 +1369,7 @@ def render_project_management_page() -> None:
         eyebrow="资料管理",
         caption=(
             "从基础资料字典选择本地仪器、试剂和质控品，建立项目；"
-            "再为具体质控品批号建立批次，设置水平、靶值和 SD。各检验项目可分别调整试剂。"
+            "再为具体质控品批号建立批次，设置水平、均值和标准差。各检验项目可分别调整试剂。"
         ),
         badges=["检验项目批量设置", "更换质控品批次", "变更记录"],
         tone="accent",
@@ -1388,7 +1393,14 @@ def render_project_management_page() -> None:
         st.session_state["v11_selected_lot_config_id"] = int(copied_id)
         st.session_state["v11_lot_config_selector"] = _config_label(pd.Series(dict(copied)))
         st.session_state["v11_management_tabs"] = "批次管理"
-        st.session_state["v11_copy_notice"] = f"已建立 {copied['lot_no']} 的新批次草稿。请展开各检验项目，核对水平和靶值后再启用。"
+        st.session_state["v11_copy_notice"] = f"已建立 {copied['lot_no']} 的新批次，资料待确认。请展开各检验项目，核对水平、均值和标准差后再确认批次设置。"
+    existing_id = st.session_state.pop("v11_pending_existing_config_id", None)
+    if existing_id is not None:
+        existing = get_lot_config(int(existing_id))
+        st.session_state["v11_selected_lot_config_id"] = int(existing_id)
+        st.session_state["v11_lot_config_selector"] = _config_label(pd.Series(dict(existing)))
+        st.session_state["v11_management_tabs"] = "批次管理"
+        st.session_state["v11_copy_notice"] = "已打开已有新批次。核对并确认设置后，在新旧批号比对页登记同时使用；无需重复建立批次。"
     tabs = st.tabs(["新建项目", "批次管理", "更换质控品批次", "导入导出", "批号使用与追溯"],
         key="v11_management_tabs", on_change="rerun")
     with tabs[0]:

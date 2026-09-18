@@ -95,7 +95,7 @@ def test_ineligible_configs_and_legacy_data_are_preserved():
         old_batch = database.create_instant_batch(project_id=old_project, instrument="旧", reagent="旧", qc_material="旧", concentration="旧", lot_no="OLD")
         manual = seed_instant_configuration(target_source="manufacturer")
         assert manual["batch_id"] is None and list_instant_workbench_projects().empty
-        assert any("本批次建靶" in issue["issue"] for issue in sync_instant_workbench_bindings())
+        assert any("本批次均值和标准差建立" in issue["issue"] for issue in sync_instant_workbench_bindings())
         f = seed_instant_configuration(name="有效项目", instrument="有效仪器")
         with get_connection() as c:
             c.execute("UPDATE md_qc_levels SET is_disabled = 1 WHERE id = ?", (f["level_id"],))
@@ -286,7 +286,7 @@ def test_page_selection_changes_clear_batch_and_disabled_actions():
         selector.set_value(next(option for option in selector.options if "第二项目" in option)).run()
         assert at.session_state["instant_selected_project_id"] == second["project_id"]
         assert at.session_state["instant_selected_batch_id"] is None
-        assert at.selectbox(key="v12_instant_batch_selector").value == "请选择已启用的批次"
+        assert at.selectbox(key="v12_instant_batch_selector").value == "请选择设置已确认的批次"
         selector = at.selectbox(key="v12_instant_batch_selector")
         selector.set_value(selector.options[1]).run()
         set_lot_config_disabled(second["config_id"], is_disabled=True, reason="测试")

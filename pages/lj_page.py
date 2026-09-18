@@ -60,7 +60,7 @@ def _build_lj_source_message(batch) -> str:
 
 def render_lj_page() -> None:
     st.subheader("单水平（LJ法）")
-    st.caption("适用于单水平项目的日常室内质控。建靶期重点查看离群值判断，进入正式期后按 Westgard 规则判读并生成月报。")
+    st.caption("适用于单水平项目的日常室内质控。参数建立期重点查看离群值判断，进入正式期后按 Westgard 规则判读并生成月报。")
     projects_df, selected_project_id, batches_df, selected_batch_id = prepare_lj_v12_project_batch_context()
     manage_tab, work_tab, report_tab = st.tabs(["项目与批次", TEXT["current_batch"], "LJ 月报"])
     render_lj_v12_configuration_selection(
@@ -106,7 +106,7 @@ def render_lj_work_tab(
     input_value_type_label = context["input_value_type_label"]
     stats = context["stats"]
     qc_df = context["qc_df"]
-    phase_label = "正式质控" if stats.get("target_ready") else "建靶期"
+    phase_label = "正式质控" if stats.get("target_ready") else "参数建立期"
     cv_limit = context["cv_limit"]
     target_n = int(batch["target_n"])
     batch_dict = dict(batch)
@@ -119,14 +119,14 @@ def render_lj_work_tab(
             caption=(
                 f"当前项目：{batch['project_name']}。"
                 f"请先确认当前批次、输入值类型（{input_value_type_label}）与阶段。"
-                "建靶期重点查看离群值判断，正式期重点查看 Westgard 判读。"
+                "参数建立期重点查看离群值判断，正式期重点查看 Westgard 判读。"
             ),
             items=[
                 ("项目名称", batch["project_name"]),
                 ("批次标识", batch_display),
                 ("输入值类型", input_value_type_label),
                 ("当前阶段", phase_label),
-                ("建靶要求次数", f"{target_n} 次"),
+                ("参数建立所需点数", f"{target_n} 次"),
                 ("仪器", batch["instrument"]),
                 ("试剂", batch["reagent"]),
                 ("质控品", batch["qc_material"]),
@@ -136,7 +136,7 @@ def render_lj_work_tab(
                 ("检测方法", _clean_lj_display_part(batch_dict.get("method_name")) or "-"),
                 ("批次名称", _clean_lj_display_part(batch_dict.get("v11_config_name")) or "-"),
                 ("批号效期", _clean_lj_display_part(batch_dict.get("v11_expiry_date")) or "-"),
-                ("CV 要求", "-" if cv_limit is None else f"≤ {cv_limit:.2f}%"),
+                ("允许不精密度（CV）", "-" if cv_limit is None else f"≤ {cv_limit:.2f}%"),
                 *(
                     [("来源", "由即时法转入")]
                     if is_from_instant
@@ -147,7 +147,7 @@ def render_lj_work_tab(
                 batch_display,
                 input_value_type_label,
                 phase_label,
-                f"建靶要求 {target_n} 次",
+                f"参数建立要求 {target_n} 次",
                 *(
                     ["由即时法转入"]
                     if is_from_instant
@@ -155,6 +155,8 @@ def render_lj_work_tab(
                 ),
             ],
         )
+        from ui.quality_targets import render_batch_quality
+        render_batch_quality("lj", selected_batch_id)
         source_message = _build_lj_source_message(batch)
         if source_message:
             st.info(source_message)
@@ -193,7 +195,7 @@ def render_lj_work_tab(
         with st.container(border=True):
             render_section_intro(
                 title="规则与记录概览",
-                caption="建靶期重点查看离群判断相关记录，正式期重点回顾 Westgard 规则与完整记录。",
+                caption="参数建立期重点查看离群判断相关记录，正式期重点回顾 Westgard 规则与完整记录。",
                 tone="default",
             )
             render_lj_rule_summary_section(stats)
@@ -204,7 +206,7 @@ def render_lj_work_tab(
             with st.container():
                 render_section_intro(
                     title="检测记录维护",
-                    caption="在此处理建靶期离群点和历史记录维护。",
+                    caption="在此处理参数建立期离群点和历史记录维护。",
                     tone="muted",
                 )
                 _render_lj_maintenance_summary(qc_df)
