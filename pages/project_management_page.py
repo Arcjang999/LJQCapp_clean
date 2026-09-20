@@ -6,7 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from database import get_connection
-from ui.cv import CV_REQUIREMENT_HELP, render_cv_requirement, render_target_cv
+from ui.cv import CV_REQUIREMENT_HELP, render_target_cv
 
 from services.master_data_service import (
     list_lab_instruments,
@@ -28,6 +28,7 @@ from services.project_config_io_service import (
 from services.project_config_service import (
     INPUT_VALUE_TYPE_LABELS,
     QC_METHOD_LABELS,
+    QC_METHOD_LEGACY_LABELS,
     TARGET_SOURCE_LABELS,
     activate_lot_config,
     activate_project_template,
@@ -52,6 +53,7 @@ from services.project_config_service import (
     validate_project_template,
 )
 from ui.common import open_global_page, render_section_intro
+from services.quality_review_service import validate_quality_review
 
 
 QC_METHOD_BY_LABEL = {label: code for code, label in QC_METHOD_LABELS.items()}
@@ -140,7 +142,8 @@ def _template_label(row: pd.Series) -> str:
     return (
         f"{_safe_text(row.get('template_name'))}｜"
         f"{_safe_text(row.get('instrument_name'))}｜"
-        f"{int(row.get('item_count', 0) or 0)} 项｜{status}"
+        f"{int(row.get('item_count', 0) or 0)} 项｜{_safe_text(row.get('project_group'), '未分组')}｜"
+        f"{', '.join(QC_METHOD_LABELS.get(x,x) for x in _safe_text(row.get('qc_methods'), '待配置').split(','))}｜{_safe_text(row.get('method_names'), '方法学待配置')}｜{status}"
     )
 
 
@@ -220,7 +223,7 @@ def _render_template_creation() -> None:
     with st.expander("新建项目", expanded=False):
         if instruments.empty or materials.empty or reagents.empty:
             st.warning("请先到“基础资料”完成本地仪器、试剂和质控品维护。")
-        with st.form("v11_create_project_template_form", clear_on_submit=True):
+        with st.container(border=True):
             template_name = st.text_input("项目名称 *")
             col1, col2, col3 = st.columns(3)
             with col1:
@@ -230,9 +233,23 @@ def _render_template_creation() -> None:
             with col3:
                 material_label = st.selectbox("质控品 *", material_labels)
             st.caption("所选试剂将作为新增检验项目的默认试剂；不同检验项目可分别调整。")
+            defaults_left,defaults_right=st.columns(2)
+            default_kind=defaults_left.selectbox('默认质控方法',['单水平','多水平联合'],key='create_default_kind',
+                format_func=lambda value: QC_METHOD_LABELS['lj' if value=='单水平' else 'zscore'])
+            default_qc='zscore' if default_kind=='多水平联合' else 'lj'
+            if default_kind=='单水平':
+                approach=st.selectbox('单水平参数建立流程',['常规 LJ（建立参数或使用已确认参数）','即时法积累，满足条件后人工转入 LJ'],key='create_building_approach')
+                if approach.startswith('即时法'): default_qc='instant'
+            methods=list_methods()
+            method_ids=[None]+methods['id'].tolist()
+            method_names={r['id']:r['method_name'] for r in methods.to_dict('records')}
+            default_method=defaults_right.selectbox('默认检测方法学',method_ids,format_func=lambda k:'请选择，或在检验项目中逐项设置' if k is None else method_names[k],key='create_default_method')
+            default_count=st.selectbox('多水平使用数量',[2,3],key='create_default_count') if default_qc=='zscore' else 1
+            project_group=st.text_input('工作分组（选填）',placeholder='例如：血筛、生化、分子；用于归类，不限制质控方式',key='create_project_group')
+            st.caption('LJ 图与 Z-score 不按检测专业划分。这里的默认设置在添加检验项目时带入，每项仍可调整；生效方式以各检验项目为准。')
             notes = st.text_input("项目备注")
-            submitted = st.form_submit_button(
-                "创建项目",
+            submitted = st.button(
+                "创建项目", key="create_project_submit",
                 type="primary",
                 width="stretch",
             )
@@ -249,6 +266,8 @@ def _render_template_creation() -> None:
                             lab_instrument_id=int(instrument_id),
                             qc_material_id=int(material_id),
                             default_reagent_id=int(reagent_id),
+                            default_qc_method=default_qc,default_method_id=default_method,
+                            default_level_count=default_count,project_group=project_group,
                             notes=notes,
                         )
                     except ValueError as exc:
@@ -333,6 +352,8 @@ def _save_editor_rows(template_id: int, edited: pd.DataFrame, lookups: dict[str,
         if not bool(row.get("保留", True)):
             continue
         qc_method_label = str(row.get("质控方法") or "")
+        if qc_method_label in QC_METHOD_LEGACY_LABELS:
+            qc_method_label = QC_METHOD_LABELS[QC_METHOD_LEGACY_LABELS[qc_method_label]]
         input_type_label = str(row.get("输入值类型") or "")
         unit_label = str(row.get("单位") or "")
         method_label = str(row.get("方法学") or "")
@@ -374,6 +395,7 @@ def _render_add_template_items(template_id: int, default_reagent_id: int | None)
     )
     selectable_labels = item_labels[1:]
     lookups = _build_editor_lookup_options()
+    template=get_project_template(template_id)
     unit_options = list(lookups["unit_options"])
     method_options = list(lookups["method_options"])
     reagent_options = [""] + list(lookups["reagent_options"])
@@ -392,6 +414,7 @@ def _render_add_template_items(template_id: int, default_reagent_id: int | None)
             qc_method_label = st.selectbox(
                 "批量质控方法",
                 list(QC_METHOD_BY_LABEL),
+                index=list(QC_METHOD_LABELS).index(template["default_qc_method"]),
                 key=f"v11_bulk_qc_method_{template_id}",
             )
             input_type_label = st.selectbox(
@@ -408,6 +431,7 @@ def _render_add_template_items(template_id: int, default_reagent_id: int | None)
             method_label = st.selectbox(
                 "批量方法学",
                 method_options,
+                index=next((i for i,name in enumerate(method_options) if lookups["method_id_by_label"][name]==template["default_method_id"]),0),
                 key=f"v11_bulk_method_{template_id}",
             )
         with row3:
@@ -417,11 +441,17 @@ def _render_add_template_items(template_id: int, default_reagent_id: int | None)
                 index=reagent_options.index(default_reagent_label),
                 key=f"v11_bulk_reagent_{template_id}",
             )
+            count_key=f"v11_bulk_level_count_{template_id}"
+            is_multi=QC_METHOD_BY_LABEL[qc_method_label]=='zscore'
+            if is_multi and st.session_state.get(count_key,template['default_level_count'])<2:
+                st.session_state[count_key]=2
+            if not is_multi:st.session_state[count_key]=1
             level_count = st.number_input(
                 "批量水平数",
-                min_value=1,
-                max_value=3,
-                value=1,
+                min_value=2 if is_multi else 1,
+                max_value=3 if is_multi else 1,
+                value=max(2,template['default_level_count']) if is_multi else 1,
+                disabled=not is_multi,
                 step=1,
                 key=f"v11_bulk_level_count_{template_id}",
             )
@@ -528,6 +558,8 @@ def _render_template_editor(template_id: int) -> None:
         f"质控品：{template['qc_material_name']}｜"
         f"资料状态：{'设置已确认' if template['status'] == 'active' else '待确认'}"
     )
+    from ui.project_navigation import render_project_defaults
+    render_project_defaults(template)
     _render_template_default_reagent(template)
     _render_add_template_items(template_id, template["default_reagent_id"])
 
@@ -635,94 +667,21 @@ def _render_template_editor(template_id: int) -> None:
                 st.rerun()
     with action2:
         if st.button(
-            "停用项目",
+            "编辑项目",
             key=f"v11_disable_template_{template_id}",
             width="stretch",
         ):
-            set_project_template_disabled(
-                template_id,
-                is_disabled=True,
-                reason="用户在项目管理页停用",
-            )
-            st.session_state["v11_selected_template_id"] = None
-            st.success("项目已停用。")
-            st.rerun()
+            from ui.project_dialogs import open_project_dialog
+            open_project_dialog('project', template_id)
+
+    from ui.project_dialogs import render_pending_project_dialog
+    render_pending_project_dialog()
 
 
 def _render_templates_tab() -> None:
-    _render_template_creation()
-    templates = list_project_templates()
-    if templates.empty:
-        st.info("当前没有项目。")
-    else:
-        template_id = _select_current_entity(
-            dataframe=templates,
-            label_builder=_template_label,
-            placeholder="请选择项目",
-            label="选择项目",
-            key="v11_template_selector",
-            state_key="v11_selected_template_id",
-        )
-        display = templates[
-            [
-                "template_name",
-                "instrument_name",
-                "qc_material_name",
-                "status",
-                "item_count",
-                "revision_no",
-                "created_at",
-            ]
-        ].copy()
-        display["status"] = display["status"].map({"draft": "待确认", "active": "设置已确认"})
-        st.dataframe(
-            display.rename(
-                columns={
-                    "template_name": "项目名称",
-                    "instrument_name": "本地仪器",
-                    "qc_material_name": "质控品",
-                    "status": "状态",
-                    "item_count": "检验项目数",
-                    "revision_no": "修订号",
-                    "created_at": "创建时间",
-                }
-            ),
-            hide_index=True,
-            width="stretch",
-        )
-        if template_id is not None:
-            _render_template_editor(int(template_id))
-
-    all_templates = list_project_templates(include_disabled=True)
-    disabled_templates = all_templates[all_templates["is_disabled"].astype(int) == 1]
-    if not disabled_templates.empty:
-        with st.expander("恢复已停用项目", expanded=False):
-            labels, mapping, _ = _option_map(
-                disabled_templates,
-                _template_label,
-                placeholder="请选择已停用项目",
-            )
-            selected = st.selectbox(
-                "已停用项目",
-                labels,
-                key="v11_restore_template_selector",
-            )
-            if st.button(
-                "恢复项目并重新确认",
-                key="v11_restore_template_button",
-                width="stretch",
-                disabled=mapping[selected] is None,
-            ):
-                try:
-                    set_project_template_disabled(
-                        int(mapping[selected]),
-                        is_disabled=False,
-                    )
-                except ValueError as exc:
-                    st.error(str(exc))
-                else:
-                    st.success("项目已恢复为待确认。")
-                    st.rerun()
+    from ui.project_navigation import render_project_navigation
+    # Both entry points share the same list, entity IDs, dialogs and return state.
+    render_project_navigation()
 
 
 def _render_create_lot_config() -> None:
@@ -743,75 +702,19 @@ def _render_create_lot_config() -> None:
             key="v11_create_config_template",
         )
         template_id = template_map[template_label]
-        lots = pd.DataFrame()
         if template_id is not None:
-            template = get_project_template(int(template_id))
-            lots = list_qc_lots(int(template["qc_material_id"]))
-        lot_labels, lot_map, _ = _option_map(
-            lots,
-            _lot_label,
-            placeholder="请选择质控品批号",
-        )
-        lot_label = st.selectbox(
-            "质控品批号",
-            lot_labels,
-            key="v11_create_config_lot",
-        )
-        config_name = st.text_input(
-            "批次名称（留空自动生成）",
-            key="v11_create_config_name",
-        )
-        quality_requirements = {}
-        if template_id is not None:
-            st.caption("各检验项目的 允许不精密度（CV）默认沿用项目设置，可在本批次建立前调整。")
-            for _, item in list_template_items(int(template_id)).iterrows():
-                item_id = int(item["id"])
-                with st.container(border=True):
-                    st.write(item["test_item_name"])
-                    limit = st.number_input(
-                        "允许不精密度（CV%，选填）", min_value=0.0, format="%.4f",
-                        value=None if pd.isna(item["cv_limit"]) else float(item["cv_limit"]),
-                        help=CV_REQUIREMENT_HELP, key=f"v12_create_cv_{template_id}_{item_id}",
-                    )
-                    source = st.text_input("允许不精密度依据（选填）",
-                        value=_safe_text(item["quality_target_source_text"], ""),
-                        key=f"v12_create_cv_source_{template_id}_{item_id}")
-                    quality_requirements[item_id] = {"cv_limit": limit, "quality_target_source_text": source}
-        if st.button(
-            "创建批次",
-            key="v11_create_config_button",
-            type="primary",
-            width="stretch",
-        ):
-            lot_id = lot_map[lot_label]
-            if template_id is None or lot_id is None:
-                st.error("请选择项目和质控品批号。")
-            else:
-                try:
-                    config_id = create_lot_config_from_template(
-                        template_id=int(template_id),
-                        qc_material_lot_id=int(lot_id),
-                        config_name=config_name,
-                        quality_requirements=quality_requirements,
-                    )
-                except ValueError as exc:
-                    st.error(str(exc))
-                else:
-                    st.session_state["v11_selected_lot_config_id"] = config_id
-                    st.success("批次已创建，请继续设置各检验项目的水平、均值和标准差。")
-                    st.rerun()
+            from ui.materials import render_material_config_creation
+            render_material_config_creation(int(template_id))
+
 
 
 def _render_item_level_form(lot_config_id: int, item: pd.Series) -> None:
     config = get_lot_config(lot_config_id)
-    all_levels = list_qc_levels(int(config["qc_material_lot_id"]))
+    from services.material_workflow_service import available_materials,material_label
+    all_levels = available_materials(int(config['qc_material_id'])) if config['material_selection_mode'] else list_qc_levels(int(config["qc_material_lot_id"]))
     level_labels, level_map, level_by_id = _option_map(
         all_levels,
-        lambda row: (
-            f"{int(row.get('level_order', 0) or 0)}｜"
-            f"{_safe_text(row.get('level_name'))}｜"
-            f"{_safe_text(row.get('concentration_label'), '')}"
-        ),
+        material_label,
         placeholder="请选择水平",
     )
     selectable_labels = level_labels[1:]
@@ -827,16 +730,19 @@ def _render_item_level_form(lot_config_id: int, item: pd.Series) -> None:
         f"{item['test_item_name']}｜{QC_METHOD_LABELS.get(str(item['qc_method']), item['qc_method'])}"
         f"｜需要 {expected_count} 个水平"
     )
-    with st.expander(title, expanded=int(item["assigned_level_count"] or 0) != expected_count):
+    from services.quality_target_service import decode
+    from ui.quality_targets import render_adoption
+    quality_goal = decode(item.get("quality_goal_json", "{}"))
+    needs_review = bool(validate_quality_review('lot', int(item['id'])))
+    with st.expander(title, expanded=int(item["assigned_level_count"] or 0) != expected_count or bool(quality_goal.get('pending')) or needs_review):
         limit = None if pd.isna(item["cv_limit"]) else float(item["cv_limit"])
         source = _safe_text(item["quality_target_source_text"], "")
         with get_connection() as connection:
             has_binding = connection.execute("SELECT * FROM qc_workbench_bindings WHERE lot_config_item_id=?", (int(item["id"]),)).fetchone()
-        from services.quality_target_service import decode
-        quality_goal = decode(item.get("quality_goal_json", "{}"))
-        if quality_goal:
-            st.caption("质量目标：" + quality_goal['spec']['name'] + " / " + quality_goal['spec']['standard'])
-            st.caption("请在“资料与批次 → 质量目标 → 批次采用要求”核对各水平。" if quality_goal.get('pending') else "已确认各水平质量要求；采用版本保留在本批次。")
+        if not existing.empty:
+            st.dataframe(existing[['level_order','level_name','level_code','lot_no','expiry_date']].rename(columns={
+                'level_order':'组合位置','level_name':'浓度水平','level_code':'浓度编号','lot_no':'实际批号','expiry_date':'效期'}),hide_index=True,width='stretch')
+        render_adoption('lot',int(item['id']),embedded=True)
         if config["status"] == "draft" and not has_binding and not quality_goal:
             limit = st.number_input("允许不精密度（CV%，选填）", value=limit, min_value=0.0,
                 format="%.4f", help=CV_REQUIREMENT_HELP, key=f"v12_draft_cv_{item['id']}")
@@ -848,8 +754,6 @@ def _render_item_level_form(lot_config_id: int, item: pd.Series) -> None:
                     st.error(str(exc))
                 else:
                     st.rerun()
-        else:
-            render_cv_requirement(limit, source, quality_goal)
         if has_binding and has_binding["qc_method"] != "instant":
             from services.lot_lifecycle_service import target_profile
             from services.cv_service import calculate_cv_percent
@@ -864,6 +768,9 @@ def _render_item_level_form(lot_config_id: int, item: pd.Series) -> None:
                 } for level in profile['levels']]), hide_index=True, width="stretch")
                 st.caption("如需调整控制参数，请前往“批号使用与追溯 → 均值和标准差管理”。")
                 return
+        if config['material_selection_mode'] and (config['activated_at'] or has_binding):
+            st.caption('本批次材料已固定；请通过更换质控品批次选择新材料。')
+            return
         if len(selectable_labels) < expected_count:
             st.error(
                 f"当前质控品批号只有 {len(selectable_labels)} 个启用水平，"
@@ -946,7 +853,7 @@ def _render_item_level_form(lot_config_id: int, item: pd.Series) -> None:
                 }
             )
         if st.button(
-            "保存本检验项目水平配置",
+            "保存各水平设置",
             key=f"v11_save_item_levels_{item['id']}",
             width="stretch",
             disabled=len(selected_labels) != expected_count,
@@ -956,16 +863,18 @@ def _render_item_level_form(lot_config_id: int, item: pd.Series) -> None:
             except (ValueError, TypeError) as exc:
                 st.error(str(exc))
             else:
-                st.success("本检验项目水平配置已保存。")
+                st.success("各水平设置已保存。")
                 st.rerun()
 
 
 def _render_lot_config_editor(lot_config_id: int) -> None:
     config = get_lot_config(lot_config_id)
     items = list_lot_config_items(lot_config_id)
+    from services.material_workflow_service import config_material_summary
+    material_summary=config_material_summary(lot_config_id)
     st.caption(
         f"当前批次：{config['config_name']}｜项目：{config['template_name']}｜"
-        f"批号：{config['lot_no']}｜效期：{_safe_text(config['expiry_date'], '未填写')}｜"
+        f"使用材料：{material_summary}｜"
         f"资料状态：{'设置已确认' if config['status'] == 'active' else '待确认'}｜修订 {config['revision_no']}"
     )
     if items.empty:
@@ -997,7 +906,7 @@ def _render_lot_config_editor(lot_config_id: int) -> None:
                 "method_name": "方法学",
                 "reagent_name": "试剂",
                 "level_count": "所需水平数",
-                "assigned_level_count": "已配置水平数",
+                "assigned_level_count": "已设置水平数",
                 "target_n": "参数建立点数",
                 "cv_limit": "允许不精密度(CV%)",
             }
@@ -1005,7 +914,7 @@ def _render_lot_config_editor(lot_config_id: int) -> None:
         hide_index=True,
         width="stretch",
     )
-    st.markdown("**为各检验项目设置水平、均值和标准差**")
+    st.markdown("**为各检验项目设置水平、均值和标准差，并确认本批次质量目标**")
     for _, item in items.iterrows():
         _render_item_level_form(lot_config_id, item)
 
@@ -1034,21 +943,16 @@ def _render_lot_config_editor(lot_config_id: int) -> None:
             key=f"v11_disable_lot_config_{lot_config_id}",
             width="stretch",
         ):
-            set_lot_config_disabled(
-                lot_config_id,
-                is_disabled=True,
-                reason="用户在项目管理页停用",
-            )
-            st.session_state["v11_selected_lot_config_id"] = None
-            st.success("批次已停用。")
-            st.rerun()
+            from ui.config_confirmation import confirm_batch_status
+            confirm_batch_status(lot_config_id, disabled=True,
+                                 expected_revision=int(get_lot_config(lot_config_id)['revision_no']))
 
     snapshots = list_config_snapshots(lot_config_id).copy()
     snapshots["action_type"] = snapshots["action_type"].replace({
         "create": "创建", "edit": "修改", "activate": "启用",
         "copy": "复制", "disable": "停用", "reactivate": "恢复使用",
     })
-    with st.expander("配置修订记录", expanded=False):
+    with st.expander("设置变更记录", expanded=False):
         st.dataframe(
             snapshots.rename(
                 columns={
@@ -1144,16 +1048,13 @@ def _render_lot_configs_tab() -> None:
                 width="stretch",
                 disabled=mapping[selected] is None,
             ):
-                try:
-                    set_lot_config_disabled(
-                        int(mapping[selected]),
-                        is_disabled=False,
-                    )
-                except ValueError as exc:
-                    st.error(str(exc))
-                else:
-                    st.success("批次已恢复为待确认，请重新校验后确认设置。")
-                    st.rerun()
+                from ui.config_confirmation import confirm_batch_status
+                config_id = int(mapping[selected])
+                confirm_batch_status(config_id, disabled=False,
+                                     expected_revision=int(get_lot_config(config_id)['revision_no']))
+
+    from ui.config_confirmation import render_pending_batch_confirmation
+    render_pending_batch_confirmation()
 
 
 def _render_copy_tab() -> None:
@@ -1162,6 +1063,11 @@ def _render_copy_tab() -> None:
     if configs.empty:
         st.info("还没有可沿用设置的批次，请先在“批次管理”中建立第一个批次。")
         return
+    from ui.materials import render_material_replacement
+    render_material_replacement(configs)
+    st.markdown('**更换全部水平的质控品批号**')
+    configs=configs[configs['material_selection_mode']==0]
+    if configs.empty:return
     source_labels, source_map, _ = _option_map(
         configs, _config_label, placeholder="请选择旧批次",
     )
@@ -1400,7 +1306,7 @@ def render_project_management_page() -> None:
         st.session_state["v11_selected_lot_config_id"] = int(existing_id)
         st.session_state["v11_lot_config_selector"] = _config_label(pd.Series(dict(existing)))
         st.session_state["v11_management_tabs"] = "批次管理"
-        st.session_state["v11_copy_notice"] = "已打开已有新批次。核对并确认设置后，在新旧批号比对页登记同时使用；无需重复建立批次。"
+        st.session_state["v11_copy_notice"] = st.session_state.pop("v11_quality_review_notice", "已打开已有新批次。核对并确认设置后，在新旧批号比对页登记同时使用；无需重复建立批次。")
     tabs = st.tabs(["新建项目", "批次管理", "更换质控品批次", "导入导出", "批号使用与追溯"],
         key="v11_management_tabs", on_change="rerun")
     with tabs[0]:

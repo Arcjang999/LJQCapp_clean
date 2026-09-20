@@ -6,6 +6,7 @@ from collections import OrderedDict
 
 import pandas as pd
 
+from database import atomic_write
 from services.export_utils import dataframes_to_xlsx_bytes, xlsx_bytes_to_dataframes
 from services.master_data_service import (
     create_manufacturer,
@@ -22,6 +23,7 @@ from services.master_data_service import (
 from services.project_config_service import (
     INPUT_VALUE_TYPE_LABELS,
     QC_METHOD_LABELS,
+    QC_METHOD_LEGACY_LABELS,
     TARGET_SOURCE_LABELS,
     get_lot_config,
     get_project_template,
@@ -54,6 +56,7 @@ PROJECT_IMPORT_COLUMNS = [
 _QC_METHOD_BY_TEXT = {
     **{code.casefold(): code for code in QC_METHOD_LABELS},
     **{label.casefold(): code for code, label in QC_METHOD_LABELS.items()},
+    **{label.casefold(): code for label, code in QC_METHOD_LEGACY_LABELS.items()},
     "lj法": "lj",
     "z-score": "zscore",
     "z-score法": "zscore",
@@ -112,6 +115,7 @@ def _instructions_dataframe() -> pd.DataFrame:
             ["本地词条", "找不到的检验项目、单位、方法学、试剂及厂家会作为医院自定义词条新增。"],
             ["导入方式", "合并会保留未出现在文件中的原检验项目；替换会以文件内容作为完整的检验项目表。"],
             ["设置确认", "导入后项目保持待确认，必须回到“新建项目”页校验并人工确认设置。"],
+            ["质量目标确认", "“质量目标”和“标准适用情况”工作表供查阅，不参与导入。导入后请重新确认质量目标，不能使用文件中的确认人和状态代替确认。"],
         ],
         columns=["项目", "说明"],
     )
@@ -186,6 +190,63 @@ def _project_items_export_dataframe(template_id: int) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=PROJECT_IMPORT_COLUMNS)
 
 
+def _quality_review_export_sheets(items: pd.DataFrame) -> list[tuple[str, pd.DataFrame]]:
+    """Export frozen readable evidence, never an importable authorization token."""
+    from services.quality_target_service import decode
+
+    review_rows = []
+    candidate_rows = []
+    for item in items.to_dict('records'):
+        review = decode(item.get('quality_review_json'))
+        goal = decode(item.get('quality_goal_json'))
+        spec = goal.get('spec', {})
+        recorded = review.get('recorded', {})
+        state = {'confirmed': '已确认', 'pending': '待重新确认'}.get(review.get('status'),
+            '按原确认记录使用' if goal and not goal.get('pending') else '未确认')
+        content = recorded.get('requirement_text', '')
+        if spec:
+            content = '；'.join(label + spec[key] for label, key in (
+                ('允许不精密度：', 'imprecision_text'), ('允许偏倚：', 'bias_text'),
+                ('允许总误差/可比性偏差：', 'tea_text')) if spec.get(key))
+        review_rows.append({
+            '检验项目': _text(item['test_item_name']),
+            '输入值类型': INPUT_VALUE_TYPE_LABELS.get(_text(item['input_value_type']), _text(item['input_value_type'])),
+            '单位': _text(item.get('unit_symbol')), '方法学': _text(item.get('method_name')),
+            '核对状态': state,
+            '来源类型': {'standard': '标准', 'custom': '实验室自定要求',
+                       'record_only': '实验室自定要求（不自动评价）'}.get(review.get('decision'),
+                           '原质量目标' if goal else '未确认'),
+            '来源名称': recorded.get('source_name') or spec.get('standard', ''),
+            '来源版本或编号': recorded.get('source_version') or spec.get('version', ''),
+            '要求内容': content,
+            '来源条款': spec.get('source_clause', ''), '适用范围': spec.get('scope', ''),
+            '来源实施日期': spec.get('effective_date', ''),
+            '确认人': review.get('confirmed_by') or goal.get('confirmed_by', ''),
+            '确认时间': review.get('reviewed_at') or goal.get('adopted_at', ''),
+            '适用依据': review.get('evidence') or goal.get('evidence', ''),
+            '用途说明': '供查阅；本表不参与导入，导入后请重新确认质量目标。',
+        })
+        for candidate in review.get('candidates', []):
+            candidate_rows.append({
+                '检验项目': _text(item['test_item_name']),
+                '输入值类型': INPUT_VALUE_TYPE_LABELS.get(_text(item['input_value_type']), _text(item['input_value_type'])),
+                '标准名称及版本': candidate.get('source', ''),
+                '适用情况': {'adopted': '已采用', 'not_applicable': '不适用'}.get(candidate.get('disposition'), '未确认'),
+                '说明': candidate.get('reason', ''),
+                '核对状态': state,
+                '确认人': review.get('confirmed_by', ''),
+                '确认时间': review.get('reviewed_at', ''),
+            })
+    return [
+        ('质量目标（供查阅）', pd.DataFrame(review_rows, columns=[
+            '检验项目', '输入值类型', '单位', '方法学', '核对状态', '来源类型', '来源名称',
+            '来源版本或编号', '要求内容', '来源条款', '适用范围', '来源实施日期', '确认人',
+            '确认时间', '适用依据', '用途说明'])),
+        ('标准适用情况（供查阅）', pd.DataFrame(candidate_rows, columns=[
+            '检验项目', '输入值类型', '标准名称及版本', '适用情况', '说明', '核对状态', '确认人', '确认时间'])),
+    ]
+
+
 def build_project_template_xlsx(template_id: int) -> bytes:
     template = get_project_template(template_id)
     overview = pd.DataFrame(
@@ -211,6 +272,7 @@ def build_project_template_xlsx(template_id: int) -> bytes:
                 ("项目信息", overview),
                 ("项目配置", _project_items_export_dataframe(template_id)),
                 ("填写说明", _instructions_dataframe()),
+                *_quality_review_export_sheets(list_template_items(template_id)),
             ]
         )
     )
@@ -276,8 +338,10 @@ def build_lot_config_xlsx(lot_config_id: int) -> bytes:
                 {
                     "检验项目": _text(item["test_item_name"]),
                     "水平顺序": int(level["level_order"]),
-                    "水平名称": _text(level["level_name"]),
-                    "水平编码": _text(level["level_code"]),
+                    "浓度水平": _text(level["level_name"]),
+                    "实际批号": _text(level["lot_no"]),
+                    "效期": _text(level["expiry_date"]),
+                    "浓度编号": _text(level["level_code"]),
                     "均值和标准差来源": TARGET_SOURCE_LABELS.get(
                         _text(level["target_source"]), _text(level["target_source"])
                     ),
@@ -290,7 +354,7 @@ def build_lot_config_xlsx(lot_config_id: int) -> bytes:
             )
     level_export = pd.DataFrame(
         level_rows,
-        columns=["检验项目", "水平顺序", "水平名称", "水平编码", "均值和标准差来源", "设定均值", "SD", "设定变异系数（%）", "已确认", "备注"],
+        columns=["检验项目", "水平顺序", "浓度水平", "浓度编号", "实际批号", "效期", "均值和标准差来源", "设定均值", "SD", "设定变异系数（%）", "已确认", "备注"],
     )
     snapshots = list_config_snapshots(lot_config_id).rename(
         columns={
@@ -309,6 +373,7 @@ def build_lot_config_xlsx(lot_config_id: int) -> bytes:
                 ("项目配置", item_export),
                 ("水平均值和标准差", level_export),
                 ("修订记录", snapshots),
+                *_quality_review_export_sheets(items),
             ]
         )
     )
@@ -564,7 +629,18 @@ def import_project_template_xlsx(
         for order, row in enumerate(rows_to_save, start=1):
             row["sort_order"] = order
 
-    save_template_items(template_id, rows_to_save)
+    # Read-only evidence sheets are deliberately ignored. Even reimporting an
+    # unchanged row requires fresh source confirmation in this configuration.
+    from services.quality_review_service import pending_review_copy
+    with atomic_write() as connection:
+        save_template_items(template_id, rows_to_save)
+        for row in imported_config_rows:
+            existing = connection.execute('''SELECT id,quality_review_json FROM qc_project_template_items
+                WHERE template_id=? AND test_item_id=? AND qc_method=? AND input_value_type=? AND is_disabled=0''',
+                (template_id, row['test_item_id'], row['qc_method'], row['input_value_type'])).fetchone()
+            if existing:
+                connection.execute('UPDATE qc_project_template_items SET quality_review_json=? WHERE id=?',
+                                   (pending_review_copy(existing['quality_review_json']), existing['id']))
     return {
         "imported_count": len(imported_config_rows),
         "saved_count": len(rows_to_save),

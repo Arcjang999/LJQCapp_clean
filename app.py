@@ -33,6 +33,9 @@ def _consume_pending_navigation_intent() -> None:
     st.session_state.pop("pending_navigation_source", None)
 
     st.session_state["top_level_method_selector"] = LJ_ENTRY_LABEL
+    st.session_state['lj_workbench_tabs'] = '当前批次'
+    st.session_state.pop('v12_lj_project_selector', None)
+    st.session_state.pop('v12_lj_batch_selector', None)
 
     if pending_project_id is not None:
         try:
@@ -81,12 +84,19 @@ if bool(st.session_state.get("show_project_management_page", False)):
     render_project_management_page()
     st.stop()
 
-selected_method = st.radio(
-    "质控工作台",
-    options=METHOD_ENTRY_OPTIONS,
-    horizontal=True,
-    key="top_level_method_selector",
-)
+# Project navigation is primary; retained method routes support old links and existing sessions.
+current = st.session_state.get('top_level_method_selector', MAIN_ENTRY_LABEL)
+if current != MAIN_ENTRY_LABEL and st.button('返回项目工作台',key='back_project_home'):
+    st.session_state['pending_top_level_method']=MAIN_ENTRY_LABEL
+    st.rerun()
+with st.expander('选择质控方法',expanded=False):
+    selected_method = st.radio(
+        "质控工作台",options=METHOD_ENTRY_OPTIONS,horizontal=True,key="top_level_method_selector",
+    )
+
+if selected_method != MAIN_ENTRY_LABEL:
+    from ui.project_navigation import render_workspace_return_bar
+    render_workspace_return_bar()
 
 if selected_method == MAIN_ENTRY_LABEL:
     render_main_entry_page()

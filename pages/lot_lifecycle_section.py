@@ -192,16 +192,16 @@ def render_lot_management():
                 target=st.selectbox('新质控品批号',target_lots.id.tolist(),format_func=lambda i:target_lots.loc[target_lots.id==i,'lot_no'].iloc[0])
                 existing=configs[(configs.template_id==current['template_id']) & (configs.qc_material_lot_id==target) & (configs.combination_key=='')]
                 if not existing.empty:
-                    st.info('该新批号已有批次。请继续核对已有批次，在下方登记“新旧批同时使用”；其已积累数据会保留。')
+                    draft=existing.iloc[0]['status']=='draft'
+                    st.info('此批号已建立批次，设置尚未确认。请核对质量目标及各水平的均值和标准差，确认后再录入。' if draft else '此批号已建立批次，可以继续使用。原有检测结果保留。')
                     if st.button('打开已有新批次核对', key='lot_open_existing_config'):
-                        st.session_state['v11_pending_existing_config_id']=int(existing.iloc[0]['id'])
-                        st.rerun()
+                        _open_config_review(int(existing.iloc[0]['id']))
                     with get_connection() as c:
                         disabled_items={r[0] for r in c.execute(
                             'SELECT source_template_item_id FROM qc_lot_config_items WHERE lot_config_id=? AND is_enabled=0 AND is_disabled=0',
                             (int(existing.iloc[0]['id']),))}
                     remaining={i:label for i,label in items.items() if i in disabled_items}
-                    if remaining:
+                    if remaining and draft:
                         st.caption('以下检验项目尚未在该新批次使用，可单独加入同时使用。')
                         _render_new_parallel_form(cid, target, remaining)
                 else:
@@ -223,10 +223,19 @@ def _render_new_parallel_form(cid, target, items):
         when=st.datetime_input('开始新旧批同时使用时间')
         operator=st.text_input('质控换批操作者')
         reason=st.text_input('质控品换批原因')
-        st.caption('沿用项目，只新建质控批次；新批检测值从零开始。旧批仍可使用，完成验证后按检测项结束旧批。')
-        if st.form_submit_button('创建新批同时使用批次'):
+        st.caption('新增批次后，请核对质控品批号、质量目标及各水平的均值和标准差。确认设置后可录入新批，旧批仍可使用。')
+        if st.form_submit_button('准备新批次并核对'):
             result=_save(lambda:change_qc_lot(source_config_id=int(cid),target_qc_lot_id=int(target),template_item_ids=chosen,operator=operator,reason=reason,effective_at=when))
-            if result: st.info(f'新批次已创建：{result}。复制的人工／厂家参数及质量目标需在新批次中重新确认，完成后再确认批次设置。')
+            if result:
+                _open_config_review(int(result))
+
+
+def _open_config_review(config_id):
+    from ui.common import open_global_page
+    st.session_state['v11_pending_existing_config_id']=int(config_id)
+    st.session_state['v11_quality_review_notice']='请核对质控品批号、质量目标及各水平的均值和标准差，再确认批次设置。旧批次检测结果保留。'
+    open_global_page('show_project_management_page')
+    st.rerun()
 
 
 def _binding_options():
@@ -235,7 +244,7 @@ def _binding_options():
         result={}
         for r in rows:
             s,_,_=source_context(c,r['qc_method'],r['runtime_batch_id'])
-            method_label={'lj':'单水平 LJ','zscore':'多水平 Z-score','instant':'即时法'}.get(r['qc_method'],r['qc_method'])
+            method_label={'lj':'单水平（LJ）','zscore':'多水平法','instant':'即时法'}.get(r['qc_method'],r['qc_method'])
             result[r['id']]={**dict(r),'snapshot':s,'label':f"{s.get('test_item_name','')}｜{s.get('instrument_name','')}｜{s.get('lot_no','')}｜{method_label}"}
         return result
 
@@ -381,4 +390,4 @@ def _render_level_combination(systems):
             when=st.datetime_input('新水平组合生效时间');person=st.text_input('水平换批确认人');reason=st.text_input('水平换批依据')
             if st.form_submit_button('建立新的水平组合'):
                 result=_save(lambda:create_level_combination(source_batch_id=b['runtime_batch_id'],level_ids=chosen,verification_ids=verification_ids,operator=person,reason=reason,effective_at=when))
-                if result:st.info('新水平组合已创建；如沿用了质量目标，请到“质量目标 → 批次采用要求”逐水平确认，再确认批次设置。')
+                if result:_open_config_review(int(result))

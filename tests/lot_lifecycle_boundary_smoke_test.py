@@ -17,6 +17,8 @@ from services.instant_workbench_service import sync_instant_workbench_bindings
 from tests.lot_lifecycle_smoke_test import IsolatedDatabase, lj, verified, switch, rejected
 from tests.zscore_v12_fixtures import seed_zscore_configuration
 from tests.instant_v12_fixtures import seed_instant_configuration
+from tests.quality_review_fixtures import confirm_fixture_lot
+from services.project_config_service import activate_lot_config
 
 
 def snapshot(method, batch):
@@ -108,6 +110,9 @@ def test_partial_replacement_rejects_superseded_pass_atomically():
 def test_mixed_combination_activation_requires_all_actual_lots():
     with IsolatedDatabase():
         f,s,lot,level,vid=combination_fixture();new=combination(f,level,vid)
+        confirm_fixture_lot(new);activate_lot_config(new)
+        from services.zscore_workbench_service import sync_zscore_workbench_bindings
+        sync_zscore_workbench_bindings()
         with get_connection() as c:
             b=dict(c.execute('SELECT * FROM qc_workbench_bindings WHERE lot_config_id=?',(new,)).fetchone())
         profile('zscore',b['runtime_batch_id'],3,when='2026-09-04')
@@ -133,6 +138,7 @@ def test_result_timestamp_obeys_qc_state_without_unlocking_ended_batch():
         create_qc_level(qc_material_lot_id=lot,level_name='常规水平',level_order=1)
         new=change_qc_lot(source_config_id=f['config_id'],target_qc_lot_id=lot,
             template_item_ids=[s['project_template_item_id']],operator='验收人员',reason='平行计划',effective_at='2026-09-03')
+        confirm_fixture_lot(new);activate_lot_config(new)
         sync_instant_workbench_bindings()
         with get_connection() as c:
             b=dict(c.execute('SELECT * FROM qc_workbench_bindings WHERE lot_config_id=?',(new,)).fetchone())

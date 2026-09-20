@@ -27,20 +27,20 @@ def render_lj_monthly_report_section(selected_batch_id: int) -> None:
 
     with st.container(border=True):
         render_section_intro(
-            title="单水平（LJ法）月度质控报告",
-            caption="基于当前批次生成单水平（LJ法）月度质控报告。",
+            title="单水平（LJ）月度质控报告",
+            caption="基于当前批次生成单水平（LJ）月度质控报告。",
             tone="accent",
         )
         render_workbench_context_bar(
-            title="LJ 月报当前选择",
+            title="月报设置",
             caption="项目与批次沿用当前 LJ 工作台选择；报告统计仅包含所选月份内的正式期数据。",
             items=[
-                ("方法", "单水平（LJ法）"),
+                ("方法", "单水平（LJ）"),
                 ("项目名称", batch["project_name"]),
                 ("批次标识", _build_batch_display(batch)),
                 ("报告支持范围", "仅支持 LJ 单水平月报"),
             ],
-            badges=["单水平（LJ法）", "仅支持 LJ 月报"],
+            badges=["单水平（LJ）", "仅支持 LJ 月报"],
         )
 
         if not available_months:
@@ -79,7 +79,7 @@ def render_lj_monthly_report_section(selected_batch_id: int) -> None:
                     "file_name": package.report.file_name,
                     "snapshot_id": snapshot_id,
                 }
-                st.success("已生成单水平（LJ法）月度质控报告，可预览并下载 PDF。")
+                st.success("已生成单水平（LJ）月度质控报告，可预览并下载 PDF。")
 
         preview_state = st.session_state.get(preview_key)
         if not _preview_matches(preview_state, selected_batch_id, selected_month):

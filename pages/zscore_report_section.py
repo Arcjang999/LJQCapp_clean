@@ -7,8 +7,8 @@ import pandas as pd
 import streamlit as st
 
 from database import get_zscore_batch
+from services.project_config_service import QC_METHOD_LABELS
 from services.report_service import (
-    ZSCORE_METHOD_LABEL,
     ZScoreMonthlyReportPackage,
     build_zscore_monthly_preview_summary,
     build_zscore_monthly_report_package,
@@ -28,20 +28,20 @@ def render_zscore_monthly_report_section(selected_batch_id: int) -> None:
 
     with st.container(border=True):
         render_section_intro(
-            title="多水平（Z-score法）月度质控报告",
-            caption="基于当前批次生成多水平（Z-score法）月度质控报告。",
+            title="多水平法月度质控报告",
+            caption="基于当前批次生成多水平法月度质控报告。",
             tone="accent",
         )
         render_workbench_context_bar(
-            title="Z-score 月报当前选择",
-            caption="项目与批次沿用当前 Z-score 工作台选择；报告统计仅包含所选月份内的正式期检测记录。",
+            title="月报设置",
+            caption="沿用当前多水平法工作台的项目和批次；报告统计仅包含所选月份内的正式期检测记录。",
             items=[
-                ("方法", ZSCORE_METHOD_LABEL),
+                ("方法", QC_METHOD_LABELS['zscore']),
                 ("项目名称", batch["project_name"]),
                 ("批次标识", _build_batch_display(batch)),
                 ("报告支持范围", "仅支持 Z-score 多水平月报"),
             ],
-            badges=[ZSCORE_METHOD_LABEL, "仅支持 Z-score 月报"],
+            badges=[QC_METHOD_LABELS['zscore'], "月度报告"],
         )
 
         if not available_months:
@@ -79,7 +79,7 @@ def render_zscore_monthly_report_section(selected_batch_id: int) -> None:
                     "file_name": package.report.file_name,
                     "snapshot_id": snapshot_id,
                 }
-                st.success("已生成多水平（Z-score法）月度质控报告，可预览并下载 PDF。")
+                st.success("已生成多水平法月度质控报告，可预览并下载 PDF。")
 
         preview_state = st.session_state.get(preview_key)
         if not _preview_matches(preview_state, selected_batch_id, selected_month):

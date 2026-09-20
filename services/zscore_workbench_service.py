@@ -11,7 +11,7 @@ from services.workbench_config_service import _materialize_runtime_batch
 
 def _configuration_sources(connection: sqlite3.Connection) -> tuple[list[dict], list[dict]]:
     candidates = connection.execute("""
-        SELECT items.*, configs.revision_no, configs.config_name, configs.qc_material_lot_id,
+        SELECT items.*, configs.revision_no, configs.config_name, configs.qc_material_lot_id, configs.material_selection_mode,
                tests.chinese_name AS test_item_name, lots.lot_no
         FROM qc_lot_config_items items
         JOIN qc_lot_configs configs ON configs.id = items.lot_config_id
@@ -24,7 +24,7 @@ def _configuration_sources(connection: sqlite3.Connection) -> tuple[list[dict], 
           AND configs.status = 'active' AND configs.is_disabled = 0
           AND templates.status = 'active' AND templates.is_disabled = 0
           AND tests.is_disabled = 0 AND instruments.is_disabled = 0
-          AND materials.is_disabled = 0 AND lots.is_disabled = 0
+          AND materials.is_disabled = 0 AND (configs.material_selection_mode = 1 OR lots.is_disabled = 0)
         ORDER BY items.id
     """).fetchall()
     sources, issues = [], []
@@ -37,9 +37,9 @@ def _configuration_sources(connection: sqlite3.Connection) -> tuple[list[dict], 
             SELECT assigned.* FROM qc_lot_config_item_levels assigned
             JOIN md_qc_levels levels ON levels.id = assigned.qc_level_id
             WHERE assigned.lot_config_item_id = ? AND assigned.is_disabled = 0
-              AND levels.is_disabled = 0 AND (levels.qc_material_lot_id = ? OR EXISTS (SELECT 1 FROM qc_level_combination_members m WHERE m.lot_config_item_id=assigned.lot_config_item_id AND m.qc_level_id=levels.id))
+              AND levels.is_disabled = 0 AND (?=1 OR levels.qc_material_lot_id = ? OR EXISTS (SELECT 1 FROM qc_level_combination_members m WHERE m.lot_config_item_id=assigned.lot_config_item_id AND m.qc_level_id=levels.id))
             ORDER BY assigned.level_order, assigned.id
-        """, (row["id"], row["qc_material_lot_id"])).fetchall()
+        """, (row["id"], row["material_selection_mode"], row["qc_material_lot_id"])).fetchall()
         if row["level_count"] not in (2, 3) or len(levels) != row["level_count"]:
             reject("有效水平必须完整匹配项目的 2 或 3 个水平。")
             continue
@@ -64,6 +64,10 @@ def _configuration_sources(connection: sqlite3.Connection) -> tuple[list[dict], 
             reject("当前配置未完成，请检查水平数量、均值和标准差来源及参数确认。")
             continue
         config = payload["config"]
+        from services.material_workflow_service import concentration_label,validate_material_selection
+        try: validate_material_selection(connection,config['qc_material_id'],live_level_ids,row['level_count'])
+        except ValueError as exc:
+            reject(str(exc));continue
         sources.append({
             "lot_config_item_id": row["id"], "lot_config_id": row["lot_config_id"],
             "project_template_item_id": item["source_template_item_id"],
@@ -72,12 +76,13 @@ def _configuration_sources(connection: sqlite3.Connection) -> tuple[list[dict], 
             "input_value_type": item["input_value_type"], "level_count": item["level_count"],
             "target_n": item["target_n"], "cv_limit": item["cv_limit"],
             "quality_goal_json": item.get("quality_goal_json", "{}"),
+            "quality_review_json": item.get("quality_review_json", "{}"),
             "unit_symbol": item["unit_symbol"], "method_name": item["method_name"],
             "instrument_name": config["instrument_name"], "reagent_name": item["reagent_name"],
             "reagent_manufacturer_name": "", "qc_material_name": config["qc_material_name"],
             "qc_material_manufacturer_name": "", "lot_no": " / ".join(dict.fromkeys(level.get("lot_no") or config["lot_no"] for level in item["levels"])),
-            "expiry_date": config["expiry_date"], "levels": item["levels"],
-            "concentration_label": " / ".join(level["level_name"] for level in item["levels"]),
+            "expiry_date": min((l.get("expiry_date") or config["expiry_date"]) for l in item["levels"]), "levels": item["levels"],
+            "concentration_label": " / ".join(concentration_label(level) for level in item["levels"]),
             "quality_target_source_text": item["quality_target_source_text"],
             "identity": [config["lab_instrument_id"], config["qc_material_id"],
                          config["qc_material_lot_id"], item["test_item_id"], item["input_value_type"],

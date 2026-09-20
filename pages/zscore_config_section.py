@@ -24,15 +24,15 @@ def render_zscore_v12_configuration_selection(manage_tab, projects, project_id, 
     with manage_tab:
         render_section_intro(
             title="Z-score 项目与批次选择",
-            caption="请选择设置已确认的 2 或 3 水平配置。可按本批均值和标准差建立，或在均值和标准差管理中确认全部水平的控制参数。",
-            badges=["多水平", "参数版本"], tone="accent",
+            caption="请选择已确认设置的项目和批次。每批使用 2 或 3 个水平，可用本批结果建立均值和标准差，也可使用已确认的均值和标准差。",
+            badges=["多水平", "均值和标准差"], tone="accent",
         )
         if issues:
-            st.warning(f"有 {len(issues)} 个配置尚不能进入工作台。")
-            with st.expander("查看需要完善的配置"):
+            st.warning(f"有 {len(issues)} 项批次设置需要检查，暂不能录入。")
+            with st.expander("查看待检查项目"):
                 st.dataframe(pd.DataFrame(issues).rename(columns={"config_name": "批次名称", "test_item_name": "检验项目", "lot_no": "质控品批号", "issue": "说明"}), hide_index=True)
         if projects.empty:
-            st.info("当前没有可用的多水平配置。请先在项目/批次管理中建立并启用项目与批次。")
+            st.info("尚无可用的多水平项目。请先添加检验项目、选择质控品批号并确认批次设置。")
             return
 
         project_map = {"请选择设置已确认的 Z-score 项目": None}

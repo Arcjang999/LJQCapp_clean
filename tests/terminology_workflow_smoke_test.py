@@ -7,7 +7,8 @@ from streamlit.testing.v1 import AppTest
 from database import get_connection, add_result, get_results
 from services.export_utils import xlsx_bytes_to_dataframes, dataframes_to_xlsx_bytes
 from services.project_config_io_service import preview_project_template_xlsx
-from services.project_config_service import copy_lot_config
+from services.project_config_service import copy_lot_config, activate_lot_config
+from tests.quality_review_fixtures import confirm_fixture_lot
 from services.master_data_service import create_qc_lot, create_qc_level
 from services.lot_lifecycle_service import (source_context, change_qc_lot, set_qc_usage_state,
     record_lot_verification, create_target_profile, effective_qc_state)
@@ -81,6 +82,8 @@ def test_new_lot_keeps_parallel_data_on_formal_use_for_all_methods():
                 create_qc_level(qc_material_lot_id=lot, level_order=i, level_name=f'水平 {i}')
             config = change_qc_lot(source_config_id=source['lot_config_id'], target_qc_lot_id=lot,
                 template_item_ids=[source['project_template_item_id']], operator='验收', reason='新批同时使用', effective_at='2026-09-03')
+            confirm_fixture_lot(config)
+            activate_lot_config(config)
             sync = {'lj': sync_lj_workbench_bindings, 'zscore': sync_zscore_workbench_bindings, 'instant': sync_instant_workbench_bindings}[method]
             sync()
             with get_connection() as c:

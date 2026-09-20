@@ -125,9 +125,9 @@ def render_lj_v12_configuration_selection(
         issues = list_lj_workbench_configuration_issues()
         if not issues.empty:
             st.warning(
-                f"有 {len(issues)} 个 LJ 配置需要完善，请在顶部“资料与批次 → 项目/批次管理”检查。"
+                f"有 {len(issues)} 项批次设置需要检查，请打开“资料与批次 → 项目/批次管理”。"
             )
-            with st.expander("查看需要完善的配置", expanded=False):
+            with st.expander("查看待检查项目", expanded=False):
                 st.dataframe(
                     issues.rename(
                         columns={
@@ -145,7 +145,7 @@ def render_lj_v12_configuration_selection(
         if projects.empty:
             st.info(
                 "当前没有可用的 LJ 项目。请先在顶部“资料与批次 → 项目/批次管理”中"
-                "创建 LJ 项目、配置一个水平并启用批次，或从即时法确认转入。"
+                "添加检验项目、选择一个水平的质控品并确认批次设置，或从即时法确认转入。"
             )
             return
 

@@ -655,6 +655,8 @@ def list_qc_levels(
             materials.generic_name AS qc_material_name,
             lots.lot_no,
             levels.level_code,
+            levels.specification_id,
+            lots.expiry_date,
             levels.level_name,
             levels.level_order,
             levels.concentration_label,

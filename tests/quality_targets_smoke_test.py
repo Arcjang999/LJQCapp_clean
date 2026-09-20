@@ -194,13 +194,21 @@ def test_page_catalog_and_adoption_existing_batch_readonly():
         item,config,old=new_lot()
         at=AppTest.from_file(str(ROOT/'app.py'),default_timeout=30);at.session_state['show_quality_targets_page']=True;at.run()
         assert not at.exception
-        at.selectbox(key='quality_lot_selector').set_value(item).run()
+        assert [tab.label for tab in at.tabs]==['质量目标设置','分析质量要求','实验室自定要求']
+        assert at.selectbox(key='quality_project_selector').label=='选择检验项目'
+        at.session_state['v11_selected_lot_config_id']=config
+        at.button(key='quality_open_lot_management').click().run()
+        assert not at.exception
+        assert at.session_state['show_project_management_page']
+        assert at.session_state['v11_management_tabs']=='批次管理'
+        at.radio(key=f'quality_lot_{item}_mode').set_value('选择标准或自定义目录').run()
         at.selectbox(key=f'quality_lot_{item}_requirement').set_value('wst403-2024-047').run()
         at.text_input(key=f'quality_lot_{item}_person').set_value('页面验收')
         at.text_area(key=f'quality_lot_{item}_evidence').set_value('已核对项目、单位、浓度和来源')
         at.checkbox(key=f'quality_lot_{item}_confirmed').check().run()
         at.button(key=f'quality_lot_{item}_adopt').click().run();assert not at.exception
         assert decode(item_context('lot',item)['quality_goal_json'])['confirmed_by']=='页面验收'
+        assert any(m.value=='**本批次质量目标**' for m in at.markdown)
         activate(item,config,'lj');at.run();assert not at.exception
         assert not any(b.key==f'quality_lot_{item}_adopt' for b in at.button)
 

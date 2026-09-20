@@ -24,15 +24,15 @@ def render_instant_v12_configuration_selection(manage_tab, projects, project_id,
     with manage_tab:
         render_section_intro(
             title="即时法项目与批次选择",
-            caption="请选择在项目/批次管理中设置已确认、使用本批次均值和标准差建立的单水平即时法配置。",
+            caption="请选择已确认设置的即时法项目和批次。逐次录入本批质控结果，建立均值和标准差。",
             badges=["单水平", "3 点开始检验", "20 点后可转 LJ"], tone="accent",
         )
         if issues:
-            st.warning(f"有 {len(issues)} 个配置尚不能进入工作台。")
-            with st.expander("查看需要完善的配置"):
+            st.warning(f"有 {len(issues)} 项批次设置需要检查，暂不能录入。")
+            with st.expander("查看待检查项目"):
                 st.dataframe(pd.DataFrame(issues).rename(columns={"config_name": "批次名称", "test_item_name": "检验项目", "lot_no": "质控品批号", "issue": "说明"}), hide_index=True)
         if projects.empty:
-            st.info("当前没有可用的即时法配置。请先在项目/批次管理中建立并启用项目与批次。")
+            st.info("尚无可用的即时法项目。请先添加检验项目、选择质控品批号并确认批次设置。")
             return
 
         project_map = {"请选择设置已确认的即时法项目": None}

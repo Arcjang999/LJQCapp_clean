@@ -28,6 +28,7 @@ from services.report_service import build_lj_monthly_report_package, build_lj_mo
 from services.value_type_service import parse_project_input_value
 from services.workbench_config_service import list_lj_workbench_batches
 from tests.instant_v12_fixtures import seed_instant_configuration
+from tests.quality_review_fixtures import confirm_fixture_lot
 
 
 class IsolatedDatabase:
@@ -194,6 +195,7 @@ def test_multiple_lots_share_project_without_merging_results():
         config = create_lot_config_from_template(template_id=f["template_id"], qc_material_lot_id=lot, config_name="第二批号")
         item = int(list_lot_config_items(config).iloc[0]["id"])
         save_lot_item_levels(item, [{"qc_level_id": level, "target_source": "building"}])
+        confirm_fixture_lot(config)
         activate_lot_config(config)
         for _ in range(3):
             assert sync_instant_workbench_bindings() == []

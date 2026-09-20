@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import date
-
 import pandas as pd
 import streamlit as st
 
@@ -11,9 +9,6 @@ from services.master_data_service import (
     create_lab_instrument,
     create_manufacturer,
     create_method,
-    create_qc_level,
-    create_qc_lot,
-    create_qc_material,
     create_reagent,
     create_test_item,
     create_unit,
@@ -22,9 +17,6 @@ from services.master_data_service import (
     list_lab_instruments,
     list_manufacturers,
     list_methods,
-    list_qc_levels,
-    list_qc_lots,
-    list_qc_materials,
     list_reagents,
     list_sources,
     list_test_items,
@@ -76,25 +68,11 @@ def _instrument_model_label(row: pd.Series) -> str:
     return prefix + model
 
 
-def _qc_material_label(row: pd.Series) -> str:
-    manufacturer = _safe_text(row.get("manufacturer_name"), "未维护厂家")
-    name = _safe_text(row.get("qc_material_name", row.get("generic_name")))
-    trade = _safe_text(row.get("trade_name", row.get("qc_material_trade_name")), "")
-    return f"{manufacturer}｜{name}" + (f"｜{trade}" if trade else "")
-
-
 def _reagent_label(row: pd.Series) -> str:
     manufacturer = _safe_text(row.get("manufacturer_name"), "未维护厂家")
     name = _safe_text(row.get("generic_name"))
     trade = _safe_text(row.get("trade_name"), "")
     return f"{manufacturer}｜{name}" + (f"｜{trade}" if trade else "")
-
-
-def _lot_label(row: pd.Series) -> str:
-    return (
-        f"{_safe_text(row.get('qc_material_name'))}｜批号 {_safe_text(row.get('lot_no'))}"
-        f"｜效期 {_safe_text(row.get('expiry_date'), '未填写')}"
-    )
 
 
 def _display_table(dataframe: pd.DataFrame, columns: dict[str, str]) -> None:
@@ -554,193 +532,8 @@ def _render_reagents_tab() -> None:
 
 
 def _render_qc_materials_tab() -> None:
-    manufacturers = list_manufacturers()
-    manufacturer_labels, manufacturer_map = _option_map(
-        manufacturers,
-        _manufacturer_label,
-        placeholder="请选择厂家",
-    )
-    with st.expander("新增质控品", expanded=False):
-        with st.form("md_create_qc_material_form", clear_on_submit=True):
-            manufacturer_label = st.selectbox("厂家 *", manufacturer_labels)
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                generic_name = st.text_input("质控品名称 *")
-                trade_name = st.text_input("商品名称")
-            with col2:
-                matrix = st.text_input("基质")
-                physical_form = st.text_input("物理形态")
-            with col3:
-                catalog_no = st.text_input("产品货号")
-                registration_no = st.text_input("注册证 / 备案编号")
-            nominal_level_count = st.number_input(
-                "通常水平数",
-                min_value=1,
-                max_value=9,
-                value=1,
-                step=1,
-            )
-            if st.form_submit_button("新增质控品", width="stretch"):
-                if manufacturer_map[manufacturer_label] is None:
-                    st.error("请选择厂家。")
-                else:
-                    try:
-                        create_qc_material(
-                            manufacturer_id=manufacturer_map[manufacturer_label],
-                            generic_name=generic_name,
-                            trade_name=trade_name,
-                            matrix=matrix,
-                            physical_form=physical_form,
-                            catalog_no=catalog_no,
-                            registration_no=registration_no,
-                            nominal_level_count=int(nominal_level_count),
-                        )
-                    except ValueError as exc:
-                        st.error(str(exc))
-                    else:
-                        st.success("质控品已新增。")
-                        st.rerun()
-
-    materials = list_qc_materials()
-    material_labels, material_map = _option_map(
-        materials,
-        _qc_material_label,
-        placeholder="请选择质控品",
-    )
-    with st.expander("新增质控品批号", expanded=True):
-        with st.form("md_create_qc_lot_form", clear_on_submit=True):
-            material_label = st.selectbox("质控品 *", material_labels)
-            col1, col2 = st.columns(2)
-            with col1:
-                lot_no = st.text_input("批号 *")
-            with col2:
-                expiry = st.date_input(
-                    "效期 *",
-                    value=date.today(),
-                    format="YYYY-MM-DD",
-                )
-            if st.form_submit_button("新增批号", type="primary", width="stretch"):
-                if material_map[material_label] is None:
-                    st.error("请选择质控品。")
-                else:
-                    try:
-                        create_qc_lot(
-                            qc_material_id=int(material_map[material_label]),
-                            lot_no=lot_no,
-                            expiry_date=expiry,
-                        )
-                    except ValueError as exc:
-                        st.error(str(exc))
-                    else:
-                        st.success("质控品批号已新增。")
-                        st.rerun()
-
-    lots = list_qc_lots()
-    lot_labels, lot_map = _option_map(
-        lots,
-        _lot_label,
-        placeholder="请选择质控品批号",
-    )
-    with st.expander("为批号新增水平", expanded=True):
-        with st.form("md_create_qc_level_form", clear_on_submit=True):
-            lot_label = st.selectbox("质控品批号 *", lot_labels)
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                level_name = st.text_input("水平名称 *", placeholder="例如：低值")
-            with col2:
-                level_order = st.number_input(
-                    "水平顺序 *",
-                    min_value=1,
-                    max_value=9,
-                    value=1,
-                    step=1,
-                )
-            with col3:
-                concentration_label = st.text_input("厂家浓度说明")
-            if st.form_submit_button("新增水平", width="stretch"):
-                if lot_map[lot_label] is None:
-                    st.error("请选择质控品批号。")
-                else:
-                    try:
-                        create_qc_level(
-                            qc_material_lot_id=int(lot_map[lot_label]),
-                            level_name=level_name,
-                            level_order=int(level_order),
-                            concentration_label=concentration_label,
-                        )
-                    except ValueError as exc:
-                        st.error(str(exc))
-                    else:
-                        st.success("质控水平已新增。")
-                        st.rerun()
-
-    show_disabled = st.checkbox(
-        "显示已停用质控品、批号和水平",
-        key="md_show_disabled_qc",
-    )
-    sub1, sub2, sub3 = st.tabs(["质控品", "批号", "水平"])
-    with sub1:
-        all_materials = list_qc_materials(include_disabled=show_disabled)
-        _display_table(
-            all_materials,
-            {
-                "manufacturer_name": "厂家",
-                "generic_name": "质控品",
-                "trade_name": "商品名称",
-                "matrix": "基质",
-                "physical_form": "形态",
-                "nominal_level_count": "通常水平数",
-                "is_disabled": "状态",
-            },
-        )
-        _render_disable_control(
-            entity_type="qc_material",
-            dataframe=list_qc_materials(include_disabled=True),
-            label_builder=_qc_material_label,
-            key_prefix="qc_material",
-        )
-    with sub2:
-        all_lots = list_qc_lots(include_disabled=show_disabled)
-        _display_table(
-            all_lots,
-            {
-                "manufacturer_name": "厂家",
-                "qc_material_name": "质控品",
-                "lot_no": "批号",
-                "expiry_date": "效期",
-                "is_disabled": "状态",
-                "created_at": "创建时间",
-            },
-        )
-        _render_disable_control(
-            entity_type="qc_lot",
-            dataframe=list_qc_lots(include_disabled=True),
-            label_builder=_lot_label,
-            key_prefix="qc_lot",
-        )
-    with sub3:
-        all_levels = list_qc_levels(include_disabled=show_disabled)
-        _display_table(
-            all_levels,
-            {
-                "qc_material_name": "质控品",
-                "lot_no": "批号",
-                "level_name": "水平",
-                "level_order": "顺序",
-                "concentration_label": "浓度说明",
-                "is_disabled": "状态",
-            },
-        )
-        _render_disable_control(
-            entity_type="qc_level",
-            dataframe=list_qc_levels(include_disabled=True),
-            label_builder=lambda row: (
-                f"{_safe_text(row.get('qc_material_name'))}｜"
-                f"{_safe_text(row.get('lot_no'))}｜"
-                f"{_safe_text(row.get('level_name'))}"
-            ),
-            key_prefix="qc_level",
-        )
+    from ui.material_catalog import render_material_catalog
+    render_material_catalog()
 
 
 def _render_methods_units_tab() -> None:

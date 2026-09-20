@@ -24,6 +24,7 @@ from services.project_config_service import (
 from services.workbench_config_service import sync_lj_workbench_bindings
 from tests.project_management_v11_smoke_test import TemporaryDatabaseContext, _seed_v11_configuration_dependencies
 from tests.lot_lifecycle_smoke_test import rejected
+from tests.quality_review_fixtures import confirm_fixture_lot, confirm_fixture_project
 from ui.traceability import target_history_table
 from zscore_logic import _safe_cv
 
@@ -76,11 +77,12 @@ def test_creation_to_workbench_and_live_target_preview():
         assert not list(app.exception)
         project_item = list_template_items(tid).iloc[0]
         assert project_item.cv_limit == 3.5
+        confirm_fixture_project(tid)
         activate_project_template(tid)
         app = AppTest.from_function(create_batch_page, default_timeout=15).run()
         app.selectbox(key='v11_create_config_template').select_index(1).run()
-        lot_picker = app.selectbox(key='v11_create_config_lot')
-        lot_picker.set_value(next(x for x in lot_picker.options if 'V11-LOT-001' in x))
+        material_picker = app.selectbox(key=f'create_material_{tid}_{int(project_item.id)}_0')
+        material_picker.set_value(data['source_levels'][0]).run()
         cv_key = f'v12_create_cv_{tid}_{int(project_item.id)}'
         assert app.number_input(key=cv_key).value == 3.5
         app.number_input(key=cv_key).set_value(2.5)
@@ -95,6 +97,7 @@ def test_creation_to_workbench_and_live_target_preview():
             'target_mean': 100, 'target_sd': 2, 'target_confirmed': True}])
         copied = copy_lot_config(source_lot_config_id=config_id, target_qc_material_lot_id=data['target_lot_id'])
         assert list_lot_config_items(copied).iloc[0].cv_limit == 2.25
+        confirm_fixture_lot(config_id)
         activate_lot_config(config_id)
         sync_lj_workbench_bindings()
         with get_connection() as connection:
@@ -145,8 +148,9 @@ def test_creation_to_workbench_and_live_target_preview():
         assert math.isclose(context['stats']['cv'], 3 / 110 * 100)
         app = AppTest.from_function(batch_parameters_page, args=(config_id, item_id), default_timeout=15).run()
         assert not list(app.exception)
-        assert app.dataframe[0].value.iloc[0]['设定均值'] == 110
-        assert math.isclose(app.dataframe[0].value.iloc[0]['设定变异系数（%）'], context['stats']['cv'])
+        parameter_table = next(table.value for table in app.dataframe if '设定均值' in table.value.columns)
+        assert parameter_table.iloc[0]['设定均值'] == 110
+        assert math.isclose(parameter_table.iloc[0]['设定变异系数（%）'], context['stats']['cv'])
         app = AppTest.from_function(target_page, default_timeout=15).run()
         assert next(x for x in app.number_input if x.label == '均值').value == 110
         assert next(x for x in app.number_input if x.label == 'SD').value == 3

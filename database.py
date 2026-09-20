@@ -29,6 +29,8 @@ from migrations.v1_2_workbench import ensure_v12_workbench_schema
 from migrations.v1_2_template_reagent import ensure_template_reagent_schema
 from migrations.v1_2_lot_lifecycle import ensure_lot_lifecycle_schema
 from migrations.quality_targets import ensure_quality_target_schema
+from migrations.material_workflow import ensure_material_workflow_schema
+from migrations.quality_review import ensure_quality_review_schema
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -223,6 +225,8 @@ def init_db() -> None:
         ensure_v12_workbench_schema(connection)
         ensure_lot_lifecycle_schema(connection)
         ensure_quality_target_schema(connection)
+        ensure_material_workflow_schema(connection)
+        ensure_quality_review_schema(connection)
         _rebind_legacy_batches_foreign_keys(connection)
         connection.execute(
             """
@@ -2632,7 +2636,7 @@ def save_zscore_level_outlier_snapshot(batch_id: int, analysis_rows: list[dict[s
 
 def require_active_instant_binding(connection: sqlite3.Connection, batch_id: int) -> None:
     binding = connection.execute("""
-        SELECT b.binding_status, c.status, c.is_disabled, t.status AS template_status,
+        SELECT b.binding_status, c.status, c.is_disabled, c.material_selection_mode, t.status AS template_status,
                t.is_disabled AS template_disabled, i.is_enabled, i.is_disabled AS item_disabled, i.qc_method,
                tests.is_disabled AS test_disabled, instruments.is_disabled AS instrument_disabled,
                materials.is_disabled AS material_disabled, lots.is_disabled AS lot_disabled,
@@ -2657,7 +2661,8 @@ def require_active_instant_binding(connection: sqlite3.Connection, batch_id: int
         or binding["is_disabled"] or binding["template_disabled"] or binding["item_disabled"]
         or not binding["is_enabled"]
         or any(binding[key] != 0 for key in ("test_disabled", "instrument_disabled", "material_disabled",
-                                            "lot_disabled", "reagent_disabled", "unit_disabled", "method_disabled"))
+                                            "reagent_disabled", "unit_disabled", "method_disabled"))
+        or (not binding["material_selection_mode"] and binding["lot_disabled"] != 0)
     ):
         raise ValueError("当前即时法配置已停用或变更，请返回项目/批次管理确认后再操作。")
 

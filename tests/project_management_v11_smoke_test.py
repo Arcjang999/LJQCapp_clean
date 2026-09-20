@@ -25,6 +25,7 @@ from services.master_data_service import (
     create_test_item,
     create_unit,
 )
+from tests.quality_review_fixtures import confirm_fixture_lot, confirm_fixture_project
 from services.project_config_service import (
     activate_lot_config,
     activate_project_template,
@@ -170,6 +171,7 @@ def _build_active_source_config(data: dict[str, object]) -> tuple[int, int]:
             },
         ],
     )
+    confirm_fixture_project(template_id)
     assert validate_project_template(template_id) == []
     activate_project_template(template_id)
 
@@ -203,6 +205,7 @@ def _build_active_source_config(data: dict[str, object]) -> tuple[int, int]:
             for level_id in source_levels
         ],
     )
+    confirm_fixture_lot(lot_config_id)
     assert validate_lot_config(lot_config_id) == []
     activate_lot_config(lot_config_id)
     return template_id, lot_config_id
@@ -214,7 +217,8 @@ def test_template_lot_copy_and_snapshot_round_trip() -> None:
         template_id, source_config_id = _build_active_source_config(data)
         source = get_lot_config(source_config_id)
         assert str(source["status"]) == "active"
-        assert len(list_config_snapshots(source_config_id).index) == 4
+        # Creation, two level edits, two explicit source reviews, and activation.
+        assert len(list_config_snapshots(source_config_id).index) == 6
 
         copied_config_id = copy_lot_config(
             source_lot_config_id=source_config_id,
@@ -310,40 +314,47 @@ def test_creation_requires_three_dictionaries_and_prefills_selected_reagent() ->
     with TemporaryDatabaseContext():
         data = _seed_v11_configuration_dependencies()
         alternate_id = create_reagent(generic_name="另一项目试剂")
-        at = AppTest.from_file(APP_FILE_PATH, default_timeout=10).run()
-        at.button(key="open_project_management_page").click().run()
+        at = AppTest.from_file(APP_FILE_PATH, default_timeout=15).run()
+        at.button(key="home_create_project").click().run()
 
-        def select(label, text):
-            widget = next(item for item in at.selectbox if item.label == label)
-            widget.select(next(option for option in widget.options if text in option))
+        def key(field):
+            return 'project_draft_' + at.session_state['project_workspace_dialog']['token'] + '_' + field
 
         def fill_creation():
-            next(item for item in at.text_input if item.label == "项目名称 *").input("三字典模板")
-            select("本地仪器 *", "V11 1号仪器")
-            select("质控品 *", "V11 三水平质控品")
+            at.text_input(key=key('template_name')).set_value("三字典模板")
+            at.selectbox(key=key('lab_instrument_id')).set_value(data['lab_instrument_id'])
+            at.selectbox(key=key('qc_material_id')).set_value(data['qc_material_id'])
 
         fill_creation()
-        next(item for item in at.button if item.label == "创建项目").click().run()
+        at.button(key='project_dialog_save').click().run()
         assert list_project_templates().empty
-        assert any("请选择本地仪器、试剂和质控品" in error.value for error in at.error)
+        assert any("请选择仪器、默认试剂和质控品" in error.value for error in at.error)
         fill_creation()
-        select("试剂 *", "另一项目试剂")
-        next(item for item in at.button if item.label == "创建项目").click().run()
+        at.selectbox(key=key('default_reagent_id')).set_value(alternate_id)
+        at.selectbox(key=key('default_method_id')).set_value(data['method_id'])
+        at.button(key='project_dialog_save').click().run()
         assert not list(at.exception)
         template_id = int(list_project_templates().iloc[0]["id"])
         assert get_project_template(template_id)["default_reagent_id"] == alternate_id
-        assert at.selectbox(key=f"v11_bulk_reagent_{template_id}").value == "未维护厂家｜另一项目试剂"
-        chooser = at.multiselect(key=f"v11_add_template_items_{template_id}")
-        chooser.select(next(option for option in chooser.options if "V11 单水平项目" in option)).run()
-        at.button(key=f"v11_add_items_button_{template_id}").click().run()
+
+        at.button(key='workspace_add_item').click().run()
+        assert at.selectbox(key=key('reagent_id')).value == alternate_id
+        assert at.selectbox(key=key('method_id')).value == data['method_id']
+        at.selectbox(key=key('test_item_id')).set_value(data['lj_item_id'])
+        at.selectbox(key=key('unit_id')).set_value(data['unit_id'])
+        at.button(key='project_item_save').click().run()
         assert not list(at.exception)
+        at.button(key='project_quality_close').click().run()
         assert list_template_items(template_id)["reagent_id"].tolist() == [alternate_id]
-        # Different tests can choose different reagents within the same template.
-        select("批量试剂", "V11 配套试剂")
-        chooser = at.multiselect(key=f"v11_add_template_items_{template_id}")
-        chooser.set_value([next(option for option in chooser.options if "V11 多水平项目" in option)]).run()
-        at.button(key=f"v11_add_items_button_{template_id}").click().run()
+        # Each item inherits the project default and may independently override it.
+        at.button(key='workspace_add_item').click().run()
+        assert at.selectbox(key=key('reagent_id')).value == alternate_id
+        at.selectbox(key=key('reagent_id')).set_value(data['reagent_id'])
+        at.selectbox(key=key('test_item_id')).set_value(data['zscore_item_id'])
+        at.selectbox(key=key('unit_id')).set_value(data['unit_id'])
+        at.button(key='project_item_save').click().run()
         assert not list(at.exception)
+        at.button(key='project_quality_close').click().run()
         assert list_template_items(template_id)["reagent_id"].tolist() == [alternate_id, data["reagent_id"]]
 
 

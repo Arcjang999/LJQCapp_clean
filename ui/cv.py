@@ -13,7 +13,7 @@ def render_target_cv(mean, sd, cv_limit=None, *, input_value_type="raw", pending
     st.metric("参考变异系数（%）（待确认）" if pending else "设定变异系数（%）", "—" if cv is None else f"{cv:.2f}%",
         help="CV% = SD ÷ 设定均值 × 100；设定均值须大于 0。此值用于描述参数的相对离散程度，不代表本次检测的 Westgard 结论。")
     if input_value_type in {"ct", "log"}:
-        st.caption("此 CV 按当前输入尺度计算；Ct / log 值不能直接套用浓度值的 允许不精密度（CV）。")
+        st.caption("此 CV 根据录入的 Ct 值或 log 值计算，不能直接与针对浓度值制定的 CV 要求比较。")
     if cv_limit is not None and cv is not None:
         message = f"要求 ≤ {cv_limit:g}% · {'满足' if cv <= cv_limit else '超出'}"
         if cv > cv_limit:

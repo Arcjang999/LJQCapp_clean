@@ -59,10 +59,12 @@ def _build_lj_source_message(batch) -> str:
 
 
 def render_lj_page() -> None:
-    st.subheader("单水平（LJ法）")
+    st.subheader("单水平（LJ）")
     st.caption("适用于单水平项目的日常室内质控。参数建立期重点查看离群值判断，进入正式期后按 Westgard 规则判读并生成月报。")
     projects_df, selected_project_id, batches_df, selected_batch_id = prepare_lj_v12_project_batch_context()
-    manage_tab, work_tab, report_tab = st.tabs(["项目与批次", TEXT["current_batch"], "LJ 月报"])
+    if st.session_state.get('lj_workbench_tabs') == 'LJ 月报':
+        st.session_state['lj_workbench_tabs'] = '月度报告'
+    manage_tab, work_tab, report_tab = st.tabs(["项目与批次", TEXT["current_batch"], "月度报告"], key='lj_workbench_tabs', on_change='rerun')
     render_lj_v12_configuration_selection(
         manage_tab,
         projects_df,
@@ -115,7 +117,7 @@ def render_lj_work_tab(
 
     with work_tab:
         render_workbench_context_bar(
-            title="单水平（LJ法）当前批次",
+            title="单水平（LJ）当前批次",
             caption=(
                 f"当前项目：{batch['project_name']}。"
                 f"请先确认当前批次、输入值类型（{input_value_type_label}）与阶段。"
@@ -164,7 +166,7 @@ def render_lj_work_tab(
         render_section_intro(
             title="本次质控",
             caption=None,
-            badges=["单水平（LJ法）", phase_label, input_value_type_label],
+            badges=["单水平（LJ）", phase_label, input_value_type_label],
             tone="accent",
         )
         entry_col, chart_col = st.columns([1.0, 1.18], gap="large")

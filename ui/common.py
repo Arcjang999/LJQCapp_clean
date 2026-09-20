@@ -1288,7 +1288,7 @@ def render_zscore_batch_header(
         <div class="workbench-context-shell zscore-batch-header-shell">
             <div class="zscore-batch-header-top">
                 <div class="zscore-batch-header-left">
-                    <div class="workbench-context-title">Z-score 当前批次</div>
+                    <div class="workbench-context-title">多水平法当前批次</div>
                     <div class="zscore-batch-header-project">项目：{html_escape(_stringify_display_value(project_name))}</div>
                     <div class="zscore-batch-header-primary-row">
                         <div class="zscore-batch-header-phase-chip">{html_escape(_stringify_display_value(phase_label))}</div>

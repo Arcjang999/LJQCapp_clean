@@ -65,7 +65,7 @@ def select_rule(spec, concentration=None, category=''):
             if 'upper' in r and (concentration > r['upper'] or (concentration == r['upper'] and not r.get('upper_inclusive',True))): continue
         matches.append(r)
     if len(matches) != 1:
-        raise ValueError('请核对浓度值和水平类别，须匹配且只匹配一条允许不精密度要求。')
+        raise ValueError('请核对浓度值和水平类别，以确定适用的允许不精密度要求。')
     return dict(matches[0])
 
 
@@ -78,13 +78,13 @@ def requirement_text(rule):
 
 
 def item_context(scope, item_id, connection=None):
-    if scope not in ('project','lot'): raise ValueError('未知质量要求应用位置。')
+    if scope not in ('project','lot'): raise ValueError('无法确定要设置质量目标的项目或批次，请重新打开设置。')
     table = 'qc_project_template_items' if scope=='project' else 'qc_lot_config_items'
     def read(c):
         row=c.execute(f'''SELECT i.*, t.chinese_name AS test_item_name, u.symbol AS unit_symbol
             FROM {table} i JOIN md_test_items t ON t.id=i.test_item_id
             LEFT JOIN md_units u ON u.id=i.unit_id WHERE i.id=? AND i.is_disabled=0''',(int(item_id),)).fetchone()
-        if row is None: raise ValueError('未找到检验项目配置。')
+        if row is None: raise ValueError('未找到该检验项目，请重新选择。')
         return dict(row)
     if connection is not None:return read(connection)
     with get_connection() as c:return read(c)
@@ -92,12 +92,12 @@ def item_context(scope, item_id, connection=None):
 
 def validate_spec_for_item(spec, item):
     if item['input_value_type'] != 'raw':
-        raise ValueError('当前质量目标面向原始浓度/检测值，不能直接用于 Ct 或 log 输入。')
-    if not item['unit_symbol']: raise ValueError('请先配置测量单位。')
+        raise ValueError('该分析质量要求适用于原始检测值，不能直接用于 Ct 或 log 值。')
+    if not item['unit_symbol']: raise ValueError('请先设置测量单位。')
     if spec.get('measurement_unit') and normalize_unit(spec['measurement_unit']) != normalize_unit(item['unit_symbol']):
         raise ValueError(f"单位不匹配：要求使用 {spec['measurement_unit']}，当前为 {item['unit_symbol']}；本版不自动换算。")
     if date.fromisoformat(spec['effective_date']) > date.today():
-        raise ValueError('该版本尚未到实施日期，暂不能采用。')
+        raise ValueError('该标准或实验室要求尚未到实施日期，暂不能采用。')
 
 
 def _require_draft(c, item):
@@ -116,9 +116,9 @@ def common_cv(goal):
     return None
 
 
-def adopt_requirement(scope, item_id, requirement_id, *, confirmed_by, evidence, levels=None):
+def adopt_requirement(scope, item_id, requirement_id, *, confirmed_by, evidence, levels=None, exclusions=None):
     if not str(confirmed_by).strip() or not str(evidence).strip():
-        raise ValueError('请填写确认人和适用性依据。')
+        raise ValueError('请填写确认人和适用依据。')
     spec=get_requirement(requirement_id)
     with atomic_write() as c:
         item=item_context(scope,item_id,c);validate_spec_for_item(spec,item)
@@ -144,6 +144,11 @@ def adopt_requirement(scope, item_id, requirement_id, *, confirmed_by, evidence,
         table='qc_project_template_items' if scope=='project' else 'qc_lot_config_items'
         c.execute(f'UPDATE {table} SET quality_goal_json=?,cv_limit=?,quality_target_source_text=? WHERE id=?',
             (json.dumps(goal,ensure_ascii=False,allow_nan=False),common_cv(goal),source_label(spec),item_id))
+        from services.quality_review_service import build_review, save_review
+        reviewed_item=item_context(scope,item_id,c)
+        review=build_review(c,reviewed_item,source_spec=spec,confirmed_by=confirmed_by,
+                            evidence=evidence,exclusions=exclusions)
+        save_review(c,scope,item_id,review)
         if scope=='lot':
             from services.project_config_service import _save_snapshot
             c.execute('UPDATE qc_lot_configs SET revision_no=revision_no+1,updated_at=CURRENT_TIMESTAMP WHERE id=?',(item['lot_config_id'],))
@@ -158,11 +163,11 @@ def clear_requirement(scope,item_id):
         item=item_context(scope,item_id,c)
         if scope=='lot':_require_draft(c,item)
         table='qc_project_template_items' if scope=='project' else 'qc_lot_config_items'
-        c.execute(f"UPDATE {table} SET quality_goal_json='{{}}',cv_limit=NULL,quality_target_source_text='' WHERE id=?",(item_id,))
+        c.execute(f"UPDATE {table} SET quality_goal_json='{{}}',quality_review_json='{{}}',cv_limit=NULL,quality_target_source_text='' WHERE id=?",(item_id,))
         if scope=='lot':
             from services.project_config_service import _save_snapshot
             c.execute('UPDATE qc_lot_configs SET revision_no=revision_no+1 WHERE id=?',(item['lot_config_id'],))
-            _save_snapshot(c,item['lot_config_id'],action_type='edit',change_summary='取消新批次质量目标，改为手动设置')
+            _save_snapshot(c,item['lot_config_id'],action_type='edit',change_summary='清空草稿质量目标，需重新确认来源')
         else:c.execute("UPDATE qc_project_templates SET status='draft',revision_no=revision_no+1 WHERE id=?",(item['template_id'],))
 
 
@@ -174,16 +179,18 @@ def pending_copy(value):
 
 def validate_lot_goal(item_id):
     item=item_context('lot',item_id);goal=decode(item['quality_goal_json'])
-    if not goal:return []
+    from services.quality_review_service import validate_quality_review
+    review_errors=validate_quality_review('lot',item_id)
+    if not goal:return review_errors
     try:
         validate_spec_for_item(goal['spec'],item)
-        if goal.get('pending') or not goal.get('levels'):raise ValueError('质量目标待核对，请逐水平确认浓度/类别及适用依据。')
+        if goal.get('pending') or not goal.get('levels'):raise ValueError('质量目标待核对，请逐水平确认浓度、水平类别和适用依据。')
         with get_connection() as c:
             current={(r[0],r[1]) for r in c.execute('SELECT level_order,qc_level_id FROM qc_lot_config_item_levels WHERE lot_config_item_id=? AND is_disabled=0',(item_id,))}
         if current!={(r['level_order'],r['qc_level_id']) for r in goal['levels']}:raise ValueError('质控水平已变更，请重新确认质量目标。')
         if goal['test_item_id']!=item['test_item_id'] or normalize_unit(goal['unit'])!=normalize_unit(item['unit_symbol']):raise ValueError('项目或单位已变更，请重新确认质量目标。')
-    except ValueError as e:return [str(e)]
-    return []
+    except ValueError as e:return list(dict.fromkeys([str(e),*review_errors]))
+    return review_errors
 
 
 def runtime_goal(method,batch_id):

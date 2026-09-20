@@ -620,7 +620,7 @@ def test_instant_transfer_navigation_uses_pending_intent_and_opens_target_lj_bat
 
         at.button(key="instant_go_to_transferred_lj_batch").click().run()
         assert not list(at.exception)
-        assert at.radio(key="top_level_method_selector").value == "单水平（LJ法）"
+        assert at.radio(key="top_level_method_selector").value == "单水平（LJ）"
         assert int(at.session_state["selected_project_id"]) == transfer_result["target_project_id"]
         assert int(at.session_state["selected_batch_id"]) == transfer_result["target_batch_id"]
         filtered_state = at.session_state.filtered_state
@@ -635,7 +635,7 @@ def test_instant_transfer_navigation_uses_pending_intent_and_opens_target_lj_bat
         reopened_at.session_state["selected_batch_id"] = transfer_result["target_batch_id"]
         reopened_at.run()
         assert not list(reopened_at.exception)
-        assert reopened_at.radio(key="top_level_method_selector").value == "单水平（LJ法）"
+        assert reopened_at.radio(key="top_level_method_selector").value == "单水平（LJ）"
         assert int(reopened_at.session_state["selected_project_id"]) == transfer_result["target_project_id"]
         assert int(reopened_at.session_state["selected_batch_id"]) == transfer_result["target_batch_id"]
         assert reopened_at.session_state.filtered_state.get("pending_navigation_source") in (None, "")

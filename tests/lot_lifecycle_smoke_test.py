@@ -10,6 +10,8 @@ from tests.lj_v12_integration_smoke_test import _seed_active_lj_configuration
 from database import get_connection,add_result,get_results,get_batch,init_db
 from services.lot_lifecycle_service import *
 from services.workbench_config_service import sync_lj_workbench_bindings
+from tests.quality_review_fixtures import confirm_fixture_lot
+from services.project_config_service import activate_lot_config
 from services.instant_service import save_instant_result,confirm_instant_transfer_to_lj
 from zscore_logic import create_zscore_run,get_zscore_runs,get_zscore_level_targets,rebuild_zscore_batch_state
 from qc_logic import calculate_qc_results
@@ -88,6 +90,7 @@ def test_qc_new_batch_same_project_parallel_ended_readonly():
         lot=create_qc_lot(qc_material_id=f['material_id'],lot_no='QC-NEW',expiry_date='2028-12-31')
         create_qc_level(qc_material_lot_id=lot,level_order=1,level_name='常规水平')
         new=change_qc_lot(source_config_id=f['config_id'],target_qc_lot_id=lot,template_item_ids=[s['project_template_item_id']],operator='测试',reason='新批平行',effective_at='2026-09-03')
+        confirm_fixture_lot(new);activate_lot_config(new)
         sync_instant_workbench_bindings()
         with get_connection() as c:
             b=c.execute('SELECT * FROM qc_workbench_bindings WHERE lot_config_id=?',(new,)).fetchone()
@@ -160,6 +163,9 @@ def test_single_level_replacement_freezes_old_combination():
             source='manual',evidence='已确认',confirmed_by='测试',effective_at='2026-09-02')
         create_zscore_run(batch_id=b,test_time='2026-09-03',operator='测试',level_results=[{'level_id':f'Level {i}','raw_value':100*i} for i in (1,2,3)],template_id='3_level_threes')
         new=create_level_combination(source_batch_id=b,level_ids=f['level_ids'][:2]+[new_level],verification_ids={new_level:vid},operator='测试',reason='只换高值',effective_at='2026-09-04')
+        confirm_fixture_lot(new);activate_lot_config(new)
+        from services.zscore_workbench_service import sync_zscore_workbench_bindings
+        sync_zscore_workbench_bindings()
         with get_connection() as c:
             binding=c.execute('SELECT * FROM qc_workbench_bindings WHERE lot_config_id=?',(new,)).fetchone()
             assert binding and binding['runtime_project_id']==f['project_id']

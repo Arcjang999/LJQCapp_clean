@@ -185,7 +185,7 @@ def test_master_data_page_starts_from_new_navigation() -> None:
         assert MASTER_DATA_ENTRY_LABEL not in at.radio(key="top_level_method_selector").options
         at.button(key="open_master_data_page").click().run()
         assert not list(at.exception)
-        assert len(at.tabs) == 9
+        assert [tab.label for tab in at.tabs] == ['厂家', '检验项目', '仪器', '试剂', '质控品与批号', '方法与单位']
         assert any(button.key == "close_master_data_page" for button in at.button)
 
 

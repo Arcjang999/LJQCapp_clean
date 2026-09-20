@@ -12,9 +12,17 @@ from services.cv_service import normalize_cv_limit
 
 
 QC_METHOD_LABELS = {
-    "lj": "单水平（LJ法）",
-    "zscore": "多水平（Z-score法）",
+    "lj": "单水平（LJ）",
+    "zscore": "多水平法",
     "instant": "即时法",
+}
+
+# Existing spreadsheets and in-progress editor rows may still contain these labels.
+QC_METHOD_LEGACY_LABELS = {
+    "单水平（LJ法）": "lj",
+    "多水平（Z-score法）": "zscore",
+    "单水平 LJ": "lj",
+    "多水平 Z-score": "zscore",
 }
 
 INPUT_VALUE_TYPE_LABELS = {
@@ -64,6 +72,10 @@ def create_project_template(
     qc_material_id: int,
     notes: str = "",
     default_reagent_id: int | None = None,
+    default_qc_method: str = 'lj',
+    default_method_id: int | None = None,
+    default_level_count: int = 1,
+    project_group: str = '',
 ) -> int:
     with get_connection() as connection:
         instrument = connection.execute(
@@ -84,6 +96,13 @@ def create_project_template(
             raise ValueError("请选择启用中的质控品。")
         if default_reagent_id is not None:
             _require_active_reagent(connection, default_reagent_id)
+        if default_qc_method not in QC_METHOD_LABELS:
+            raise ValueError('请选择支持的质控方式。')
+        default_level_count = int(default_level_count) if default_qc_method == 'zscore' else 1
+        if default_qc_method == 'zscore' and default_level_count not in (2,3):
+            raise ValueError('多水平质控请选择 2 或 3 个水平。')
+        if default_method_id is not None and not connection.execute('SELECT id FROM md_methods WHERE id=? AND is_disabled=0',(default_method_id,)).fetchone():
+            raise ValueError('请选择启用中的检测方法学。')
         try:
             cursor = connection.execute(
                 """
@@ -105,7 +124,10 @@ def create_project_template(
             )
         except sqlite3.IntegrityError as exc:
             raise ValueError("已存在同名的启用项目。") from exc
-        return int(cursor.lastrowid)
+        template_id = int(cursor.lastrowid)
+        connection.execute('UPDATE qc_project_templates SET default_qc_method=?,default_method_id=?,default_level_count=?,project_group=? WHERE id=?',
+            (default_qc_method,default_method_id,default_level_count,_clean_optional(project_group),template_id))
+        return template_id
 
 
 def _require_active_reagent(connection: sqlite3.Connection, reagent_id: int) -> None:
@@ -142,6 +164,9 @@ def list_project_templates(include_disabled: bool = False) -> pd.DataFrame:
             templates.id,
             templates.uid,
             templates.template_name,
+            templates.project_group,
+            GROUP_CONCAT(DISTINCT CASE WHEN items.is_disabled=0 THEN items.qc_method END) AS qc_methods,
+            GROUP_CONCAT(DISTINCT CASE WHEN items.is_disabled=0 THEN methods.method_name END) AS method_names,
             local.display_name AS instrument_name,
             manufacturers.display_name AS qc_manufacturer_name,
             materials.generic_name AS qc_material_name,
@@ -158,6 +183,7 @@ def list_project_templates(include_disabled: bool = False) -> pd.DataFrame:
         LEFT JOIN md_qc_materials AS materials ON materials.id = templates.qc_material_id
         LEFT JOIN md_manufacturers AS manufacturers ON manufacturers.id = materials.manufacturer_id
         LEFT JOIN qc_project_template_items AS items ON items.template_id = templates.id
+        LEFT JOIN md_methods AS methods ON methods.id=items.method_id
         {where_clause}
         GROUP BY templates.id
         ORDER BY templates.is_disabled ASC, templates.updated_at DESC, templates.id DESC
@@ -227,6 +253,7 @@ def list_template_items(template_id: int, include_disabled: bool = False) -> pd.
             items.cv_limit,
             items.quality_target_source_text,
             items.quality_goal_json,
+            items.quality_review_json,
             items.sort_order,
             items.notes,
             items.is_disabled
@@ -398,6 +425,8 @@ def validate_project_template(template_id: int) -> list[str]:
             errors.append(f"{item_name}：未配置方法学。")
         if pd.isna(row["reagent_id"]):
             errors.append(f"{item_name}：未配置试剂。")
+        from services.quality_review_service import validate_project_quality
+        errors.extend(f"{item_name}：{message}" for message in validate_project_quality(int(row['id'])))
     return errors
 
 
@@ -456,6 +485,8 @@ def create_lot_config_from_template(
     qc_material_lot_id: int,
     config_name: str = "",
     quality_requirements: dict[int, dict] | None = None,
+    material_selection_mode: bool = False,
+    combination_key: str = '',
 ) -> int:
     with get_connection() as connection:
         template = connection.execute(
@@ -514,9 +545,9 @@ def create_lot_config_from_template(
                 """
                 INSERT INTO qc_lot_configs (
                     uid, origin_type, template_id, qc_material_lot_id,
-                    lab_instrument_id, qc_material_id, config_name
+                    lab_instrument_id, qc_material_id, config_name, material_selection_mode, combination_key
                 )
-                VALUES (?, 'hospital', ?, ?, ?, ?, ?)
+                VALUES (?, 'hospital', ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     _new_uid(),
@@ -525,6 +556,7 @@ def create_lot_config_from_template(
                     int(template["lab_instrument_id"]),
                     int(template["qc_material_id"]),
                     normalized_config_name,
+                    int(material_selection_mode), combination_key,
                 ),
             )
         except sqlite3.IntegrityError as exc:
@@ -563,9 +595,10 @@ def create_lot_config_from_template(
                 ),
             )
         from services.quality_target_service import pending_copy
+        from services.quality_review_service import pending_review_copy
         for item in items:
-            connection.execute('UPDATE qc_lot_config_items SET quality_goal_json=? WHERE lot_config_id=? AND source_template_item_id=?',
-                (pending_copy(item['quality_goal_json']),lot_config_id,item['id']))
+            connection.execute('UPDATE qc_lot_config_items SET quality_goal_json=?,quality_review_json=? WHERE lot_config_id=? AND source_template_item_id=?',
+                (pending_copy(item['quality_goal_json']),pending_review_copy(item['quality_review_json']),lot_config_id,item['id']))
         _save_snapshot(connection, lot_config_id, action_type="create", change_summary="创建批次")
         return lot_config_id
 
@@ -611,6 +644,7 @@ def list_lot_configs(
             configs.template_id,
             templates.template_name,
             configs.config_name,
+            configs.material_selection_mode,
             local.display_name AS instrument_name,
             materials.generic_name AS qc_material_name,
             lots.lot_no,
@@ -683,6 +717,7 @@ def list_lot_config_items(lot_config_id: int) -> pd.DataFrame:
             items.cv_limit,
             items.quality_target_source_text,
             items.quality_goal_json,
+            items.quality_review_json,
             items.sort_order,
             items.is_enabled,
             COUNT(
@@ -714,6 +749,10 @@ def list_lot_item_levels(lot_config_item_id: int) -> pd.DataFrame:
             assigned.qc_level_id,
             levels.level_name,
             levels.level_code,
+            levels.specification_id,
+            levels.qc_material_lot_id,
+            (SELECT lot_no FROM md_qc_material_lots WHERE id=levels.qc_material_lot_id) AS lot_no,
+            (SELECT expiry_date FROM md_qc_material_lots WHERE id=levels.qc_material_lot_id) AS expiry_date,
             assigned.level_order,
             assigned.target_source,
             assigned.target_mean,
@@ -734,10 +773,12 @@ def save_lot_item_levels(
     lot_config_item_id: int,
     assignments: list[dict[str, object]],
 ) -> None:
-    with get_connection() as connection:
+    from database import atomic_write
+    with atomic_write() as connection:
         item = connection.execute(
             """
-            SELECT items.*, configs.qc_material_lot_id, configs.id AS config_id
+            SELECT items.*, configs.qc_material_lot_id, configs.qc_material_id, configs.material_selection_mode,
+                configs.activated_at, configs.id AS config_id
             FROM qc_lot_config_items AS items
             INNER JOIN qc_lot_configs AS configs ON configs.id = items.lot_config_id
             WHERE items.id = ?
@@ -748,7 +789,12 @@ def save_lot_item_levels(
         ).fetchone()
         if item is None:
             raise ValueError("未找到当前批次的检验项目。")
+        if item['material_selection_mode'] and (item['activated_at'] or connection.execute('SELECT 1 FROM qc_workbench_bindings WHERE lot_config_item_id=?',(lot_config_item_id,)).fetchone()):
+            raise ValueError('本批次材料与参数已固定，请通过换批或参数版本管理调整。')
         expected_count = int(item["level_count"])
+        if item['material_selection_mode']:
+            from services.material_workflow_service import validate_material_selection
+            validate_material_selection(connection,item['qc_material_id'],[int(r['qc_level_id']) for r in assignments],expected_count)
         if len(assignments) != expected_count:
             raise ValueError(f"当前检验项目必须配置 {expected_count} 个水平。")
 
@@ -764,10 +810,10 @@ def save_lot_item_levels(
                 SELECT id
                 FROM md_qc_levels
                 WHERE id = ?
-                  AND (qc_material_lot_id = ? OR id IN (SELECT qc_level_id FROM qc_level_combination_members WHERE lot_config_item_id=?))
+                  AND (?=1 OR qc_material_lot_id = ? OR id IN (SELECT qc_level_id FROM qc_level_combination_members WHERE lot_config_item_id=?))
                   AND is_disabled = 0
                 """,
-                (level_id, int(item["qc_material_lot_id"]),lot_config_item_id),
+                (level_id, item["material_selection_mode"], int(item["qc_material_lot_id"]),lot_config_item_id),
             ).fetchone()
             if level is None:
                 raise ValueError("所选水平不属于当前质控品批号。")
@@ -865,6 +911,14 @@ def save_lot_item_levels(
                     ),
                 )
         config_id = int(item["config_id"])
+        if item['quality_goal_json'] and item['material_selection_mode']:
+            from services.quality_target_service import decode,pending_copy
+            goal=decode(item['quality_goal_json'])
+            # Any change in selected material requires confirmation against the new identity.
+            prior=connection.execute('SELECT snapshot_json FROM qc_config_snapshots WHERE lot_config_id=? ORDER BY revision_no DESC LIMIT 1',(config_id,)).fetchone()
+            old_item=next((r for r in json.loads(prior[0])['items'] if r['id']==lot_config_item_id),{}) if prior else {}
+            if [r['qc_level_id'] for r in old_item.get('levels',[])] != [r['qc_level_id'] for r in normalized]:
+                connection.execute('UPDATE qc_lot_config_items SET quality_goal_json=? WHERE id=?',(pending_copy(item['quality_goal_json']),lot_config_item_id))
         connection.execute(
             """
             UPDATE qc_lot_configs
@@ -903,6 +957,11 @@ def validate_lot_config(lot_config_id: int) -> list[str]:
         if len(assigned.index) != expected_count:
             errors.append(f"{item_name}：应配置 {expected_count} 个水平。")
             continue
+        if config['material_selection_mode']:
+            from services.material_workflow_service import validate_material_selection
+            with get_connection() as connection:
+                try: validate_material_selection(connection,config['qc_material_id'],assigned['qc_level_id'].tolist(),expected_count)
+                except ValueError as exc: errors.append(f'{item_name}：{exc}')
         for _, level in assigned.iterrows():
             level_label = str(level["level_name"])
             source = str(level["target_source"])
@@ -1056,8 +1115,9 @@ def copy_lot_config(
             )
             target_item_id = int(item_cursor.lastrowid)
             from services.quality_target_service import pending_copy
-            connection.execute('UPDATE qc_lot_config_items SET quality_goal_json=? WHERE id=?',
-                (pending_copy(source_item['quality_goal_json']),target_item_id))
+            from services.quality_review_service import pending_review_copy
+            connection.execute('UPDATE qc_lot_config_items SET quality_goal_json=?,quality_review_json=? WHERE id=?',
+                (pending_copy(source_item['quality_goal_json']),pending_review_copy(source_item['quality_review_json']),target_item_id))
             source_levels = connection.execute(
                 """
                 SELECT *
@@ -1069,7 +1129,11 @@ def copy_lot_config(
             ).fetchall()
             for source_level in source_levels:
                 level_order = int(source_level["level_order"])
-                target_level = target_level_by_order.get(level_order)
+                source_material=connection.execute('SELECT * FROM md_qc_levels WHERE id=?',(source_level['qc_level_id'],)).fetchone()
+                if source_material and source_material['specification_id']:
+                    target_level=next((r for r in target_levels if r['specification_id']==source_material['specification_id']),None)
+                else:
+                    target_level = target_level_by_order.get(level_order)
                 if target_level is None:
                     continue
                 source_target_kind = str(source_level["target_source"] or "building")
@@ -1261,6 +1325,7 @@ def _build_snapshot_payload(
                 levels.level_name,
                 levels.level_code,
                 levels.concentration_label,
+                levels.specification_id,
                 levels.qc_material_lot_id,
                 (SELECT lot_no FROM md_qc_material_lots WHERE id=levels.qc_material_lot_id) AS lot_no,
                 (SELECT expiry_date FROM md_qc_material_lots WHERE id=levels.qc_material_lot_id) AS expiry_date

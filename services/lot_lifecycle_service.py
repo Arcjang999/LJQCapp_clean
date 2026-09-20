@@ -78,12 +78,27 @@ def require_writable(connection, method, batch_id, test_time=None):
             raise ValueError('配置已变更、停用或停止使用，请刷新并重新确认；历史记录仍可查看。')
         if test_time is not None and effective_qc_state(connection,binding['lot_config_item_id'],test_time) in ('ended','pending'):
             raise ValueError('检测时间不在该质控批次的可使用期间，请核对新旧批同时使用及停止使用时间。')
-        current=connection.execute("""SELECT c.lab_instrument_id,c.qc_material_id,c.qc_material_lot_id,i.test_item_id,i.input_value_type,i.unit_id,i.method_id,i.reagent_id
+        current=connection.execute("""SELECT c.lab_instrument_id,c.qc_material_id,c.qc_material_lot_id,i.test_item_id,i.input_value_type,i.unit_id,i.method_id,i.reagent_id,c.material_selection_mode
             FROM qc_lot_config_items i JOIN qc_lot_configs c ON c.id=i.lot_config_id WHERE i.id=?""",(binding['lot_config_item_id'],)).fetchone()
-        if source.get('identity') and list(current)!=source['identity'][:8]:
+        material_mode = bool(current['material_selection_mode'])
+        # A material combination's header lot is an internal anchor, not every assay's actual lot.
+        identity_indices = (0, 1, 3, 4, 5, 6, 7) if material_mode else range(8)
+        if source.get('identity') and any(current[index] != source['identity'][index] for index in identity_indices):
             raise ValueError('检测系统配置已变更，请刷新并重新建立适用配置；旧结果保持原上下文。')
+        if material_mode:
+            actual_levels = connection.execute('''SELECT a.qc_level_id,l.qc_material_lot_id
+                FROM qc_lot_config_item_levels a JOIN md_qc_levels l ON l.id=a.qc_level_id
+                WHERE a.lot_config_item_id=? AND a.is_disabled=0 ORDER BY a.level_order,a.id''',
+                (binding['lot_config_item_id'],)).fetchall()
+            frozen_levels = source.get('levels', [])
+            if ([row['qc_level_id'] for row in actual_levels] != [row['qc_level_id'] for row in frozen_levels]
+                or any(frozen.get('qc_material_lot_id') != current_level['qc_material_lot_id']
+                       for frozen, current_level in zip(frozen_levels, actual_levels))):
+                raise ValueError('实际质控材料或水平顺序已变更，请建立新批次；旧结果保持原上下文。')
         if source.get('identity'):
             for table,index in [('lab_instruments',0),('md_qc_materials',1),('md_qc_material_lots',2),('md_test_items',3),('md_units',5),('md_methods',6),('md_reagents',7)]:
+                if material_mode and index == 2:
+                    continue
                 identity=source['identity'][index]
                 if identity and not connection.execute(f'SELECT 1 FROM {table} WHERE id=? AND is_disabled=0',(identity,)).fetchone():
                     raise ValueError('检测系统引用的基础资料已停用，请刷新确认。')
@@ -280,8 +295,8 @@ def record_result_context(connection, method, result_id, batch_id, test_time, se
         if qc_lot_id is None and level.get('qc_level_id'):
             row=connection.execute('SELECT qc_material_lot_id FROM md_qc_levels WHERE id=?',(level['qc_level_id'],)).fetchone()
             qc_lot_id=row[0] if row else None
-        connection.execute('''INSERT INTO qc_result_context_levels(context_id,level_order,qc_level_id,qc_lot_id,lot_no,level_name)
-            VALUES(?,?,?,?,?,?)''',(context_id,i,level.get('qc_level_id'),qc_lot_id,level.get('lot_no') or source.get('lot_no',''),level.get('level_name','')))
+        connection.execute('''INSERT INTO qc_result_context_levels(context_id,level_order,qc_level_id,qc_lot_id,lot_no,level_name,level_code,expiry_date)
+            VALUES(?,?,?,?,?,?,?,?)''',(context_id,i,level.get('qc_level_id'),qc_lot_id,level.get('lot_no') or source.get('lot_no',''),level.get('level_name',''),level.get('level_code',''),level.get('expiry_date','')))
     return context_id
 
 
@@ -294,8 +309,8 @@ def transfer_result_context(connection, source_result_id, target_result_id, targ
     cid=connection.execute('''INSERT INTO qc_result_contexts(lj_result_id,config_snapshot_json,reagent_lot_id,reagent_lot_no,
         reagent_expiry_date,usage_id,provenance,source_context_id) VALUES(?,?,?,?,?,?,'instant_transfer',?)''',
         (target_result_id,original['config_snapshot_json'],original['reagent_lot_id'],original['reagent_lot_no'],original['reagent_expiry_date'],original['usage_id'],original['id'])).lastrowid
-    connection.execute('''INSERT INTO qc_result_context_levels(context_id,level_order,qc_level_id,qc_lot_id,lot_no,level_name)
-        SELECT ?,level_order,qc_level_id,qc_lot_id,lot_no,level_name FROM qc_result_context_levels WHERE context_id=?''',(cid,original['id']))
+    connection.execute('''INSERT INTO qc_result_context_levels(context_id,level_order,qc_level_id,qc_lot_id,lot_no,level_name,level_code,expiry_date)
+        SELECT ?,level_order,qc_level_id,qc_lot_id,lot_no,level_name,level_code,expiry_date FROM qc_result_context_levels WHERE context_id=?''',(cid,original['id']))
     return cid
 
 
@@ -306,8 +321,9 @@ def context_dataframe(method,batch_id):
     records=[]
     for r in rows:
         with get_connection() as c:
-            levels=c.execute('SELECT level_name,lot_no FROM qc_result_context_levels WHERE context_id=? ORDER BY level_order',(r['id'],)).fetchall()
-        qc_label=' / '.join(f"{level['level_name']}: {level['lot_no']}" for level in levels)
+            levels=c.execute('SELECT level_name,level_code,lot_no,expiry_date FROM qc_result_context_levels WHERE context_id=? ORDER BY level_order',(r['id'],)).fetchall()
+        from services.material_workflow_service import concentration_label
+        qc_label=' / '.join(f"{concentration_label(level)}: {level['lot_no']}" for level in levels)
         s=json.loads(r['config_snapshot_json']);records.append({'result_id':r['result_id'],'test_time':r['test_time'],
             'context_id':r['id'],'reagent_lot_no':r['reagent_lot_no'] or '未记录','reagent_expiry_date':r['reagent_expiry_date'],
             'qc_lot_no':qc_label or s.get('lot_no','未记录'),'instrument':s.get('instrument_name',''),
@@ -364,7 +380,7 @@ def change_qc_lot(*, source_config_id, target_qc_lot_id, template_item_ids, oper
         available={r[0] for r in c.execute('SELECT source_template_item_id FROM qc_lot_config_items WHERE lot_config_id=? AND is_disabled=0',(source_config_id,))}
         if not set(template_item_ids)<=available:
             raise ValueError('所选检测项不属于来源配置。')
-        existing=c.execute("SELECT id FROM qc_lot_configs WHERE template_id=? AND qc_material_lot_id=? AND combination_key='' AND is_disabled=0",(source['template_id'],target_qc_lot_id)).fetchone()
+        existing=c.execute("SELECT id,status,activated_at FROM qc_lot_configs WHERE template_id=? AND qc_material_lot_id=? AND combination_key='' AND is_disabled=0",(source['template_id'],target_qc_lot_id)).fetchone()
         new_id=existing[0] if existing else copy_lot_config(source_lot_config_id=source_config_id,target_qc_material_lot_id=target_qc_lot_id)
         items=c.execute('SELECT * FROM qc_lot_config_items WHERE lot_config_id=?',(new_id,)).fetchall()
         for item in items:
@@ -373,6 +389,9 @@ def change_qc_lot(*, source_config_id, target_qc_lot_id, template_item_ids, oper
                 continue
             if existing and item['is_enabled']:
                 raise ValueError('该检测项已经在目标批次中，请直接使用其已有批次或调整使用状态。')
+            if existing and (existing['status'] == 'active' or existing['activated_at']
+                or c.execute('SELECT 1 FROM qc_workbench_bindings WHERE lot_config_id=?', (new_id,)).fetchone()):
+                raise ValueError('目标批次已经固定，不能追加尚未确认的检测项；请建立新的批次草稿并核对质量目标。')
             c.execute('UPDATE qc_lot_config_items SET is_enabled=1 WHERE id=?',(item['id'],))
             old_binding=c.execute('''SELECT b.* FROM qc_workbench_bindings b WHERE b.lot_config_id=?
                 AND b.project_template_item_id=?''',(source_config_id,item['source_template_item_id'])).fetchone()
@@ -387,7 +406,10 @@ def change_qc_lot(*, source_config_id, target_qc_lot_id, template_item_ids, oper
         # Building configs can immediately collect parallel observations. Copied targets stay draft for explicit confirmation.
         pending=c.execute("SELECT 1 FROM qc_lot_config_item_levels l JOIN qc_lot_config_items i ON i.id=l.lot_config_item_id WHERE i.lot_config_id=? AND i.is_enabled=1 AND l.target_source='copied_pending'",(new_id,)).fetchone()
         goal_pending=c.execute("SELECT 1 FROM qc_lot_config_items WHERE lot_config_id=? AND is_enabled=1 AND json_extract(quality_goal_json,'$.pending')=1",(new_id,)).fetchone()
-        if not pending and not goal_pending:
+        from services.quality_review_service import validate_quality_review
+        review_pending = any(validate_quality_review('lot', item['id'], c)
+            for item in c.execute('SELECT id FROM qc_lot_config_items WHERE lot_config_id=? AND is_enabled=1', (new_id,)))
+        if not pending and not goal_pending and not review_pending:
             activate_lot_config(new_id)
         return new_id
 
@@ -674,8 +696,15 @@ def create_level_combination(*,source_batch_id,level_ids,verification_ids,operat
             level=c.execute('''SELECT l.*,q.qc_material_id,q.lot_no,q.expiry_date,q.is_disabled AS lot_disabled FROM md_qc_levels l
                 JOIN md_qc_material_lots q ON q.id=l.qc_material_lot_id WHERE l.id=?''',(lid,)).fetchone()
             if (level is None or level['is_disabled'] or level['lot_disabled'] or level['qc_material_id']!=source['identity'][1]
-                or level['expiry_date']<timestamp(effective_at)[:10] or level['level_order']!=order):
+                or level['expiry_date']<timestamp(effective_at)[:10]):
                 raise ValueError('各水平必须属于同一质控产品、对应浓度顺序且未过期。')
+            old_level=c.execute('SELECT * FROM md_qc_levels WHERE id=?',(old_ids[order-1],)).fetchone()
+            if old_level['specification_id']:
+                if level['specification_id']!=old_level['specification_id']: raise ValueError('换批须选择对应浓度规格的新材料；改变规格请重新建立批次。')
+            elif level['level_code'] or old_level['level_code']:
+                if (level['level_code'],level['level_name'])!=(old_level['level_code'],old_level['level_name']): raise ValueError('请选择对应浓度水平和编号的新材料。')
+            elif level['level_order']!=old_level['level_order']:
+                raise ValueError('请选择与原材料对应的浓度水平。')
             vid=verification_ids.get(lid)
             if lid!=old_ids[order-1]:
                 _require_qc_verification(c,source,level['qc_material_lot_id'],vid,effective_at)
@@ -699,7 +728,8 @@ def create_level_combination(*,source_batch_id,level_ids,verification_ids,operat
             json.dumps({'source_batch_id':source_batch_id,'new_config_id':new,'old_level_ids':old_ids,'new_level_ids':level_ids,'retained_target_profile_id':old_target['id'] if old_target else None}))).lastrowid
         c.execute("INSERT INTO qc_config_item_lifecycle VALUES(?,'parallel',?,?)",(selected,timestamp(effective_at),event))
         goal_pending=c.execute("SELECT 1 FROM qc_lot_config_items WHERE id=? AND json_extract(quality_goal_json,'$.pending')=1",(selected,)).fetchone()
-        if not goal_pending:
+        from services.quality_review_service import validate_quality_review
+        if not goal_pending and not validate_quality_review('lot', selected, c):
             activate_lot_config(new);sync_zscore_workbench_bindings()
         return new
 

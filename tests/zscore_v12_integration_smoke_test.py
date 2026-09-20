@@ -156,6 +156,8 @@ def test_multiple_lots_reuse_project_with_separate_results():
         config = create_lot_config_from_template(template_id=fixture["template_id"], qc_material_lot_id=lot, config_name="第二批号")
         item = int(list_lot_config_items(config).iloc[0]["id"])
         save_lot_item_levels(item, [{"qc_level_id": level, "target_source": "building"} for level in levels])
+        from tests.quality_review_fixtures import confirm_fixture_lot
+        confirm_fixture_lot(config)
         activate_lot_config(config)
         sync_zscore_workbench_bindings()
         assert len(list_zscore_workbench_projects()) == 1

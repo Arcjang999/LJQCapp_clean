@@ -228,10 +228,12 @@ def _render_zscore_maintenance_summary(context: dict[str, object]) -> None:
 
 
 def render_zscore_page() -> None:
-    st.subheader("多水平（Z-score法）")
+    st.subheader("多水平法")
     st.caption("适用于 2 水平或 3 水平项目的联合判断。")
     projects_df, selected_project_id, batches_df, selected_batch_id, issues = prepare_zscore_v12_project_batch_context()
-    manage_tab, work_tab, report_tab = st.tabs(["项目与批次", TEXT["current_batch"], "Z-score 月报"])
+    if st.session_state.get('zscore_workbench_tabs') == 'Z-score 月报':
+        st.session_state['zscore_workbench_tabs'] = '月度报告'
+    manage_tab, work_tab, report_tab = st.tabs(["项目与批次", TEXT["current_batch"], "月度报告"], key='zscore_workbench_tabs', on_change='rerun')
     render_zscore_v12_configuration_selection(
         manage_tab,
         projects_df,
@@ -278,7 +280,7 @@ def render_zscore_page() -> None:
         render_section_intro(
             title="本次质控",
             caption=None,
-            badges=["多水平（Z-score法）", f"{level_count} 水平", context["overall_phase_label"], input_value_type_label],
+            badges=["多水平法", f"{level_count} 水平", context["overall_phase_label"], input_value_type_label],
             tone="accent",
         )
         from ui.quality_targets import render_batch_quality

@@ -17,6 +17,7 @@ from services.report_service import (
     list_report_history_records,
     regenerate_report_from_history,
 )
+from services.project_config_service import QC_METHOD_LABELS, QC_METHOD_LEGACY_LABELS
 from ui.common import (
     render_compact_stat_metrics,
     render_html_block,
@@ -26,6 +27,10 @@ from ui.common import (
 
 
 REGENERATION_STATE_PREFIX = "report_history_regenerated_"
+
+
+def _display_method_label(value: str) -> str:
+    return QC_METHOD_LABELS.get(QC_METHOD_LEGACY_LABELS.get(value, ''), value)
 
 
 def render_report_history_page() -> None:
@@ -38,19 +43,19 @@ def render_report_history_page() -> None:
     records = list_report_history_records()
     render_section_intro(
         title="报告历史",
-        caption="统一查看 LJ 与 Z-score 月报记录，可按项目、方法学、批次和月份筛选。",
+        caption="查看单水平（LJ）和多水平法月报，可按项目、质控方法、批次和月份筛选。",
         eyebrow="报告管理",
         badges=["项目筛选", "摘要查看", "按当前数据重新生成"],
         tone="accent",
     )
     render_workbench_context_bar(
         title="历史记录概览",
-        caption="按项目名称快速定位，再结合方法学、批次和生成时间确认目标报告。",
+        caption="按项目名称查找，再结合质控方法、批次和生成时间确认报告。",
         items=[
             ("历史报告数", len(records)),
             ("涉及项目数", len({record.project_name for record in records})),
-            ("单水平（LJ法）", sum(1 for record in records if record.report_type == REPORT_TYPE_LJ_MONTHLY)),
-            ("多水平（Z-score法）", sum(1 for record in records if record.report_type == REPORT_TYPE_ZSCORE_MONTHLY)),
+            ("单水平（LJ）", sum(1 for record in records if record.report_type == REPORT_TYPE_LJ_MONTHLY)),
+            ("多水平法", sum(1 for record in records if record.report_type == REPORT_TYPE_ZSCORE_MONTHLY)),
         ],
         badges=["报告摘要", "筛选定位", "重新生成报告"],
     )
@@ -62,7 +67,7 @@ def render_report_history_page() -> None:
     with st.container():
         render_section_intro(
             title="筛选条件",
-            caption="支持组合筛选项目名称、方法学、批次和报告月份。",
+            caption="可按项目名称、质控方法、批次和报告月份筛选。",
             badges=["可组合筛选", "组内按时间倒序"],
             tone="muted",
         )
@@ -76,7 +81,7 @@ def render_report_history_page() -> None:
         report_month=report_month,
     )
     if not filtered_records:
-        st.info("当前筛选条件下没有匹配的历史记录，请调整项目名称、方法学、批次或报告月份条件。")
+        st.info("当前筛选条件下没有匹配的历史记录，请调整项目名称、质控方法、批次或报告月份。")
         return
 
     for project_name, project_records in _group_records_by_project(filtered_records):
@@ -85,8 +90,8 @@ def render_report_history_page() -> None:
                 title=project_name,
                 caption=f"共 {len(project_records)} 份历史记录，组内按生成时间倒序显示。",
                 badges=[
-                    f"LJ {sum(1 for item in project_records if item.report_type == REPORT_TYPE_LJ_MONTHLY)}",
-                    f"Z-score {sum(1 for item in project_records if item.report_type == REPORT_TYPE_ZSCORE_MONTHLY)}",
+                    f"单水平（LJ） {sum(1 for item in project_records if item.report_type == REPORT_TYPE_LJ_MONTHLY)}",
+                    f"多水平法 {sum(1 for item in project_records if item.report_type == REPORT_TYPE_ZSCORE_MONTHLY)}",
                 ],
                 tone="default",
             )
@@ -111,9 +116,10 @@ def _render_filters(records: list[ReportHistoryRecord]) -> tuple[str, str, str, 
         )
     with filter_columns[1]:
         method_label = st.selectbox(
-            "方法学筛选",
+            "质控方法筛选",
             options=method_options,
             index=0,
+            format_func=_display_method_label,
             key="report_history_method_filter",
         )
     with filter_columns[2]:
@@ -155,7 +161,7 @@ def _render_record_meta_row(record: ReportHistoryRecord) -> None:
     html = dedent(
         f"""
         <div class="main-entry-card-tags" style="margin-top:4px; margin-bottom:10px;">
-            <span class="main-entry-card-tag">{record.method_label}</span>
+            <span class="main-entry-card-tag">{_display_method_label(record.method_label)}</span>
             <span class="main-entry-card-tag">{record.batch_label}</span>
             <span class="main-entry-card-tag">{record.report_month_label}</span>
             <span class="main-entry-card-tag">{record.generated_at_label}</span>
@@ -178,7 +184,7 @@ def _render_report_history_card(record: ReportHistoryRecord) -> None:
         with info_col:
             render_compact_stat_metrics(
                 [
-                    ("方法标签", record.method_label),
+                    ("质控方法", _display_method_label(record.method_label)),
                     ("生成时间", record.generated_at_label),
                 ]
             )
@@ -191,7 +197,7 @@ def _render_report_history_card(record: ReportHistoryRecord) -> None:
             detail_rows = pd.DataFrame(
                 [
                     ("项目名称", record.project_name),
-                    ("方法标签", record.method_label),
+                    ("质控方法", _display_method_label(record.method_label)),
                     ("批次标识", record.batch_label),
                     ("报告月份", record.report_month_label),
                     ("报告期间", record.report_period_label),

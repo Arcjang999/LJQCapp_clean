@@ -78,7 +78,8 @@ def _format_instant_datetime_text(value: object) -> str:
 def _navigate_to_lj_batch(project_id: int | None, batch_id: int | None) -> None:
     if project_id is None or batch_id is None:
         return
-    st.session_state["pending_top_level_method"] = "单水平（LJ法）"
+    from pages.main_page import LJ_ENTRY_LABEL
+    st.session_state["pending_top_level_method"] = LJ_ENTRY_LABEL
     st.session_state["pending_lj_project_id"] = int(project_id)
     st.session_state["pending_lj_batch_id"] = int(batch_id)
     st.session_state["pending_navigation_source"] = "instant_transfer"
@@ -206,7 +207,7 @@ def _render_instant_entry_and_summary_section(
 
     st.markdown("**结果录入区**")
     if is_transferred:
-        st.info("该批次已转入 LJ 法，当前录入区已冻结为只读。")
+        st.info("该批次已转入 LJ 法，请在 LJ 页面继续录入。此处仅供查询。")
     elif is_batch_writable("instant",selected_batch_id):
         if st.session_state.get("instant_entry_batch_id") != selected_batch_id:
             st.session_state["instant_entry_batch_id"] = selected_batch_id
@@ -302,7 +303,7 @@ def _render_instant_transfer_section(context: dict[str, object]) -> None:
                 ("去向 LJ 批次", str(transfer_state.get("transferred_to_lj_batch_display") or "-")),
             ]
         )
-        st.caption("转入后当前即时法批次已冻结为只读，目标 LJ 批次会保留“由即时法转入”的来源标识。")
+        st.caption("转入后请在 LJ 页面继续录入，原即时法记录仅供查询；LJ 批次会注明“由即时法转入”。")
         if st.button(
             "前往对应 LJ 批次",
             key="instant_go_to_transferred_lj_batch",
@@ -520,7 +521,7 @@ def _render_instant_maintenance_section(context: dict[str, object]) -> None:
         st.info("当前批次暂无记录可维护。")
         return
     if bool(transfer_state.get("is_transferred")):
-        st.success("该即时法批次已转入 LJ 法，记录维护入口已冻结为只读。")
+        st.success("该批次已转入 LJ 法。原即时法记录仅供查询，不能修改。")
         st.caption("如需继续后续质控，请前往对应 LJ 批次；即时法源批次仅保留追溯信息。")
         return
 
@@ -594,11 +595,11 @@ def _render_instant_maintenance_section(context: dict[str, object]) -> None:
 def render_instant_page() -> None:
     st.subheader("即时法")
     st.caption(
-        "即时法是面向单水平项目的过渡方法，适用于短期内难以快速累积 20 个点的场景；"
+        "即时法是单水平质控建立均值和标准差的一种方法；"
         "3 个有效点后开始检验，20 个有效建立点后可人工确认转入 LJ。"
     )
     projects_df, selected_project_id, batches_df, selected_batch_id, issues = prepare_instant_v12_project_batch_context()
-    manage_tab, work_tab = st.tabs([TEXT["manage"], TEXT["current_batch"]])
+    manage_tab, work_tab = st.tabs([TEXT["manage"], TEXT["current_batch"]], key='instant_workbench_tabs', on_change='rerun')
     render_instant_v12_configuration_selection(
         manage_tab,
         projects_df,

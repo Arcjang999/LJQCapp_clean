@@ -27,6 +27,7 @@ from services.master_data_service import (
     create_test_item,
     list_units,
 )
+from tests.quality_review_fixtures import confirm_fixture_lot, confirm_fixture_project
 from services.project_config_service import (
     activate_lot_config,
     activate_project_template,
@@ -127,6 +128,7 @@ def _seed_active_lj_configuration() -> int:
             }
         ],
     )
+    confirm_fixture_project(template_id)
     activate_project_template(template_id)
     lot_config_id = create_lot_config_from_template(
         template_id=template_id,
@@ -143,6 +145,7 @@ def _seed_active_lj_configuration() -> int:
             }
         ],
     )
+    confirm_fixture_lot(lot_config_id)
     activate_lot_config(lot_config_id)
     return lot_config_id
 
