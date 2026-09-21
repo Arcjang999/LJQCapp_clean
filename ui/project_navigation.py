@@ -61,7 +61,9 @@ def open_project_setup(template_id, *, config_id=None):
     st.session_state.pop('v11_template_selector', None)
     if config_id is not None:
         st.session_state['v11_pending_existing_config_id'] = int(config_id)
-    st.session_state['v11_management_tabs'] = '批次管理' if config_id else '新建项目'
+    st.session_state['batch_project_filter'] = int(template_id)
+    st.session_state['batch_search'] = ''
+    st.session_state['v11_management_tabs'] = '批次管理'
     open_global_page('show_project_management_page')
     st.rerun()
 

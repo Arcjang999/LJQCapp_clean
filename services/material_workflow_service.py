@@ -144,11 +144,12 @@ def copy_material_config(*,source_config_id,selections,config_name=''):
             for lid in selections[item['id']]:
                 old=prior.get(lid,{})
                 assignments.append(dict(qc_level_id=lid,target_source='copied_pending' if old.get('target_mean') is not None else 'building',
-                    target_mean=old.get('target_mean'),target_sd=old.get('target_sd'),target_confirmed=False))
+                    target_mean=old.get('target_mean'),target_sd=old.get('target_sd'),target_confirmed=False,
+                    notes=old.get('notes','')))
             save_lot_item_levels(new['id'],assignments)
-        wanted={r['test_item_id'] for r in items}
-        for row in c.execute('SELECT id,test_item_id FROM qc_lot_config_items WHERE lot_config_id=?',(config,)).fetchall():
-            if row['test_item_id'] not in wanted: c.execute('UPDATE qc_lot_config_items SET is_enabled=0 WHERE id=?',(row['id'],))
+        wanted={r['source_template_item_id'] for r in items}
+        for row in c.execute('SELECT id,source_template_item_id FROM qc_lot_config_items WHERE lot_config_id=?',(config,)).fetchall():
+            if row['source_template_item_id'] not in wanted: c.execute('UPDATE qc_lot_config_items SET is_enabled=0 WHERE id=?',(row['id'],))
         from services.project_config_service import _save_snapshot
         # save_lot_item_levels already recorded this revision; replace its draft snapshot before any activation.
         c.execute('UPDATE qc_lot_configs SET revision_no=revision_no+1 WHERE id=?',(config,))

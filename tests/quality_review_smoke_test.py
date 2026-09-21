@@ -182,11 +182,21 @@ def test_old_new_lot_entry_opens_one_pending_draft_for_review():
         template_item = int(list_template_items(fixture['template_id']).iloc[0]['id'])
         lot = create_qc_lot(qc_material_id=fixture['material_id'], lot_no='UI-REVIEW-LOT', expiry_date='2028-12-31')
         create_qc_level(qc_material_lot_id=lot, level_order=1, level_name='常规水平')
-        app = AppTest.from_string(f"from pages.lot_lifecycle_section import _render_new_parallel_form\n_render_new_parallel_form({fixture['config_id']}, {lot}, {{{template_item}: '验收检验项目'}})", default_timeout=30).run()
-        app.multiselect[0].set_value([template_item])
-        next(widget for widget in app.text_input if widget.label == '质控换批操作者').set_value('页面验收人')
-        next(widget for widget in app.text_input if widget.label == '质控品换批原因').set_value('新批次到货，准备平行质控')
-        next(button for button in app.button if button.label == '准备新批次并核对').click().run()
+        app = AppTest.from_string(f"""import streamlit as st
+from services.lot_lifecycle_service import workbench_systems
+from ui.qc_lifecycle_workspace import open_qc_lifecycle_dialog, render_pending_qc_lifecycle_dialog
+workbench_systems()
+if st.button('准备新批次', key='test_open_prepare'):
+    open_qc_lifecycle_dialog('prepare', {fixture['config_id']})
+render_pending_qc_lifecycle_dialog()
+""", default_timeout=30).run()
+        app.button(key='test_open_prepare').click().run()
+        prefix = 'qcl_' + app.session_state['qc_lifecycle_dialog']['token'] + '_'
+        app.selectbox(key=prefix + 'target').set_value(lot).run()
+        app.multiselect(key=prefix + 'items').set_value([template_item])
+        app.text_input(key=prefix + 'person').set_value('页面验收人')
+        app.text_area(key=prefix + 'reason').set_value('新批次到货，准备平行质控')
+        app.button(key='qcl_save').click().run()
         assert not app.exception
         config = app.session_state['v11_pending_existing_config_id']
         assert app.session_state['show_project_management_page']

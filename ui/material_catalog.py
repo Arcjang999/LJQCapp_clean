@@ -203,7 +203,7 @@ def _render_material_dialog() -> None:
         _material_editor(state)
 
 
-def render_material_catalog() -> None:
+def render_material_catalog(*, render_dialog: bool = True) -> None:
     notice = st.session_state.pop('material_catalog_notice', '')
     if notice:
         st.success(notice)
@@ -287,5 +287,10 @@ def render_material_catalog() -> None:
                     if st.button('恢复批号', key='material_catalog_restore_lot'):
                         _open_dialog('lot_status', product_id=product_id, level_id=selected_id)
         st.caption('浓度编号请按厂家标识填写；不同浓度水平可使用不同批号。')
+    if render_dialog:
+        render_pending_material_dialog()
+
+
+def render_pending_material_dialog() -> None:
     if st.session_state.get('material_dialog'):
         _render_material_dialog()

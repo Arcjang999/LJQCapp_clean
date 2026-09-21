@@ -1,7 +1,7 @@
 from __future__ import annotations
 import pandas as pd
 import streamlit as st
-from database import get_connection
+from database import atomic_write, get_connection
 from services.quality_target_service import (adopt_requirement, clear_requirement, decode, item_context,
     list_catalog, suggested_requirements, source_label, validate_spec_for_item, batch_quality_summary)
 
@@ -43,7 +43,7 @@ def render_review_summary(review):
         st.caption(f"{row['source']}｜{state}：{row.get('reason', '')}")
 
 
-def render_adoption(scope,item_id,*,embedded=False):
+def render_adoption(scope,item_id,*,embedded=False,expected_revision=None,on_saved=None):
     from services.quality_review_service import (standard_candidates, save_recorded_requirement,
         is_frozen_lot)
     item=item_context(scope,item_id);goal=decode(item['quality_goal_json']);prefix=f'quality_{scope}_{item_id}'
@@ -130,13 +130,23 @@ def render_adoption(scope,item_id,*,embedded=False):
     checked=st.checkbox('已核对检验项目、单位、浓度水平及标准或依据版本',key=prefix+'_confirmed')
     if st.button('确认本批次质量目标' if scope=='lot' else '保存质量目标',key=prefix+'_adopt',disabled=not checked,type='primary'):
         try:
-            if mode=='记录实验室要求':
-                save_recorded_requirement(scope,item_id,source_name=source_name,source_version=source_version,
-                    requirement_text=requirement_text,confirmed_by=person,evidence=evidence,exclusions=exclusions)
-            else:
-                adopt_requirement(scope,item_id,selected,confirmed_by=person,evidence=evidence,levels=values,exclusions=exclusions)
+            with atomic_write():
+                if scope=='lot' and expected_revision is not None:
+                    from services.batch_edit_service import get_batch_item_context
+                    current=get_batch_item_context(item_id)
+                    if not current['editable']:
+                        raise ValueError(current['read_only_reason'])
+                    if current['revision']!=expected_revision:
+                        raise ValueError('本批次设置已修改，请重新打开后再保存。')
+                if mode=='记录实验室要求':
+                    save_recorded_requirement(scope,item_id,source_name=source_name,source_version=source_version,
+                        requirement_text=requirement_text,confirmed_by=person,evidence=evidence,exclusions=exclusions)
+                else:
+                    adopt_requirement(scope,item_id,selected,confirmed_by=person,evidence=evidence,levels=values,exclusions=exclusions)
         except ValueError as error:st.error(str(error))
-        else:st.success('质量目标已保存，请继续确认项目或批次设置。');st.rerun()
+        else:
+            if on_saved is not None:on_saved()
+            st.success('质量目标已保存，请继续确认项目或批次设置。');st.rerun()
 
 
 def render_batch_quality(method,batch_id,month=None):

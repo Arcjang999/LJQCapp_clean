@@ -7,7 +7,7 @@ from streamlit.testing.v1 import AppTest
 from database import get_connection, add_result, get_results
 from services.export_utils import xlsx_bytes_to_dataframes, dataframes_to_xlsx_bytes
 from services.project_config_io_service import preview_project_template_xlsx
-from services.project_config_service import copy_lot_config, activate_lot_config
+from services.project_config_service import copy_lot_config, activate_lot_config, get_lot_config
 from tests.quality_review_fixtures import confirm_fixture_lot
 from services.master_data_service import create_qc_lot, create_qc_level
 from services.lot_lifecycle_service import (source_context, change_qc_lot, set_qc_usage_state,
@@ -24,6 +24,7 @@ from tests.zscore_v12_fixtures import seed_zscore_configuration
 from tests.instant_v12_fixtures import seed_instant_configuration
 from tests.project_config_io_smoke_test import _import_workbook
 from ui.common import prepare_display_records
+from tests.project_workspace_smoke_test import select_table_row
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -133,7 +134,15 @@ def test_existing_new_lot_links_to_review_without_duplicate_creation():
         app.session_state['v11_management_tabs'] = '批号使用与追溯'
         app.run()
         assert not app.exception
-        app.button(key='lot_open_existing_config').click().run()
+        index = next(i for i, table in enumerate(app.dataframe) if 'qc_lifecycle_config_id_table_' in table.proto.id)
+        names = app.dataframe[index].value['批次'].tolist()
+        select_table_row(app, names.index(get_lot_config(source['lot_config_id'])['config_name']), index=index)
+        assert app.session_state['qc_lifecycle_config_id'] == source['lot_config_id']
+        app.button(key='qc_lifecycle_prepare').click().run()
+        prefix = 'qcl_' + app.session_state['qc_lifecycle_dialog']['token'] + '_'
+        app.selectbox(key=prefix + 'target').set_value(lot).run()
+        app.button(key='qcl_open_existing').click().run()
+        app.button(key='qcl_discard').click().run()
         assert not app.exception
         assert app.session_state['v11_management_tabs'] == '批次管理'
         assert app.session_state['v11_selected_lot_config_id'] == config

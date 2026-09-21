@@ -32,6 +32,7 @@ from services.master_data_service import (
     list_test_items,
     set_master_entity_disabled,
 )
+from tests.project_workspace_smoke_test import select_table_row
 
 
 APP_FILE_PATH = str(PROJECT_ROOT / "app.py")
@@ -179,20 +180,100 @@ def test_v11_schema_seeds_and_master_data_round_trip() -> None:
 
 def test_master_data_page_starts_from_new_navigation() -> None:
     with TemporaryDatabaseContext():
-        at = AppTest.from_file(APP_FILE_PATH)
+        at = AppTest.from_file(APP_FILE_PATH, default_timeout=15)
         at.run()
         assert not list(at.exception)
         assert MASTER_DATA_ENTRY_LABEL not in at.radio(key="top_level_method_selector").options
         at.button(key="open_master_data_page").click().run()
         assert not list(at.exception)
-        assert [tab.label for tab in at.tabs] == ['厂家', '检验项目', '仪器', '试剂', '质控品与批号', '方法与单位']
+        subtabs = {'已登记仪器', '仪器型号', '方法学', '单位'}
+        labels = [tab.label for tab in at.tabs]
+        assert [label for label in labels if label not in subtabs] == ['厂家', '检验项目', '仪器', '试剂', '质控品与批号', '方法学与单位']
+        assert subtabs <= set(labels)
         assert any(button.key == "close_master_data_page" for button in at.button)
+
+
+def test_filtered_manufacturer_edit_and_status_require_explicit_save() -> None:
+    with TemporaryDatabaseContext():
+        first_id = create_manufacturer(display_name='Alpha厂家')
+        selected_id = create_manufacturer(display_name='Beta厂家')
+
+        def stored(entity_id):
+            with get_connection() as connection:
+                return dict(connection.execute('SELECT * FROM md_manufacturers WHERE id=?', (entity_id,)).fetchone())
+
+        def field_key(field):
+            return 'md_dialog_' + at.session_state['master_data_dialog']['token'] + '_' + field
+
+        def select_filtered_row():
+            table_index = next(index for index, table in enumerate(at.dataframe)
+                               if 'md_table_manufacturer_' in table.proto.id)
+            select_table_row(at, 0, index=table_index)
+            assert at.session_state['md_selected_manufacturer'] == selected_id
+
+        first_before, selected_before = stored(first_id), stored(selected_id)
+        at = AppTest.from_file(APP_FILE_PATH, default_timeout=15).run()
+        at.button(key='open_master_data_page').click().run()
+        at.text_input(key='md_search_manufacturer').set_value('Beta').run()
+        select_filtered_row()
+        at.button(key='md_edit_manufacturer').click().run()
+        at.text_input(key=field_key('display_name')).set_value('Beta未保存名称')
+        at.button(key='md_dialog_cancel').click().run()
+        assert not at.exception
+        assert stored(first_id) == first_before and stored(selected_id) == selected_before
+        at.button(key='md_dialog_discard').click().run()
+        assert not at.exception and stored(selected_id) == selected_before
+
+        at.button(key='md_edit_manufacturer').click().run()
+        at.text_input(key=field_key('display_name')).set_value('Beta更新名称')
+        at.text_area(key=field_key('notes')).set_value('第一行备注\n第二行备注')
+        at.button(key='md_dialog_save').click().run()
+        assert not at.exception
+        assert at.session_state['md_selected_manufacturer'] == selected_id
+        assert stored(selected_id)['display_name'] == 'Beta更新名称'
+        assert stored(selected_id)['notes'] == '第一行备注\n第二行备注'
+        assert stored(first_id) == first_before
+        saved = stored(selected_id)
+
+        at.button(key='md_status_manufacturer').click().run()
+        at.text_area(key=field_key('reason')).set_value('本次取消，不应停用').run()
+        assert stored(selected_id) == saved
+        at.button(key='md_status_cancel').click().run()
+        assert not at.exception and stored(selected_id) == saved
+        at.button(key='md_status_manufacturer').click().run()
+        at.button(key='md_status_confirm').click().run()
+        assert not at.exception and stored(selected_id) == saved
+        assert any('停用原因' in error.value for error in at.error)
+        at.text_area(key=field_key('reason')).set_value('停用流程验收')
+        at.button(key='md_status_confirm').click().run()
+        assert not at.exception
+        assert stored(selected_id)['is_disabled'] == 1
+        assert stored(selected_id)['disabled_reason'] == '停用流程验收'
+        assert stored(first_id) == first_before
+        at.checkbox(key='md_show_disabled_manufacturer').check().run()
+        select_filtered_row()
+        at.button(key='md_status_manufacturer').click().run()
+        at.button(key='md_status_cancel').click().run()
+        assert not at.exception and stored(selected_id)['is_disabled'] == 1
+        at.button(key='md_status_manufacturer').click().run()
+        at.button(key='md_status_confirm').click().run()
+        assert not at.exception and stored(selected_id)['is_disabled'] == 0
+        assert stored(first_id) == first_before
+        assert len(list_manufacturers(include_disabled=True)) == 2
+        at.button(key='close_master_data_page').click().run()
+        assert not at.exception and not at.session_state['show_master_data_page']
+        at.button(key='open_master_data_page').click().run()
+        assert not at.exception
+        assert at.text_input(key='md_search_manufacturer').value == 'Beta'
+        assert at.checkbox(key='md_show_disabled_manufacturer').value
+        assert at.session_state['md_selected_manufacturer'] == selected_id
 
 
 if __name__ == "__main__":
     tests = [
         test_v11_schema_seeds_and_master_data_round_trip,
         test_master_data_page_starts_from_new_navigation,
+        test_filtered_manufacturer_edit_and_status_require_explicit_save,
     ]
     for test in tests:
         test()

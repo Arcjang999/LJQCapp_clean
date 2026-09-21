@@ -19,7 +19,7 @@ from services.export_utils import xlsx_bytes_to_dataframes
 from services.project_config_service import (
     create_project_template, activate_project_template, list_template_items,
     list_lot_configs, list_lot_config_items, save_lot_item_cv_requirement,
-    save_lot_item_levels, activate_lot_config, copy_lot_config, get_lot_config,
+    activate_lot_config, copy_lot_config, get_lot_config,
 )
 from services.workbench_config_service import sync_lj_workbench_bindings
 from tests.project_management_v11_smoke_test import TemporaryDatabaseContext, _seed_v11_configuration_dependencies
@@ -27,6 +27,7 @@ from tests.lot_lifecycle_smoke_test import rejected
 from tests.quality_review_fixtures import confirm_fixture_lot, confirm_fixture_project
 from ui.traceability import target_history_table
 from zscore_logic import _safe_cv
+from tests.project_workspace_smoke_test import select_table_row
 
 
 def add_items_page(template_id, reagent_id):
@@ -35,13 +36,15 @@ def add_items_page(template_id, reagent_id):
 
 
 def create_batch_page():
-    from pages.project_management_page import _render_create_lot_config
-    _render_create_lot_config()
+    from pages.project_management_page import _render_lot_configs_tab
+    _render_lot_configs_tab()
 
 
 def target_page():
     from pages.lot_lifecycle_section import _render_target_versions
     _render_target_versions()
+    from ui.target_profile_workspace import render_pending_target_profile_dialog
+    render_pending_target_profile_dialog()
 
 
 def batch_parameters_page(config_id, item_id):
@@ -80,7 +83,9 @@ def test_creation_to_workbench_and_live_target_preview():
         confirm_fixture_project(tid)
         activate_project_template(tid)
         app = AppTest.from_function(create_batch_page, default_timeout=15).run()
-        app.selectbox(key='v11_create_config_template').select_index(1).run()
+        app.selectbox(key='batch_project_filter').set_value(tid).run()
+        app.button(key='batch_create').click().run()
+        assert not list(app.exception)
         material_picker = app.selectbox(key=f'create_material_{tid}_{int(project_item.id)}_0')
         material_picker.set_value(data['source_levels'][0]).run()
         cv_key = f'v12_create_cv_{tid}_{int(project_item.id)}'
@@ -92,9 +97,20 @@ def test_creation_to_workbench_and_live_target_preview():
         item_id = int(list_lot_config_items(config_id).iloc[0].id)
         assert list_lot_config_items(config_id).iloc[0].cv_limit == 2.5
         assert list_template_items(tid).iloc[0].cv_limit == 3.5
-        save_lot_item_cv_requirement(item_id, 2.25, '本批次评估依据')
-        save_lot_item_levels(item_id, [{'qc_level_id': data['source_levels'][0], 'target_source': 'manual',
-            'target_mean': 100, 'target_sd': 2, 'target_confirmed': True}])
+        app.button(key=f'batch_edit_levels_{item_id}').click().run()
+        assert not list(app.exception)
+        prefix = 'batch_level_' + app.session_state['batch_item_dialog']['token']
+        level_id = data['source_levels'][0]
+        app.number_input(key=prefix+'_cv').set_value(2.25)
+        app.text_input(key=prefix+'_cv_source').set_value('本批次评估依据')
+        app.selectbox(key=f'{prefix}_{level_id}_source').set_value('manual')
+        app.number_input(key=f'{prefix}_{level_id}_mean').set_value(100)
+        app.number_input(key=f'{prefix}_{level_id}_sd').set_value(2)
+        app.checkbox(key=f'{prefix}_{level_id}_confirmed').check()
+        app.button(key='batch_levels_save').click().run()
+        assert not list(app.exception)
+        assert app.session_state['v11_selected_lot_config_id'] == config_id
+        assert list_lot_config_items(config_id).iloc[0].cv_limit == 2.25
         copied = copy_lot_config(source_lot_config_id=config_id, target_qc_material_lot_id=data['target_lot_id'])
         assert list_lot_config_items(copied).iloc[0].cv_limit == 2.25
         confirm_fixture_lot(config_id)
@@ -122,10 +138,12 @@ def test_creation_to_workbench_and_live_target_preview():
         export = xlsx_bytes_to_dataframes(build_lot_config_xlsx(config_id))['水平均值和标准差']
         assert export['设定变异系数（%）'].tolist() == [2]
         app = AppTest.from_function(target_page, default_timeout=15).run()
-        mean = next(x for x in app.number_input if x.label == '均值')
-        sd = next(x for x in app.number_input if x.label == 'SD')
-        mean.set_value(100)
-        sd.set_value(3).run()
+        assert not app.number_input
+        select_table_row(app, 0)
+        app.button(key='target_profile_open').click().run()
+        prefix = 'target_profile_' + app.session_state['target_profile_dialog']['token'] + '_'
+        app.number_input(key=prefix + '1_mean').set_value(100)
+        app.number_input(key=prefix + '1_sd').set_value(3).run()
         assert not list(app.exception)
         assert next(x for x in app.metric if x.label == '设定变异系数（%）').value == '3.00%'
         assert any('超出' in x.value for x in app.warning)
@@ -137,12 +155,28 @@ def test_creation_to_workbench_and_live_target_preview():
         assert '1_3s' in qc.iloc[-1]['rule_hits']
         with get_connection() as connection:
             evidence_before = connection.execute('SELECT evaluation_json FROM qc_result_evaluations').fetchall()
-        next(x for x in app.number_input if x.label == '均值').set_value(110)
-        app.text_area[0].set_value('修订参数')
-        app.text_input[0].set_value('CV 测试')
-        app.checkbox[0].set_value(True)
-        next(x for x in app.button if x.label == '保存新的控制参数版本').click().run()
+        app.number_input(key=prefix + '1_mean').set_value(110)
+        app.text_area(key=prefix + 'evidence').set_value('修订参数')
+        app.text_input(key=prefix + 'confirmed_by').set_value('CV 测试')
+        app.checkbox(key=prefix + 'confirmed').set_value(True)
+        app.button(key='target_profile_save').click().run()
         assert not list(app.exception)
+        assert any('重新打开' in error.value for error in app.error)
+        assert build_lj_workbench_context(batch_id)['stats']['mean'] == 100
+        # A new result arrived while the dialog was open. Refresh the review,
+        # then save explicitly; the old result keeps its original evaluation.
+        app.button(key='target_profile_cancel').click().run()
+        app.button(key='target_profile_discard').click().run()
+        app.button(key='target_profile_open').click().run()
+        prefix = 'target_profile_' + app.session_state['target_profile_dialog']['token'] + '_'
+        app.number_input(key=prefix + '1_mean').set_value(110)
+        app.number_input(key=prefix + '1_sd').set_value(3)
+        app.text_area(key=prefix + 'evidence').set_value('修订参数')
+        app.text_input(key=prefix + 'confirmed_by').set_value('CV 测试')
+        app.checkbox(key=prefix + 'confirmed').set_value(True)
+        app.button(key='target_profile_save').click().run()
+        assert not list(app.exception)
+        assert 'target_profile_dialog' not in app.session_state
         context = build_lj_workbench_context(batch_id)
         assert context['stats']['mean'] == 110
         assert math.isclose(context['stats']['cv'], 3 / 110 * 100)
@@ -152,8 +186,14 @@ def test_creation_to_workbench_and_live_target_preview():
         assert parameter_table.iloc[0]['设定均值'] == 110
         assert math.isclose(parameter_table.iloc[0]['设定变异系数（%）'], context['stats']['cv'])
         app = AppTest.from_function(target_page, default_timeout=15).run()
-        assert next(x for x in app.number_input if x.label == '均值').value == 110
-        assert next(x for x in app.number_input if x.label == 'SD').value == 3
+        select_table_row(app, 0)
+        assert not app.number_input
+        current = next(table.value for table in app.dataframe if {'均值', '标准差'}.issubset(table.value.columns))
+        assert current.iloc[0]['均值'] == 110 and current.iloc[0]['标准差'] == 3
+        app.button(key='target_profile_open').click().run()
+        prefix = 'target_profile_' + app.session_state['target_profile_dialog']['token'] + '_'
+        assert app.number_input(key=prefix + '1_mean').value == 110
+        assert app.number_input(key=prefix + '1_sd').value == 3
         with get_connection() as connection:
             assert connection.execute('SELECT evaluation_json FROM qc_result_evaluations').fetchall() == evidence_before
 

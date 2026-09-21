@@ -709,428 +709,28 @@ def _render_create_lot_config() -> None:
 
 
 def _render_item_level_form(lot_config_id: int, item: pd.Series) -> None:
-    config = get_lot_config(lot_config_id)
-    from services.material_workflow_service import available_materials,material_label
-    all_levels = available_materials(int(config['qc_material_id'])) if config['material_selection_mode'] else list_qc_levels(int(config["qc_material_lot_id"]))
-    level_labels, level_map, level_by_id = _option_map(
-        all_levels,
-        material_label,
-        placeholder="请选择水平",
-    )
-    selectable_labels = level_labels[1:]
-    existing = list_lot_item_levels(int(item["id"]))
-    existing_level_ids = (
-        existing["qc_level_id"].astype(int).tolist() if not existing.empty else []
-    )
-    default_level_labels = [
-        level_by_id[level_id] for level_id in existing_level_ids if level_id in level_by_id
-    ]
-    expected_count = int(item["level_count"])
-    title = (
-        f"{item['test_item_name']}｜{QC_METHOD_LABELS.get(str(item['qc_method']), item['qc_method'])}"
-        f"｜需要 {expected_count} 个水平"
-    )
-    from services.quality_target_service import decode
-    from ui.quality_targets import render_adoption
-    quality_goal = decode(item.get("quality_goal_json", "{}"))
-    needs_review = bool(validate_quality_review('lot', int(item['id'])))
-    with st.expander(title, expanded=int(item["assigned_level_count"] or 0) != expected_count or bool(quality_goal.get('pending')) or needs_review):
-        limit = None if pd.isna(item["cv_limit"]) else float(item["cv_limit"])
-        source = _safe_text(item["quality_target_source_text"], "")
-        with get_connection() as connection:
-            has_binding = connection.execute("SELECT * FROM qc_workbench_bindings WHERE lot_config_item_id=?", (int(item["id"]),)).fetchone()
-        if not existing.empty:
-            st.dataframe(existing[['level_order','level_name','level_code','lot_no','expiry_date']].rename(columns={
-                'level_order':'组合位置','level_name':'浓度水平','level_code':'浓度编号','lot_no':'实际批号','expiry_date':'效期'}),hide_index=True,width='stretch')
-        render_adoption('lot',int(item['id']),embedded=True)
-        if config["status"] == "draft" and not has_binding and not quality_goal:
-            limit = st.number_input("允许不精密度（CV%，选填）", value=limit, min_value=0.0,
-                format="%.4f", help=CV_REQUIREMENT_HELP, key=f"v12_draft_cv_{item['id']}")
-            source = st.text_input("允许不精密度依据（选填）", value=source, key=f"v12_draft_cv_source_{item['id']}")
-            if st.button("保存允许不精密度（CV）", key=f"v12_save_cv_{item['id']}"):
-                try:
-                    save_lot_item_cv_requirement(int(item["id"]), limit, source)
-                except ValueError as exc:
-                    st.error(str(exc))
-                else:
-                    st.rerun()
-        if has_binding and has_binding["qc_method"] != "instant":
-            from services.lot_lifecycle_service import target_profile
-            from services.cv_service import calculate_cv_percent
-            profile = target_profile(has_binding["qc_method"], has_binding["runtime_batch_id"])
-            if profile:
-                st.caption(f"当前生效参数 V{profile['version_no']}｜生效时间：{profile['effective_at']}")
-                level_names = {f"Level {int(row['level_order'])}": row['level_name'] for _, row in existing.iterrows()}
-                st.dataframe(pd.DataFrame([{
-                    "质控水平": level_names.get(level['level_id'], level['level_id']),
-                    "设定均值": level['mean'], "SD": level['sd'],
-                    "设定变异系数（%）": calculate_cv_percent(level['mean'], level['sd']),
-                } for level in profile['levels']]), hide_index=True, width="stretch")
-                st.caption("如需调整控制参数，请前往“批号使用与追溯 → 均值和标准差管理”。")
-                return
-        if config['material_selection_mode'] and (config['activated_at'] or has_binding):
-            st.caption('本批次材料已固定；请通过更换质控品批次选择新材料。')
-            return
-        if len(selectable_labels) < expected_count:
-            st.error(
-                f"当前质控品批号只有 {len(selectable_labels)} 个启用水平，"
-                f"不能满足本项目需要的 {expected_count} 个水平。"
-            )
-            return
-        selected_labels = st.multiselect(
-            "选择水平",
-            options=selectable_labels,
-            default=default_level_labels,
-            max_selections=expected_count,
-            key=f"v11_item_levels_{item['id']}_{int(config['revision_no'])}",
-        )
-        existing_by_level = {
-            int(row["qc_level_id"]): row for _, row in existing.iterrows()
-        }
-        assignments: list[dict[str, object]] = []
-        for order, selected_label in enumerate(selected_labels, start=1):
-            level_id = int(level_map[selected_label])
-            saved = existing_by_level.get(level_id)
-            default_source = (
-                TARGET_SOURCE_LABELS.get(str(saved["target_source"]))
-                if saved is not None
-                else TARGET_SOURCE_LABELS["building"]
-            )
-            row1, row2 = st.columns(2)
-            with row1:
-                st.text(selected_label)
-            with row2:
-                source_label = st.selectbox(
-                    "均值和标准差来源",
-                    options=list(TARGET_SOURCE_BY_LABEL),
-                    index=list(TARGET_SOURCE_BY_LABEL).index(default_source),
-                    key=f"v11_target_source_{item['id']}_{level_id}",
-                )
-            row3, row4, cv_column = st.columns(3)
-            with row3:
-                target_mean = st.number_input(
-                    "均值",
-                    value=(
-                        None
-                        if saved is None or pd.isna(saved["target_mean"])
-                        else float(saved["target_mean"])
-                    ),
-                    key=f"v11_target_mean_{item['id']}_{level_id}",
-                )
-            with row4:
-                target_sd = st.number_input(
-                    "SD",
-                    min_value=0.0,
-                    value=(
-                        None
-                        if saved is None or pd.isna(saved["target_sd"])
-                        else float(saved["target_sd"])
-                    ),
-                    key=f"v11_target_sd_{item['id']}_{level_id}",
-                )
-            with cv_column:
-                if TARGET_SOURCE_BY_LABEL[source_label] == "building":
-                    st.metric("设定变异系数（%）", "均值和标准差建立后计算")
-                else:
-                    render_target_cv(target_mean, target_sd, limit,
-                        input_value_type=str(item["input_value_type"]),
-                        pending=TARGET_SOURCE_BY_LABEL[source_label] == "copied_pending")
-            confirmed_default = bool(
-                saved is not None and int(saved["target_confirmed"] or 0)
-            )
-            confirmed = st.checkbox(
-                f"确认 {selected_label} 的均值和标准差",
-                value=confirmed_default,
-                key=f"v11_target_confirmed_{item['id']}_{level_id}",
-            )
-            assignments.append(
-                {
-                    "qc_level_id": level_id,
-                    "target_source": TARGET_SOURCE_BY_LABEL[source_label],
-                    "target_mean": target_mean,
-                    "target_sd": target_sd,
-                    "target_confirmed": confirmed,
-                }
-            )
-        if st.button(
-            "保存各水平设置",
-            key=f"v11_save_item_levels_{item['id']}",
-            width="stretch",
-            disabled=len(selected_labels) != expected_count,
-        ):
-            try:
-                save_lot_item_levels(int(item["id"]), assignments)
-            except (ValueError, TypeError) as exc:
-                st.error(str(exc))
-            else:
-                st.success("各水平设置已保存。")
-                st.rerun()
+    # Compatibility entry used by older tests and embedded details.
+    from ui.batch_workspace import render_batch_item_detail, render_pending_batch_dialogs
+    if int(item['lot_config_id']) != int(lot_config_id):
+        raise ValueError('检验项目不属于当前批次。')
+    render_batch_item_detail(int(item['id']))
+    render_pending_batch_dialogs()
 
 
 def _render_lot_config_editor(lot_config_id: int) -> None:
-    config = get_lot_config(lot_config_id)
-    items = list_lot_config_items(lot_config_id)
-    from services.material_workflow_service import config_material_summary
-    material_summary=config_material_summary(lot_config_id)
-    st.caption(
-        f"当前批次：{config['config_name']}｜项目：{config['template_name']}｜"
-        f"使用材料：{material_summary}｜"
-        f"资料状态：{'设置已确认' if config['status'] == 'active' else '待确认'}｜修订 {config['revision_no']}"
-    )
-    if items.empty:
-        st.error("当前批次没有检验项目。")
-        return
-    summary = items[
-        [
-            "test_item_name",
-            "qc_method",
-            "input_value_type",
-            "unit_symbol",
-            "method_name",
-            "reagent_name",
-            "level_count",
-            "assigned_level_count",
-            "target_n",
-            "cv_limit",
-        ]
-    ].copy()
-    summary["qc_method"] = summary["qc_method"].map(QC_METHOD_LABELS)
-    summary["input_value_type"] = summary["input_value_type"].map(INPUT_VALUE_TYPE_LABELS)
-    st.dataframe(
-        summary.rename(
-            columns={
-                "test_item_name": "检验项目",
-                "qc_method": "质控方法",
-                "input_value_type": "输入值类型",
-                "unit_symbol": "单位",
-                "method_name": "方法学",
-                "reagent_name": "试剂",
-                "level_count": "所需水平数",
-                "assigned_level_count": "已设置水平数",
-                "target_n": "参数建立点数",
-                "cv_limit": "允许不精密度(CV%)",
-            }
-        ),
-        hide_index=True,
-        width="stretch",
-    )
-    st.markdown("**为各检验项目设置水平、均值和标准差，并确认本批次质量目标**")
-    for _, item in items.iterrows():
-        _render_item_level_form(lot_config_id, item)
-
-    errors = validate_lot_config(lot_config_id)
-    if errors:
-        st.warning("批次尚未满足启用条件：\n\n" + "\n".join(f"- {item}" for item in errors))
-    action1, action2 = st.columns(2)
-    with action1:
-        if st.button(
-            "校验并确认批次设置",
-            key=f"v11_activate_lot_config_{lot_config_id}",
-            type="primary",
-            width="stretch",
-            disabled=bool(errors),
-        ):
-            try:
-                activate_lot_config(lot_config_id)
-            except ValueError as exc:
-                st.error(str(exc))
-            else:
-                st.success("批次设置已确认。")
-                st.rerun()
-    with action2:
-        if st.button(
-            "停用批次",
-            key=f"v11_disable_lot_config_{lot_config_id}",
-            width="stretch",
-        ):
-            from ui.config_confirmation import confirm_batch_status
-            confirm_batch_status(lot_config_id, disabled=True,
-                                 expected_revision=int(get_lot_config(lot_config_id)['revision_no']))
-
-    snapshots = list_config_snapshots(lot_config_id).copy()
-    snapshots["action_type"] = snapshots["action_type"].replace({
-        "create": "创建", "edit": "修改", "activate": "启用",
-        "copy": "复制", "disable": "停用", "reactivate": "恢复使用",
-    })
-    with st.expander("设置变更记录", expanded=False):
-        st.dataframe(
-            snapshots.rename(
-                columns={
-                    "revision_no": "修订号",
-                    "action_type": "动作",
-                    "change_summary": "变更说明",
-                    "created_by": "操作者",
-                    "created_at": "时间",
-                }
-            )[
-                ["修订号", "动作", "变更说明", "操作者", "时间"]
-            ],
-            hide_index=True,
-            width="stretch",
-        )
+    from ui.batch_workspace import render_batch_detail, render_pending_batch_dialogs
+    render_batch_detail(lot_config_id)
+    render_pending_batch_dialogs()
 
 
 def _render_lot_configs_tab() -> None:
-    notice = st.session_state.pop("v11_copy_notice", "")
-    if notice:
-        st.success(notice)
-    _render_create_lot_config()
-    configs = list_lot_configs()
-    if configs.empty:
-        st.info("当前没有批次。")
-    else:
-        config_id = _select_current_entity(
-            dataframe=configs,
-            label_builder=_config_label,
-            placeholder="请选择批次",
-            label="选择批次",
-            key="v11_lot_config_selector",
-            state_key="v11_selected_lot_config_id",
-        )
-        display = configs[
-            [
-                "config_name",
-                "template_name",
-                "instrument_name",
-                "qc_material_name",
-                "lot_no",
-                "expiry_date",
-                "status",
-                "item_count",
-                "revision_no",
-            ]
-        ].copy()
-        display["status"] = display["status"].map(
-            {
-                "draft": "待确认",
-                "active": "设置已确认",
-                "superseded": "已替代",
-                "disabled": "已停用",
-            }
-        )
-        st.dataframe(
-            display.rename(
-                columns={
-                    "config_name": "批次名称",
-                    "template_name": "项目",
-                    "instrument_name": "仪器",
-                    "qc_material_name": "质控品",
-                    "lot_no": "批号",
-                    "expiry_date": "效期",
-                    "status": "状态",
-                    "item_count": "检验项目数",
-                    "revision_no": "修订号",
-                }
-            ),
-            hide_index=True,
-            width="stretch",
-        )
-        if config_id is not None:
-            _render_lot_config_editor(int(config_id))
-
-    all_configs = list_lot_configs(include_disabled=True)
-    disabled_configs = all_configs[all_configs["is_disabled"].astype(int) == 1]
-    if not disabled_configs.empty:
-        with st.expander("恢复已停用批次", expanded=False):
-            labels, mapping, _ = _option_map(
-                disabled_configs,
-                _config_label,
-                placeholder="请选择已停用批次",
-            )
-            selected = st.selectbox(
-                "已停用批次",
-                labels,
-                key="v11_restore_lot_config_selector",
-            )
-            if st.button(
-                "恢复为待确认批次",
-                key="v11_restore_lot_config_button",
-                width="stretch",
-                disabled=mapping[selected] is None,
-            ):
-                from ui.config_confirmation import confirm_batch_status
-                config_id = int(mapping[selected])
-                confirm_batch_status(config_id, disabled=False,
-                                     expected_revision=int(get_lot_config(config_id)['revision_no']))
-
-    from ui.config_confirmation import render_pending_batch_confirmation
-    render_pending_batch_confirmation()
+    from ui.batch_workspace import render_batch_workspace
+    render_batch_workspace()
 
 
 def _render_copy_tab() -> None:
-    st.caption("换用新批号的质控品时，沿用旧批次的检验项目和设置，省去重新填写。")
-    configs = list_lot_configs()
-    if configs.empty:
-        st.info("还没有可沿用设置的批次，请先在“批次管理”中建立第一个批次。")
-        return
-    from ui.materials import render_material_replacement
-    render_material_replacement(configs)
-    st.markdown('**更换全部水平的质控品批号**')
-    configs=configs[configs['material_selection_mode']==0]
-    if configs.empty:return
-    source_labels, source_map, _ = _option_map(
-        configs, _config_label, placeholder="请选择旧批次",
-    )
-    source_label = st.selectbox(
-        "沿用哪个批次的设置", source_labels, key="v11_copy_source_config",
-    )
-    source_id = source_map[source_label]
-    if source_id is None:
-        return
-    source = get_lot_config(int(source_id))
-    target_lots = list_qc_lots(int(source["qc_material_id"]))
-    with get_connection() as connection:
-        occupied = {row[0] for row in connection.execute(
-            "SELECT qc_material_lot_id FROM qc_lot_configs WHERE template_id=? AND combination_key='' AND is_disabled=0",
-            (source["template_id"],),
-        )}
-    unavailable = occupied | {int(source["qc_material_lot_id"])}
-    target_lots = target_lots[~target_lots["id"].isin(unavailable)]
-    if target_lots.empty:
-        st.info("没有可选的新质控品批号。请先登记新批号及水平；已经建立过批次的批号，可直接在“批次管理”中打开。")
-        if st.button("去基础资料登记新批号", key="v11_copy_register_lot"):
-            open_global_page("show_master_data_page")
-        return
-    lot_labels, lot_map, _ = _option_map(
-        target_lots, _lot_label, placeholder="请选择新质控品批号",
-    )
-    target_lot_label = st.selectbox(
-        "新质控品批号", lot_labels, key=f"v11_copy_target_lot_{source_id}",
-    )
-    target_lot_id = lot_map[target_lot_label]
-    if target_lot_id is None:
-        return
-    target = target_lots[target_lots["id"] == target_lot_id].iloc[0]
-    st.markdown(f"**{source['qc_material_name']}：{source['lot_no']} → {target['lot_no']}**")
-    config_name = st.text_input(
-        "新批次名称", value=f"{source['template_name']}｜{target['lot_no']}",
-        key=f"v11_copy_config_name_{source_id}_{target_lot_id}",
-    )
-    items = list_lot_config_items(int(source_id))
-    preview = []
-    for _, item in items.iterrows():
-        levels = list_lot_item_levels(int(item["id"]))
-        manual = not levels.empty and (levels["target_source"] != "building").any()
-        preview.append({
-            "检验项目": item["test_item_name"],
-            "质控方法": QC_METHOD_LABELS.get(item["qc_method"], item["qc_method"]),
-            "水平数": int(item["level_count"]),
-            "允许不精密度（CV%）": item["cv_limit"],
-            "新批次参数": "参考值待核对" if manual else "重新收集数据均值和标准差建立",
-        })
-    st.dataframe(pd.DataFrame(preview), hide_index=True, width="stretch")
-    st.caption("单位、方法学、试剂及参数建立点数一并沿用。新批次从空白检测记录开始，旧批次及记录保留。")
-    if st.button("建立待确认新批次", key="v11_copy_config_button", type="primary", width="stretch"):
-        try:
-            new_config_id = copy_lot_config(
-                source_lot_config_id=int(source_id), target_qc_material_lot_id=int(target_lot_id),
-                config_name=config_name,
-            )
-        except ValueError as exc:
-            st.error(str(exc))
-        else:
-            st.session_state["v11_pending_copied_config_id"] = new_config_id
-            st.rerun()
+    from ui.qc_replacement_workspace import render_qc_replacement_workspace
+    render_qc_replacement_workspace()
 
 
 def _render_import_export_tab() -> None:
@@ -1264,6 +864,8 @@ def _render_import_export_tab() -> None:
 
 
 def render_project_management_page() -> None:
+    if 'v11_management_tabs' not in st.session_state and st.session_state.get('project_management_active_tab'):
+        st.session_state['v11_management_tabs'] = st.session_state['project_management_active_tab']
     action_column, _ = st.columns([0.24, 0.76], gap="small")
     with action_column:
         if st.button("返回当前工作台", key="close_project_management_page", use_container_width=True):
@@ -1297,18 +899,25 @@ def render_project_management_page() -> None:
     if copied_id is not None:
         copied = get_lot_config(int(copied_id))
         st.session_state["v11_selected_lot_config_id"] = int(copied_id)
+        st.session_state['batch_project_filter'] = int(copied['template_id'])
+        st.session_state['batch_search'] = ''
+        st.session_state['batch_show_disabled'] = bool(copied['is_disabled'])
         st.session_state["v11_lot_config_selector"] = _config_label(pd.Series(dict(copied)))
         st.session_state["v11_management_tabs"] = "批次管理"
-        st.session_state["v11_copy_notice"] = f"已建立 {copied['lot_no']} 的新批次，资料待确认。请展开各检验项目，核对水平、均值和标准差后再确认批次设置。"
+        st.session_state["v11_copy_notice"] = f"已建立新批次“{copied['config_name']}”，资料待确认。请选择检验项目，核对各水平批号、均值和标准差后再确认批次设置。"
     existing_id = st.session_state.pop("v11_pending_existing_config_id", None)
     if existing_id is not None:
         existing = get_lot_config(int(existing_id))
         st.session_state["v11_selected_lot_config_id"] = int(existing_id)
+        st.session_state['batch_project_filter'] = int(existing['template_id'])
+        st.session_state['batch_search'] = ''
+        st.session_state['batch_show_disabled'] = bool(existing['is_disabled'])
         st.session_state["v11_lot_config_selector"] = _config_label(pd.Series(dict(existing)))
         st.session_state["v11_management_tabs"] = "批次管理"
-        st.session_state["v11_copy_notice"] = st.session_state.pop("v11_quality_review_notice", "已打开已有新批次。核对并确认设置后，在新旧批号比对页登记同时使用；无需重复建立批次。")
+        st.session_state["v11_copy_notice"] = st.session_state.pop("v11_quality_review_notice", "已打开所选批次，可查看资料和质量目标。")
     tabs = st.tabs(["新建项目", "批次管理", "更换质控品批次", "导入导出", "批号使用与追溯"],
         key="v11_management_tabs", on_change="rerun")
+    st.session_state['project_management_active_tab'] = st.session_state.get('v11_management_tabs', '新建项目')
     with tabs[0]:
         _render_templates_tab()
     with tabs[1]:
@@ -1320,4 +929,20 @@ def render_project_management_page() -> None:
 
     with tabs[4]:
         from pages.lot_lifecycle_section import render_lot_management
-        render_lot_management()
+        render_lot_management(render_dialogs=False)
+    _render_pending_management_dialogs()
+
+
+def _render_pending_management_dialogs():
+    # The existing project/batch renderers already handle their own dialog.
+    # Queue the new workflows so a pending draft never renders a second window.
+    if any(st.session_state.get(key) for key in (
+            'project_workspace_dialog', 'workspace_create_batch_for',
+            'batch_workspace_create', 'batch_item_dialog', 'batch_status_confirmation')):
+        return
+    from ui.qc_replacement_workspace import MODAL_KEY, render_pending_qc_replacement_dialog
+    if st.session_state.get(MODAL_KEY):
+        render_pending_qc_replacement_dialog()
+        return
+    from pages.lot_lifecycle_section import render_pending_lifecycle_dialogs
+    render_pending_lifecycle_dialogs()

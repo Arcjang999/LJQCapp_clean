@@ -13,6 +13,7 @@ from services.workbench_config_service import sync_lj_workbench_bindings
 from services.lot_lifecycle_service import create_target_profile
 from tests.project_management_v11_smoke_test import TemporaryDatabaseContext, _seed_v11_configuration_dependencies, _build_active_source_config
 from tests.lot_lifecycle_smoke_test import rejected
+from tests.project_workspace_smoke_test import select_table_row
 
 
 def test_reject_same_lot_without_creating_a_draft():
@@ -43,24 +44,32 @@ def test_ui_guides_to_new_draft_and_preserves_old_results():
         app.session_state['v11_management_tabs'] = '更换质控品批次'
         app.run()
         assert not list(app.exception)
-        source = app.selectbox(key='v11_copy_source_config')
-        source.select_index(1).run()
-        target = app.selectbox(key=f'v11_copy_target_lot_{source_id}')
+        table_index = next(i for i, table in enumerate(app.dataframe) if 'qc_replace_table_' in table.proto.id)
+        select_table_row(app, 0, index=table_index)
+        assert app.session_state['qc_replace_selected_config'] == source_id
+        app.button(key='qc_replace_open').click().run()
+        prefix = 'qcr_' + app.session_state['qc_replacement_dialog']['token'] + '_'
+        app.radio(key=prefix + 'mode').set_value('lot').run()
+        target = app.selectbox(key=prefix + 'target_lot')
         assert not any('V11-LOT-001' in value for value in target.options)
         assert any('V11-LOT-002' in value for value in target.options)
-        target.select_index(1).run()
+        target.set_value(data['target_lot_id']).run()
         assert not list(app.exception)
-        app.button(key='v11_copy_config_button').click().run()
+        app.button(key='qc_replace_save').click().run()
         assert not list(app.exception)
         assert app.session_state['v11_management_tabs'] == '批次管理'
         new_id = int(app.session_state['v11_selected_lot_config_id'])
         assert new_id != source_id
         new = get_lot_config(new_id)
         assert new['status'] == 'draft' and new['qc_material_lot_id'] == data['target_lot_id']
-        assert 'V11-LOT-002' in app.selectbox(key='v11_lot_config_selector').value
-        assert any('核对水平、均值和标准差' in item.value for item in app.success)
-        assert 'v11_copy_config_button' not in [button.key for button in app.button]
-        assert any(button.key == 'v11_copy_register_lot' for button in app.button)
+        assert app.session_state['batch_project_filter'] == tid
+        batch_table = next(table.value for table in app.dataframe if 'batch_configs_' in table.proto.id)
+        assert new['config_name'] in batch_table['批次名称'].tolist()
+        assert any('V11-LOT-002' in str(table.value.to_dict()) for table in app.dataframe)
+        assert any('核对各水平批号、均值和标准差' in item.value for item in app.success)
+        assert 'qc_replace_save' not in [button.key for button in app.button]
+        assert 'qc_replacement_dialog' not in app.session_state
+        assert any(button.key == 'qc_replace_register' for button in app.button)
         items = list_lot_config_items(new_id)
         lj_item = items[items.qc_method == 'lj'].iloc[0]
         assert lj_item.cv_limit == 5

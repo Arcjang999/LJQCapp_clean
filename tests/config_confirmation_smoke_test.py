@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT))
 from database import get_connection
 from services.project_config_service import get_lot_config, list_config_snapshots
 from tests.project_management_v11_smoke_test import TemporaryDatabaseContext, _seed_v11_configuration_dependencies, _build_active_source_config
+from tests.project_workspace_smoke_test import select_table_row
 
 
 def status_page(config_id, disabled, expected_revision):
@@ -62,7 +63,11 @@ def test_cancel_reason_gate_disable_and_management_restore():
         assert disabled['revision_no'] == before['revision_no'] + 1
         app = AppTest.from_function(management_page, default_timeout=15).run()
         assert_clean(app)
-        app.selectbox(key='v11_restore_lot_config_selector').select_index(1).run()
+        app.checkbox(key='batch_show_disabled').check().run()
+        assert_clean(app)
+        names = app.dataframe[0].value['批次名称'].tolist()
+        select_table_row(app, names.index(before['config_name']))
+        assert app.session_state['v11_selected_lot_config_id'] == config_id
         app.button(key='v11_restore_lot_config_button').click().run()
         assert_clean(app)
         assert get_lot_config(config_id)['is_disabled'] == 1

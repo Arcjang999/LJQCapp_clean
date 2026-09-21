@@ -201,6 +201,9 @@ def test_page_catalog_and_adoption_existing_batch_readonly():
         assert not at.exception
         assert at.session_state['show_project_management_page']
         assert at.session_state['v11_management_tabs']=='批次管理'
+        assert not any(b.key==f'quality_lot_{item}_adopt' for b in at.button)
+        at.button(key=f'batch_edit_quality_{item}').click().run()
+        assert not at.exception
         at.radio(key=f'quality_lot_{item}_mode').set_value('选择标准或自定义目录').run()
         at.selectbox(key=f'quality_lot_{item}_requirement').set_value('wst403-2024-047').run()
         at.text_input(key=f'quality_lot_{item}_person').set_value('页面验收')
@@ -211,6 +214,7 @@ def test_page_catalog_and_adoption_existing_batch_readonly():
         assert any(m.value=='**本批次质量目标**' for m in at.markdown)
         activate(item,config,'lj');at.run();assert not at.exception
         assert not any(b.key==f'quality_lot_{item}_adopt' for b in at.button)
+        assert at.button(key=f'batch_edit_quality_{item}').disabled
 
 
 if __name__=='__main__':

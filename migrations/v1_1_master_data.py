@@ -762,6 +762,8 @@ def _seed_wst886_test_items(connection: sqlite3.Connection) -> None:
         else:
             test_item_id = int(existing["id"])
             if str(existing["origin_type"]) == "official":
+                # Existing notes can contain laboratory additions. Only new rows
+                # receive the catalogue's default analyte note; reseeding preserves edits.
                 connection.execute(
                     """
                     UPDATE md_test_items
@@ -770,7 +772,6 @@ def _seed_wst886_test_items(connection: sqlite3.Connection) -> None:
                         category_name = ?,
                         specimen_type = ?,
                         result_type = 'quantitative',
-                        notes = ?,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                     """,
@@ -779,7 +780,6 @@ def _seed_wst886_test_items(connection: sqlite3.Connection) -> None:
                         chinese_name,
                         str(row.get("category_name") or "").strip(),
                         str(row.get("specimen_type") or "").strip(),
-                        f"分析物：{str(row.get('analyte_name') or '').strip()}",
                         test_item_id,
                     ),
                 )
