@@ -23,13 +23,16 @@
 
 已完成的改造与证据： [首版流程](docs/ui_workflow_trial_implementation.md) → [批次弹窗](docs/batch_dialog_workflow_implementation.md) → [基础资料](docs/master_data_dialog_workflow_implementation.md) → [质控品换批与参数](docs/lot_lifecycle_dialog_workflow_implementation.md) → [试剂与历史更正](docs/reagent_dialog_workflow_implementation.md)。前一步 23 套相关隔离测试及实际浏览器操作通过；特定高缩放和新安装包尚未验收。
 
-交付分支：[`codex/project-workflow-alignment`](https://github.com/Arcjang999/LJQCapp_clean/tree/codex/project-workflow-alignment)，远端仓库为 `Arcjang999/LJQCapp_clean`。本轮用户已授权将此前保留的改造代码、测试和本次说明一起提交推送；准确提交号以 Git 记录为准。数据库、备份、参考手册和本地验收输出不纳入源码提交。
+交付分支：[`codex/project-workflow-alignment`](https://github.com/Arcjang999/LJQCapp_clean/tree/codex/project-workflow-alignment)，远端仓库为 `Arcjang999/LJQCapp_clean`。功能基线 [`7ac92c6`](https://github.com/Arcjang999/LJQCapp_clean/commit/7ac92c65d7c775ced9209fb6b84a82bbd2932a7f) 已推送，之后为交接文档整理提交；准确最新提交以 Git 记录为准。数据库、备份、参考手册和本地验收输出不纳入源码提交。
 
-新 session 先按 `AGENTS.md` 阅读，再读 [最新交接](docs/DEVELOPMENT_HANDOFF.md) 和 [下一步任务](docs/NEXT_SESSION_TASKS.md)。本机运行方式见交接说明；8504 是独立演示库，服务状态需现场核查。
+**试剂换批和历史事件更正弹窗已完成，不再作为下一开发项。** 新 session 先按 `AGENTS.md` 阅读，再读 [最新交接及可复制的接手说明](docs/DEVELOPMENT_HANDOFF.md) 和 [下一步任务](docs/NEXT_SESSION_TASKS.md)。本机运行方式见交接说明；8504 是独立演示库，服务状态需现场核查。
 
 ## 历史开发记录
 
-以下保留各阶段完成时的说明；当前范围、开发顺序及交付分支以文首为准。
+<details>
+<summary>查看此前开发过程与旧版说明（不是当前接手指令）</summary>
+
+以下完整保留各阶段完成时的说明。旧“最新”“下一步”“未提交”等只对应当时状态，当前完成度和执行顺序以文首及开发交接为准。
 
 2026-09-21 最新进度：试剂批号登记、验证、切换及历史更正已统一为列表/详情与操作弹窗，23 套相关隔离测试及独立库实际浏览器验收通过。修复页面刷新误报保存冲突、内置检验项目备注被覆盖的问题，核心计算和真实库未改。见 [试剂与历史弹窗实施说明](docs/reagent_dialog_workflow_implementation.md)。下一步是整条业务流程、高缩放和打包验收；原任务 1→2→3 仍未开发。HEAD 仍为 `f263cff`（未推送），本步及此前全部修改保留未提交。下文较早进度为历史记录。
 
@@ -479,3 +482,5 @@ py tests/demo_data_current_db_smoke_test.py
 py tests/zscore_smoke_test.py
 py tests/instant_smoke_test.py
 ```
+
+</details>
