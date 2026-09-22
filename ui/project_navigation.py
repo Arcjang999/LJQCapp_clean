@@ -4,6 +4,7 @@ from hashlib import sha1
 
 import pandas as pd
 import streamlit as st
+from services.search_service import filter_frame, SEARCH_HELP
 from services.project_config_service import (
     list_project_templates, list_template_items, get_project_template, QC_METHOD_LABELS,
     validate_project_template, activate_project_template,
@@ -16,7 +17,7 @@ def filter_projects(projects, prefix):
     if projects.empty:
         return projects
     search, group_col, way_col, method_col = st.columns([2, 1, 1, 1.5])
-    search_text = search.text_input('搜索项目', key=prefix+'_search', placeholder='项目名称或仪器')
+    search_text = search.text_input('搜索项目', key=prefix+'_search', help=SEARCH_HELP, placeholder='项目名称或仪器')
     groups = sorted({str(x) for x in projects['project_group'] if x})
     ways = sorted({x for cell in projects['qc_methods'].dropna() for x in cell.split(',')})
     methods = sorted({x for cell in projects['method_names'].dropna() for x in cell.split(',')})
@@ -28,8 +29,7 @@ def filter_projects(projects, prefix):
     way = choose(way_col, '质控方法', ['全部']+ways, prefix+'_way', lambda x: QC_METHOD_LABELS.get(x,x))
     method = choose(method_col, '方法学', ['全部']+methods, prefix+'_method')
     if search_text.strip():
-        mask = projects[['template_name','instrument_name']].fillna('').agg(' '.join, axis=1).str.contains(search_text.strip(), case=False, regex=False)
-        projects = projects[mask]
+        projects = filter_frame(projects, search_text, ['template_name', 'instrument_name', 'project_group', 'method_names'])
     if group != '全部':
         projects = projects[projects.project_group == group]
     if way != '全部' or method != '全部':

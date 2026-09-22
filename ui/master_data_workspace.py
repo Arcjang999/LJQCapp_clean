@@ -4,6 +4,7 @@ from hashlib import sha1
 
 import pandas as pd
 import streamlit as st
+from services.search_service import filter_frame, SEARCH_HELP
 
 from database import get_connection
 from services import master_data_service as master
@@ -47,8 +48,7 @@ def _rows(entity_type, *, query='', include_disabled=False, parent_id=None):
         frame = _LISTERS[entity_type](include_disabled=include_disabled)
     if query.strip() and not frame.empty:
         fields = list(_COLUMNS[entity_type])
-        text = frame[fields].fillna('').astype(str).agg(' '.join, axis=1)
-        frame = frame[text.str.casefold().str.contains(query.strip().casefold(), regex=False)]
+        frame = filter_frame(frame, query, fields)
     return frame
 
 
@@ -188,7 +188,7 @@ def render_master_data_workspace(entity_type, *, parent_id=None, allow_create=Tr
     _prepare_saved(entity_type, parent_id)
     label = ENTITY_LABELS[entity_type]
     left, right = st.columns([3, 1])
-    query = left.text_input('搜索' + label, key='md_search_' + entity_type,
+    query = left.text_input('搜索' + label, key='md_search_' + entity_type, help=SEARCH_HELP,
                            placeholder='名称、代码或别名' if entity_type == 'test_item' else '名称或代码')
     include_disabled = right.checkbox('显示已停用' + label, key='md_show_disabled_' + entity_type)
     settings['md_search_' + entity_type] = query

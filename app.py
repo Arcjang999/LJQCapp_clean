@@ -57,6 +57,7 @@ def _consume_pending_navigation_intent() -> None:
 st.set_page_config(page_title=APP_TITLE, layout="wide")
 st.set_option("client.showSidebarNavigation", False)
 st.set_option("client.toolbarMode", "minimal")
+st.set_option("client.showErrorDetails", "none")
 init_db()
 inject_global_styles()
 

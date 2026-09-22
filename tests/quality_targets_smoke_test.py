@@ -16,6 +16,7 @@ from services.zscore_workbench_service import sync_zscore_workbench_bindings
 from services.instant_workbench_service import sync_instant_workbench_bindings
 from services.report_service import build_lj_monthly_report_package,build_zscore_monthly_report_package
 from zscore_logic import create_zscore_run
+from tests.quality_review_fixtures import fixture_conditions
 ROOT=Path(__file__).resolve().parents[1]
 
 
@@ -28,12 +29,24 @@ def new_lot(method='lj',count=1,name='质量目标验收'):
     for i in range(count):create_qc_level(qc_material_lot_id=lot,level_order=i+1,level_name=f'水平{i+1}')
     config=copy_lot_config(source_lot_config_id=binding['lot_config_id'],target_qc_material_lot_id=lot)
     item=int(list_lot_config_items(config).iloc[0]['id'])
+    with get_connection() as c:
+        row=item_context('lot',item,c)
+        c.execute("UPDATE md_test_items SET chinese_name='CRP',abbreviation='' WHERE id=?",(row['test_item_id'],))
     return item,config,binding
 
 
 def apply(item,requirement='wst403-2024-047',count=1,**kw):
+    spec=get_requirement(requirement)
+    with get_connection() as c:
+        row=item_context('lot',item,c)
+        c.execute('UPDATE md_test_items SET chinese_name=?,abbreviation=? WHERE id=?',(spec['name'],'',row['test_item_id']))
+        if requirement.startswith('wst406'):
+            method = '凝血初筛法' if requirement.rsplit('-',1)[1] in ('pt','aptt','fib','tt') else '血细胞分析'
+            c.execute("UPDATE md_methods SET method_name=?,method_code='',principle='' WHERE id=?",(method,row['method_id']))
+        elif requirement == 'wst403-2024-082':
+            c.execute("UPDATE md_methods SET method_name='便携式血糖仪法',method_code='',principle='' WHERE id=?",(row['method_id'],))
     levels=kw.pop('levels',[dict(level_order=i+1,concentration=100*(i+1),category='') for i in range(count)])
-    return adopt_requirement('lot',item,requirement,confirmed_by='测试确认人',evidence='已核对项目、单位、浓度与适用条件',levels=levels,**kw)
+    return adopt_requirement('lot',item,requirement,confirmed_by='测试确认人',evidence='已核对项目、单位、浓度与适用条件',levels=levels,**fixture_conditions(item_context('lot',item),clinical=True),**kw)
 
 
 def activate(item,config,method):
@@ -76,6 +89,21 @@ def test_legacy_migration_idempotent_and_no_cv_backfill():
         assert runtime_goal('lj',old)=={}
 
 
+def test_sd_adoption_does_not_claim_automatic_cv_evaluation():
+    with IsolatedDatabase():
+        item,config,_=new_lot()
+        with get_connection() as c:
+            unit=int(list_units().loc[lambda d:d.symbol=='mmol/L','id'].iloc[0])
+            c.execute('UPDATE qc_lot_config_items SET unit_id=? WHERE id=?',(unit,item))
+        for concentration,expected in [(5.0,False),(6.0,True)]:
+            goal=apply(item,'wst403-2024-082',levels=[dict(level_order=1,concentration=concentration)])
+            reviewed=decode(item_context('lot',item)['quality_review_json'])
+            selected=next(r for r in reviewed['candidates'] if r['id']=='wst403-2024-082')
+            assert selected['automatic_evaluation'] is expected
+            if not expected:
+                assert '暂不自动评价' in evaluate_cv(goal,1,3,count=20)
+
+
 def test_adoption_freezes_batch_and_copied_goal_requires_confirmation():
     with IsolatedDatabase():
         item,config,old=new_lot();goal=apply(item);batch=activate(item,config,'lj')
@@ -83,7 +111,8 @@ def test_adoption_freezes_batch_and_copied_goal_requires_confirmation():
         rejected(lambda:apply(item),'已有批次')
         rejected(lambda:clear_requirement('lot',item),'已有批次')
         project_id=item_context('lot',item)['source_template_item_id']
-        adopt_requirement('project',project_id,'wst403-2024-010',confirmed_by='更新人',evidence='后续项目要求调整')
+        adopt_requirement('project',project_id,'wst403-2024-047',confirmed_by='更新人',evidence='后续项目采用更严要求',
+                          supplemental_cv=3,**fixture_conditions(item_context('project',project_id),clinical=True))
         template_id=item_context('project',project_id)['template_id']
         activate_project_template(template_id)
         assert runtime_goal('lj',batch)==goal
@@ -101,7 +130,7 @@ def test_adoption_freezes_batch_and_copied_goal_requires_confirmation():
         create_qc_level(qc_material_lot_id=default_lot,level_order=1,level_name='L1')
         default_config=create_lot_config_from_template(template_id=template_id,qc_material_lot_id=default_lot)
         inherited=decode(list_lot_config_items(default_config).iloc[0]['quality_goal_json'])
-        assert inherited['pending'] and inherited['spec']['id']=='wst403-2024-010'
+        assert inherited['pending'] and inherited['spec']['id']=='wst403-2024-047' and inherited['supplement']['cv']==3
         assert runtime_goal('lj',batch)==goal
 
 
@@ -204,6 +233,7 @@ def test_page_catalog_and_adoption_existing_batch_readonly():
         assert not any(b.key==f'quality_lot_{item}_adopt' for b in at.button)
         at.button(key=f'batch_edit_quality_{item}').click().run()
         assert not at.exception
+        at.selectbox(key=f'quality_lot_{item}_context_purpose').set_value('clinical').run()
         at.radio(key=f'quality_lot_{item}_mode').set_value('选择标准或自定义目录').run()
         at.selectbox(key=f'quality_lot_{item}_requirement').set_value('wst403-2024-047').run()
         at.text_input(key=f'quality_lot_{item}_person').set_value('页面验收')

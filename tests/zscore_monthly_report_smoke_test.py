@@ -249,7 +249,9 @@ def test_zscore_monthly_report_builds_pdf_and_snapshot() -> None:
         reader = assert_uniform_a4_pages_without_watermark(pdf_bytes)
         pdf_text = "\n".join(page.extract_text() or "" for page in reader.pages).lower()
         assert len(reader.pages) >= 7
-        assert "追溯" in reader.pages[-1].extract_text()
+        assert "追溯" in pdf_text
+        assert "质量目标采用依据" in reader.pages[-1].extract_text()
+        assert "尚无自动评价" in ''.join(pdf_text.split())
         assert str(reader.metadata.get("/Subject", "")) == REPORT_TYPE_ZSCORE_MONTHLY
         assert "run级" not in pdf_text
         assert "level明细" not in pdf_text

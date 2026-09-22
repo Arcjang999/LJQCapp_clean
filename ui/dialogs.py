@@ -393,7 +393,7 @@ def render_zscore_record_maintenance_dialog(
                                     st.rerun()
 
             with maintenance_right:
-                st.info("原始 run 及各水平结果保留追溯，不提供删除。参数建立维护继续按整次 run 进行。")
+                st.info("每次检测及各水平原始结果均保留，不能删除。参数建立期的保留、禁用或恢复会同时应用于本次检测的所有水平。")
 
     st.divider()
     if st.button("关闭", key="close_zscore_record_dialog", width="stretch"):

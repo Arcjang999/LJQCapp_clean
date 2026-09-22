@@ -1,0 +1,3306 @@
+{
+  "schema_version": 1,
+  "checked_on": "2026-09-22",
+  "purpose": "数值要求与检验项目的准确身份映射；不作模糊采用。",
+  "dictionary_note": "现有WS/T886—2026项目代码仅用作应用已有的内部身份键；该名称代码来源不是现行分析质量要求。",
+  "specimen_note": "WS/T403—2024第1章及附录A未逐项列出基质限制；reviewed_specimens是当前已核对的项目身份/常规检测基质，不宣称其他基质被标准排除。其他或不明基质须另核对后确认。WS/T406—2024血细胞条目核对第6章全血模式和质控物，凝血条目核对第7章临床样品/质控品及血浆标本。",
+  "source_evidence": [
+    {
+      "standard": "WS/T 403—2024",
+      "sha256": "7b9d8c904ccaea73aced0fb725b204754f3c50a06305fba432490a29fc08c6ed",
+      "scope_pages": [
+        3,
+        6,
+        7,
+        8
+      ]
+    },
+    {
+      "standard": "WS/T 406—2024",
+      "sha256": "c2b73ecd97909e4b8ef0c5e063aed5f2dc63f4193e784a7894f3439e8b08dfe0",
+      "scope_pages": [
+        3,
+        6,
+        10
+      ]
+    }
+  ],
+  "dictionary_items": [
+    {
+      "code": "0100101A",
+      "name": "白细胞计数",
+      "specimen": "全血"
+    },
+    {
+      "code": "0100201A",
+      "name": "红细胞计数",
+      "specimen": "全血"
+    },
+    {
+      "code": "0100301A",
+      "name": "血小板计数",
+      "specimen": "全血"
+    },
+    {
+      "code": "0100401A",
+      "name": "血红蛋白测定",
+      "specimen": "全血"
+    },
+    {
+      "code": "0100501A",
+      "name": "血细胞比容测定",
+      "specimen": "全血"
+    },
+    {
+      "code": "0100601A",
+      "name": "平均红细胞体积测定",
+      "specimen": "全血"
+    },
+    {
+      "code": "0100701A",
+      "name": "平均红细胞血红蛋白含量测定",
+      "specimen": "全血"
+    },
+    {
+      "code": "0100801A",
+      "name": "平均红细胞血红蛋白浓度测定",
+      "specimen": "全血"
+    },
+    {
+      "code": "0100901A",
+      "name": "网织红细胞计数",
+      "specimen": "全血"
+    },
+    {
+      "code": "0300101A",
+      "name": "红细胞沉降率测定",
+      "specimen": "全血"
+    },
+    {
+      "code": "0300201A",
+      "name": "全血黏度测定",
+      "specimen": "全血"
+    },
+    {
+      "code": "0300303A",
+      "name": "血浆黏度测定",
+      "specimen": "血浆"
+    },
+    {
+      "code": "0400101A",
+      "name": "血红蛋白A 测定2",
+      "specimen": "全血"
+    },
+    {
+      "code": "0400201A",
+      "name": "血红蛋白F测定",
+      "specimen": "全血"
+    },
+    {
+      "code": "0500103A",
+      "name": "凝血酶原时间检测",
+      "specimen": "血浆"
+    },
+    {
+      "code": "0500203A",
+      "name": "活化部分凝血活酶时间检测",
+      "specimen": "血浆"
+    },
+    {
+      "code": "0500303A",
+      "name": "凝血酶时间检测",
+      "specimen": "血浆"
+    },
+    {
+      "code": "0500403A",
+      "name": "纤维蛋白原检测",
+      "specimen": "血浆"
+    },
+    {
+      "code": "0500503A",
+      "name": "凝血因子Ⅱ活性检测",
+      "specimen": "血浆"
+    },
+    {
+      "code": "0500603A",
+      "name": "凝血因子Ⅴ活性检测",
+      "specimen": "血浆"
+    },
+    {
+      "code": "0500703A",
+      "name": "凝血因子Ⅶ活性检测",
+      "specimen": "血浆"
+    },
+    {
+      "code": "0500803A",
+      "name": "凝血因子Ⅷ活性检测",
+      "specimen": "血浆"
+    },
+    {
+      "code": "0500903A",
+      "name": "凝血因子Ⅸ活性检测",
+      "specimen": "血浆"
+    },
+    {
+      "code": "0501003A",
+      "name": "凝血因子Ⅹ活性检测",
+      "specimen": "血浆"
+    },
+    {
+      "code": "0501103A",
+      "name": "凝血因子Ⅺ活性检测",
+      "specimen": "血浆"
+    },
+    {
+      "code": "0501203A",
+      "name": "凝血因子Ⅻ活性检测",
+      "specimen": "血浆"
+    },
+    {
+      "code": "0501303A",
+      "name": "抗凝血因子Ⅹa活性检测",
+      "specimen": "血浆"
+    },
+    {
+      "code": "0501403A",
+      "name": "抗凝血酶活性检测",
+      "specimen": "血浆"
+    },
+    {
+      "code": "0501503A",
+      "name": "蛋白C活性检测",
+      "specimen": "血浆"
+    },
+    {
+      "code": "0501603A",
+      "name": "蛋白S活性检测",
+      "specimen": "血浆"
+    },
+    {
+      "code": "0501703A",
+      "name": "D-二聚体检测",
+      "specimen": "血浆"
+    },
+    {
+      "code": "0501803A",
+      "name": "纤维蛋白（原）降解产物检测",
+      "specimen": "血浆"
+    },
+    {
+      "code": "0501903A",
+      "name": "血管性血友病因子抗原检测",
+      "specimen": "血浆"
+    },
+    {
+      "code": "0800101A",
+      "name": "淋巴细胞亚群测定：CD3+细胞相对计数",
+      "specimen": "全血"
+    },
+    {
+      "code": "0800201A",
+      "name": "淋巴细胞亚群测定：CD3+细胞绝对计数",
+      "specimen": "全血"
+    },
+    {
+      "code": "0800301A",
+      "name": "淋巴细胞亚群测定：CD3+CD4+细胞相对计数",
+      "specimen": "全血"
+    },
+    {
+      "code": "0800401A",
+      "name": "淋巴细胞亚群测定：CD3+CD4+细胞绝对计数",
+      "specimen": "全血"
+    },
+    {
+      "code": "0800501A",
+      "name": "淋巴细胞亚群测定：CD3+CD8+细胞相对计数",
+      "specimen": "全血"
+    },
+    {
+      "code": "0800601A",
+      "name": "淋巴细胞亚群测定：CD3+CD8+细胞绝对计数",
+      "specimen": "全血"
+    },
+    {
+      "code": "0800701A",
+      "name": "淋 巴 细 胞 亚 群 测 定 ：CD3-CD19+细胞相对计数",
+      "specimen": "全血"
+    },
+    {
+      "code": "0800801A",
+      "name": "淋 巴 细 胞 亚 群 测 定 ：CD3-CD19+细胞绝对计数",
+      "specimen": "全血"
+    },
+    {
+      "code": "0800901A",
+      "name": "淋 巴 细 胞 亚 群 测 定 ：CD3-CD16+CD56+细胞相对计数",
+      "specimen": "全血"
+    },
+    {
+      "code": "0801001A",
+      "name": "淋 巴 细 胞 亚 群 测 定 ：CD3-CD16+CD56+细胞绝对计数",
+      "specimen": "全血"
+    },
+    {
+      "code": "0900101A",
+      "name": "CD34+细胞相对计数",
+      "specimen": "全血"
+    },
+    {
+      "code": "0900201A",
+      "name": "CD34+细胞绝对计数",
+      "specimen": "全血"
+    },
+    {
+      "code": "1100104A",
+      "name": "白蛋白测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1100110A",
+      "name": "尿液白蛋白测定",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1100112A",
+      "name": "脑脊液白蛋白测定",
+      "specimen": "脑脊液"
+    },
+    {
+      "code": "1100204A",
+      "name": "总蛋白测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1100210A",
+      "name": "尿液总蛋白测定",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1100212A",
+      "name": "脑脊液总蛋白测定",
+      "specimen": "脑脊液"
+    },
+    {
+      "code": "1100301A",
+      "name": "糖化血红蛋白测定",
+      "specimen": "全血"
+    },
+    {
+      "code": "1100404A",
+      "name": "糖化白蛋白测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1100504A",
+      "name": "性激素结合球蛋白测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1100604A",
+      "name": "甲状腺球蛋白测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1100704A",
+      "name": "抗缪勒管激素测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1100802A",
+      "name": "血清蛋白电泳测定",
+      "specimen": "血清"
+    },
+    {
+      "code": "1100902A",
+      "name": "β-微球蛋白测定2",
+      "specimen": "血清"
+    },
+    {
+      "code": "1100910A",
+      "name": "尿液β-微球蛋白测定2",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1101010A",
+      "name": "尿液α-微球蛋白测定1",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1101104A",
+      "name": "视黄醇结合蛋白测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1101110A",
+      "name": "尿液视黄醇结合蛋白测定",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1101204A",
+      "name": "半胱氨酸蛋白酶抑制剂C测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1101310A",
+      "name": "尿液转铁蛋白测定",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1101304A",
+      "name": "转铁蛋白测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1101405A",
+      "name": "C反应蛋白测定",
+      "specimen": "全血、血清、血浆"
+    },
+    {
+      "code": "1101504A",
+      "name": "降钙素原测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1101604A",
+      "name": "血清淀粉样蛋白A测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1101704A",
+      "name": "抗链球菌溶血素O测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1101804A",
+      "name": "免疫球蛋白G测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1101810A",
+      "name": "尿液免疫球蛋白G测定",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1101812A",
+      "name": "脑脊液免疫球蛋白G测定",
+      "specimen": "脑脊液"
+    },
+    {
+      "code": "1101904A",
+      "name": "免疫球蛋白M测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1101912A",
+      "name": "脑脊液免疫球蛋白M测定",
+      "specimen": "脑脊液"
+    },
+    {
+      "code": "1102004A",
+      "name": "免疫球蛋白A测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1102012A",
+      "name": "脑脊液免疫球蛋白A测定",
+      "specimen": "脑脊液"
+    },
+    {
+      "code": "1102104A",
+      "name": "免疫球蛋白E测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1102204A",
+      "name": "免疫球蛋白κ轻链测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1102304A",
+      "name": "免疫球蛋白λ轻链测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1102404A",
+      "name": "补体3测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1102504A",
+      "name": "补体4测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1102604A",
+      "name": "类风湿因子测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1102704A",
+      "name": "结合珠蛋白测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1102804A",
+      "name": "铁蛋白测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1102904A",
+      "name": "前白蛋白测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1103004A",
+      "name": "脂联素测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1103104A",
+      "name": "层黏连蛋白测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1103204A",
+      "name": "Ⅲ型前胶原N端肽测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1103304A",
+      "name": "Ⅳ型胶原蛋白测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1200104A",
+      "name": "促黄体生成素测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1200204A",
+      "name": "卵泡刺激素测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1200304A",
+      "name": "促肾上腺皮质激素测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1200404A",
+      "name": "泌乳素测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1200504A",
+      "name": "生长激素测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1200604A",
+      "name": "促甲状腺激素测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1200704A",
+      "name": "三碘甲状腺原氨酸测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1200804A",
+      "name": "甲状腺素测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1200904A",
+      "name": "游离三碘甲状腺原氨酸测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1201004A",
+      "name": "游离甲状腺素测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1201104A",
+      "name": "反三碘甲状腺原氨酸测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1201204A",
+      "name": "甲状旁腺激素测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1201304A",
+      "name": "孕酮测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1201404A",
+      "name": "睾酮测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1201504A",
+      "name": "雌二醇测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1201604A",
+      "name": "雌三醇测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1201704A",
+      "name": "17α-羟孕酮测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1201709A",
+      "name": "血斑17α-羟孕酮测定",
+      "specimen": "血斑"
+    },
+    {
+      "code": "1201804A",
+      "name": "硫酸脱氢表雄酮测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1201904A",
+      "name": "胰岛素测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1202004A",
+      "name": "C肽测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1202104A",
+      "name": "皮质醇测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1202204A",
+      "name": "醛固酮测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1202210A",
+      "name": "尿液醛固酮测定",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1202303A",
+      "name": "肾素浓度测定",
+      "specimen": "血浆"
+    },
+    {
+      "code": "1202403A",
+      "name": "肾素活性测定",
+      "specimen": "血浆"
+    },
+    {
+      "code": "1202503A",
+      "name": "血管紧张素Ⅰ测定",
+      "specimen": "血浆"
+    },
+    {
+      "code": "1202603A",
+      "name": "血管紧张素Ⅱ测定",
+      "specimen": "血浆"
+    },
+    {
+      "code": "1300101A",
+      "name": "环孢霉素测定",
+      "specimen": "全血"
+    },
+    {
+      "code": "1300201A",
+      "name": "他克莫司测定",
+      "specimen": "全血"
+    },
+    {
+      "code": "1300301A",
+      "name": "西罗莫司测定",
+      "specimen": "全血"
+    },
+    {
+      "code": "1300404A",
+      "name": "卡马西平测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1300504A",
+      "name": "10,11-二氢-10-羟基卡马西平测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1300604A",
+      "name": "地高辛测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1300704A",
+      "name": "苯妥英测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1300804A",
+      "name": "茶碱测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1300904A",
+      "name": "丙戊酸测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1301004A",
+      "name": "拉莫三嗪测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1301104A",
+      "name": "左乙拉西坦测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1301204A",
+      "name": "托吡酯测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1301304A",
+      "name": "奥氮平测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1301404A",
+      "name": "氯氮平测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1301504A",
+      "name": "去甲氯氮平测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1301604A",
+      "name": "利培酮测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1301704A",
+      "name": "帕利哌酮测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1301804A",
+      "name": "阿立哌唑测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1301904A",
+      "name": "脱氢阿立哌唑测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1302004A",
+      "name": "氨磺必利测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1302104A",
+      "name": "喹硫平测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1302204A",
+      "name": "氯丙嗪测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1302304A",
+      "name": "万古霉素测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1302404A",
+      "name": "美罗培南测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1302504A",
+      "name": "亚胺培南测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1302604A",
+      "name": "利奈唑胺测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1302704A",
+      "name": "替考拉宁测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1400104A",
+      "name": "锂离子测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1400205A",
+      "name": "钠离子测定",
+      "specimen": "全血、血清、血浆"
+    },
+    {
+      "code": "1400210A",
+      "name": "尿液钠离子测定",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1400305A",
+      "name": "镁离子测定",
+      "specimen": "全血、血清、血浆"
+    },
+    {
+      "code": "1400310A",
+      "name": "尿液镁离子测定",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1400404A",
+      "name": "磷酸根离子测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1400410A",
+      "name": "尿液磷酸根离子测定",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1400505A",
+      "name": "氯离子测定",
+      "specimen": "全血、血清、血浆"
+    },
+    {
+      "code": "1400510A",
+      "name": "尿液氯离子测定",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1400512A",
+      "name": "脑脊液氯离子测定",
+      "specimen": "脑脊液"
+    },
+    {
+      "code": "1400605A",
+      "name": "钾离子测定",
+      "specimen": "全血、血清、血浆"
+    },
+    {
+      "code": "1400610A",
+      "name": "尿液钾离子测定",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1400705A",
+      "name": "总钙离子测定",
+      "specimen": "全血、血清、血浆"
+    },
+    {
+      "code": "1400710A",
+      "name": "尿液钙离子测定",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1400805A",
+      "name": "游离钙离子测定",
+      "specimen": "全血、血清、血浆"
+    },
+    {
+      "code": "1400905A",
+      "name": "铁离子测定",
+      "specimen": "全血、血清、血浆"
+    },
+    {
+      "code": "1401005A",
+      "name": "铜离子测定",
+      "specimen": "全血、血清、血浆"
+    },
+    {
+      "code": "1401105A",
+      "name": "锌离子测定",
+      "specimen": "全血、血清、血浆"
+    },
+    {
+      "code": "1401210A",
+      "name": "尿液碘离子测定",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1401301A",
+      "name": "铅离子测定",
+      "specimen": "全血"
+    },
+    {
+      "code": "1500104A",
+      "name": "丙氨酸氨基转移酶测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1500204A",
+      "name": "天门冬氨酸氨基转移酶测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1500304A",
+      "name": "天门冬氨酸氨基转移酶线粒体同工酶测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1500404A",
+      "name": "碱性磷酸酶测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1500504A",
+      "name": "淀粉酶测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1500510A",
+      "name": "尿液淀粉酶测定",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1500604A",
+      "name": "肌酸激酶测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1500704A",
+      "name": "乳酸脱氢酶测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1500712A",
+      "name": "脑脊液乳酸脱氢酶测定",
+      "specimen": "脑脊液"
+    },
+    {
+      "code": "1500804A",
+      "name": "乳酸脱氢酶同工酶测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1500904A",
+      "name": "γ-谷氨酰基转移酶测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1501004A",
+      "name": "α-羟丁酸脱氢酶测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1501104A",
+      "name": "胆碱酯酶测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1501204A",
+      "name": "脂肪酶测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1501304A",
+      "name": "α-L-岩藻糖苷酶测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1501404A",
+      "name": "5′-核苷酸酶测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1501504A",
+      "name": "腺苷脱氨酶测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1501604A",
+      "name": "超氧化物歧化酶测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1600104A",
+      "name": "甲胎蛋白测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1600204A",
+      "name": "癌胚抗原测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1600304A",
+      "name": "游离前列腺特异性抗原测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1600404A",
+      "name": "前列腺特异性抗原测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1600504A",
+      "name": "糖链抗原72-4测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1600604A",
+      "name": "糖链抗原125测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1600704A",
+      "name": "糖链抗原15-3测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1600804A",
+      "name": "糖链抗原19-9测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1600904A",
+      "name": "糖链抗原50测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1601004A",
+      "name": "糖链抗原242测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1601104A",
+      "name": "鳞状细胞癌抗原测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1601204A",
+      "name": "β-人绒毛膜促性腺激素测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1601304A",
+      "name": "人绒毛膜促性腺激素测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1601404A",
+      "name": "人附睾分泌蛋白4测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1601504A",
+      "name": "细胞角蛋白19片段测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1601604A",
+      "name": "神经元特异性烯醇化酶测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1601704A",
+      "name": "胃蛋白酶原I测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1601804A",
+      "name": "胃蛋白酶原Ⅱ测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1601904A",
+      "name": "胃泌素-17测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1700104A",
+      "name": "葡萄糖测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1700110A",
+      "name": "尿液葡萄糖测定",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1700112A",
+      "name": "脑脊液葡萄糖测定",
+      "specimen": "脑脊液"
+    },
+    {
+      "code": "1700204A",
+      "name": "尿素测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1700210A",
+      "name": "尿液尿素测定",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1700304A",
+      "name": "尿酸测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1700404A",
+      "name": "肌酐测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1700410A",
+      "name": "尿液肌酐测定",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1700504A",
+      "name": "总胆红素测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1700604A",
+      "name": "直接胆红素测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1700704A",
+      "name": "胆汁酸测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1700804A",
+      "name": "唾液酸测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1700904A",
+      "name": "β-羟丁酸测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1701004A",
+      "name": "透明质酸测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1701104A",
+      "name": "甘胆酸测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1701204A",
+      "name": "同型半胱氨酸测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1701312A",
+      "name": "脑脊液乳酸测定",
+      "specimen": "脑脊液"
+    },
+    {
+      "code": "1800103A",
+      "name": "肾上腺素测定",
+      "specimen": "血浆"
+    },
+    {
+      "code": "1800110A",
+      "name": "尿液肾上腺素测定",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1800203A",
+      "name": "去甲肾上腺素测定",
+      "specimen": "血浆"
+    },
+    {
+      "code": "1800210A",
+      "name": "尿液去甲肾上腺素测定",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1800303A",
+      "name": "多巴胺测定",
+      "specimen": "血浆"
+    },
+    {
+      "code": "1800310A",
+      "name": "尿液多巴胺测定",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1800403A",
+      "name": "3-甲氧基肾上腺素测定",
+      "specimen": "血浆"
+    },
+    {
+      "code": "1800410A",
+      "name": "尿液3-甲氧基肾上腺素测定",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1800503A",
+      "name": "3-甲氧基去甲肾上腺素测定",
+      "specimen": "血浆"
+    },
+    {
+      "code": "1800510A",
+      "name": "尿液3-甲氧基去甲肾上腺素测定",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1800603A",
+      "name": "3-甲氧基酪胺测定",
+      "specimen": "血浆"
+    },
+    {
+      "code": "1800610A",
+      "name": "尿液3-甲氧基酪胺测定",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1800703A",
+      "name": "香草扁桃酸测定",
+      "specimen": "血浆"
+    },
+    {
+      "code": "1800710A",
+      "name": "尿液香草扁桃酸测定",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1800803A",
+      "name": "高香草酸测定",
+      "specimen": "血浆"
+    },
+    {
+      "code": "1800810A",
+      "name": "尿液高香草酸测定",
+      "specimen": "尿液"
+    },
+    {
+      "code": "1900104A",
+      "name": "5-甲基四氢叶酸测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1900204A",
+      "name": "蝶酰谷氨酸测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1900304A",
+      "name": "维生素A测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1900404A",
+      "name": "25-羟维生素D3测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1900504A",
+      "name": "25-羟维生素D2测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1900604A",
+      "name": "总维生素D测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1900704A",
+      "name": "维生素E测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1900804A",
+      "name": "维生素K1测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1900904A",
+      "name": "维生素B1测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1901004A",
+      "name": "维生素B2测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1901104A",
+      "name": "维生素B3测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1901204A",
+      "name": "维生素B5测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1901304A",
+      "name": "维生素B6测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1901404A",
+      "name": "维生素B7测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1901504A",
+      "name": "维生素B9测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "1901604A",
+      "name": "维生素B12测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2000104A",
+      "name": "总胆固醇测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2000204A",
+      "name": "甘油三酯测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2000304A",
+      "name": "高密度脂蛋白胆固醇测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2000404A",
+      "name": "低密度脂蛋白胆固醇测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2000504A",
+      "name": "脂蛋白a测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2000604A",
+      "name": "载脂蛋白AⅠ测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2000704A",
+      "name": "载脂蛋白B测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2000804A",
+      "name": "载脂蛋白E测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2000904A",
+      "name": "磷脂测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2001004A",
+      "name": "小而密低密度脂蛋白胆固醇测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2100104A",
+      "name": "肌酸激酶-MB质量测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2100204A",
+      "name": "肌酸激酶-MB活性测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2100304A",
+      "name": "肌红蛋白测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2100404A",
+      "name": "心肌肌钙蛋白I测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2100504A",
+      "name": "心肌肌钙蛋白T测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2100604A",
+      "name": "脑钠肽测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2100704A",
+      "name": "N末端前脑钠肽测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2200104A",
+      "name": "白细胞介素6测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2200204A",
+      "name": "白细胞介素8测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2200304A",
+      "name": "白细胞介素10测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2300101A",
+      "name": "pH测定",
+      "specimen": "全血"
+    },
+    {
+      "code": "2300201A",
+      "name": "氧分压测定",
+      "specimen": "全血"
+    },
+    {
+      "code": "2300301A",
+      "name": "二氧化碳分压测定",
+      "specimen": "全血"
+    },
+    {
+      "code": "2400104A",
+      "name": "乙型肝炎病毒表面抗原测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2400204A",
+      "name": "乙型肝炎病毒表面抗体测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2400304A",
+      "name": "乙型肝炎病毒e抗原测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2500204A",
+      "name": "抗双链DNA抗体测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2500304A",
+      "name": "抗RNP抗体测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2500404A",
+      "name": "抗Sm抗体测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2500504A",
+      "name": "抗SS-A抗体测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2500604A",
+      "name": "抗SS-B抗体测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2500704A",
+      "name": "抗Ro-52抗体测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2500804A",
+      "name": "抗Scl-70抗体测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2500904A",
+      "name": "抗Jo-1抗体测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2501004A",
+      "name": "抗环瓜氨酸肽抗体测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2501204A",
+      "name": "抗髓过氧化物酶抗体测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2501304A",
+      "name": "抗蛋白酶3抗体测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2501404A",
+      "name": "甲状腺球蛋白抗体测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2501504A",
+      "name": "抗甲状腺过氧化物酶抗体测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2501604A",
+      "name": "促甲状腺受体抗体测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2600104A",
+      "name": "乙型肝炎病毒核酸测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2600204A",
+      "name": "丙型肝炎病毒核酸测定",
+      "specimen": "血清、血浆"
+    },
+    {
+      "code": "2600305A",
+      "name": "EB病毒核酸测定",
+      "specimen": "全血、血清、血浆"
+    },
+    {
+      "code": "2600421A",
+      "name": "人巨细胞病毒核酸测定",
+      "specimen": "血浆、血清、尿液、乳汁、淋巴细胞"
+    },
+    {
+      "code": "3300116A",
+      "name": "药敏定量试验",
+      "specimen": "菌株"
+    },
+    {
+      "code": "3400102A",
+      "name": "真菌细胞壁（1，3）-β-D-葡聚糖试验",
+      "specimen": "血清"
+    }
+  ],
+  "requirements": [
+    {
+      "requirement_id": "wst403-2024-001",
+      "requirement_name": "钾",
+      "dictionary_codes": [
+        "1400605A"
+      ],
+      "dictionary_names": [
+        "钾离子测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "全血",
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-002",
+      "requirement_name": "钠",
+      "dictionary_codes": [
+        "1400205A"
+      ],
+      "dictionary_names": [
+        "钠离子测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "全血",
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-003",
+      "requirement_name": "氯",
+      "dictionary_codes": [
+        "1400505A"
+      ],
+      "dictionary_names": [
+        "氯离子测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "全血",
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-004",
+      "requirement_name": "钙",
+      "dictionary_codes": [
+        "1400705A"
+      ],
+      "dictionary_names": [
+        "总钙离子测定"
+      ],
+      "identity_aliases": [
+        "总钙",
+        "总钙离子"
+      ],
+      "reviewed_specimens": [
+        "全血",
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-005",
+      "requirement_name": "磷酸根离子",
+      "dictionary_codes": [
+        "1400404A"
+      ],
+      "dictionary_names": [
+        "磷酸根离子测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-006",
+      "requirement_name": "葡萄糖",
+      "dictionary_codes": [
+        "1700104A"
+      ],
+      "dictionary_names": [
+        "葡萄糖测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-007",
+      "requirement_name": "尿素",
+      "dictionary_codes": [
+        "1700204A"
+      ],
+      "dictionary_names": [
+        "尿素测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-008",
+      "requirement_name": "尿酸",
+      "dictionary_codes": [
+        "1700304A"
+      ],
+      "dictionary_names": [
+        "尿酸测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-009",
+      "requirement_name": "肌酐",
+      "dictionary_codes": [
+        "1700404A"
+      ],
+      "dictionary_names": [
+        "肌酐测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-010",
+      "requirement_name": "总蛋白",
+      "dictionary_codes": [
+        "1100204A"
+      ],
+      "dictionary_names": [
+        "总蛋白测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-011",
+      "requirement_name": "白蛋白",
+      "dictionary_codes": [
+        "1100104A"
+      ],
+      "dictionary_names": [
+        "白蛋白测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-012",
+      "requirement_name": "总胆固醇",
+      "dictionary_codes": [
+        "2000104A"
+      ],
+      "dictionary_names": [
+        "总胆固醇测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-013",
+      "requirement_name": "甘油三酯",
+      "dictionary_codes": [
+        "2000204A"
+      ],
+      "dictionary_names": [
+        "甘油三酯测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-014",
+      "requirement_name": "高密度脂蛋白胆固醇",
+      "dictionary_codes": [
+        "2000304A"
+      ],
+      "dictionary_names": [
+        "高密度脂蛋白胆固醇测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-015",
+      "requirement_name": "低密度脂蛋白胆固醇",
+      "dictionary_codes": [
+        "2000404A"
+      ],
+      "dictionary_names": [
+        "低密度脂蛋白胆固醇测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-016",
+      "requirement_name": "载脂蛋白 AⅠ",
+      "dictionary_codes": [
+        "2000604A"
+      ],
+      "dictionary_names": [
+        "载脂蛋白AⅠ测定"
+      ],
+      "identity_aliases": [
+        "载脂蛋白A1",
+        "ApoA1",
+        "ApoAⅠ"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-017",
+      "requirement_name": "载脂蛋白 B",
+      "dictionary_codes": [
+        "2000704A"
+      ],
+      "dictionary_names": [
+        "载脂蛋白B测定"
+      ],
+      "identity_aliases": [
+        "ApoB"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-018",
+      "requirement_name": "脂蛋白(a)",
+      "dictionary_codes": [
+        "2000504A"
+      ],
+      "dictionary_names": [
+        "脂蛋白a测定"
+      ],
+      "identity_aliases": [
+        "脂蛋白a",
+        "Lp(a)"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-019",
+      "requirement_name": "总胆红素",
+      "dictionary_codes": [
+        "1700504A"
+      ],
+      "dictionary_names": [
+        "总胆红素测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-020",
+      "requirement_name": "直接胆红素/结合胆红素",
+      "dictionary_codes": [
+        "1700604A"
+      ],
+      "dictionary_names": [
+        "直接胆红素测定"
+      ],
+      "identity_aliases": [
+        "直接胆红素",
+        "结合胆红素",
+        "DBIL"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-021",
+      "requirement_name": "丙氨酸氨基转移酶",
+      "dictionary_codes": [
+        "1500104A"
+      ],
+      "dictionary_names": [
+        "丙氨酸氨基转移酶测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-022",
+      "requirement_name": "天门冬氨酸氨基转移酶",
+      "dictionary_codes": [
+        "1500204A"
+      ],
+      "dictionary_names": [
+        "天门冬氨酸氨基转移酶测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-023",
+      "requirement_name": "碱性磷酸酶",
+      "dictionary_codes": [
+        "1500404A"
+      ],
+      "dictionary_names": [
+        "碱性磷酸酶测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-024",
+      "requirement_name": "淀粉酶",
+      "dictionary_codes": [
+        "1500504A"
+      ],
+      "dictionary_names": [
+        "淀粉酶测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-025",
+      "requirement_name": "肌酸激酶",
+      "dictionary_codes": [
+        "1500604A"
+      ],
+      "dictionary_names": [
+        "肌酸激酶测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-026",
+      "requirement_name": "乳酸脱氢酶",
+      "dictionary_codes": [
+        "1500704A"
+      ],
+      "dictionary_names": [
+        "乳酸脱氢酶测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-027",
+      "requirement_name": "γ-谷氨酰基转移酶",
+      "dictionary_codes": [
+        "1500904A"
+      ],
+      "dictionary_names": [
+        "γ-谷氨酰基转移酶测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-028",
+      "requirement_name": "α-羟丁酸脱氢酶",
+      "dictionary_codes": [
+        "1501004A"
+      ],
+      "dictionary_names": [
+        "α-羟丁酸脱氢酶测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-029",
+      "requirement_name": "胆碱酯酶",
+      "dictionary_codes": [
+        "1501104A"
+      ],
+      "dictionary_names": [
+        "胆碱酯酶测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-030",
+      "requirement_name": "铁",
+      "dictionary_codes": [
+        "1400905A"
+      ],
+      "dictionary_names": [
+        "铁离子测定"
+      ],
+      "identity_aliases": [
+        "铁离子"
+      ],
+      "reviewed_specimens": [
+        "全血",
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-031",
+      "requirement_name": "镁",
+      "dictionary_codes": [
+        "1400305A"
+      ],
+      "dictionary_names": [
+        "镁离子测定"
+      ],
+      "identity_aliases": [
+        "镁离子"
+      ],
+      "reviewed_specimens": [
+        "全血",
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-032",
+      "requirement_name": "胱抑素C",
+      "dictionary_codes": [
+        "1101204A"
+      ],
+      "dictionary_names": [
+        "半胱氨酸蛋白酶抑制剂C测定"
+      ],
+      "identity_aliases": [
+        "半胱氨酸蛋白酶抑制剂C",
+        "胱抑素 C",
+        "CysC"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-033",
+      "requirement_name": "肌酸激酶-MB(μg/L)",
+      "dictionary_codes": [
+        "2100104A"
+      ],
+      "dictionary_names": [
+        "肌酸激酶-MB质量测定"
+      ],
+      "identity_aliases": [
+        "肌酸激酶-MB质量",
+        "CK-MB质量",
+        "CK-MB"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "肌酸激酶-MB质量与活性是不同结果种类；分别映射，另按质量或活性单位核对。"
+    },
+    {
+      "requirement_id": "wst403-2024-034",
+      "requirement_name": "肌酸激酶-MB(U/L)",
+      "dictionary_codes": [
+        "2100204A"
+      ],
+      "dictionary_names": [
+        "肌酸激酶-MB活性测定"
+      ],
+      "identity_aliases": [
+        "肌酸激酶-MB活性",
+        "CK-MB活性",
+        "CK-MB"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "肌酸激酶-MB质量与活性是不同结果种类；分别映射，另按质量或活性单位核对。"
+    },
+    {
+      "requirement_id": "wst403-2024-035",
+      "requirement_name": "肌红蛋白",
+      "dictionary_codes": [
+        "2100304A"
+      ],
+      "dictionary_names": [
+        "肌红蛋白测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-036",
+      "requirement_name": "同型半胱氨酸",
+      "dictionary_codes": [
+        "1701204A"
+      ],
+      "dictionary_names": [
+        "同型半胱氨酸测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-037",
+      "requirement_name": "HbA1c（NGSP单位）",
+      "dictionary_codes": [
+        "1100301A"
+      ],
+      "dictionary_names": [
+        "糖化血红蛋白测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "全血"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "同一糖化血红蛋白检测对象；NGSP与IFCC条目必须再按结果单位区分。"
+    },
+    {
+      "requirement_id": "wst403-2024-038",
+      "requirement_name": "HbA1c（IFCC单位）",
+      "dictionary_codes": [
+        "1100301A"
+      ],
+      "dictionary_names": [
+        "糖化血红蛋白测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "全血"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "同一糖化血红蛋白检测对象；NGSP与IFCC条目必须再按结果单位区分。"
+    },
+    {
+      "requirement_id": "wst403-2024-039",
+      "requirement_name": "pH（血气）",
+      "dictionary_codes": [
+        "2300101A"
+      ],
+      "dictionary_names": [
+        "pH测定"
+      ],
+      "identity_aliases": [
+        "血气pH",
+        "pH"
+      ],
+      "reviewed_specimens": [
+        "全血"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-040",
+      "requirement_name": "CO2分压",
+      "dictionary_codes": [
+        "2300301A"
+      ],
+      "dictionary_names": [
+        "二氧化碳分压测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "全血"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-041",
+      "requirement_name": "O2分压",
+      "dictionary_codes": [
+        "2300201A"
+      ],
+      "dictionary_names": [
+        "氧分压测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "全血"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-042",
+      "requirement_name": "免疫球蛋白G",
+      "dictionary_codes": [
+        "1101804A"
+      ],
+      "dictionary_names": [
+        "免疫球蛋白G测定"
+      ],
+      "identity_aliases": [
+        "IgG"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-043",
+      "requirement_name": "免疫球蛋白A",
+      "dictionary_codes": [
+        "1102004A"
+      ],
+      "dictionary_names": [
+        "免疫球蛋白A测定"
+      ],
+      "identity_aliases": [
+        "IgA"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-044",
+      "requirement_name": "免疫球蛋白M",
+      "dictionary_codes": [
+        "1101904A"
+      ],
+      "dictionary_names": [
+        "免疫球蛋白M测定"
+      ],
+      "identity_aliases": [
+        "IgM"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-045",
+      "requirement_name": "补体C3",
+      "dictionary_codes": [
+        "1102404A"
+      ],
+      "dictionary_names": [
+        "补体3测定"
+      ],
+      "identity_aliases": [
+        "补体3",
+        "C3"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-046",
+      "requirement_name": "补体C4",
+      "dictionary_codes": [
+        "1102504A"
+      ],
+      "dictionary_names": [
+        "补体4测定"
+      ],
+      "identity_aliases": [
+        "补体4",
+        "C4"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-047",
+      "requirement_name": "C-反应蛋白",
+      "dictionary_codes": [
+        "1101405A"
+      ],
+      "dictionary_names": [
+        "C反应蛋白测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "全血",
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-048",
+      "requirement_name": "类风湿因子",
+      "dictionary_codes": [
+        "1102604A"
+      ],
+      "dictionary_names": [
+        "类风湿因子测定"
+      ],
+      "identity_aliases": [
+        "RF"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-049",
+      "requirement_name": "抗链球菌溶血素O",
+      "dictionary_codes": [
+        "1101704A"
+      ],
+      "dictionary_names": [
+        "抗链球菌溶血素O测定"
+      ],
+      "identity_aliases": [
+        "ASO"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-050",
+      "requirement_name": "前白蛋白",
+      "dictionary_codes": [
+        "1102904A"
+      ],
+      "dictionary_names": [
+        "前白蛋白测定"
+      ],
+      "identity_aliases": [
+        "PA"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-051",
+      "requirement_name": "游离三碘甲状腺原氨酸",
+      "dictionary_codes": [
+        "1200904A"
+      ],
+      "dictionary_names": [
+        "游离三碘甲状腺原氨酸测定"
+      ],
+      "identity_aliases": [
+        "FT3"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-052",
+      "requirement_name": "总三碘甲状腺原氨酸",
+      "dictionary_codes": [
+        "1200704A"
+      ],
+      "dictionary_names": [
+        "三碘甲状腺原氨酸测定"
+      ],
+      "identity_aliases": [
+        "T3",
+        "总T3"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-053",
+      "requirement_name": "游离甲状腺素",
+      "dictionary_codes": [
+        "1201004A"
+      ],
+      "dictionary_names": [
+        "游离甲状腺素测定"
+      ],
+      "identity_aliases": [
+        "FT4"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-054",
+      "requirement_name": "总甲状腺素",
+      "dictionary_codes": [
+        "1200804A"
+      ],
+      "dictionary_names": [
+        "甲状腺素测定"
+      ],
+      "identity_aliases": [
+        "T4",
+        "总T4"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-055",
+      "requirement_name": "促甲状腺刺激激素",
+      "dictionary_codes": [
+        "1200604A"
+      ],
+      "dictionary_names": [
+        "促甲状腺激素测定"
+      ],
+      "identity_aliases": [
+        "促甲状腺激素",
+        "TSH"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-056",
+      "requirement_name": "皮质醇",
+      "dictionary_codes": [
+        "1202104A"
+      ],
+      "dictionary_names": [
+        "皮质醇测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-057",
+      "requirement_name": "雌二醇",
+      "dictionary_codes": [
+        "1201504A"
+      ],
+      "dictionary_names": [
+        "雌二醇测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-058",
+      "requirement_name": "卵泡刺激素",
+      "dictionary_codes": [
+        "1200204A"
+      ],
+      "dictionary_names": [
+        "卵泡刺激素测定"
+      ],
+      "identity_aliases": [
+        "FSH"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 7,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-059",
+      "requirement_name": "黄体生成素",
+      "dictionary_codes": [
+        "1200104A"
+      ],
+      "dictionary_names": [
+        "促黄体生成素测定"
+      ],
+      "identity_aliases": [
+        "促黄体生成素",
+        "LH"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 8,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-060",
+      "requirement_name": "孕酮",
+      "dictionary_codes": [
+        "1201304A"
+      ],
+      "dictionary_names": [
+        "孕酮测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 8,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-061",
+      "requirement_name": "催乳素",
+      "dictionary_codes": [
+        "1200404A"
+      ],
+      "dictionary_names": [
+        "泌乳素测定"
+      ],
+      "identity_aliases": [
+        "泌乳素",
+        "PRL"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 8,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-062",
+      "requirement_name": "睾酮",
+      "dictionary_codes": [
+        "1201404A"
+      ],
+      "dictionary_names": [
+        "睾酮测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 8,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-063",
+      "requirement_name": "C-肽",
+      "dictionary_codes": [
+        "1202004A"
+      ],
+      "dictionary_names": [
+        "C肽测定"
+      ],
+      "identity_aliases": [
+        "C肽"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 8,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-064",
+      "requirement_name": "胰岛素",
+      "dictionary_codes": [
+        "1201904A"
+      ],
+      "dictionary_names": [
+        "胰岛素测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 8,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-065",
+      "requirement_name": "叶酸",
+      "dictionary_codes": [
+        "1901504A"
+      ],
+      "dictionary_names": [
+        "维生素B9测定"
+      ],
+      "identity_aliases": [
+        "维生素B9"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 8,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-066",
+      "requirement_name": "维生素B12",
+      "dictionary_codes": [
+        "1901604A"
+      ],
+      "dictionary_names": [
+        "维生素B12测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 8,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-067",
+      "requirement_name": "甲状腺球蛋白",
+      "dictionary_codes": [
+        "1100604A"
+      ],
+      "dictionary_names": [
+        "甲状腺球蛋白测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 8,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-068",
+      "requirement_name": "甲状旁腺激素",
+      "dictionary_codes": [
+        "1201204A"
+      ],
+      "dictionary_names": [
+        "甲状旁腺激素测定"
+      ],
+      "identity_aliases": [
+        "PTH"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 8,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-069",
+      "requirement_name": "总前列腺特异抗原",
+      "dictionary_codes": [
+        "1600404A"
+      ],
+      "dictionary_names": [
+        "前列腺特异性抗原测定"
+      ],
+      "identity_aliases": [
+        "总前列腺特异性抗原",
+        "前列腺特异性抗原",
+        "总PSA",
+        "tPSA"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 8,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-070",
+      "requirement_name": "游离前列腺特异抗原",
+      "dictionary_codes": [
+        "1600304A"
+      ],
+      "dictionary_names": [
+        "游离前列腺特异性抗原测定"
+      ],
+      "identity_aliases": [
+        "游离前列腺特异性抗原",
+        "fPSA"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 8,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-071",
+      "requirement_name": "癌胚抗原",
+      "dictionary_codes": [
+        "1600204A"
+      ],
+      "dictionary_names": [
+        "癌胚抗原测定"
+      ],
+      "identity_aliases": [
+        "CEA"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 8,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-072",
+      "requirement_name": "甲胎蛋白",
+      "dictionary_codes": [
+        "1600104A"
+      ],
+      "dictionary_names": [
+        "甲胎蛋白测定"
+      ],
+      "identity_aliases": [
+        "AFP"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 8,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-073",
+      "requirement_name": "糖链抗原19-9",
+      "dictionary_codes": [
+        "1600804A"
+      ],
+      "dictionary_names": [
+        "糖链抗原19-9测定"
+      ],
+      "identity_aliases": [
+        "CA19-9"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 8,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-074",
+      "requirement_name": "糖链抗原125",
+      "dictionary_codes": [
+        "1600604A"
+      ],
+      "dictionary_names": [
+        "糖链抗原125测定"
+      ],
+      "identity_aliases": [
+        "CA125"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 8,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-075",
+      "requirement_name": "糖链抗原15-3",
+      "dictionary_codes": [
+        "1600704A"
+      ],
+      "dictionary_names": [
+        "糖链抗原15-3测定"
+      ],
+      "identity_aliases": [
+        "CA15-3"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 8,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-076",
+      "requirement_name": "β2-微球蛋白",
+      "dictionary_codes": [
+        "1100902A"
+      ],
+      "dictionary_names": [
+        "β-微球蛋白测定2"
+      ],
+      "identity_aliases": [
+        "β2微球蛋白",
+        "β2-微球蛋白测定",
+        "β2微球蛋白测定",
+        "β-微球蛋白测定2"
+      ],
+      "reviewed_specimens": [
+        "血清"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 8,
+      "mapping_note": "名称目录的β下标2排在名称末尾；仅明确映射血清代码1100902A，不将尿液代码1100910A一并映射。"
+    },
+    {
+      "requirement_id": "wst403-2024-077",
+      "requirement_name": "铁蛋白",
+      "dictionary_codes": [
+        "1102804A"
+      ],
+      "dictionary_names": [
+        "铁蛋白测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 8,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-078",
+      "requirement_name": "糖链抗原72-4",
+      "dictionary_codes": [
+        "1600504A"
+      ],
+      "dictionary_names": [
+        "糖链抗原72-4测定"
+      ],
+      "identity_aliases": [
+        "CA72-4"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 8,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-079",
+      "requirement_name": "细胞角蛋白19片段",
+      "dictionary_codes": [
+        "1601504A"
+      ],
+      "dictionary_names": [
+        "细胞角蛋白19片段测定"
+      ],
+      "identity_aliases": [
+        "CYFRA21-1"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 8,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-080",
+      "requirement_name": "特异性神经元烯醇酶",
+      "dictionary_codes": [
+        "1601604A"
+      ],
+      "dictionary_names": [
+        "神经元特异性烯醇化酶测定"
+      ],
+      "identity_aliases": [
+        "神经元特异性烯醇化酶",
+        "神经元特异性烯醇酶",
+        "NSE"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 8,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-081",
+      "requirement_name": "鳞状细胞癌抗原",
+      "dictionary_codes": [
+        "1601104A"
+      ],
+      "dictionary_names": [
+        "鳞状细胞癌抗原测定"
+      ],
+      "identity_aliases": [
+        "SCC"
+      ],
+      "reviewed_specimens": [
+        "血清",
+        "血浆"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 8,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst403-2024-082",
+      "requirement_name": "葡萄糖（便携式血糖仪）",
+      "dictionary_codes": [],
+      "dictionary_names": [],
+      "identity_aliases": [
+        "便携式血糖仪葡萄糖",
+        "葡萄糖便携式血糖仪",
+        "床旁血糖",
+        "指尖血糖"
+      ],
+      "reviewed_specimens": [
+        "全血"
+      ],
+      "source_clause": "附录 A 表 A.1",
+      "source_page": 8,
+      "mapping_note": "现有296项名称目录无独立便携式血糖仪项目；用明确项目名称识别，并须核对便携式血糖仪方法。普通葡萄糖项目不自动代入。"
+    },
+    {
+      "requirement_id": "wst406-2024-wbc",
+      "requirement_name": "白细胞计数",
+      "dictionary_codes": [
+        "0100101A"
+      ],
+      "dictionary_names": [
+        "白细胞计数"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "全血"
+      ],
+      "source_clause": "6.4 表5；6.6 表6；6.9 表9",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst406-2024-rbc",
+      "requirement_name": "红细胞计数",
+      "dictionary_codes": [
+        "0100201A"
+      ],
+      "dictionary_names": [
+        "红细胞计数"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "全血"
+      ],
+      "source_clause": "6.4 表5；6.6 表6；6.9 表9",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst406-2024-hb",
+      "requirement_name": "血红蛋白",
+      "dictionary_codes": [
+        "0100401A"
+      ],
+      "dictionary_names": [
+        "血红蛋白测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "全血"
+      ],
+      "source_clause": "6.4 表5；6.6 表6；6.9 表9",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst406-2024-hct",
+      "requirement_name": "血细胞比容",
+      "dictionary_codes": [
+        "0100501A"
+      ],
+      "dictionary_names": [
+        "血细胞比容测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "全血"
+      ],
+      "source_clause": "6.4 表5；6.6 表6；6.9 表9",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst406-2024-plt",
+      "requirement_name": "血小板计数",
+      "dictionary_codes": [
+        "0100301A"
+      ],
+      "dictionary_names": [
+        "血小板计数"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "全血"
+      ],
+      "source_clause": "6.4 表5；6.6 表6；6.9 表9",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst406-2024-mcv",
+      "requirement_name": "平均红细胞体积",
+      "dictionary_codes": [
+        "0100601A"
+      ],
+      "dictionary_names": [
+        "平均红细胞体积测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "全血"
+      ],
+      "source_clause": "6.4 表5；6.6 表6；6.9 表9",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst406-2024-mch",
+      "requirement_name": "平均红细胞血红蛋白含量",
+      "dictionary_codes": [
+        "0100701A"
+      ],
+      "dictionary_names": [
+        "平均红细胞血红蛋白含量测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "全血"
+      ],
+      "source_clause": "6.4 表5；6.6 表6；6.9 表9",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst406-2024-mchc",
+      "requirement_name": "平均红细胞血红蛋白浓度",
+      "dictionary_codes": [
+        "0100801A"
+      ],
+      "dictionary_names": [
+        "平均红细胞血红蛋白浓度测定"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "全血"
+      ],
+      "source_clause": "6.4 表5；6.6 表6；6.9 表9",
+      "source_page": 6,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst406-2024-pt",
+      "requirement_name": "凝血酶原时间",
+      "dictionary_codes": [
+        "0500103A"
+      ],
+      "dictionary_names": [
+        "凝血酶原时间检测"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血浆"
+      ],
+      "source_clause": "7.2 表11；7.5；7.6 表12",
+      "source_page": 10,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst406-2024-aptt",
+      "requirement_name": "活化部分凝血活酶时间",
+      "dictionary_codes": [
+        "0500203A"
+      ],
+      "dictionary_names": [
+        "活化部分凝血活酶时间检测"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血浆"
+      ],
+      "source_clause": "7.2 表11；7.5；7.6 表12",
+      "source_page": 10,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst406-2024-fib",
+      "requirement_name": "纤维蛋白原",
+      "dictionary_codes": [
+        "0500403A"
+      ],
+      "dictionary_names": [
+        "纤维蛋白原检测"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血浆"
+      ],
+      "source_clause": "7.2 表11；7.5；7.6 表12",
+      "source_page": 10,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    },
+    {
+      "requirement_id": "wst406-2024-tt",
+      "requirement_name": "凝血酶时间",
+      "dictionary_codes": [
+        "0500303A"
+      ],
+      "dictionary_names": [
+        "凝血酶时间检测"
+      ],
+      "identity_aliases": [],
+      "reviewed_specimens": [
+        "血浆"
+      ],
+      "source_clause": "7.2 表11；7.5；7.6 表12",
+      "source_page": 10,
+      "mapping_note": "按检测对象及明确结果种类逐条核对；名称代码仅供内部身份识别，不作为质量限值来源。"
+    }
+  ]
+}

@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pandas as pd
 import streamlit as st
+from services.search_service import fuzzy_match, SEARCH_HELP
 
 from services.material_workflow_service import concentration_label, material_label
 from services.project_config_service import QC_METHOD_LABELS
@@ -277,7 +278,7 @@ def render_qc_lifecycle_workspace():
     notice = st.session_state.pop('qc_lifecycle_notice', None)
     if notice:
         st.success(notice)
-    st.caption('用于同一质控品的新旧批同时检测及使用状态管理。各批数据分别查看，专门的比对图表和报告尚未提供。更换质控品产品请另建项目。')
+    st.caption('在此登记同一质控品新旧批号的验证结果和使用状态。请分别查看各批检测数据，依据实验室的比对记录确认；此处不生成比对结论或比对报告。更换质控品产品请另建项目。')
     rows = list_qc_lifecycle_configs()
     settings = st.session_state.setdefault('qc_lifecycle_filters', {})
     projects = {row['template_id']: row['template_name'] for row in rows}
@@ -287,14 +288,14 @@ def render_qc_lifecycle_workspace():
     if st.session_state['qc_lifecycle_project'] not in projects:
         st.session_state['qc_lifecycle_project'] = None
     left, right = st.columns(2)
-    query = left.text_input('搜索项目、批次或质控品批号', key='qc_lifecycle_search')
+    query = left.text_input('搜索项目、批次或质控品批号', key='qc_lifecycle_search', help=SEARCH_HELP)
     project = right.selectbox('项目', [None] + list(projects), key='qc_lifecycle_project', placeholder='全部项目',
         format_func=lambda value: '全部项目' if value is None else projects[value])
     settings.update(qc_lifecycle_search=query, qc_lifecycle_project=project)
     if project is not None:
         rows = [row for row in rows if row['template_id'] == project]
     if query.strip():
-        rows = [row for row in rows if query.strip().casefold() in ' '.join(str(row[field]) for field in ('template_name', 'config_name', 'material_summary')).casefold()]
+        rows = [row for row in rows if fuzzy_match(query, *(row[field] for field in ('template_name', 'config_name', 'material_summary')))]
     config_id = _table(rows, {'template_name': '项目', 'config_name': '批次', 'material_summary': '质控品浓度水平及批号'}, 'qc_lifecycle_config_id')
     if config_id is None:
         st.info('请选择批次，查看检验项目及批号使用情况。')
@@ -321,7 +322,7 @@ def render_qc_lifecycle_workspace():
                          'method_label': QC_METHOD_LABELS.get(binding['qc_method'], '即时法'),
                          'lot_summary': '；'.join(material_label(level) for level in source.get('levels', []))})
     if not bindings:
-        st.info('此批次尚未接入工作台，请先打开批次设置核对并确认。')
+        st.info('此批次尚不能录入检测结果，请先打开批次设置完成核对并确认。')
         return
     selected = _table(bindings, {'test_item_name': '检验项目', 'method_label': '质控方法', 'lot_summary': '各水平实际质控品'}, 'qc_lifecycle_binding_id')
     if selected is not None:

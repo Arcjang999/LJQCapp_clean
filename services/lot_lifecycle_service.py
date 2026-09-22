@@ -396,7 +396,7 @@ def change_qc_lot(*, source_config_id, target_qc_lot_id, template_item_ids, oper
             old_binding=c.execute('''SELECT b.* FROM qc_workbench_bindings b WHERE b.lot_config_id=?
                 AND b.project_template_item_id=?''',(source_config_id,item['source_template_item_id'])).fetchone()
             if old_binding is None:
-                raise ValueError('来源检测项需先接入工作台。')
+                raise ValueError('请先确认来源批次，再为该检验项目换批。')
             old_source,_,_=source_context(c,old_binding['qc_method'],old_binding['runtime_batch_id'])
             event=c.execute('''INSERT INTO qc_lot_change_events(system_id,template_item_id,event_type,previous_id,next_id,effective_at,reason,operator,details_json)
                 VALUES(?,?,'qc',?,?,?,?,?,?)''',(old_source['system_id'],item['source_template_item_id'],source['qc_material_lot_id'],target_qc_lot_id,
@@ -421,7 +421,7 @@ def set_qc_usage_state(*, lot_config_item_id, state, effective_at, operator, rea
     with atomic_write() as c:
         binding=c.execute('SELECT * FROM qc_workbench_bindings WHERE lot_config_item_id=?',(lot_config_item_id,)).fetchone()
         if binding is None:
-            raise ValueError('该配置尚未接入工作台。')
+            raise ValueError('请先确认本批次设置，再调整使用状态。')
         source,_,_=source_context(c,binding['qc_method'],binding['runtime_batch_id'])
         confirmed_verifications={}
         if state=='active':
@@ -685,7 +685,7 @@ def create_level_combination(*,source_batch_id,level_ids,verification_ids,operat
     operator=_required(operator,'操作者');reason=_required(reason,'水平换批依据')
     with atomic_write() as c:
         source,binding,_=source_context(c,'zscore',source_batch_id)
-        if binding is None:raise ValueError('请选择新版多水平配置。')
+        if binding is None:raise ValueError('请从项目中选择已确认的多水平批次。')
         old_levels=source['levels']
         if len(level_ids)!=len(old_levels) or len(set(level_ids))!=len(level_ids):raise ValueError('请选择完整且不重复的水平组合。')
         old_ids=[l['qc_level_id'] for l in old_levels]

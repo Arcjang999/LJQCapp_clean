@@ -193,6 +193,7 @@ def _project_items_export_dataframe(template_id: int) -> pd.DataFrame:
 def _quality_review_export_sheets(items: pd.DataFrame) -> list[tuple[str, pd.DataFrame]]:
     """Export frozen readable evidence, never an importable authorization token."""
     from services.quality_target_service import decode
+    from services.quality_applicability_service import CONTEXT_OPTIONS, CONTEXT_LABELS
 
     review_rows = []
     candidate_rows = []
@@ -201,6 +202,9 @@ def _quality_review_export_sheets(items: pd.DataFrame) -> list[tuple[str, pd.Dat
         goal = decode(item.get('quality_goal_json'))
         spec = goal.get('spec', {})
         recorded = review.get('recorded', {})
+        conditions = '；'.join(CONTEXT_LABELS.get(k,k)+'：'+CONTEXT_OPTIONS.get(k,{}).get(v,str(v))
+                              for k,v in review.get('context',{}).items())
+        search = review.get('search_record',{})
         state = {'confirmed': '已确认', 'pending': '待重新确认'}.get(review.get('status'),
             '按原确认记录使用' if goal and not goal.get('pending') else '未确认')
         content = recorded.get('requirement_text', '')
@@ -224,6 +228,9 @@ def _quality_review_export_sheets(items: pd.DataFrame) -> list[tuple[str, pd.Dat
             '确认人': review.get('confirmed_by') or goal.get('confirmed_by', ''),
             '确认时间': review.get('reviewed_at') or goal.get('adopted_at', ''),
             '适用依据': review.get('evidence') or goal.get('evidence', ''),
+            '结构化适用条件': conditions,
+            '标准查找复核': '；'.join(str(search.get(k,'')) for k in ('query','official_url','checked_on','conclusion','rationale')) if search else '',
+            '实验室更严CV': goal.get('supplement',{}).get('cv',''),
             '用途说明': '供查阅；本表不参与导入，导入后请重新确认质量目标。',
         })
         for candidate in review.get('candidates', []):
@@ -237,11 +244,17 @@ def _quality_review_export_sheets(items: pd.DataFrame) -> list[tuple[str, pd.Dat
                 '确认人': review.get('confirmed_by', ''),
                 '确认时间': review.get('reviewed_at', ''),
             })
+        for source in review.get('registered_standards', []):
+            candidate_rows.append({'检验项目':_text(item['test_item_name']),
+                '输入值类型':INPUT_VALUE_TYPE_LABELS.get(_text(item['input_value_type']),''),
+                '标准名称及版本':source['standard']+' / '+source['version'],
+                '适用情况':'补充登记，未自动评价','说明':source['source_clause']+'；'+source['requirement_text'],
+                '核对状态':state,'确认人':source['verified_by'],'确认时间':source['checked_on']})
     return [
         ('质量目标（供查阅）', pd.DataFrame(review_rows, columns=[
             '检验项目', '输入值类型', '单位', '方法学', '核对状态', '来源类型', '来源名称',
             '来源版本或编号', '要求内容', '来源条款', '适用范围', '来源实施日期', '确认人',
-            '确认时间', '适用依据', '用途说明'])),
+            '确认时间', '适用依据', '结构化适用条件', '标准查找复核', '实验室更严CV', '用途说明'])),
         ('标准适用情况（供查阅）', pd.DataFrame(candidate_rows, columns=[
             '检验项目', '输入值类型', '标准名称及版本', '适用情况', '说明', '核对状态', '确认人', '确认时间'])),
     ]

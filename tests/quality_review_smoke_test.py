@@ -16,6 +16,14 @@ from services.quality_target_service import (adopt_requirement, clear_requiremen
     item_context, validate_lot_goal)
 from services.quality_review_service import (save_recorded_requirement, standard_candidates,
     validate_project_quality, runtime_review)
+from tests.quality_review_fixtures import fixture_conditions
+
+_adopt_requirement = adopt_requirement
+
+
+def adopt_requirement(scope, item_id, requirement_id, **kwargs):
+    return _adopt_requirement(scope, item_id, requirement_id,
+        **fixture_conditions(item_context(scope,item_id),clinical=True), **kwargs)
 
 
 def draft_fixture(mode='raw', candidate=False):
@@ -34,6 +42,8 @@ def record(scope, item_id, **overrides):
     kwargs = dict(source_name='本实验室 SOP', source_version='QC-SOP-2026-01',
                   requirement_text='按本检测系统的质控材料说明书建立并确认控制参数。',
                   confirmed_by='验收确认人', evidence='已逐项核对检测对象、方法学、输入尺度和适用范围。')
+    item=item_context(scope,item_id)
+    kwargs.update(fixture_conditions(item,clinical=bool(standard_candidates(item)) and item['input_value_type']=='raw'))
     kwargs.update(overrides)
     return save_recorded_requirement(scope, item_id, **kwargs)
 
@@ -65,7 +75,7 @@ def test_name_candidate_requires_adoption_or_specific_exclusion_and_cannot_clear
         fixture, project_item = draft_fixture(candidate=True)
         candidates = standard_candidates(item_context('project', project_item))
         assert [row['id'] for row in candidates] == ['wst403-2024-047']
-        rejected(lambda: record('project', project_item), '不适用原因')
+        rejected(lambda: record('project', project_item), '必须采用')
         goal = adopt_requirement('project', project_item, 'wst403-2024-047',
                                 confirmed_by='验收', evidence='CRP，免疫比浊，mg/L；按适用范围采用。')
         assert goal['spec']['standard'] == 'WS/T 403—2024'
@@ -74,9 +84,9 @@ def test_name_candidate_requires_adoption_or_specific_exclusion_and_cannot_clear
         assert not validate_project_quality(project_item)
         clear_requirement('project', project_item)
         rejected(lambda: activate_project_template(fixture['template_id']), '质量目标待确认')
-        # A same-name candidate is not automatically an applicable standard.
-        record('project', project_item, exclusions={'wst403-2024-047':
-            '当前为研究用非血液基质材料；标准的临床样本和分析质量范围不适用，采用所列验证方案。'})
+        rejected(lambda:record('project',project_item,exclusions={'wst403-2024-047':'不想采用'}),'必须采用')
+        # An explicitly different use requires structured conditions and a search record.
+        record('project',project_item,**fixture_conditions(item_context('project',project_item),clinical=False))
         assert not validate_project_quality(project_item)
 
 
@@ -86,7 +96,7 @@ def test_ct_and_log_record_sources_without_inventing_cv_or_using_concentration_r
             fixture, project_item = draft_fixture(mode, candidate=True)
             rejected(lambda: adopt_requirement('project', project_item, 'wst403-2024-047',
                      confirmed_by='验收', evidence='同名'), 'Ct 或 log')
-            rejected(lambda: record('project', project_item), '不适用原因')
+            rejected(lambda: record('project', project_item,search_record=None), '目录尚未收录')
             reviewed = record('project', project_item, exclusions={'wst403-2024-047':
                 f'本配置使用 {mode} 输入尺度，不能套用目录的浓度尺度允许不精密度。'})
             assert reviewed['decision'] == 'record_only'
@@ -103,7 +113,7 @@ def test_method_change_or_goal_tampering_invalidates_review():
         with get_connection() as connection:
             connection.execute("UPDATE qc_project_template_items SET quality_goal_json='{}' WHERE id=?", (project_item,))
         assert any('质量目标已修改' in error for error in validate_project_quality(project_item))
-        record('project', project_item, exclusions={'wst403-2024-047':'研究基质不属于条款范围，采用研究方案。'})
+        record('project',project_item,**fixture_conditions(item_context('project',project_item),clinical=False))
         with get_connection() as connection:
             connection.execute("UPDATE qc_project_template_items SET input_value_type='ct' WHERE id=?", (project_item,))
         assert any('已修改' in error for error in validate_project_quality(project_item))
@@ -145,6 +155,14 @@ def test_record_only_form_retains_invalid_submission_then_saves():
         fixture, project_item = draft_fixture('ct')
         app = AppTest.from_string(f"from ui.quality_targets import render_adoption\nrender_adoption('project', {project_item})", default_timeout=30).run()
         prefix = f'quality_project_{project_item}'
+        app.selectbox(key=prefix+'_context_technique').set_value('clinical_chemistry')
+        app.selectbox(key=prefix+'_context_result_kind').set_value('quantitative')
+        app.selectbox(key=prefix+'_context_purpose').set_value('research')
+        app.text_input(key=prefix+'_context_specimen').set_value('隔离测试基质')
+        app.text_input(key=prefix+'_search_query').set_value('仅限合成测试用途')
+        app.text_input(key=prefix+'_search_url').set_value('https://www.nhc.gov.cn/wjw/s9492/wsbz.shtml')
+        app.selectbox(key=prefix+'_search_conclusion').set_value('no_applicable')
+        app.text_area(key=prefix+'_search_rationale').set_value('本合成项目非临床用途，测试方案独立规定。')
         app.text_input(key=prefix+'_source_name').set_value('页面验收 SOP')
         app.text_input(key=prefix+'_source_version').set_value('UI-001')
         app.text_area(key=prefix+'_recorded_text').set_value('Ct尺度试剂说明书要求')

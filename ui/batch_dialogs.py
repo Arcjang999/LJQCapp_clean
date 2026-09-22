@@ -205,7 +205,8 @@ def _render_quality(state, current):
             st.error(str(error))
         prefix = _quality_prefix(state['item_id'])
         state['quality_values'] = {key: st.session_state[key] for key in st.session_state
-                                   if key.startswith(prefix) and key != prefix + 'adopt'}
+                                   if key.startswith(prefix) and key not in
+                                   (prefix + 'adopt', prefix + 'save_pending')}
         state.setdefault('quality_initial', dict(state['quality_values']))
     if st.button('取消' if current['editable'] else '关闭', key='batch_quality_close', width='stretch'):
         if state.get('quality_values', {}) != state.get('quality_initial', {}):

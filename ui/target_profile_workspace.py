@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pandas as pd
 import streamlit as st
+from services.search_service import fuzzy_match, SEARCH_HELP
 
 from services.cv_service import calculate_cv_percent
 from services.project_config_service import QC_METHOD_LABELS
@@ -159,7 +160,7 @@ def render_target_profile_workspace():
     if notice:
         st.success(notice)
     left, right = st.columns([2, 1])
-    query = left.text_input('搜索检验项目、仪器或批号', key='target_profile_search',
+    query = left.text_input('搜索检验项目、仪器或批号', key='target_profile_search', help=SEARCH_HELP,
         on_change=_filter_changed, args=('target_profile_search',))
     project_id = right.selectbox('项目', [None] + list(projects), key='target_profile_project',
         placeholder='全部项目',
@@ -178,7 +179,7 @@ def render_target_profile_workspace():
             '可调整': '是' if context['editable'] else '仅供查询'}
         if project_id is not None and context['template']['id'] != project_id:
             continue
-        if query.strip() and query.strip().casefold() not in ' '.join(row[field] for field in ('项目', '检验项目', '仪器', '批号')).casefold():
+        if not fuzzy_match(query, *(row[field] for field in ('项目', '检验项目', '仪器', '批号'))):
             continue
         selected_contexts.append(context)
         rows.append(row)

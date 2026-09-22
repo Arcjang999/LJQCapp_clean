@@ -1,6 +1,6 @@
 # 实验室室内质控工作台使用说明
 
-## 当前版本与使用入口（2026-09-21）
+## 当前版本与使用入口（2026-09-22）
 
 这是本地单机室内质控工作台。新版从首页选择项目，再选择检验项目和批次进入业务工作台；基础资料、项目、批次、换批和参数管理采用列表、详情及操作弹窗。支持单水平（LJ）、多水平法，以及单水平内的即时法；同一项目可混合不同质控方法和方法学。
 
@@ -13,19 +13,21 @@
 5. 换批、参数调整与试剂使用记录更正在“项目/批次管理 → 批号使用与追溯”办理；原检测及历史判读保留。
 6. 项目停用位于“编辑项目”，须两次确认。管理弹窗明确保存才提交；取消可继续填写或放弃。月报、报告历史和系统设置中的备份继续使用。
 
-当前内置 94 条质量要求来自 WS/T 403—2024（包括部分免疫项目）和 WS/T 406—2024（血液/凝血）。它们是卫生行业标准，不能全部称作国家标准。当前已有来源确认和不适用依据记录；**分子、定性免疫等更多标准及更严格的适用条件必选校验尚待开发**，不能把本次说明更新理解为已扩充运行目录。
+任务 0 已按用户反馈重新核查并修正。“质量目标 → 分析质量要求”只展示现行依据，分为“检验项目要求”和“通用质控要求”；可直接查找 HBV DNA、HCV RNA、HIV-1 RNA 等具体分子项目，并核对适用方法。HCV与HIV-1 RNA另关联中国CDC专项要求；HIV-1 RNA定量须使用Log10结果。94 条数值要求继续保留，真实内置项目名称与标准的对应关系已补齐；分子项目关联方法与对照要求，不伪造通用 CV。废止、未生效版本及参考区间不进入当前质量要求目录。全软件业务搜索继续支持模糊匹配，采用标准仍须准确核对项目、方法、基质、尺度和单位。偏差、修正与证据见 [本轮复核记录](docs/task_00_reaudit_2026_09_22.md)。
 
 ## 下一步开发
 
-1. 优先完成 [分子、免疫等标准扩展与适用标准必选](docs/task_00_standards_expansion.md)：明确适用的现行标准必须关联并采用，无适用条目才记录实验室要求；按检测方法、结果尺度、单位和浓度条件核对，不能只按名称或分组套用。
-2. 完成整条业务流程、2880×1800 @ 200% 等环境和打包后运行验收；核心计算保持不变。
+后续开发已细化为[独立执行卡](docs/execution/README.md)，配有[逐卡规则](docs/execution/EXECUTION_RULES.md)和[进度表](docs/execution/STATUS.md)。每次指定一张卡，按范围和案例验收后停止；本轮只改任务书，未开始后续功能实现。下列为阶段背景，具体执行以卡片为准。
+
+1. 保留任务 0 与搜索改动，先读 [本轮复核记录](docs/task_00_reaudit_2026_09_22.md)。此前“101 条目录”和 29 组回归是旧轮次记录，本轮另补真实内置项目、基质及现行目录验证；不以目录行数代表标准覆盖完成度。
+2. 发布前补充目标 Windows 安装环境、2880×1800 @ 200% 及完整人工业务链验收；本机服务包验证不替代这些环境检查。
 3. 依次继续 [任务 1：失控处理与报告](docs/task_01_out_of_control_reports.md)、[任务 2：今日总览与多项目录入](docs/task_02_daily_workbench.md)、[任务 3：换批比对与批量月报](docs/task_03_comparisons_and_monthly_reports.md)。这三项主体尚未开发。
 
-已完成的改造与证据： [首版流程](docs/ui_workflow_trial_implementation.md) → [批次弹窗](docs/batch_dialog_workflow_implementation.md) → [基础资料](docs/master_data_dialog_workflow_implementation.md) → [质控品换批与参数](docs/lot_lifecycle_dialog_workflow_implementation.md) → [试剂与历史更正](docs/reagent_dialog_workflow_implementation.md)。前一步 23 套相关隔离测试及实际浏览器操作通过；特定高缩放和新安装包尚未验收。
+已完成的改造与证据： [首版流程](docs/ui_workflow_trial_implementation.md) → [批次弹窗](docs/batch_dialog_workflow_implementation.md) → [基础资料](docs/master_data_dialog_workflow_implementation.md) → [质控品换批与参数](docs/lot_lifecycle_dialog_workflow_implementation.md) → [试剂与历史更正](docs/reagent_dialog_workflow_implementation.md) → [任务 0 与全软件模糊搜索](docs/task_00_implementation.md)。各阶段的通过结果按对应环境理解。
 
 交付分支：[`codex/project-workflow-alignment`](https://github.com/Arcjang999/LJQCapp_clean/tree/codex/project-workflow-alignment)，远端仓库为 `Arcjang999/LJQCapp_clean`。功能基线 [`7ac92c6`](https://github.com/Arcjang999/LJQCapp_clean/commit/7ac92c65d7c775ced9209fb6b84a82bbd2932a7f) 已推送，之后为交接文档整理提交；准确最新提交以 Git 记录为准。数据库、备份、参考手册和本地验收输出不纳入源码提交。
 
-**试剂换批和历史事件更正弹窗已完成，不再作为下一开发项。** 新 session 先按 `AGENTS.md` 阅读，再读 [最新交接及可复制的接手说明](docs/DEVELOPMENT_HANDOFF.md) 和 [下一步任务](docs/NEXT_SESSION_TASKS.md)。本机运行方式见交接说明；8504 是独立演示库，服务状态需现场核查。
+**试剂换批和历史事件更正弹窗已完成，不再作为下一开发项。** 新 session 先按 `AGENTS.md` 阅读，再读 [最新交接及可复制的接手说明](docs/DEVELOPMENT_HANDOFF.md) 和 [下一步任务](docs/NEXT_SESSION_TASKS.md)。本机运行方式见交接说明；旧打包进程已关闭，8505 当前为本轮最新源码隔离预览，使用 `output/task00-reaudit-2026-09-22/preview/preview.db`。接手仍须核对实际进程、入口版本和数据库。
 
 ## 历史开发记录
 

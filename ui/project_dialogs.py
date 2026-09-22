@@ -71,7 +71,7 @@ def _choice(ctx, field, label, frame, label_fields, *, disabled=False, optional=
     key = _key(ctx, field)
     if st.session_state[key] not in [None, *rows]:
         st.session_state[key] = None
-    ctx['draft'][field] = st.selectbox(label, [None, *rows], key=key, disabled=disabled,
+    ctx['draft'][field] = st.selectbox(label, [None, *rows], key=key, disabled=disabled, filter_mode='fuzzy',
         placeholder='逐项设置' if optional else '请选择',
         format_func=lambda value: ('逐项设置' if optional else '请选择') if value is None else
         '｜'.join(str(rows[value].get(f) or '') for f in label_fields if rows[value].get(f)))
@@ -246,7 +246,7 @@ def _render_item_form(ctx):
     from services.master_data_service import list_test_items, list_units, list_methods, list_reagents
     st.subheader('编辑检验项目' if ctx['item_id'] else '添加检验项目')
     st.caption(ctx['template_name'])
-    _choice(ctx, 'test_item_id', '检验项目 *', list_test_items(include_disabled=True), ['chinese_name', 'abbreviation'])
+    _choice(ctx, 'test_item_id', '检验项目 *', list_test_items(include_disabled=True), ['chinese_name', 'abbreviation', 'aliases'])
     left, right = st.columns(2)
     with left:
         _choice(ctx, 'method_id', '方法学 *', list_methods(include_disabled=True), ['method_name'])
@@ -261,15 +261,8 @@ def _render_item_form(ctx):
     else:
         ctx['draft']['target_n'] = st.number_input('建立均值和标准差所需数据点数', min_value=5, max_value=20, step=1, key=_key(ctx, 'target_n'))
     if ctx['draft']['test_item_id']:
-        from services.quality_target_service import suggested_requirements
-        records = list_test_items(include_disabled=True)
-        name = records.loc[records.id == ctx['draft']['test_item_id'], 'chinese_name'].iloc[0]
-        candidates = [r for r in suggested_requirements(name) if r['origin'] == 'builtin']
-        if candidates:
-            st.info('可参考的质量标准：' + '；'.join(f"{r['standard']} · {r['name']}" for r in candidates) +
-                    '。保存后请选择适用标准，并核对方法学、单位和适用范围。')
-        else:
-            st.info('暂未查到此检验项目的质量标准。保存后可选择其他适用标准，或填写实验室自定要求及依据。')
+        from ui.quality_applicability import render_draft_standard_preview
+        render_draft_standard_preview(ctx['draft'])
     _text(ctx, 'notes', '备注', multiline=True)
     cancel, save = st.columns(2)
     if cancel.button('取消', key='project_dialog_cancel'):

@@ -42,7 +42,9 @@ def get_requirement(identifier):
 
 def suggested_requirements(name):
     key = normalize_name(name)
-    return [r for r in list_catalog() if key and any(normalize_name(x) == key for x in [r['name'], *r.get('aliases',[])])]
+    from services.quality_applicability_service import catalog_index
+    aliases = catalog_index()['aliases']
+    return [r for r in list_catalog() if key and any(normalize_name(x) == key for x in [r['name'], *r.get('aliases',[]), *aliases.get(r['id'], [])])]
 
 
 def finite_number(value, label, optional=False):
@@ -81,11 +83,16 @@ def item_context(scope, item_id, connection=None):
     if scope not in ('project','lot'): raise ValueError('无法确定要设置质量目标的项目或批次，请重新打开设置。')
     table = 'qc_project_template_items' if scope=='project' else 'qc_lot_config_items'
     def read(c):
-        row=c.execute(f'''SELECT i.*, t.chinese_name AS test_item_name, u.symbol AS unit_symbol
+        row=c.execute(f'''SELECT i.*, t.chinese_name AS test_item_name, t.abbreviation,
+            t.standard_code,t.specimen_type,t.result_type,u.symbol AS unit_symbol,
+            m.method_name,m.method_code,m.principle AS method_principle
             FROM {table} i JOIN md_test_items t ON t.id=i.test_item_id
+            LEFT JOIN md_methods m ON m.id=i.method_id
             LEFT JOIN md_units u ON u.id=i.unit_id WHERE i.id=? AND i.is_disabled=0''',(int(item_id),)).fetchone()
         if row is None: raise ValueError('未找到该检验项目，请重新选择。')
-        return dict(row)
+        item = dict(row)
+        item['test_aliases'] = [r[0] for r in c.execute("SELECT alias_text FROM md_aliases WHERE entity_type='test_item' AND entity_id=? AND is_disabled=0", (item['test_item_id'],))]
+        return item
     if connection is not None:return read(connection)
     with get_connection() as c:return read(c)
 
@@ -112,16 +119,20 @@ def common_cv(goal):
     rules=[v['rule'] for v in goal.get('levels',[])] if goal.get('levels') else goal['spec']['imprecision']
     if rules and all(r['kind']=='cv' and r['operator']=='<=' for r in rules):
         values={r['value'] for r in rules}
-        if len(values)==1:return next(iter(values))
+        if len(values)==1:return goal.get('supplement',{}).get('cv',next(iter(values)))
     return None
 
 
-def adopt_requirement(scope, item_id, requirement_id, *, confirmed_by, evidence, levels=None, exclusions=None):
+def adopt_requirement(scope, item_id, requirement_id, *, confirmed_by, evidence, levels=None, exclusions=None,
+                      context=None, search_record=None, adopted_standard_ids=None,
+                      registered_standards=None, supplemental_cv=None):
     if not str(confirmed_by).strip() or not str(evidence).strip():
         raise ValueError('请填写确认人和适用依据。')
     spec=get_requirement(requirement_id)
     with atomic_write() as c:
         item=item_context(scope,item_id,c);validate_spec_for_item(spec,item)
+        if (context or {}).get('result_scale') not in (None, '', 'concentration'):
+            raise ValueError('该目录数值要求不能用于 Ct、log、定性或 S/CO 信号尺度。')
         goal=dict(spec=spec,unit=item['unit_symbol'],test_item_id=item['test_item_id'],
                   confirmed_by=str(confirmed_by).strip(),evidence=str(evidence).strip(),
                   adopted_at=datetime.now().isoformat(timespec='seconds'),levels=[],pending=scope=='project')
@@ -141,13 +152,24 @@ def adopt_requirement(scope, item_id, requirement_id, *, confirmed_by, evidence,
                     if concentration is None or not (concentration>6 or concentration<1.5):raise ValueError('Fib 异常水平须填写浓度，且 >6 g/L 或 <1.5 g/L。')
                 goal['levels'].append(dict(level_order=row['level_order'],qc_level_id=row['qc_level_id'],concentration=concentration,category=category,rule=selected))
             goal['pending']=False
+        if supplemental_cv is not None:
+            limit=finite_number(supplemental_cv,'实验室更严 CV 要求')
+            rules=[v['rule'] for v in goal['levels']] if goal['levels'] else spec['imprecision']
+            if limit <= 0 or any(r['kind']!='cv' or limit>=r['value'] for r in rules):
+                raise ValueError('补充 CV 必须为正数且严于每个适用的同尺度 CV 限值；SD 要求不能这样比较。')
+            goal['supplement']={'cv':limit,'evidence':str(evidence).strip(), 'unit':'%', 'context':dict(context or {})}
+            for entry in goal['levels']:
+                entry['standard_rule']=dict(entry['rule'])
+                entry['rule']={**entry['rule'],'value':limit,'operator':'<='}
         table='qc_project_template_items' if scope=='project' else 'qc_lot_config_items'
         c.execute(f'UPDATE {table} SET quality_goal_json=?,cv_limit=?,quality_target_source_text=? WHERE id=?',
             (json.dumps(goal,ensure_ascii=False,allow_nan=False),common_cv(goal),source_label(spec),item_id))
         from services.quality_review_service import build_review, save_review
         reviewed_item=item_context(scope,item_id,c)
         review=build_review(c,reviewed_item,source_spec=spec,confirmed_by=confirmed_by,
-                            evidence=evidence,exclusions=exclusions)
+                            evidence=evidence,exclusions=exclusions,context=context,
+                            search_record=search_record,adopted_standard_ids=adopted_standard_ids,
+                            registered_standards=registered_standards)
         save_review(c,scope,item_id,review)
         if scope=='lot':
             from services.project_config_service import _save_snapshot
@@ -179,7 +201,10 @@ def pending_copy(value):
 
 def validate_lot_goal(item_id):
     item=item_context('lot',item_id);goal=decode(item['quality_goal_json'])
-    from services.quality_review_service import validate_quality_review
+    from services.quality_review_service import validate_quality_review, is_frozen_lot
+    with get_connection() as connection:
+        if is_frozen_lot(connection, item):
+            return []
     review_errors=validate_quality_review('lot',item_id)
     if not goal:return review_errors
     try:
@@ -215,7 +240,9 @@ def evaluate_cv(goal,level_order,cv,*,count,days=None):
 
 def batch_quality_summary(method,batch_id,month=None):
     goal=runtime_goal(method,batch_id)
-    if not goal:return {}
+    from services.quality_review_service import runtime_review
+    review=runtime_review(method,batch_id)
+    if not goal:return dict(goal={},review=review,rows=[],period=month or '本批次全部正式期',statistics_scope='仅登记依据，尚无自动评价') if review else {}
     values={r['level_order']:[] for r in goal.get('levels',[])};dates={k:set() for k in values}
     def add(order,value,when):
         if order not in values or (month and not str(when).startswith(month)):return
@@ -241,7 +268,7 @@ def batch_quality_summary(method,batch_id,month=None):
         cv=calculate_cv_percent(data.mean(),data.std(ddof=1)) if len(data)>1 else None
         decision='即时法过渡期，暂不评价正式期 CV' if method=='instant' else evaluate_cv(goal,order,cv,count=len(data),days=len(dates[order]))
         rows.append(dict(level=f'水平 {order}',requirement=requirement_text(entry['rule']),category=entry['category'],concentration=entry['concentration'],count=len(data),days=len(dates[order]),cv=cv,decision=decision))
-    return dict(goal=goal,rows=rows,period=month or '本批次全部正式期',statistics_scope='仅正式期在控结果；Z-score 按整次在控筛选；SD 要求、偏倚和总误差不自动评价')
+    return dict(goal=goal,review=review,rows=rows,period=month or '本批次全部正式期',statistics_scope='仅正式期在控结果；Z-score 按整次在控筛选；SD 要求、偏倚和总误差不自动评价')
 
 
 IMPORT_COLUMNS=['检验项目','来源名称','版本','实施日期','单位','允许不精密度类型','上限','比较符','浓度下限','浓度上限','水平类别','允许偏倚说明','允许总误差说明','来源链接或依据','确认人']

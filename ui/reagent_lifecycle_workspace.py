@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import pandas as pd
 import streamlit as st
+from services.search_service import fuzzy_match, SEARCH_HELP
 
 from services.reagent_lifecycle_edit_service import (
     build_reagent_switch_preview, get_reagent_workspace_context,
@@ -249,7 +250,7 @@ def render_reagent_lifecycle_workspace():
     if st.session_state['reagent_product_filter'] not in products:
         st.session_state['reagent_product_filter'] = None
     left, right = st.columns(2)
-    query = left.text_input('搜索试剂、厂家或批号', key='reagent_search')
+    query = left.text_input('搜索试剂、厂家或批号', key='reagent_search', help=SEARCH_HELP)
     product = right.selectbox('试剂产品', [None, *products], placeholder='全部试剂产品', key='reagent_product_filter',
         format_func=lambda value: '全部试剂产品' if value is None else
         '｜'.join(filter(None,[_text(products[value].get('manufacturer_name')), products[value]['generic_name']])))
@@ -260,8 +261,8 @@ def render_reagent_lifecycle_workspace():
     rows = [row for row in context['all_lots'] if (show_disabled or row['id'] in {x['id'] for x in context['lots']})
             and (product is None or row['reagent_id'] == product)]
     if query.strip():
-        rows = [row for row in rows if query.strip().casefold() in ' '.join(_text(row.get(field)) for field in
-                ('reagent_name','manufacturer_name','lot_no')).casefold()]
+        rows = [row for row in rows if fuzzy_match(query, *(row.get(field) for field in
+                ('reagent_name','manufacturer_name','lot_no')))]
     ids = [row['id'] for row in rows]
     if st.session_state.get('reagent_selected_lot') not in ids:
         st.session_state['reagent_selected_lot'] = None

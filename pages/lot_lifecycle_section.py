@@ -98,7 +98,7 @@ def render_lot_management(*, render_dialogs=True):
         from ui.qc_lifecycle_workspace import render_qc_lifecycle_workspace
         render_qc_lifecycle_workspace()
     with target_tab:
-        st.caption('均值和标准差建立期间简称“参数建立期”。当前按设定的有效点数计算，尚未区分暂定与常用参数，也未按独立分析批计数。')
+        st.caption('均值和标准差按设定的有效检测点数计算。请另行核对数据是否来自规定数量的独立分析批，并按实验室规程确认暂定或常用参数。')
         _render_target_versions()
     with history_tab:
         _render_history()

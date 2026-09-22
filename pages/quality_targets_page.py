@@ -15,13 +15,8 @@ def render_quality_targets_page():
     st.caption('为检验项目选择适用标准；无适用标准时，填写实验室自定要求及依据。新批次需逐水平核对质量目标。')
     project,browse,custom=st.tabs(['质量目标设置','分析质量要求','实验室自定要求'])
     with browse:
-        records=list_catalog()
-        query=st.text_input('搜索检验项目或标准',key='quality_search')
-        if query:records=[r for r in records if query.casefold() in ' '.join([r['name'],r['standard'],*r.get('aliases',[])]).casefold()]
-        st.caption(f'共 {len(records)} 条。血液和凝血项目列出的是日间不精密度要求，不使用批内不精密度要求作为日常质控上限。')
-        st.dataframe(catalog_table(records),hide_index=True,width='stretch')
-        st.download_button('导出分析质量要求（CSV）',catalog_table(records).to_csv(index=False).encode('utf-8-sig'),'质量要求目录.csv','text/csv')
-        st.caption('导出文件供查阅。导入时请使用“实验室自定要求”中的模板。标准未规定的要求显示为空白。')
+        from ui.quality_catalog import render_quality_catalog
+        render_quality_catalog()
     with project:
         with get_connection() as c:
             rows=c.execute('''SELECT i.id,t.template_name,m.chinese_name,i.qc_method FROM qc_project_template_items i

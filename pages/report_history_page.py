@@ -5,6 +5,7 @@ from textwrap import dedent
 
 import pandas as pd
 import streamlit as st
+from services.search_service import SEARCH_HELP
 
 from services.report_service import (
     LJ_METHOD_LABEL,
@@ -111,7 +112,7 @@ def _render_filters(records: list[ReportHistoryRecord]) -> tuple[str, str, str, 
     with filter_columns[0]:
         project_query = st.text_input(
             "项目名称筛选",
-            key="report_history_project_query",
+            key="report_history_project_query", help=SEARCH_HELP,
             placeholder="输入项目名称关键字",
         )
     with filter_columns[1]:
@@ -125,7 +126,7 @@ def _render_filters(records: list[ReportHistoryRecord]) -> tuple[str, str, str, 
     with filter_columns[2]:
         batch_query = st.text_input(
             "批次筛选",
-            key="report_history_batch_query",
+            key="report_history_batch_query", help=SEARCH_HELP,
             placeholder="输入批次关键字",
         )
     with filter_columns[3]:
@@ -205,7 +206,7 @@ def _render_report_history_card(record: ReportHistoryRecord) -> None:
                     ("生成时间", record.generated_at_label),
                     ("导出文件", export_identifier),
                 ],
-                columns=["字段", "内容"],
+                columns=["项目", "内容"],
             )
             st.dataframe(detail_rows, hide_index=True, width="stretch")
 

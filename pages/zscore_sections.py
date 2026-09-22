@@ -2010,7 +2010,7 @@ def _render_zscore_export_import_section_impl(
         )
         render_import_review_summary(zscore_review_summary)
         if zscore_review_summary["has_blocking_errors"]:
-            st.error("审查未通过：存在阻断错误，当前整批不会导入。")
+            st.error("审查未通过，请按下方提示修正后重新上传。本次数据尚未导入。")
         else:
             st.success("审查通过：当前没有阻断错误，可以确认导入。")
 
@@ -2128,7 +2128,7 @@ def _render_zscore_export_import_section_impl(
         )
         render_import_review_summary(zscore_formal_review_summary)
         if zscore_formal_review_summary["has_blocking_errors"]:
-            st.error("正式期审查未通过：存在阻断错误，当前整批不会导入。")
+            st.error("正式期审查未通过，请按下方提示修正后重新上传。本次数据尚未导入。")
         else:
             st.success("正式期审查通过：当前没有阻断错误，可以确认导入。")
 

@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import pandas as pd
 import streamlit as st
+from services.search_service import fuzzy_match, SEARCH_HELP
 
 from database import get_connection
 from services.lot_lifecycle_service import timestamp
@@ -93,7 +94,7 @@ def _select_event(key, ids):
 
 def _matches(row, event, query, system_id):
     return (system_id is None or event['system_id'] == system_id) and (
-        not query.strip() or query.strip().casefold() in ' '.join(str(value) for value in row.values()).casefold())
+        fuzzy_match(query, *row.values()))
 
 
 def _render_result_history(context):
@@ -144,7 +145,7 @@ def render_reagent_history_workspace():
     if notice:
         st.success(notice)
     left, right = st.columns([2, 2])
-    query = left.text_input('搜索批号、操作或原因', key='reagent_history_search',
+    query = left.text_input('搜索批号、操作或原因', key='reagent_history_search', help=SEARCH_HELP,
         on_change=_filter_changed, args=('reagent_history_search',))
     system_id = right.selectbox('检验项目、仪器及试剂', [None] + list(systems), key='reagent_history_system',
         placeholder='全部检验项目',

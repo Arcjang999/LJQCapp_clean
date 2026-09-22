@@ -883,10 +883,48 @@ def _build_lot_trace_pages(report):
         sections=[_TextSectionSpec('报告期实际使用批号',usage),_TextSectionSpec('按控制参数版本分组统计',parameters),_TextSectionSpec('换批及参数事件',events or ['报告期无已登记的换批或参数变更事件。'])])
 
 
+def _quality_section(title, paragraphs):
+    # Chinese evidence can be much wider than textwrap's character count, and
+    # user-entered provenance may span multiple pages. Bound both dimensions.
+    chunks = []
+    for paragraph in paragraphs:
+        lines = _wrap_text(paragraph, DECLARATION_TEXT_WIDTH).splitlines()
+        chunks.extend('\n'.join(lines[i:i+20]) for i in range(0, len(lines), 20))
+    return _TextSectionSpec(title, chunks, width=DECLARATION_TEXT_WIDTH)
+
+
 def _build_quality_pages(report):
     summary=getattr(report,'quality_summary',{})
     if not summary:return []
-    goal=summary['goal'];spec=goal['spec']
+    review=summary.get('review',{})
+    evidence=[]
+    for source in review.get('candidates',[]):
+        if source.get('disposition')=='adopted':
+            evidence.append(source['source']+'；PDF 页码 '+source.get('pages','')+'。'+
+                '；'.join(source.get('requirements',[]))+
+                ('；仅登记依据，尚无自动评价。' if source.get('kind')!='numeric' else ''))
+    for source in review.get('registered_standards',[]):
+        evidence.append(f"{source['standard']} / {source['version']}；{source['source_clause']}；PDF {source['source_page']}。{source['requirement_text']}；仅登记依据，尚无自动评价。")
+    recorded=review.get('recorded',{})
+    if recorded:
+        evidence.append(f"{recorded['source_name']} / {recorded['source_version']}：{recorded['requirement_text']}；仅登记依据，尚无自动评价。")
+    if review:
+        evidence.append(f"确认人 {review.get('confirmed_by','')}；确认时间 {review.get('reviewed_at','')}；适用依据：{review.get('evidence','')}")
+        from services.quality_applicability_service import CONTEXT_OPTIONS, CONTEXT_LABELS
+        if review.get('context'):
+            evidence.append('适用条件：'+'；'.join(CONTEXT_LABELS.get(k,k)+'：'+CONTEXT_OPTIONS.get(k,{}).get(v,str(v))
+                            for k,v in review['context'].items()))
+        search=review.get('search_record',{})
+        if search:
+            evidence.append('标准查找复核：'+search.get('checked_on','')+'；'+search.get('query','')+'；'+search.get('rationale',''))
+    extra=[_quality_section('适用标准及补充依据',evidence)] if evidence else []
+    goal=summary.get('goal')
+    if not goal:
+        return _build_text_pages(report_title=report.title,page_title='质量目标采用依据',
+            subtitle_lines=[f"项目：{report.basic_info.project_name} / {report.report_month_label}"],sections=extra)
+    spec=goal['spec']
+    if goal.get('supplement'):
+        extra.append(_quality_section('实验室更严要求',[f"在保留标准基准的前提下采用 CV ≤{goal['supplement']['cv']:g}%；依据：{goal['supplement']['evidence']}"]))
     rows=[]
     for r in summary['rows']:
         value='未计算' if r['cv'] is None else f"{r['cv']:.3f}%"
@@ -894,7 +932,7 @@ def _build_quality_pages(report):
     return _build_text_pages(report_title=report.title,page_title='分析质量要求与实测 CV',
         subtitle_lines=[f"项目：{report.basic_info.project_name} / {report.report_month_label}"],
         sections=[
-            _TextSectionSpec('采用来源与依据',[f"{spec['name']}；{spec['standard']} / {spec['version']}；实施 {spec['effective_date']}；{spec['source_clause']}；PDF页码 {spec.get('source_page') or '未提供'}。",
+            _quality_section('采用来源与依据',[f"{spec['name']}；{spec['standard']} / {spec['version']}；实施 {spec['effective_date']}；{spec['source_clause']}；PDF页码 {spec.get('source_page') or '未提供'}。",
                 f"确认人 {goal['confirmed_by']}；采用时间 {goal['adopted_at']}；依据：{goal['evidence']}"]),
-            _TextSectionSpec('不精密度比较',rows+[summary['statistics_scope']+'。仅比较统计值与所选限值，不代表完成标准规定的全部验证。']),
-            _TextSectionSpec('其他要求（未自动评价）',[f"允许偏倚：{spec['bias_text'] or '原条款未规定'}",f"允许总误差/可比性偏差：{spec['tea_text'] or '原条款未规定'}",spec['notes'] or '无补充说明'])])
+            _quality_section('不精密度比较',rows+[summary['statistics_scope']+'。仅比较统计值与所选限值，不代表完成标准规定的全部验证。']),
+            _quality_section('其他要求（未自动评价）',[f"允许偏倚：{spec['bias_text'] or '原条款未规定'}",f"允许总误差/可比性偏差：{spec['tea_text'] or '原条款未规定'}",spec['notes'] or '无补充说明']),*extra])

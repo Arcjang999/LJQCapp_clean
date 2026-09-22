@@ -1,0 +1,906 @@
+{
+  "version": "2026-09-22",
+  "sources": [
+    {
+      "id": "wst403-2024",
+      "standard": "WS/T 403—2024",
+      "name": "临床化学检验常用项目分析质量标准",
+      "version": "2024",
+      "source_type": "卫生行业推荐性标准",
+      "published_on": "2024-05-09",
+      "effective_date": "2024-11-01",
+      "withdrawn_on": "",
+      "replaced_by": "",
+      "replaces": "WS/T 403—2012",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821991150_35767.pdf",
+      "sha256": "7b9d8c904ccaea73aced0fb725b204754f3c50a06305fba432490a29fc08c6ed",
+      "checked_on": "2026-09-22",
+      "verification": "verified",
+      "kind": "numeric",
+      "reviewed_clauses": "第1、4、5章；附录A表A.1，PDF第3—8页"
+    },
+    {
+      "id": "wst406-2024",
+      "standard": "WS/T 406—2024",
+      "name": "临床血液检验常用项目分析质量标准",
+      "version": "2024",
+      "source_type": "卫生行业推荐性标准",
+      "published_on": "2024-05-09",
+      "effective_date": "2024-11-01",
+      "withdrawn_on": "",
+      "replaced_by": "",
+      "replaces": "WS/T 406—2012",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821990695_59250.pdf",
+      "sha256": "c2b73ecd97909e4b8ef0c5e063aed5f2dc63f4193e784a7894f3439e8b08dfe0",
+      "checked_on": "2026-09-22",
+      "verification": "verified",
+      "kind": "numeric",
+      "reviewed_clauses": "第1、6.4、7.4节；表5、11，PDF第3、6、10页"
+    },
+    {
+      "id": "wst230-2024",
+      "standard": "WS/T 230—2024",
+      "name": "实时荧光聚合酶链反应临床实验室应用指南",
+      "version": "2024",
+      "source_type": "卫生行业推荐性标准",
+      "published_on": "2024-05-09",
+      "effective_date": "2024-11-01",
+      "withdrawn_on": "",
+      "replaced_by": "",
+      "replaces": "WS/T 230—2002",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202407/758b8a012f4748c9b23ee48d22d0a79a/files/1733821990134_71016.pdf",
+      "sha256": "775d80a8ce44f5528992e9bd92b353345c168462c1ca110b2f6264cc6cd5805e",
+      "checked_on": "2026-09-22",
+      "verification": "verified",
+      "kind": "process",
+      "reviewed_clauses": "第1章；8.5节，PDF第4、16—17页"
+    },
+    {
+      "id": "wst494-2017",
+      "standard": "WS/T 494—2017",
+      "name": "临床定性免疫检验重要常规项目分析质量要求",
+      "version": "2017",
+      "source_type": "卫生行业推荐性标准",
+      "published_on": "2017-09-06",
+      "effective_date": "2018-03-01",
+      "withdrawn_on": "",
+      "replaced_by": "",
+      "replaces": "",
+      "source_url": "https://www.nhc.gov.cn/wjw/s9492/201710/7faf1d5e1d13449d803c29e88c3d382e/files/1739781491810_39687.pdf",
+      "sha256": "5ec0f89deac7e17c600dc5c87e77d12e6045d5b8651230f410cd05de016896cf",
+      "checked_on": "2026-09-22",
+      "verification": "verified",
+      "kind": "process",
+      "reviewed_clauses": "第1章；4.2—4.3，PDF第5、9—10页"
+    },
+    {
+      "id": "wst641-2018",
+      "standard": "WS/T 641—2018",
+      "name": "临床检验定量测定室内质量控制",
+      "version": "2018",
+      "source_type": "卫生行业推荐性标准",
+      "published_on": "2018-12-11",
+      "effective_date": "2019-06-01",
+      "withdrawn_on": "2026-11-01",
+      "replaced_by": "wst641-2026",
+      "replaces": "",
+      "source_url": "https://www.nhc.gov.cn/wjw/s9492/201812/f71376353f5d409593c2bc57d01f1ea0/files/1739781543096_36831.pdf",
+      "sha256": "d5fbc27a09780bbbbac9c4ab9c796e89ffe576b971bc5c2473a21ec59d978e86",
+      "checked_on": "2026-09-22",
+      "verification": "verified",
+      "kind": "process",
+      "reviewed_clauses": "第1章；5.1—5.3、5.6节，PDF第4、9—13页"
+    },
+    {
+      "id": "wst641-2026",
+      "standard": "WS/T 641—2026",
+      "name": "临床检验定量测定室内质量控制标准",
+      "version": "2026",
+      "source_type": "卫生行业推荐性标准",
+      "published_on": "2026-05-25",
+      "effective_date": "2026-11-01",
+      "withdrawn_on": "",
+      "replaced_by": "",
+      "replaces": "wst641-2018",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202606/1d8e67475848413cb4447e1b49037888/files/WST%20641%E2%80%942026-20260612145316250.pdf",
+      "sha256": "e81f670b6e58fc8ad093e21c19f88e5ab4d7db3b37476d9ffa03ff07ae1ffa86",
+      "checked_on": "2026-09-22",
+      "verification": "verified",
+      "kind": "process",
+      "reviewed_clauses": "前言；第1、4—8章，PDF第2—13页"
+    },
+    {
+      "id": "wst645.1-2026",
+      "standard": "WS/T 645.1—2026",
+      "name": "临床常用免疫学检验项目参考区间 第1部分：血清免疫球蛋白G、免疫球蛋白A、免疫球蛋白M、补体3、补体4",
+      "version": "2026",
+      "source_type": "卫生行业推荐性标准",
+      "published_on": "2026-05-25",
+      "effective_date": "2026-11-01",
+      "withdrawn_on": "",
+      "replaced_by": "",
+      "replaces": "WS/T 645.1—2018",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202606/1d8e67475848413cb4447e1b49037888/files/WST%20645.1%E2%80%942026.pdf",
+      "sha256": "c264d37009cbd26d7dfa53d615bd3955eaf369a4a588ad4cd7de62a0b3bc4308",
+      "checked_on": "2026-09-22",
+      "verification": "verified",
+      "kind": "reference_interval",
+      "reviewed_clauses": "第1、4、5章，PDF第3—4页；参考区间不是质控限值"
+    },
+    {
+      "id": "wst645.2-2026",
+      "standard": "WS/T 645.2—2026",
+      "name": "临床常用免疫学检验项目参考区间 第2部分：血清甲胎蛋白、癌胚抗原、糖链抗原19-9、糖链抗原15-3、糖链抗原125",
+      "version": "2026",
+      "source_type": "卫生行业推荐性标准",
+      "published_on": "2026-05-25",
+      "effective_date": "2026-11-01",
+      "withdrawn_on": "",
+      "replaced_by": "",
+      "replaces": "WS/T 645.2—2018",
+      "source_url": "https://www.nhc.gov.cn/fzs/c100048/202606/1d8e67475848413cb4447e1b49037888/files/WST%20645.2%E2%80%942026-20260612145407318.pdf",
+      "sha256": "adc9bce4631a0adba96aad3494227f5f2dc1f5204ea5e41b9e62ac061aadf8ac",
+      "checked_on": "2026-09-22",
+      "verification": "verified",
+      "kind": "reference_interval",
+      "reviewed_clauses": "第1、4、5章，PDF第3—4页；参考区间不是质控限值"
+    },
+    {
+      "id": "cdc-hcv-2023",
+      "standard": "中国疾控中心丙肝检测技术规范（2023年修订版）",
+      "name": "丙型肝炎病毒实验室检测技术规范（2023年修订版）",
+      "version": "2023",
+      "source_type": "中国疾病预防控制中心技术规范",
+      "published_on": "2023-10-16",
+      "effective_date": "2023-10-16",
+      "withdrawn_on": "",
+      "replaced_by": "",
+      "replaces": "丙型肝炎病毒实验室检测技术规范（2011年版）",
+      "source_url": "https://www.cdctj.com.cn/doc/003/001/287/00300128716_49d5f443.pdf",
+      "publication_url": "https://ncaids.chinacdc.cn/fzyw_10256/jsgf/202310/t20231017_270150.htm",
+      "original_attachment_url": "https://ncaids.chinacdc.cn/fzyw_10256/jsgf/202310/W020250603737576491065.pdf",
+      "mirror_publication_url": "https://www.cdctj.com.cn/system/2023/10/20/030122187.shtml",
+      "retrieved_from": "天津市疾病预防控制中心官方转载附件",
+      "sha256": "35751e5aed0aaabbc6662646c7cb791f8e67c9d7d3fa8e4a18f1e15175acbdc6",
+      "checked_on": "2026-09-22",
+      "verification": "verified",
+      "kind": "process",
+      "reviewed_clauses": "前言实施与范围（PDF第7页）；第四章1.1—1.2（PDF第31—32页）；第九章1—4（PDF第68—74页）；附件全文共81页",
+      "effective_date_basis": "中国CDC发布页明确2023-10-16正式印发；前言（PDF第7页、正文第3页）规定自发布之日起施行，同时终止2011年版。有效起始日据此记录2023-10-16，并非另有一张标准实施公告。",
+      "current_status_basis": "2026-09-22中国CDC艾防中心文件规范栏目仍刊载2023修订版；本次未找到后续修订或终止公告。此为技术规范的官方发布与替代关系核查，不是WS/GB标准平台状态。",
+      "checksum_scope": "校验值对应天津疾控附件81页PDF；未取得原CDC附件二进制，未宣称两者字节相同。"
+    },
+    {
+      "id": "cdc-hiv-iqc-2024",
+      "standard": "中国疾控中心艾滋病检测实验室质量控制指南（2024）",
+      "name": "全国艾滋病检测实验室质量控制指南",
+      "version": "2024",
+      "source_type": "中国疾病预防控制中心技术指南",
+      "published_on": "2024-10-08",
+      "effective_date": "2024-10-08",
+      "withdrawn_on": "",
+      "replaced_by": "",
+      "replaces": "",
+      "source_url": "http://upload.cghhospital.cn/2024/1018/20241018084251849.pdf",
+      "publication_url": "https://ncaids.chinacdc.cn/fzyw_10256/jsgf/202410/t20241014_301477.htm",
+      "original_attachment_url": "https://ncaids.chinacdc.cn/fzyw_10256/jsgf/202410/W020250331478448773802.pdf",
+      "mirror_publication_url": "http://www.cghhospital.cn/depart_jyk2_zc/2024/YerMRWdO.html",
+      "retrieved_from": "重庆市临床检验中心（重庆市人民医院）2024-10-18官方转载附件",
+      "sha256": "bf86576665f6052e265e54f5411de3a0198e5b91c99f56db4139a79864c7c3fa",
+      "checked_on": "2026-09-22",
+      "verification": "verified",
+      "kind": "process",
+      "reviewed_clauses": "前言实施与范围（PDF第3页）；第二篇第一章第三节1.1—1.2、3.1.1—3.1.4（PDF第51—53页）；第二篇第四章第一节1—2（PDF第75—76页）；附件全文共116页",
+      "effective_date_basis": "CDC发布页明确2024-10-08正式印发；前言（PDF第3页）规定自发布之日起实施。",
+      "current_status_basis": "CDC官方2025年检测技术规范发布说明将质控内容指向此独立指南；2026年7月官方质量培训仍采用；本次未找到替代公告。属于技术指南，未借用WS/GB标准状态标签。",
+      "checksum_scope": "校验值对应实际从重庆市人民医院官方附件地址取得的116页PDF；未宣称与暂不可达的CDC附件字节相同。"
+    }
+  ],
+  "requirements": [
+    {
+      "id": "wst230-2024-iqc",
+      "source_id": "wst230-2024",
+      "kind": "process",
+      "name": "实时荧光 PCR 室内质控",
+      "source_clause": "第1章；8.5.1—8.5.5",
+      "source_page": "4、16—17",
+      "techniques": [
+        "realtime_pcr"
+      ],
+      "result_kinds": [
+        "quantitative",
+        "qualitative"
+      ],
+      "scales": [
+        "concentration",
+        "ct",
+        "log",
+        "qualitative",
+        "other_numeric"
+      ],
+      "purposes": [
+        "clinical"
+      ],
+      "requirements": [
+        "按实验目的设置阴性、弱阳性及阳性等对照；基因分型另核对代表性位点。",
+        "质控涉及提取、扩增、结果判读和异常处理。对照设置与统计浓度水平分别记录。"
+      ],
+      "automatic_evaluation": false
+    },
+    {
+      "id": "wst494-2017-qualitative",
+      "source_id": "wst494-2017",
+      "kind": "qualitative",
+      "name": "定性免疫精密度要求",
+      "source_clause": "第1章；4.2.2—4.2.4",
+      "source_page": "5、9",
+      "techniques": [
+        "immunoassay"
+      ],
+      "result_kinds": [
+        "qualitative"
+      ],
+      "scales": [
+        "s_co",
+        "qualitative",
+        "other_numeric"
+      ],
+      "purposes": [
+        "clinical"
+      ],
+      "requirements": [
+        "采用 C5—C95 灰区评价定性精密度；按 4.2.4 核对 C50±20% 范围要求。",
+        "定性一致性和灰区要求不换算成浓度 CV。"
+      ],
+      "automatic_evaluation": false
+    },
+    {
+      "id": "wst494-2017-signal",
+      "source_id": "wst494-2017",
+      "kind": "signal_precision",
+      "name": "COI / S/CO 比值精密度要求",
+      "source_clause": "4.3.1—4.3.7；特别是4.3.3.4、4.3.6",
+      "source_page": "9—10",
+      "techniques": [
+        "immunoassay"
+      ],
+      "result_kinds": [
+        "qualitative"
+      ],
+      "scales": [
+        "s_co"
+      ],
+      "purposes": [
+        "clinical"
+      ],
+      "requirements": [
+        "信号比值的批内与批间精密度分别核对，不采用浓度测定限值。",
+        "批内 CV <10%、批间 CV <15%；原文还附说明书相对要求和独立试验设计，需一并人工核对。"
+      ],
+      "automatic_evaluation": false
+    },
+    {
+      "id": "wst641-2018-iqc",
+      "source_id": "wst641-2018",
+      "kind": "process",
+      "name": "定量测定室内质控过程要求",
+      "source_clause": "第1章；5.1—5.3、5.6",
+      "source_page": "4、9—13",
+      "techniques": [
+        "clinical_chemistry",
+        "immunoassay",
+        "realtime_pcr",
+        "sequencing",
+        "isothermal",
+        "hybridization",
+        "hematology",
+        "coagulation",
+        "other"
+      ],
+      "result_kinds": [
+        "quantitative"
+      ],
+      "scales": [
+        "concentration",
+        "ct",
+        "log",
+        "other_numeric"
+      ],
+      "purposes": [
+        "clinical"
+      ],
+      "requirements": [
+        "各项目按本实验室现行程序建立新批质控品的均值与控制限，并核对质控频次及换批安排。",
+        "定值说明书数值仅供参考；失控原因分析、处置和记录需按原文落实。请逐项核对并保留相关记录。"
+      ],
+      "automatic_evaluation": false
+    },
+    {
+      "id": "wst641-2026-iqc",
+      "source_id": "wst641-2026",
+      "kind": "process",
+      "name": "定量测定室内质控过程要求",
+      "source_clause": "第1章；6.1—6.3、6.6",
+      "source_page": "3、6—9",
+      "techniques": [
+        "clinical_chemistry",
+        "immunoassay",
+        "realtime_pcr",
+        "sequencing",
+        "isothermal",
+        "hybridization",
+        "hematology",
+        "coagulation",
+        "other"
+      ],
+      "result_kinds": [
+        "quantitative"
+      ],
+      "scales": [
+        "concentration",
+        "ct",
+        "log",
+        "other_numeric"
+      ],
+      "purposes": [
+        "clinical"
+      ],
+      "requirements": [
+        "各项目按本实验室现行程序建立新批质控品的均值与控制限，并核对质控频次及换批安排。",
+        "定值说明书数值仅供参考；失控原因分析、处置和记录需按原文落实。请逐项核对并保留相关记录。"
+      ],
+      "automatic_evaluation": false
+    },
+    {
+      "source_id": "cdc-hcv-2023",
+      "kind": "process",
+      "test_item_codes": [
+        "2600204A"
+      ],
+      "test_item_names": [
+        "丙型肝炎病毒核酸测定",
+        "丙型肝炎病毒核酸定量检测",
+        "丙型肝炎病毒核酸定量测定",
+        "丙型肝炎病毒RNA定量测定",
+        "丙型肝炎病毒RNA测定",
+        "HCV RNA",
+        "HCV-RNA",
+        "丙肝病毒RNA",
+        "丙肝核酸"
+      ],
+      "source_clause": "前言；第四章1.1—1.2；第九章1.1—1.2、2、3.2、3.3.3、4.3",
+      "source_page": "7、31—32、68—74",
+      "techniques": [
+        "realtime_pcr",
+        "isothermal"
+      ],
+      "purposes": [
+        "clinical"
+      ],
+      "automatic_evaluation": false,
+      "id": "cdc-hcv-2023-rna-quantitative-iqc",
+      "name": "丙肝病毒核酸定量室内质控",
+      "result_kinds": [
+        "quantitative"
+      ],
+      "scales": [
+        "concentration",
+        "log",
+        "ct",
+        "other_numeric"
+      ],
+      "requirements": [
+        "每个检测批次使用试剂盒内部对照和非试剂盒组份的外部对照；内部对照限同批号试剂盒使用，结果无效须重新试验。",
+        "外部对照的基质应与临床样品相同或相似，并具有可靠来源、均一性和稳定性。",
+        "每个分析批至少检测一次质控品，并在发出该批结果前评价；对照位置应结合漂移与随机误差选择。",
+        "定量检测每次设置阴性、弱阳性和阳性质控品。",
+        "选择临床有意义的质控浓度；说明书标定值仅供参考，由实验室重复测定建立均值和标准差。",
+        "质控图记录结果、中心线和控制界线，并关联时间、质控品、仪器、方法、试剂与校准物信息。更换试剂厂家、试剂批号或外部对照批次时重新建立质控图。"
+      ],
+      "method_terms": {
+        "isothermal": [
+          "TMA",
+          "转录介导"
+        ]
+      }
+    },
+    {
+      "source_id": "cdc-hcv-2023",
+      "kind": "process",
+      "test_item_codes": [
+        "2600204A"
+      ],
+      "test_item_names": [
+        "丙型肝炎病毒核酸测定",
+        "丙型肝炎病毒核酸定量检测",
+        "丙型肝炎病毒核酸定量测定",
+        "丙型肝炎病毒RNA定量测定",
+        "丙型肝炎病毒RNA测定",
+        "HCV RNA",
+        "HCV-RNA",
+        "丙肝病毒RNA",
+        "丙肝核酸"
+      ],
+      "source_clause": "前言；第四章1.1—1.2；第九章1.1—1.2、2、3.2、3.3.3、4.3",
+      "source_page": "7、31—32、68—74",
+      "techniques": [
+        "realtime_pcr",
+        "isothermal"
+      ],
+      "purposes": [
+        "clinical"
+      ],
+      "automatic_evaluation": false,
+      "id": "cdc-hcv-2023-rna-qualitative-iqc",
+      "name": "丙肝病毒核酸定性室内质控",
+      "result_kinds": [
+        "qualitative"
+      ],
+      "scales": [
+        "qualitative",
+        "ct",
+        "other_numeric"
+      ],
+      "requirements": [
+        "每个检测批次使用试剂盒内部对照和非试剂盒组份的外部对照；内部对照限同批号试剂盒使用，结果无效须重新试验。",
+        "外部对照的基质应与临床样品相同或相似，并具有可靠来源、均一性和稳定性。",
+        "每个分析批至少检测一次质控品，并在发出该批结果前评价；对照位置应结合漂移与随机误差选择。",
+        "定性检测每次设置阴性、弱阳性和/或阳性质控品；各对照的结果符合预期时判为在控。"
+      ],
+      "method_terms": {
+        "isothermal": [
+          "TMA",
+          "转录介导"
+        ]
+      }
+    },
+    {
+      "source_id": "cdc-hiv-iqc-2024",
+      "kind": "process",
+      "test_item_codes": [],
+      "test_item_names": [
+        "HIV-1 RNA",
+        "HIV1 RNA",
+        "HIV-1 RNA定量",
+        "HIV-1 RNA定量检测",
+        "HIV-1 RNA测定",
+        "HIV-1 RNA定性检测",
+        "HIV-1 RNA定性测定",
+        "人类免疫缺陷病毒1型RNA测定",
+        "人类免疫缺陷病毒1型RNA定量测定",
+        "人类免疫缺陷病毒1型RNA定量检测",
+        "人类免疫缺陷病毒1型RNA定性测定",
+        "人类免疫缺陷病毒1型RNA定性检测",
+        "人类免疫缺陷病毒1型核糖核酸测定",
+        "人类免疫缺陷病毒Ⅰ型RNA测定",
+        "人类免疫缺陷病毒I型RNA测定",
+        "人类免疫缺陷病毒1型（HIV-1）RNA定量检测",
+        "人类免疫缺陷病毒1型（HIV-1）RNA定性检测"
+      ],
+      "source_clause": "第二篇第一章第三节1.1—1.2、3.1.1—3.1.4；第二篇第四章第一节1.1、1.3、2",
+      "source_page": "51—53、75—76",
+      "techniques": [
+        "realtime_pcr",
+        "isothermal"
+      ],
+      "method_terms": {
+        "isothermal": [
+          "RNA捕获探针",
+          "RNA 捕获探针"
+        ]
+      },
+      "purposes": [
+        "clinical"
+      ],
+      "automatic_evaluation": false,
+      "id": "cdc-hiv-iqc-2024-rna-quantitative",
+      "name": "HIV-1 RNA定量室内质控",
+      "result_kinds": [
+        "quantitative"
+      ],
+      "scales": [
+        "concentration",
+        "log",
+        "ct",
+        "other_numeric"
+      ],
+      "required_result_scale": "log",
+      "required_input_value_type": "log",
+      "requirements": [
+        "每次实验同时使用试剂盒内对照和一个外部质控品；各质控品与样本同步经历提取、扩增全过程。",
+        "发出报告前评价内、外部质控结果；外部质控品可在临床样本中随机放置，并注意防范污染。",
+        "质控违反规则时上报实验室质量负责人；确认真失控后，先恢复质控在控，再重新检测相应全部失控样本。",
+        "定量检测结果先换算为Log10值，再计算均值和标准差、建立质控限。",
+        "外部质控品选择临床有意义的病毒浓度，指南建议1000—15000拷贝/mL；这是质控品浓度选择建议。",
+        "说明书原标定值仅作参考；实验室通过重复测定建立均值和标准差，建图均值基于至少20次质控结果并按指南进行离群值核查。"
+      ],
+      "excluded_name_tokens": [
+        "HIV-2",
+        "人类免疫缺陷病毒2型",
+        "人类免疫缺陷病毒Ⅱ型",
+        "DNA",
+        "脱氧核糖核酸",
+        "抗体",
+        "抗原",
+        "CD4"
+      ],
+      "method_review_message": "请核对是否为 RNA 捕获探针等温扩增，其他恒温扩增方法需另核对适用依据。",
+      "scale_review_message": "HIV-1 RNA 定量质控需先换算为 Log10 值，再计算均值和标准差。请在检验项目设置中选择 log 值，并使用换算后的结果。"
+    },
+    {
+      "source_id": "cdc-hiv-iqc-2024",
+      "kind": "process",
+      "test_item_codes": [],
+      "test_item_names": [
+        "HIV-1 RNA",
+        "HIV1 RNA",
+        "HIV-1 RNA定量",
+        "HIV-1 RNA定量检测",
+        "HIV-1 RNA测定",
+        "HIV-1 RNA定性检测",
+        "HIV-1 RNA定性测定",
+        "人类免疫缺陷病毒1型RNA测定",
+        "人类免疫缺陷病毒1型RNA定量测定",
+        "人类免疫缺陷病毒1型RNA定量检测",
+        "人类免疫缺陷病毒1型RNA定性测定",
+        "人类免疫缺陷病毒1型RNA定性检测",
+        "人类免疫缺陷病毒1型核糖核酸测定",
+        "人类免疫缺陷病毒Ⅰ型RNA测定",
+        "人类免疫缺陷病毒I型RNA测定",
+        "人类免疫缺陷病毒1型（HIV-1）RNA定量检测",
+        "人类免疫缺陷病毒1型（HIV-1）RNA定性检测"
+      ],
+      "source_clause": "第二篇第一章第三节1.1—1.2、3.1.1—3.1.4；第二篇第四章第一节1.1、1.3、2",
+      "source_page": "51—53、75—76",
+      "techniques": [
+        "realtime_pcr",
+        "isothermal"
+      ],
+      "method_terms": {
+        "isothermal": [
+          "RNA捕获探针",
+          "RNA 捕获探针"
+        ]
+      },
+      "purposes": [
+        "clinical"
+      ],
+      "automatic_evaluation": false,
+      "id": "cdc-hiv-iqc-2024-rna-qualitative",
+      "name": "HIV-1 RNA定性室内质控",
+      "result_kinds": [
+        "qualitative"
+      ],
+      "scales": [
+        "qualitative",
+        "ct"
+      ],
+      "requirements": [
+        "每次实验同时使用试剂盒内对照和一个外部质控品；各质控品与样本同步经历提取、扩增全过程。",
+        "发出报告前评价内、外部质控结果；外部质控品可在临床样本中随机放置，并注意防范污染。",
+        "质控违反规则时上报实验室质量负责人；确认真失控后，先恢复质控在控，再重新检测相应全部失控样本。",
+        "定性质控品的结果应符合预期；出现错误阴阳性或无效结果属于失控。",
+        "定性检测可使用靶标Ct值计算均值和标准差；不按核酸浓度CV解释。"
+      ],
+      "excluded_name_tokens": [
+        "HIV-2",
+        "人类免疫缺陷病毒2型",
+        "人类免疫缺陷病毒Ⅱ型",
+        "DNA",
+        "脱氧核糖核酸",
+        "抗体",
+        "抗原",
+        "CD4"
+      ],
+      "method_review_message": "请核对是否为 RNA 捕获探针等温扩增，其他恒温扩增方法需另核对适用依据。"
+    }
+  ],
+  "aliases": {
+    "wst403-2024-042": [
+      "IgG",
+      "血清免疫球蛋白G"
+    ],
+    "wst403-2024-043": [
+      "IgA"
+    ],
+    "wst403-2024-044": [
+      "IgM"
+    ],
+    "wst403-2024-045": [
+      "C3"
+    ],
+    "wst403-2024-046": [
+      "C4"
+    ],
+    "wst403-2024-051": [
+      "FT3"
+    ],
+    "wst403-2024-052": [
+      "T3"
+    ],
+    "wst403-2024-053": [
+      "FT4"
+    ],
+    "wst403-2024-054": [
+      "T4"
+    ],
+    "wst403-2024-055": [
+      "TSH",
+      "促甲状腺激素"
+    ],
+    "wst403-2024-072": [
+      "AFP",
+      "血清甲胎蛋白"
+    ],
+    "wst403-2024-071": [
+      "CEA"
+    ]
+  },
+  "project_entries": [
+    {
+      "id": "molecular-hbv-dna",
+      "name": "乙型肝炎病毒核酸定量检测",
+      "aliases": [
+        "HBV",
+        "HBV DNA",
+        "乙肝病毒DNA",
+        "乙肝核酸"
+      ],
+      "category": "分子检测",
+      "source_id": "wst230-2024",
+      "rule_ids": [
+        "wst230-2024-iqc"
+      ],
+      "kind": "process",
+      "scope": "临床检验；实时荧光 PCR；核酸定量，Ct 或 log 数值按检测程序核对",
+      "source_clause": "8.5.1—8.5.5；附录 B.1.2.2",
+      "source_page": "16—17、21",
+      "requirements": [
+        "每次实验设置阴性、弱阳性和阳性质控品；核对扩增效率及阴、阳性对照结果。",
+        "按试剂说明书和实验室程序核对浓度、Ct 或 log 值的质控要求，分别记录。"
+      ]
+    },
+    {
+      "id": "molecular-hcv-rna",
+      "name": "丙型肝炎病毒核酸定量检测",
+      "aliases": [
+        "HCV",
+        "HCV RNA",
+        "丙肝病毒RNA",
+        "丙肝核酸"
+      ],
+      "category": "分子检测",
+      "source_id": "wst230-2024",
+      "rule_ids": [
+        "wst230-2024-iqc",
+        "cdc-hcv-2023-rna-quantitative-iqc"
+      ],
+      "kind": "process",
+      "scope": "临床核酸定量；实时荧光 PCR 同时核对 WS/T 230 和丙肝检测技术规范；转录介导扩增（TMA）核对丙肝检测技术规范",
+      "source_clause": "8.5.1—8.5.5；附录 B.1.2.2",
+      "source_page": "16—17、21",
+      "requirements": [
+        "每次实验设置阴性、弱阳性和阳性质控品；实时荧光 PCR 另核对扩增效率及阴、阳性对照结果。",
+        "按试剂说明书和实验室程序核对浓度、Ct 或 log 值的质控要求，分别记录。"
+      ],
+      "related_source_ids": [
+        "cdc-hcv-2023"
+      ]
+    },
+    {
+      "id": "molecular-ebv-dna",
+      "name": "EB病毒核酸定量检测",
+      "aliases": [
+        "EBV",
+        "EBV DNA",
+        "EB病毒DNA"
+      ],
+      "category": "分子检测",
+      "source_id": "wst230-2024",
+      "rule_ids": [
+        "wst230-2024-iqc"
+      ],
+      "kind": "process",
+      "scope": "临床检验；实时荧光 PCR；核酸定量，Ct 或 log 数值按检测程序核对",
+      "source_clause": "8.5.1—8.5.5；附录 B.1.2.2",
+      "source_page": "16—17、21",
+      "requirements": [
+        "每次实验设置阴性、弱阳性和阳性质控品；核对扩增效率及阴、阳性对照结果。",
+        "按试剂说明书和实验室程序核对浓度、Ct 或 log 值的质控要求，分别记录。"
+      ]
+    },
+    {
+      "id": "molecular-cmv-dna",
+      "name": "巨细胞病毒核酸定量检测",
+      "aliases": [
+        "CMV",
+        "CMV DNA",
+        "巨细胞病毒DNA"
+      ],
+      "category": "分子检测",
+      "source_id": "wst230-2024",
+      "rule_ids": [
+        "wst230-2024-iqc"
+      ],
+      "kind": "process",
+      "scope": "临床检验；实时荧光 PCR；核酸定量，Ct 或 log 数值按检测程序核对",
+      "source_clause": "8.5.1—8.5.5；附录 B.1.2.2",
+      "source_page": "16—17、21",
+      "requirements": [
+        "每次实验设置阴性、弱阳性和阳性质控品；核对扩增效率及阴、阳性对照结果。",
+        "按试剂说明书和实验室程序核对浓度、Ct 或 log 值的质控要求，分别记录。"
+      ]
+    },
+    {
+      "id": "molecular-hiv-rna",
+      "name": "HIV-1 RNA定量检测",
+      "aliases": [
+        "HIV",
+        "HIV RNA",
+        "HIV-1 RNA",
+        "HIV1 RNA",
+        "艾滋病毒核酸",
+        "人类免疫缺陷病毒1型RNA定量检测"
+      ],
+      "category": "分子检测",
+      "source_id": "wst230-2024",
+      "rule_ids": [
+        "wst230-2024-iqc",
+        "cdc-hiv-iqc-2024-rna-quantitative"
+      ],
+      "kind": "process",
+      "scope": "临床 HIV-1 RNA 定量；实时荧光 PCR 同时核对 WS/T 230 和艾滋病质控指南；RNA 捕获探针等温扩增核对艾滋病质控指南；定量统计使用 Log10 结果",
+      "source_clause": "8.5.1—8.5.5；附录 B.1.2.2",
+      "source_page": "16—17、21",
+      "requirements": [
+        "实时荧光 PCR 定量检测每次设置阴性、弱阳性和阳性质控品，核对扩增效率及对照结果。",
+        "HIV-1 RNA 定量结果先换算为 Log10 值，再计算均值和标准差。"
+      ],
+      "related_source_ids": [
+        "cdc-hiv-iqc-2024"
+      ]
+    },
+    {
+      "id": "molecular-hpv",
+      "name": "人乳头瘤病毒核酸检测及分型",
+      "aliases": [
+        "HPV",
+        "HPV DNA",
+        "高危型HPV",
+        "HPV分型"
+      ],
+      "category": "分子检测",
+      "source_id": "wst230-2024",
+      "rule_ids": [
+        "wst230-2024-iqc"
+      ],
+      "kind": "process",
+      "scope": "临床检验；实时荧光 PCR；定性或基因分型",
+      "source_clause": "8.5.3.1、8.5.3.3—8.5.3.4；附录 B.1.2.1、B.1.2.3",
+      "source_page": "17、21",
+      "requirements": [
+        "定性检测每次实验设置阴性、弱阳性和/或阳性质控品。",
+        "分型检测每批质控至少包含一种能反映检测情况的基因型，按规定周期覆盖全部检测位点。"
+      ]
+    },
+    {
+      "id": "molecular-respiratory",
+      "name": "呼吸道病毒核酸检测",
+      "aliases": [
+        "呼吸道核酸",
+        "呼吸道病原体",
+        "流感病毒",
+        "新型冠状病毒",
+        "SARS-CoV-2",
+        "RSV",
+        "呼吸道合胞病毒"
+      ],
+      "category": "分子检测",
+      "source_id": "wst230-2024",
+      "rule_ids": [
+        "wst230-2024-iqc"
+      ],
+      "kind": "process",
+      "scope": "临床检验；实时荧光 PCR；病毒核酸定性检测",
+      "source_clause": "8.5.1—8.5.5；附录 B.1.2.1",
+      "source_page": "16—17、21",
+      "requirements": [
+        "每次实验设置阴性、弱阳性和/或阳性质控品，按质控品性质覆盖核酸提取至扩增检测过程。",
+        "按具体病毒、试剂说明书和实验室程序核对内对照、阳性对照及 Ct 判定要求。"
+      ]
+    },
+    {
+      "id": "immune-hbsag",
+      "name": "乙型肝炎病毒表面抗原定性检测",
+      "aliases": [
+        "HBsAg",
+        "乙肝表面抗原"
+      ],
+      "category": "免疫检测",
+      "source_id": "wst494-2017",
+      "rule_ids": [
+        "wst494-2017-qualitative",
+        "wst494-2017-signal"
+      ],
+      "kind": "qualitative",
+      "scope": "临床检验；定性免疫测定；报告阴性/阳性或使用 S/CO、COI 信号比值",
+      "source_clause": "第1章；4.2—4.3",
+      "source_page": "5、9—10",
+      "requirements": [
+        "按定性精密度要求核对临界浓度附近的阴阳性结果。",
+        "使用 S/CO 或 COI 时，分别核对批内、批间精密度、试剂说明书的相对要求和规定试验条件；不套用浓度 CV。"
+      ]
+    },
+    {
+      "id": "immune-hcv-ab",
+      "name": "丙型肝炎病毒抗体检测",
+      "aliases": [
+        "抗HCV",
+        "anti-HCV",
+        "HCV抗体",
+        "丙肝抗体"
+      ],
+      "category": "免疫检测",
+      "source_id": "wst494-2017",
+      "rule_ids": [
+        "wst494-2017-qualitative",
+        "wst494-2017-signal"
+      ],
+      "kind": "qualitative",
+      "scope": "临床检验；定性免疫测定；报告阴性/阳性或使用 S/CO、COI 信号比值",
+      "source_clause": "第1章；4.2—4.3",
+      "source_page": "5、9—10",
+      "requirements": [
+        "按定性精密度要求核对临界浓度附近的阴阳性结果。",
+        "使用 S/CO 或 COI 时，分别核对批内、批间精密度、试剂说明书的相对要求和规定试验条件；不套用浓度 CV。"
+      ]
+    },
+    {
+      "id": "immune-hiv-ag-ab",
+      "name": "人类免疫缺陷病毒抗原抗体检测",
+      "aliases": [
+        "HIV抗原抗体",
+        "HIV Ag/Ab",
+        "HIV抗体",
+        "艾滋病抗体"
+      ],
+      "category": "免疫检测",
+      "source_id": "wst494-2017",
+      "rule_ids": [
+        "wst494-2017-qualitative",
+        "wst494-2017-signal"
+      ],
+      "kind": "qualitative",
+      "scope": "临床检验；定性免疫测定；报告阴性/阳性或使用 S/CO、COI 信号比值",
+      "source_clause": "第1章；4.2—4.3",
+      "source_page": "5、9—10",
+      "requirements": [
+        "按定性精密度要求核对临界浓度附近的阴阳性结果。",
+        "使用 S/CO 或 COI 时，分别核对批内、批间精密度、试剂说明书的相对要求和规定试验条件；不套用浓度 CV。"
+      ]
+    },
+    {
+      "id": "immune-tp-ab",
+      "name": "梅毒螺旋体抗体检测",
+      "aliases": [
+        "TP-Ab",
+        "TP抗体",
+        "梅毒抗体"
+      ],
+      "category": "免疫检测",
+      "source_id": "wst494-2017",
+      "rule_ids": [
+        "wst494-2017-qualitative",
+        "wst494-2017-signal"
+      ],
+      "kind": "qualitative",
+      "scope": "临床检验；定性免疫测定；报告阴性/阳性或使用 S/CO、COI 信号比值",
+      "source_clause": "第1章；4.2—4.3",
+      "source_page": "5、9—10",
+      "requirements": [
+        "按定性精密度要求核对临界浓度附近的阴阳性结果。",
+        "使用 S/CO 或 COI 时，分别核对批内、批间精密度、试剂说明书的相对要求和规定试验条件；不套用浓度 CV。"
+      ]
+    }
+  ]
+}

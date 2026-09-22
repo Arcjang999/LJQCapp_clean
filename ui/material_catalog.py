@@ -5,6 +5,7 @@ from datetime import date
 import hashlib
 
 import streamlit as st
+from services.search_service import fuzzy_match, SEARCH_HELP
 
 from services.master_data_service import create_qc_material, list_manufacturers, list_qc_materials
 from services.material_catalog_service import (
@@ -235,7 +236,7 @@ def render_material_catalog(*, render_dialog: bool = True) -> None:
             _open_dialog('product_status', product_id=product_id)
         st.divider()
         query, add_material = st.columns([0.75, 0.25], vertical_alignment='bottom')
-        search = query.text_input('搜索浓度水平、浓度编号或批号', key='material_catalog_search')
+        search = query.text_input('搜索浓度水平、浓度编号或批号', key='material_catalog_search', help=SEARCH_HELP)
         if add_material.button('新增质控品批号', key='material_catalog_add', type='primary', disabled=bool(product['is_disabled']), width='stretch'):
             _open_dialog('material_new', product_id=product_id)
         materials = list_control_materials(product_id, include_disabled=show_disabled)
@@ -243,7 +244,7 @@ def render_material_catalog(*, render_dialog: bool = True) -> None:
             st.session_state.pop('material_catalog_reveal_id', None)
         reveal_id = st.session_state.get('material_catalog_reveal_id')
         if search.strip() and not materials.empty:
-            matches = materials[['level_name', 'level_code', 'lot_no']].fillna('').astype(str).agg(' '.join, axis=1).str.contains(search.strip(), case=False, regex=False)
+            matches = materials[['level_name', 'level_code', 'lot_no']].fillna('').apply(lambda row: fuzzy_match(search, *row), axis=1)
             reveal = materials['id'].eq(reveal_id)
             if (reveal & ~matches).any():
                 st.caption('下方已显示刚保存的记录，原搜索条件保留。')

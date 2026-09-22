@@ -3,6 +3,24 @@ from services.quality_target_service import adopt_requirement, item_context, val
 from services.quality_review_service import save_recorded_requirement, standard_candidates
 
 
+def fixture_conditions(item, *, clinical=False):
+    """Explicit synthetic conditions; no production policy exceptions."""
+    from services.quality_applicability_service import infer_technique
+    from datetime import date
+    technique = infer_technique(item) or 'clinical_chemistry'
+    specimen = item.get('specimen_type') or (
+        '全血' if technique == 'hematology' or '血糖仪' in str(item.get('method_name', ''))
+        else '血浆' if technique == 'coagulation' else '血清')
+    context=dict(technique=technique,
+        specimen=specimen,result_kind='quantitative',
+        result_scale=item['input_value_type'] if item['input_value_type'] in ('ct','log') else 'concentration',
+        purpose='clinical' if clinical else 'research')
+    search_record=dict(query='合成软件回归项目，非临床检测用途',
+        official_url='https://www.nhc.gov.cn/wjw/s9492/wsbz.shtml', checked_on=date.today().isoformat(),
+        conclusion='no_applicable',rationale='仅验证软件流程的合成数据，不代表真实临床项目查找结果。')
+    return dict(context=context,search_record=search_record)
+
+
 def confirm_fixture_quality(scope, item_id):
     """Use an exact applicable candidate or document a synthetic test SOP.
 
@@ -20,6 +38,7 @@ def confirm_fixture_quality(scope, item_id):
             exclusions[spec['id']] = f'隔离回归数据已核对：{error}'
         else:
             applicable.append(spec)
+    conditions=fixture_conditions(item, clinical=bool(applicable) and item['input_value_type']=='raw')
     if applicable:
         spec = applicable[0]
         for other in applicable[1:]:
@@ -45,13 +64,13 @@ def confirm_fixture_quality(scope, item_id):
         return adopt_requirement(scope, item_id, spec['id'], levels=levels,
                                  confirmed_by='隔离回归测试',
                                  evidence='已核对本夹具项目、单位、输入尺度与各水平适用条件。',
-                                 exclusions=exclusions)
+                                 exclusions=exclusions,**conditions)
     return save_recorded_requirement(
         scope, item_id, source_name='隔离测试实验室 SOP', source_version='TEST-QC-001',
         requirement_text='使用测试方案规定的合成数据、建靶参数与判读预期，仅作软件回归验证。',
         confirmed_by='隔离回归测试',
         evidence='已核对当前目录，未找到适用于本合成测试项目及输入尺度的标准；采用测试方案。',
-        exclusions=exclusions,
+        exclusions=exclusions,**conditions,
     )
 
 

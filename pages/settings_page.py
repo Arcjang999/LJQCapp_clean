@@ -22,6 +22,7 @@ from services.storage_service import (
     validate_sqlite_database,
 )
 from ui.common import render_compact_stat_metrics, render_section_intro, render_workbench_context_bar
+from ui.user_messages import storage_message
 
 
 SETTINGS_FORM_FIELD_MAP = {
@@ -73,9 +74,9 @@ def render_settings_page() -> None:
 
     render_section_intro(
         title="系统设置",
-        caption="用于维护报告默认信息，以及数据存储、迁移、备份和恢复。",
+        caption="维护报告默认信息、更改数据保存位置，以及备份和恢复数据。",
         eyebrow="系统设置",
-        badges=["报告默认信息", "数据存储与备份", "迁移与恢复"],
+        badges=["报告默认信息", "数据存储与备份", "位置更改与恢复"],
         tone="accent",
     )
     render_workbench_context_bar(
@@ -143,8 +144,8 @@ def render_settings_page() -> None:
     with st.container():
         render_section_intro(
             title="数据存储与备份",
-            caption="在此查看数据库位置，并完成迁移、备份和恢复。",
-            badges=["数据库迁移", "备份恢复", "重启后生效"],
+            caption="查看或更改数据保存位置，以及备份和恢复数据。",
+            badges=["更改数据保存位置", "备份恢复", "重启后生效"],
             tone="muted",
         )
         _render_storage_section()
@@ -159,16 +160,16 @@ def _hydrate_settings_form_state(settings: ReportSettings, *, force: bool) -> No
 def _render_storage_section() -> None:
     status = get_database_location_status()
     render_workbench_context_bar(
-        title="当前数据库位置",
-        caption=status.status_text,
+        title="当前数据保存位置",
+        caption=storage_message(status.status_text),
         items=[
-            ("当前数据库文件", _format_settings_path_summary(status.db_path)),
-            ("当前数据库目录", _format_settings_path_summary(status.db_dir)),
+            ("当前数据文件", _format_settings_path_summary(status.db_path)),
+            ("当前数据文件夹", _format_settings_path_summary(status.db_dir)),
             ("默认备份目录", _format_settings_path_summary(status.default_backup_dir)),
         ],
         badges=[
             "自选保存位置" if status.configured_db_path is not None else "默认保存位置",
-            "数据文件正常" if status.is_valid_sqlite or not status.exists else "数据库需检查",
+            "数据文件正常" if status.is_valid_sqlite or not status.exists else "数据文件需检查",
         ],
     )
 
@@ -176,26 +177,26 @@ def _render_storage_section() -> None:
     with location_col:
         render_compact_stat_metrics(
             [
-                ("数据库文件", str(status.db_path.name)),
+                ("数据文件", str(status.db_path.name)),
                 ("目录可见性", "可读取" if status.is_readable or not status.exists else "需检查"),
                 ("数据文件状态", "有效" if status.is_valid_sqlite or not status.exists else "异常"),
                 ("文件大小", f"{status.size_bytes} 字节" if status.exists else "-"),
             ]
         )
         with st.expander("查看路径详情", expanded=False):
-            st.markdown("**当前数据库路径**")
-            st.code(str(status.db_path))
-            st.markdown("**当前数据库目录**")
-            st.code(str(status.db_dir))
+            st.markdown("**当前数据文件路径**")
+            st.text(str(status.db_path))
+            st.markdown("**当前数据文件夹**")
+            st.text(str(status.db_dir))
             st.markdown("**默认备份目录**")
-            st.code(str(status.default_backup_dir))
+            st.text(str(status.default_backup_dir))
 
     with action_col:
-        if st.button("打开数据库所在文件夹", key="open_db_folder", use_container_width=True):
+        if st.button("打开数据文件夹", key="open_db_folder", use_container_width=True):
             try:
                 open_folder_in_system(status.db_dir)
             except RuntimeError as exc:
-                st.error(str(exc))
+                st.error(storage_message(exc))
             else:
                 st.success("已打开数据文件夹。")
         if st.button("打开默认备份目录", key="open_default_backup_dir", use_container_width=True):
@@ -203,29 +204,29 @@ def _render_storage_section() -> None:
                 status.default_backup_dir.mkdir(parents=True, exist_ok=True)
                 open_folder_in_system(status.default_backup_dir)
             except (RuntimeError, OSError) as exc:
-                st.error(str(exc))
+                st.error(storage_message(exc))
             else:
                 st.success("已打开备份文件夹。")
 
     if not status.exists:
-        st.warning("当前数据库文件尚未生成；执行迁移、备份或恢复前，系统会先初始化当前数据库。")
+        st.warning("当前尚无数据文件；更改保存位置、备份或恢复时会自动建立。")
     elif not status.is_readable:
-        st.warning("当前数据库文件存在但无法读取，请先检查文件权限或目录可用性。")
+        st.warning("当前数据文件存在但无法读取，请先检查文件权限或目录可用性。")
     elif not status.is_valid_sqlite:
-        st.warning(status.status_text)
+        st.warning(storage_message(status.status_text))
 
-    st.markdown("**数据库迁移**")
-    st.caption("通过系统目录选择器选择新的数据库存储目录；迁移成功后需要重启应用。")
+    st.markdown("**更改数据保存位置**")
+    st.caption("选择新的数据保存文件夹，完成更改后请重新打开软件。")
     migration_left, migration_right = st.columns([1.1, 0.9], gap="medium")
     with migration_left:
         if st.button("选择新目录", key="pick_storage_migration_dir", use_container_width=True):
             try:
                 selected_dir = choose_directory_via_dialog(
                     initial_dir=status.db_dir,
-                    title="选择新的数据库存储目录",
+                    title="选择新的数据保存文件夹",
                 )
             except RuntimeError as exc:
-                st.error(str(exc))
+                st.error(storage_message(exc))
             else:
                 if selected_dir is not None:
                     st.session_state[STORAGE_SESSION_KEYS["migration_dir"]] = str(selected_dir)
@@ -234,15 +235,15 @@ def _render_storage_section() -> None:
         migration_ready = False
         if selected_migration_dir is not None:
             st.write("已选择的新目录：")
-            st.code(str(selected_migration_dir))
+            st.text(str(selected_migration_dir))
             migration_validation = validate_directory_writable(selected_migration_dir, create_if_missing=False)
             if migration_validation[0]:
                 st.success("目标目录校验通过。")
                 migration_ready = True
             else:
-                st.warning(migration_validation[1])
+                st.warning(storage_message(migration_validation[1]))
         if st.button(
-            "确认迁移数据库",
+            "确认更改保存位置",
             key="confirm_storage_migration",
             type="primary",
             use_container_width=True,
@@ -251,12 +252,12 @@ def _render_storage_section() -> None:
             try:
                 result = migrate_database_to_directory(selected_migration_dir)
             except RuntimeError as exc:
-                st.error(str(exc))
+                st.error(storage_message(exc))
             else:
-                st.success(result.message)
+                st.success(storage_message(result.message))
     with migration_right:
         st.info("更改保存位置后，现有项目和检测记录会一起保留。")
-        st.caption("建议迁移前先做一次备份，迁移完成后按提示重启应用。")
+        st.caption("建议更改保存位置前先备份，完成后按提示重新打开软件。")
 
     st.markdown("**数据备份**")
     st.caption("支持直接备份到默认目录，也支持先选目录再立即备份。")
@@ -266,19 +267,19 @@ def _render_storage_section() -> None:
             try:
                 result = create_database_backup()
             except RuntimeError as exc:
-                st.error(str(exc))
+                st.error(storage_message(exc))
             else:
-                st.success(result.message)
-                st.code(str(result.target_path))
+                st.success(storage_message(result.message))
+                st.text(str(result.target_path))
     with backup_right:
         if st.button("选择备份目录并立即备份", key="backup_custom_dir", use_container_width=True):
             try:
                 selected_backup_dir = choose_directory_via_dialog(
                     initial_dir=status.default_backup_dir,
-                    title="选择数据库备份保存目录",
+                    title="选择备份保存文件夹",
                 )
             except RuntimeError as exc:
-                st.error(str(exc))
+                st.error(storage_message(exc))
             else:
                 if selected_backup_dir is None:
                     st.info("已取消备份目录选择。")
@@ -286,21 +287,21 @@ def _render_storage_section() -> None:
                     try:
                         result = create_database_backup(selected_backup_dir)
                     except RuntimeError as exc:
-                        st.error(str(exc))
+                        st.error(storage_message(exc))
                     else:
-                        st.success(result.message)
-                        st.code(str(result.target_path))
+                        st.success(storage_message(result.message))
+                        st.text(str(result.target_path))
 
-    st.markdown("**危险操作：从备份恢复数据库**")
-    st.warning("恢复会覆盖当前数据库内容；系统会在恢复前自动生成一份保护性备份。")
+    st.markdown("**从备份恢复数据**")
+    st.warning("恢复会覆盖当前数据；恢复前会自动生成一份保护性备份。")
     if st.button("选择备份文件", key="pick_restore_backup_file", use_container_width=True):
         try:
             selected_backup_file = choose_backup_file_via_dialog(
                 initial_dir=status.default_backup_dir,
-                title="选择要恢复的数据库备份文件",
+                title="选择要恢复的备份文件",
             )
         except RuntimeError as exc:
-            st.error(str(exc))
+            st.error(storage_message(exc))
         else:
             if selected_backup_file is not None:
                 st.session_state[STORAGE_SESSION_KEYS["restore_file"]] = str(selected_backup_file)
@@ -310,22 +311,22 @@ def _render_storage_section() -> None:
     restore_ready = False
     if selected_restore_file is not None:
         st.write("已选择的备份文件：")
-        st.code(str(selected_restore_file))
+        st.text(str(selected_restore_file))
         restore_validation = validate_sqlite_database(selected_restore_file)
         if restore_validation[0]:
             st.success("备份文件校验通过。")
             restore_ready = True
         else:
-            st.warning(restore_validation[1])
+            st.warning(storage_message(restore_validation[1]))
 
     st.checkbox(
-        "我已知晓恢复会覆盖当前数据库内容，并且需要在恢复后重启应用。",
+        "我已知晓恢复会覆盖当前数据，并且需要在恢复后重新打开软件。",
         key=STORAGE_SESSION_KEYS["restore_confirmed"],
         disabled=selected_restore_file is None,
     )
     restore_confirmed = bool(st.session_state.get(STORAGE_SESSION_KEYS["restore_confirmed"], False))
     if st.button(
-        "确认恢复数据库",
+        "确认恢复数据",
         key="confirm_restore_database",
         type="primary",
         use_container_width=True,
@@ -334,9 +335,9 @@ def _render_storage_section() -> None:
         try:
             result = restore_database_from_backup_file(selected_restore_file)
         except RuntimeError as exc:
-            st.error(str(exc))
+            st.error(storage_message(exc))
         else:
-            st.success(result.message)
+            st.success(storage_message(result.message))
             if result.protection_backup_path is not None:
                 st.caption(f"保护性备份：{result.protection_backup_path}")
 

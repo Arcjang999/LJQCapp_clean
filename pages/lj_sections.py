@@ -1032,11 +1032,11 @@ def _render_lj_export_import_section_impl(
     st.markdown("**CSV 导入**")
     st.caption("参数建立期和正式期分别提供模板下载、审查和导入。")
     st.markdown("**参数建立期 CSV 导入**")
-    st.caption(f"先下载标准模板，再上传 CSV 或单工作表 Excel 审查；只有无阻断错误时，才允许确认导入当前批次参数建立期{input_value_type_label}数据。")
+    st.caption(f"先下载标准模板，再上传 CSV 或单工作表 Excel 审查；所有必填内容和数据格式检查通过后，才可确认导入当前批次参数建立期{input_value_type_label}数据。")
     st.markdown("- `试剂批号变更（可选）` 在参数建立期一般不填。")
     st.markdown("- 正式期仅在“更换试剂批号后的第一条记录”填写“是”。")
     st.markdown("- 其余记录填“否”或留空。")
-    st.markdown("- 该字段表示“变更点”，不是持续状态。")
+    st.markdown("- 只在首次改用新试剂批号的那条记录中填写，后续记录不必重复填写。")
     st.download_button(
         label="下载参数建立期 CSV 模板",
         data=lj_building_template_csv_bytes,
@@ -1095,7 +1095,7 @@ def _render_lj_export_import_section_impl(
         review_issues_df = build_review_issues_dataframe(lj_import_review_state["issues"])
         render_import_review_summary(review_summary)
         if review_summary["has_blocking_errors"]:
-            st.error("审查未通过：存在阻断错误，当前整批不会导入。")
+            st.error("审查未通过，请按下方提示修正后重新上传。本次数据尚未导入。")
         else:
             st.success("审查通过：当前没有阻断错误，可以确认导入。")
 
@@ -1136,7 +1136,7 @@ def _render_lj_export_import_section_impl(
     st.markdown("- `试剂批号变更（可选）` 在参数建立期一般不填。")
     st.markdown("- 正式期仅在“更换试剂批号后的第一条记录”填写“是”。")
     st.markdown("- 其余记录填“否”或留空。")
-    st.markdown("- 该字段表示“变更点”，不是持续状态。")
+    st.markdown("- 只在首次改用新试剂批号的那条记录中填写，后续记录不必重复填写。")
     st.download_button(
         label="下载正式期 CSV 模板",
         data=lj_building_template_csv_bytes,
@@ -1200,7 +1200,7 @@ def _render_lj_export_import_section_impl(
         )
         render_import_review_summary(formal_review_summary)
         if formal_review_summary["has_blocking_errors"]:
-            st.error("正式期审查未通过：存在阻断错误，当前整批不会导入。")
+            st.error("正式期审查未通过，请按下方提示修正后重新上传。本次数据尚未导入。")
         else:
             st.success("正式期审查通过：当前没有阻断错误，可以确认导入。")
 

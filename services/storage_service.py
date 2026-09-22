@@ -14,7 +14,7 @@ import database
 
 BACKUP_FILE_PREFIX = "qc_lj_app_backup"
 PRE_RESTORE_BACKUP_PREFIX = "qc_lj_app_pre_restore"
-SQLITE_FILE_TYPES = [("SQLite 数据库", "*.db"), ("所有文件", "*.*")]
+SQLITE_FILE_TYPES = [("数据备份文件", "*.db"), ("所有文件", "*.*")]
 
 
 @dataclass(frozen=True)
@@ -46,16 +46,16 @@ def get_database_location_status() -> DatabaseLocationStatus:
     exists = db_path.exists()
     is_readable = exists and os.access(db_path, os.R_OK)
     is_valid_sqlite = False
-    status_text = "当前数据库文件可用。"
+    status_text = "当前数据文件可用。"
     if exists and is_readable:
         validation = validate_sqlite_database(db_path)
         is_valid_sqlite = validation[0]
         if not is_valid_sqlite:
             status_text = validation[1]
     elif exists:
-        status_text = "当前数据库文件存在，但无法读取。"
+        status_text = "当前数据文件存在，但无法读取。"
     else:
-        status_text = "当前数据库文件尚不存在，应用会在需要时自动初始化。"
+        status_text = "当前尚无数据文件，将在首次使用时自动建立。"
 
     size_bytes = 0
     if exists:
@@ -120,18 +120,18 @@ def validate_sqlite_database(path: Path) -> tuple[bool, str]:
         resolved_path = db_path.resolve()
         connection = sqlite3.connect(f"{resolved_path.as_uri()}?mode=ro", uri=True)
     except sqlite3.Error as exc:
-        return False, f"无法打开 SQLite 数据库：{db_path}"
+        return False, f"无法打开数据备份文件：{db_path}"
     try:
         quick_check_rows = connection.execute("PRAGMA quick_check").fetchall()
     except sqlite3.Error:
-        return False, f"数据库校验失败：{db_path}"
+        return False, f"数据文件检查未通过：{db_path}"
     finally:
         connection.close()
 
     normalized_rows = [str(row[0] or "").strip().lower() for row in quick_check_rows]
     if normalized_rows == ["ok"]:
-        return True, "数据库校验通过。"
-    return False, "数据库结构校验未通过，请选择有效备份文件。"
+        return True, "数据文件检查通过。"
+    return False, "数据文件检查未通过，请选择有效备份文件。"
 
 
 def validate_directory_writable(path: Path, *, create_if_missing: bool = False) -> tuple[bool, str]:
@@ -162,9 +162,9 @@ def migrate_database_to_directory(target_dir: Path) -> StorageOperationResult:
 
     destination_db_path = destination_dir / source_db_path.name
     if destination_db_path.resolve() == source_db_path.resolve():
-        raise RuntimeError("所选目录与当前数据库目录相同，无需迁移。")
+        raise RuntimeError("所选文件夹与当前保存位置相同，无需更改。")
     if destination_db_path.exists():
-        raise RuntimeError(f"目标目录已存在同名数据库文件：{destination_db_path}")
+        raise RuntimeError(f"目标文件夹已存在同名数据文件：{destination_db_path}")
 
     _copy_database_snapshot(source_db_path, destination_db_path, overwrite=False)
     validation = validate_sqlite_database(destination_db_path)
@@ -175,7 +175,7 @@ def migrate_database_to_directory(target_dir: Path) -> StorageOperationResult:
     return StorageOperationResult(
         target_path=destination_db_path,
         config_path=config_path,
-        message=f"数据库已复制到新位置：{destination_db_path}。请重启应用后生效。",
+        message=f"数据已复制到新位置：{destination_db_path}。请重新打开软件后使用。",
     )
 
 
@@ -191,7 +191,7 @@ def create_database_backup(target_dir: Path | None = None) -> StorageOperationRe
     _copy_database_snapshot(source_db_path, backup_path, overwrite=False)
     return StorageOperationResult(
         target_path=backup_path,
-        message=f"数据库备份已生成：{backup_path}",
+        message=f"数据备份已生成：{backup_path}",
         restart_required=False,
     )
 
@@ -216,8 +216,8 @@ def restore_database_from_backup_file(backup_file: Path) -> StorageOperationResu
         target_path=current_db_path,
         protection_backup_path=protection_backup.target_path,
         message=(
-            f"数据库已从备份恢复到当前路径：{current_db_path}。"
-            f"恢复前的保护性备份已保存到：{protection_backup.target_path}。请重启应用后生效。"
+            f"数据已从备份恢复到当前保存位置：{current_db_path}。"
+            f"恢复前的保护性备份已保存到：{protection_backup.target_path}。请重新打开软件后使用。"
         ),
     )
 
@@ -232,7 +232,7 @@ def _open_native_path_dialog(
         import tkinter as tk
         from tkinter import filedialog
     except Exception as exc:
-        raise RuntimeError("无法加载系统文件选择窗口，请检查本机 tkinter 环境。") from exc
+        raise RuntimeError("无法打开文件选择窗口，请重新打开软件后重试。") from exc
 
     root = None
     try:
@@ -256,7 +256,7 @@ def _open_native_path_dialog(
                 parent=root,
             )
     except Exception as exc:
-        raise RuntimeError("系统原生选择窗口调用失败，请稍后重试。") from exc
+        raise RuntimeError("无法打开文件选择窗口，请稍后重试。") from exc
     finally:
         if root is not None:
             root.destroy()
@@ -271,9 +271,9 @@ def _copy_database_snapshot(source_db_path: Path, destination_db_path: Path, *, 
     source_path = Path(source_db_path)
     destination_path = Path(destination_db_path)
     if not source_path.exists():
-        raise RuntimeError(f"源数据库文件不存在：{source_path}")
+        raise RuntimeError(f"原数据文件不存在：{source_path}")
     if source_path.resolve() == destination_path.resolve():
-        raise RuntimeError("源数据库与目标数据库不能是同一个文件。")
+        raise RuntimeError("请选择与原数据文件不同的保存位置。")
     if destination_path.exists() and not overwrite:
         raise RuntimeError(f"目标文件已存在：{destination_path}")
 

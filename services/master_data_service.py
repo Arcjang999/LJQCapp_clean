@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import pandas as pd
 
+from services.search_service import filter_frame
 from database import get_connection
 
 
@@ -236,30 +237,8 @@ def list_test_items(include_disabled: bool = False, query: str = "") -> pd.DataF
     params: list[object] = []
     if not include_disabled:
         clauses.append("items.is_disabled = 0")
-    cleaned_query = _clean_optional(query)
-    if cleaned_query:
-        clauses.append(
-            """
-            (
-                items.chinese_name LIKE ?
-                OR items.english_name LIKE ?
-                OR items.abbreviation LIKE ?
-                OR items.standard_code LIKE ?
-                OR EXISTS (
-                    SELECT 1
-                    FROM md_aliases AS aliases
-                    WHERE aliases.entity_type = 'test_item'
-                      AND aliases.entity_id = items.id
-                      AND aliases.is_disabled = 0
-                      AND aliases.alias_text LIKE ?
-                )
-            )
-            """
-        )
-        like_value = f"%{cleaned_query}%"
-        params.extend([like_value] * 5)
     where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    return _read_dataframe(
+    frame = _read_dataframe(
         f"""
         SELECT
             items.id,
@@ -271,6 +250,8 @@ def list_test_items(include_disabled: bool = False, query: str = "") -> pd.DataF
             items.category_name,
             items.specimen_type,
             units.symbol AS default_unit,
+            (SELECT group_concat(alias_text, ' ') FROM md_aliases
+             WHERE entity_type='test_item' AND entity_id=items.id AND is_disabled=0) AS aliases,
             items.origin_type,
             items.is_disabled,
             items.created_at
@@ -281,6 +262,9 @@ def list_test_items(include_disabled: bool = False, query: str = "") -> pd.DataF
         """,
         tuple(params),
     )
+
+    return filter_frame(frame, query, ['chinese_name', 'english_name', 'abbreviation',
+        'standard_code', 'category_name', 'specimen_type', 'aliases'])
 
 
 def create_instrument_model(

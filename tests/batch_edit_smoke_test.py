@@ -14,7 +14,7 @@ from services.project_config_service import (
 from services.quality_target_service import adopt_requirement, decode, validate_lot_goal
 from tests.instant_v12_fixtures import seed_instant_configuration
 from tests.instant_v12_integration_smoke_test import IsolatedDatabase, rejected
-from tests.quality_review_fixtures import confirm_fixture_lot
+from tests.quality_review_fixtures import confirm_fixture_lot, fixture_conditions
 from tests.quality_review_smoke_test import copied_lot
 from tests.zscore_v12_fixtures import seed_zscore_configuration
 
@@ -49,11 +49,13 @@ def database_state():
 
 
 def adopt_crp(context):
+    from services.quality_target_service import item_context
     # Synthetic CRP fixture with the catalog's mg/L unit and explicit evidence.
     with get_connection() as connection:
         connection.execute("UPDATE md_test_items SET chinese_name='CRP' WHERE id=?",
                            (context['item']['test_item_id'],))
     return adopt_requirement('lot', context['item']['id'], 'wst403-2024-047',
+        **fixture_conditions(item_context('lot', context['item']['id']), clinical=True),
         confirmed_by='批次参数验收人', evidence='隔离 CRP 夹具，免疫比浊方法、mg/L 和材料适用范围已核对。',
         levels=[dict(level_order=index+1, concentration=100*(index+1), category='')
                 for index in range(len(context['levels']))])

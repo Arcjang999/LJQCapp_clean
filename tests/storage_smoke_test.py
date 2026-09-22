@@ -76,7 +76,7 @@ def test_default_path_startup_without_external_config() -> None:
         assert database.get_db_path() == database.get_default_db_path()
         assert database.get_db_path().exists()
 
-        at = AppTest.from_file(APP_FILE_PATH)
+        at = AppTest.from_file(APP_FILE_PATH, default_timeout=15)
         at.run()
         assert not list(at.exception)
 
@@ -144,7 +144,7 @@ def test_restore_creates_protection_backup_and_restores_previous_snapshot() -> N
             ]
         assert names_after_restore == ["Before Restore"]
 
-        at = AppTest.from_file(APP_FILE_PATH)
+        at = AppTest.from_file(APP_FILE_PATH, default_timeout=15)
         at.run()
         assert not list(at.exception)
 

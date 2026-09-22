@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pandas as pd
 import streamlit as st
+from services.search_service import fuzzy_match, SEARCH_HELP
 
 from services.material_workflow_service import config_material_summary, material_label
 from services.project_config_service import list_lot_configs, list_project_templates, QC_METHOD_LABELS
@@ -217,7 +218,7 @@ def render_qc_replacement_workspace():
     if st.session_state.get('qc_replace_project') not in [None, *projects]:
         st.session_state['qc_replace_project'] = None
     search, project = st.columns(2)
-    query = search.text_input('搜索原批次', key='qc_replace_search', placeholder='批次、检验项目或质控品批号')
+    query = search.text_input('搜索原批次', key='qc_replace_search', help=SEARCH_HELP, placeholder='批次、检验项目或质控品批号')
     project_id = project.selectbox('项目', [None, *projects], placeholder='全部项目', format_func=lambda value: '全部项目' if value is None else projects[value], key='qc_replace_project')
     settings.update(qc_replace_search=query, qc_replace_project=project_id)
     configs = list_lot_configs(template_id=project_id)
@@ -226,7 +227,7 @@ def render_qc_replacement_workspace():
         from services.project_config_service import list_lot_config_items
         texts = configs.apply(lambda row: ' '.join([str(row.config_name), summaries[int(row.id)],
             ' '.join(list_lot_config_items(int(row.id)).test_item_name.astype(str))]), axis=1)
-        configs = configs[texts.str.contains(query.strip(), case=False, regex=False)]
+        configs = configs[texts.map(lambda value: fuzzy_match(query, value))]
     ids = [int(value) for value in configs.id]
     if st.session_state.get('qc_replace_selected_config') not in ids:
         st.session_state['qc_replace_selected_config'] = None

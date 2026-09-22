@@ -835,14 +835,15 @@ def filter_report_history_records(
     batch_query: str = "",
     report_month: str = "",
 ) -> list[ReportHistoryRecord]:
-    normalized_project_query = str(project_query or "").strip().casefold()
+    from services.search_service import fuzzy_match
+    normalized_project_query = str(project_query or "").strip()
     normalized_method_label = str(method_label or "").strip()
     normalized_batch_query = str(batch_query or "").strip().casefold()
     normalized_report_month = str(report_month or "").strip()
 
     filtered_records: list[ReportHistoryRecord] = []
     for record in records:
-        if normalized_project_query and normalized_project_query not in record.project_name.casefold():
+        if not fuzzy_match(normalized_project_query, record.project_name):
             continue
         if normalized_method_label and record.method_label != normalized_method_label:
             continue
@@ -852,7 +853,7 @@ def filter_report_history_records(
                 for part in [record.batch_label, record.file_name]
                 if str(part or "").strip()
             ).casefold()
-            if normalized_batch_query not in batch_haystack:
+            if not fuzzy_match(normalized_batch_query, batch_haystack):
                 continue
         if normalized_report_month and record.report_month != normalized_report_month:
             continue

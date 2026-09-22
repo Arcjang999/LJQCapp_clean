@@ -126,6 +126,8 @@ def _build_streamlit_argv(app_path: Path, *, port: int, address: str) -> list[st
         "--global.developmentMode=false",
         "--browser.gatherUsageStats=false",
         "--client.showSidebarNavigation=false",
+        "--client.showErrorDetails=none",
+        "--client.toolbarMode=minimal",
         "--server.fileWatcherType=none",
         "--server.headless=true",
         f"--server.address={address}",

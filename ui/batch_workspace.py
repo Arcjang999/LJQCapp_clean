@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pandas as pd
 import streamlit as st
+from services.search_service import fuzzy_match, SEARCH_HELP
 
 from database import atomic_write
 from services.project_config_service import (
@@ -227,7 +228,7 @@ def render_batch_workspace():
         st.success(notice)
     projects = {int(row['id']): row for row in list_project_templates(include_disabled=True).to_dict('records')}
     search, project_column, include_column = st.columns([2, 2, 1.2])
-    query = search.text_input('搜索批次', key='batch_search', placeholder='批次名称、批号或检验项目')
+    query = search.text_input('搜索批次', key='batch_search', help=SEARCH_HELP, placeholder='批次名称、批号或检验项目')
     if st.session_state.get('batch_project_filter') not in [None, *projects]:
         st.session_state['batch_project_filter'] = None
     project = project_column.selectbox('项目', [None, *projects], key='batch_project_filter',
@@ -245,7 +246,7 @@ def render_batch_workspace():
         if query.strip():
             names = {int(row.id): ' '.join(list_lot_config_items(int(row.id)).test_item_name.astype(str)) for _, row in configs.iterrows()}
             text = configs.apply(lambda row: ' '.join([str(row.config_name), summaries[int(row.id)], names[int(row.id)]]), axis=1)
-            configs = configs[text.str.contains(query.strip(), case=False, regex=False)]
+            configs = configs[text.map(lambda value: fuzzy_match(query, value))]
         display = configs[['config_name','template_name','instrument_name','status','item_count']].copy()
         display['status'] = display.status.map(_STATUS_LABELS)
         display['质控品批号'] = [summaries[int(row.id)] for _, row in configs.iterrows()]

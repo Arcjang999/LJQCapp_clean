@@ -1,6 +1,7 @@
 [client]
 showSidebarNavigation = false
 toolbarMode = "minimal"
+showErrorDetails = "none"
 
 [logger]
 hideWelcomeMessage = true

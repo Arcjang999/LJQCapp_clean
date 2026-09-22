@@ -157,7 +157,9 @@ def test_quality_review_export_is_readable_but_cannot_confirm_an_import() -> Non
         assert source['适用依据'] == original['evidence']
         assert source['来源类型'] == '实验室自定要求（不自动评价）'
         candidate = sheets['标准适用情况（供查阅）'].iloc[0]
-        assert candidate['适用情况'] == '不适用' and candidate['说明'] == reason
+        assert candidate['适用情况'] == '不适用'
+        assert candidate['说明'] == original['candidates'][0]['reason']
+        assert '结果尺度' in candidate['说明']
         assert '403' in candidate['标准名称及版本'] and '2024' in candidate['标准名称及版本']
         original_preview, errors = preview_project_template_xlsx(payload)
         assert not errors
@@ -185,6 +187,7 @@ def test_quality_review_export_is_readable_but_cannot_confirm_an_import() -> Non
 
 
 def test_lot_export_keeps_frozen_sources_when_project_changes() -> None:
+    from tests.quality_review_fixtures import fixture_conditions
     from tests.instant_v12_fixtures import seed_instant_configuration
     from services.quality_target_service import decode, item_context
     from services.quality_review_service import save_recorded_requirement
@@ -193,6 +196,7 @@ def test_lot_export_keeps_frozen_sources_when_project_changes() -> None:
         before = xlsx_bytes_to_dataframes(build_lot_config_xlsx(fixture['config_id']))
         item_id = int(list_template_items(fixture['template_id']).iloc[0]['id'])
         save_recorded_requirement('project', item_id, source_name='后续项目SOP', source_version='2',
+            **fixture_conditions(item_context('project', item_id)),
             requirement_text='后续新批次用新版要求。', confirmed_by='项目修改人', evidence='新版本仅供后续批次核对。')
         after = xlsx_bytes_to_dataframes(build_lot_config_xlsx(fixture['config_id']))
         assert before['质量目标（供查阅）'].to_dict('records') == after['质量目标（供查阅）'].to_dict('records')
@@ -204,11 +208,14 @@ def test_lot_export_keeps_frozen_sources_when_project_changes() -> None:
 
 
 def test_builtin_source_export_includes_original_version_and_disposition() -> None:
+    from tests.quality_review_fixtures import fixture_conditions
+    from services.quality_target_service import item_context
     from tests.quality_review_smoke_test import draft_fixture
     from services.quality_target_service import adopt_requirement
     with TemporaryDatabaseContext():
         fixture, item_id = draft_fixture(candidate=True)
         goal = adopt_requirement('project', item_id, 'wst403-2024-047',
+            **fixture_conditions(item_context('project', item_id), clinical=True),
             confirmed_by='标准验收人', evidence='CRP 原始浓度检测，核对方法、单位及适用范围。')
         exported = xlsx_bytes_to_dataframes(build_project_template_xlsx(fixture['template_id']))
         source = exported['质量目标（供查阅）'].iloc[0]
