@@ -10,6 +10,7 @@ import pandas as pd
 import streamlit as st
 
 from database import delete_result, update_result
+from services.lot_lifecycle_service import get_result_edit_availability
 from pages.management import sync_selector_state
 from services.value_type_service import (
     DEFAULT_INPUT_VALUE_TYPE,
@@ -58,7 +59,7 @@ def render_record_maintenance_dialog(
 
     normalized_input_value_type = normalize_input_value_type(input_value_type)
     input_value_type_label = get_input_value_type_label(normalized_input_value_type)
-    st.caption(f"在此可以选择检测记录进行修改或删除，当前项目的输入值类型为 {input_value_type_label}。")
+    st.caption(f"请选择一条检测记录，查看检测时间、检测人和“{input_value_type_label}”。尚未进入正式期的参数建立记录可维护；正式期记录仅供查询。")
     if qc_df.empty:
         st.info("当前批次暂无检测记录可维护。")
         if st.button("关闭", key="close_record_dialog_empty", width="stretch"):
@@ -75,7 +76,7 @@ def render_record_maintenance_dialog(
         placeholder=result_labels[0],
     )
     selected_result_label = st.selectbox(
-        "选择需要编辑或删除的检测记录",
+        "选择需要查看或修改的检测记录",
         options=result_labels,
         key="result_selector",
     )
@@ -91,6 +92,8 @@ def render_record_maintenance_dialog(
         selected_rows = maintenance_df[maintenance_df["id"] == selected_result_id]
         if not selected_rows.empty:
             selected_result = selected_rows.iloc[0]
+            availability = get_result_edit_availability('lj', int(selected_result_id))
+            edit_locked = not availability['allowed']
             dialog_nonce = int(st.session_state.get("record_maintenance_dialog_nonce", 0))
             confirm_delete_key = f"confirm_delete_result_{dialog_nonce}_{int(selected_result_id)}"
             maintenance_left, maintenance_right = st.columns([1.25, 0.75], gap="large")
@@ -101,32 +104,40 @@ def render_record_maintenance_dialog(
                     f"状态 {selected_result['status']} | 触发规则 "
                     f"{selected_result['rule_hits'] or '无'}"
                 )
+                if edit_locked:
+                    st.info(availability['reason'])
                 with st.form("edit_result_form"):
                     edit_test_time = st.datetime_input(
                         "检测时间",
                         value=pd.Timestamp(selected_result["test_time"]).to_pydatetime(),
+                        disabled=edit_locked,
                     )
                     edit_operator = st.text_input(
                         "检测人",
                         value=str(selected_result["operator"]),
+                        disabled=edit_locked,
                     )
                     edit_value = st.number_input(
                         input_value_type_label,
                         value=float(selected_result["value"]),
                         format="%.4f",
+                        disabled=edit_locked,
                     )
                     edit_reagent_changed = st.checkbox(
                         "本次为试剂批号变更点",
                         value=bool(int(selected_result["reagent_lot_changed"])),
+                        disabled=edit_locked,
                     )
                     edit_manual_note = st.text_area(
                         "手动备注（可选）",
                         value=str(selected_result.get("manual_note", "") or ""),
                         height=88,
+                        disabled=edit_locked,
                     )
                     edit_submitted = st.form_submit_button(
                         "保存记录修改",
                         width="stretch",
+                        disabled=edit_locked,
                     )
 
                     if edit_submitted:
@@ -148,21 +159,22 @@ def render_record_maintenance_dialog(
                         if validation_errors:
                             st.error("\n".join(validation_errors))
                         else:
-                            update_result(
-                                result_id=int(selected_result_id),
-                                test_time=edit_test_time.strftime("%Y-%m-%d %H:%M:%S"),
-                                operator=cleaned_operator,
-                                value=float(edit_value),
-                                log_value=compute_legacy_log_value(
-                                    float(edit_value),
-                                    normalized_input_value_type,
-                                ),
-                                reagent_lot_changed=int(edit_reagent_changed),
-                                manual_note=str(edit_manual_note or "").strip(),
-                            )
-                            close_record_maintenance_dialog()
-                            st.success("检测记录已更新。")
-                            st.rerun()
+                            try:
+                                update_result(
+                                    result_id=int(selected_result_id),
+                                    test_time=edit_test_time.strftime("%Y-%m-%d %H:%M:%S"),
+                                    operator=cleaned_operator,
+                                    value=float(edit_value),
+                                    log_value=compute_legacy_log_value(float(edit_value), normalized_input_value_type),
+                                    reagent_lot_changed=int(edit_reagent_changed),
+                                    manual_note=str(edit_manual_note or "").strip(),
+                                )
+                            except ValueError as exc:
+                                st.error(str(exc))
+                            else:
+                                close_record_maintenance_dialog()
+                                st.success("检测记录已更新。")
+                                st.rerun()
 
             with maintenance_right:
                 st.info("原始检测记录保留追溯，不提供删除。参数建立期可通过禁用保留原值及维护原因。")
@@ -196,7 +208,7 @@ def render_zscore_record_maintenance_dialog(
     input_value_type = normalize_input_value_type(batch_context["batch"]["input_value_type"])
     input_value_type_label = get_input_value_type_label(input_value_type)
     st.caption(
-        f"在此查看当前批次已保存的检测记录。未锁定记录仍可维护检测时间、检测人和各水平{input_value_type_label}；参数建立期记录在正式期后仅支持查看。"
+        f"请选择一整次检测，核对检测时间、检测人和各水平的“{input_value_type_label}”。尚未进入正式期的参数建立记录可维护；批次进入正式期后，原检测记录仅供查询。"
     )
     if not saved_runs:
         st.info("当前批次暂无已保存的检测记录可维护。")
@@ -245,7 +257,8 @@ def render_zscore_record_maintenance_dialog(
             dialog_nonce = int(st.session_state.get("zscore_record_maintenance_dialog_nonce", 0))
             confirm_delete_key = f"confirm_delete_zscore_run_{dialog_nonce}_{int(selected_run_id)}"
             delete_button_key = f"delete_zscore_run_button_{dialog_nonce}_{int(selected_run_id)}"
-            is_locked_for_maintenance = bool(selected_run.get("is_locked_for_maintenance"))
+            availability = get_result_edit_availability('zscore', int(selected_run_id))
+            is_locked_for_maintenance = bool(selected_run.get("is_locked_for_maintenance")) or not availability['allowed']
             sequence_number = get_zscore_display_sequence(selected_run)
             maintenance_left, maintenance_right = st.columns([1.25, 0.75], gap="large")
 
@@ -257,7 +270,7 @@ def render_zscore_record_maintenance_dialog(
                     f"触发规则 {format_zscore_rule_hits(selected_run.get('rule_hits_run', []))}"
                 )
                 if is_locked_for_maintenance:
-                    st.info("该参数建立期检测记录已锁定为只读，可查看，但不能修改或删除。")
+                    st.info(availability['reason'] or "批次已进入正式期，这条参数建立记录仅供查询，不能修改或删除。")
                     readonly_prefix = f"readonly_zscore_run_{dialog_nonce}_{int(selected_run_id)}"
                     st.datetime_input(
                         "检测时间",

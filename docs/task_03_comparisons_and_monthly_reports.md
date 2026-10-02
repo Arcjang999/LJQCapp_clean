@@ -1,6 +1,6 @@
 # 任务 3：换批比对与批量月报
 
-> 2026-09-22 执行细化：本文件保留原业务需求。开发按[执行总表](execution/README.md)中的 [T3A-01](execution/cards/T3A-01.md) 至 [T3C-06](execution/cards/T3C-06.md) 逐卡进行，每卡完成即停止；状态以[进度表](execution/STATUS.md)为准。下文历史日期的“当前不开发”等说明记录当时状态，不取消用户后续明确指定卡片的开发授权。
+> 2026-09-28 合并执行（保留2026-09-22细卡）：本文件保留原业务需求。[执行总表](execution/README.md)中的 [T3A-01](execution/cards/T3A-01.md) 至 [T3C-06](execution/cards/T3C-06.md) 保留为需求与验收清单；按[合并轮次](execution/BATCHES.md)连续执行，轮内不逐卡停止，轮末统一验收回填。用户明确指定单卡时只做该卡；状态以[进度表](execution/STATUS.md)为准。下文历史日期的“当前不开发”等说明记录当时状态，不取消用户后续明确指定卡片的开发授权。
 
 任务书拆分（2026-09-21）：本文件继续包含可分别交付的 3A、3B、3C，不复制三套重复规格。临时记录来自 [任务 2B](task_02b_temporary_qc.md)，更正/补录后的重算来自 [任务 5](task_05_result_maintenance_recalculation.md)，依赖与验收阶段见 [任务书总览](TASK_BOOKS.md)。本次只改文档。
 

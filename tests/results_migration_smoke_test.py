@@ -151,7 +151,8 @@ def test_legacy_results_table_migrates_and_app_starts() -> None:
         at = AppTest.from_file(APP_FILE_PATH)
         at.run()
         assert not list(at.exception)
-        assert at.radio(key="top_level_method_selector").value == "主页"
+        assert at.session_state["top_level_method_selector"] == "主页"
+        assert not any(r.key == "top_level_method_selector" for r in at.radio)
 
 
 def run_all_tests() -> None:

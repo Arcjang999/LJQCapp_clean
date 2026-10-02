@@ -19,7 +19,7 @@ from services.storage_service import (
     open_folder_in_system,
     restore_database_from_backup_file,
     validate_directory_writable,
-    validate_sqlite_database,
+    validate_backup_file,
 )
 from ui.common import render_compact_stat_metrics, render_section_intro, render_workbench_context_bar
 from ui.user_messages import storage_message
@@ -72,31 +72,28 @@ def render_settings_page() -> None:
             st.session_state["show_settings_page"] = False
             st.rerun()
 
-    render_section_intro(
+    from ui.common import render_module_header
+    render_module_header(
         title="系统设置",
         caption="维护报告默认信息、更改数据保存位置，以及备份和恢复数据。",
-        eyebrow="系统设置",
-        badges=["报告默认信息", "数据存储与备份", "位置更改与恢复"],
-        tone="accent",
+        tone="settings",
     )
     render_workbench_context_bar(
-        title="当前配置摘要",
-        caption="后续新生成的 LJ 与 Z-score 月报会优先读取这里的默认信息。",
+        title="当前报告默认信息",
+        caption="请核对实验室、科室和责任人；后续新生成的单水平（LJ）与多水平法月报会使用这些默认信息。",
         items=[
             ("实验室名称", current_settings.lab_name or "未填写"),
             ("科室名称", current_settings.department_name or "未填写"),
             ("质控负责人", current_settings.qc_owner_name or "未填写"),
             ("审核人", current_settings.reviewer_name or "未填写"),
-            ("报告声明", "已配置" if current_settings.report_statement else "使用默认声明"),
+            ("报告声明", "已填写" if current_settings.report_statement else "使用默认声明"),
         ],
-        badges=["实验室信息", "影响后续新报告"],
     )
 
     with st.container():
         render_section_intro(
             title="报告默认信息",
-            caption="集中维护实验室、科室、报告责任人和默认声明。",
-            badges=["常规配置", "影响 LJ / Z-score 月报"],
+            caption="填写实验室、科室、报告责任人和声明，供后续月报使用。",
             tone="accent",
         )
         info_left, info_right = st.columns(2, gap="medium")
@@ -122,7 +119,7 @@ def render_settings_page() -> None:
             )
             st.session_state["refresh_settings_form"] = True
             st.session_state["settings_saved_notice"] = (
-                "系统设置已保存，后续新生成的 LJ / Z-score 月报会优先使用这里的默认信息。"
+                "报告默认信息已保存，后续新生成的单水平（LJ）与多水平法月报会使用这些信息。"
             )
             st.rerun()
 
@@ -238,7 +235,7 @@ def _render_storage_section() -> None:
             st.text(str(selected_migration_dir))
             migration_validation = validate_directory_writable(selected_migration_dir, create_if_missing=False)
             if migration_validation[0]:
-                st.success("目标目录校验通过。")
+                st.success("此文件夹可以保存数据。")
                 migration_ready = True
             else:
                 st.warning(storage_message(migration_validation[1]))
@@ -260,7 +257,7 @@ def _render_storage_section() -> None:
         st.caption("建议更改保存位置前先备份，完成后按提示重新打开软件。")
 
     st.markdown("**数据备份**")
-    st.caption("支持直接备份到默认目录，也支持先选目录再立即备份。")
+    st.caption("项目资料、检测记录、处理附件和已保存报告一同备份。可保存到默认备份文件夹，也可另选文件夹。")
     backup_left, backup_right = st.columns(2, gap="medium")
     with backup_left:
         if st.button("立即备份到默认目录", key="backup_default_dir", use_container_width=True):
@@ -293,7 +290,7 @@ def _render_storage_section() -> None:
                         st.text(str(result.target_path))
 
     st.markdown("**从备份恢复数据**")
-    st.warning("恢复会覆盖当前数据；恢复前会自动生成一份保护性备份。")
+    st.warning("恢复会用备份中的资料替换当前数据。恢复前会自动备份当前数据，请妥善保留。")
     if st.button("选择备份文件", key="pick_restore_backup_file", use_container_width=True):
         try:
             selected_backup_file = choose_backup_file_via_dialog(
@@ -312,9 +309,9 @@ def _render_storage_section() -> None:
     if selected_restore_file is not None:
         st.write("已选择的备份文件：")
         st.text(str(selected_restore_file))
-        restore_validation = validate_sqlite_database(selected_restore_file)
+        restore_validation = validate_backup_file(selected_restore_file)
         if restore_validation[0]:
-            st.success("备份文件校验通过。")
+            st.success(restore_validation[1])
             restore_ready = True
         else:
             st.warning(storage_message(restore_validation[1]))
@@ -339,7 +336,7 @@ def _render_storage_section() -> None:
         else:
             st.success(storage_message(result.message))
             if result.protection_backup_path is not None:
-                st.caption(f"保护性备份：{result.protection_backup_path}")
+                st.caption(f"恢复前的数据备份：{result.protection_backup_path}")
 
 
 def _read_optional_path(session_key: str) -> Path | None:

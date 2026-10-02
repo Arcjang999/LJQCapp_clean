@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import streamlit as st
 
 from database import init_db
@@ -9,7 +11,6 @@ from pages.main_page import (
     INSTANT_ENTRY_LABEL,
     LJ_ENTRY_LABEL,
     MAIN_ENTRY_LABEL,
-    METHOD_ENTRY_OPTIONS,
     ZSCORE_ENTRY_LABEL,
     normalize_top_level_method_selection,
     render_main_entry_page,
@@ -59,11 +60,44 @@ st.set_option("client.showSidebarNavigation", False)
 st.set_option("client.toolbarMode", "minimal")
 st.set_option("client.showErrorDetails", "none")
 init_db()
-inject_global_styles()
+from services.product_directory_service import ensure_builtin_bondson_directory
+try:
+    ensure_builtin_bondson_directory()
+except (ValueError, OSError):
+    logging.exception('Bundled product directory could not be prepared')
+    st.warning('内置产品名录暂未准备完成。请在质控品管理中核对目录资料，或联系维护人员；已登记资料仍可使用。')
 
 normalize_top_level_method_selection()
 _consume_pending_navigation_intent()
+inject_global_styles()
 render_page_chrome()
+from ui.daily_navigation import render_daily_return
+render_daily_return()
+
+if bool(st.session_state.get("show_user_guide_page", False)):
+    from ui.user_guide import render_user_guide_page
+    render_user_guide_page()
+    st.stop()
+
+if bool(st.session_state.get("show_batch_monthly_reports_page", False)):
+    from ui.batch_monthly_reports import render_batch_monthly_reports_page
+    render_batch_monthly_reports_page()
+    st.stop()
+
+if bool(st.session_state.get("show_daily_overview_page", False)):
+    from ui.daily_overview import render_daily_overview
+    render_daily_overview()
+    st.stop()
+
+if bool(st.session_state.get("show_daily_entry_page", False)):
+    from ui.daily_entry import render_daily_entry
+    render_daily_entry()
+    st.stop()
+
+if bool(st.session_state.get("show_out_of_control_page", False)):
+    from pages.out_of_control_page import render_out_of_control_page
+    render_out_of_control_page()
+    st.stop()
 
 if bool(st.session_state.get("show_quality_targets_page", False)):
     render_quality_targets_page()
@@ -81,19 +115,25 @@ if bool(st.session_state.get("show_master_data_page", False)):
     render_master_data_page()
     st.stop()
 
+if bool(st.session_state.get("show_qc_materials_page", False)):
+    from pages.qc_materials_page import render_qc_materials_page
+    render_qc_materials_page()
+    st.stop()
+
+if bool(st.session_state.get("show_reference_management_page", False)):
+    from pages.reference_management_page import render_reference_management_page
+    render_reference_management_page()
+    st.stop()
+
 if bool(st.session_state.get("show_project_management_page", False)):
     render_project_management_page()
     st.stop()
 
-# Project navigation is primary; retained method routes support old links and existing sessions.
-current = st.session_state.get('top_level_method_selector', MAIN_ENTRY_LABEL)
-if current != MAIN_ENTRY_LABEL and st.button('返回项目工作台',key='back_project_home'):
-    st.session_state['pending_top_level_method']=MAIN_ENTRY_LABEL
-    st.rerun()
-with st.expander('选择质控方法',expanded=False):
-    selected_method = st.radio(
-        "质控工作台",options=METHOD_ENTRY_OPTIONS,horizontal=True,key="top_level_method_selector",
-    )
+# A configured item chooses its workbench; method selection belongs to its setup.
+selected_method = st.session_state.get('top_level_method_selector', MAIN_ENTRY_LABEL)
+if selected_method != MAIN_ENTRY_LABEL and st.button('返回项目工作台',key='back_project_home'):
+    from ui.daily_navigation import return_to_project_workspace
+    return_to_project_workspace()
 
 if selected_method != MAIN_ENTRY_LABEL:
     from ui.project_navigation import render_workspace_return_bar

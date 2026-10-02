@@ -78,7 +78,9 @@ def test_global_navigation_and_watermark_apply_to_top_level_pages() -> None:
         assert not at.get("code")
 
         for entry_label in [MAIN_ENTRY_LABEL, LJ_ENTRY_LABEL, ZSCORE_ENTRY_LABEL, INSTANT_ENTRY_LABEL]:
-            at.radio(key="top_level_method_selector").set_value(entry_label).run()
+            at.session_state["pending_top_level_method"] = entry_label
+            at.run()
+            assert at.session_state["top_level_method_selector"] == entry_label
             assert not list(at.exception)
             _assert_global_navigation_and_watermark(at)
 
@@ -90,8 +92,7 @@ def test_global_settings_entry_save_and_reopen() -> None:
 
         assert not list(at.exception)
         _assert_global_navigation_and_watermark(at)
-        navigation = at.radio(key="top_level_method_selector")
-        assert "系统设置" not in list(navigation.options)
+        assert not any(r.key == "top_level_method_selector" for r in at.radio)
 
         at.button(key="open_system_settings").click().run()
         assert not list(at.exception)
@@ -105,7 +106,7 @@ def test_global_settings_entry_save_and_reopen() -> None:
         at.button(key="save_system_settings").click().run()
 
         assert not list(at.exception)
-        assert any("系统设置已保存" in str(item.value) for item in at.success)
+        assert any("报告默认信息已保存" in str(item.value) for item in at.success)
 
         saved = get_report_settings()
         assert saved.lab_name == "星城医学实验室"
@@ -140,7 +141,7 @@ def test_storage_failure_displays_an_action_without_internal_details() -> None:
         assert errors == ["无法打开文件选择窗口，请重新打开软件后重试。"]
         assert at.button(key="confirm_storage_migration").disabled
 
-        with patch("pages.settings_page.validate_sqlite_database",
+        with patch("pages.settings_page.validate_backup_file",
                    return_value=(False, "无法打开 SQLite 数据库：/missing/backup.db")):
             at.session_state["settings_storage_selected_restore_file"] = "/missing/backup.db"
             at.run()

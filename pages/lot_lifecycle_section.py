@@ -85,7 +85,7 @@ def render_lot_management(*, render_dialogs=True):
     from services.instant_workbench_service import sync_instant_workbench_bindings
     sync_lj_workbench_bindings();sync_zscore_workbench_bindings();sync_instant_workbench_bindings()
     workbench_systems()
-    st.caption('批次设置确认、均值和标准差确认、质控品使用状态分别管理。试剂与质控品换批验证依据按实验室 SOP 填写。')
+    st.caption('请在对应页面核对批次设置、均值和标准差，以及质控品是否已启用。试剂和质控品换批时，请按实验室 SOP 填写验证依据。')
     labels = ['试剂批号与换批','新旧批号比对','均值和标准差管理','历史记录']
     if 'lot_management_tabs' not in st.session_state and st.session_state.get('lot_management_active_tab') in labels:
         st.session_state['lot_management_tabs'] = st.session_state['lot_management_active_tab']

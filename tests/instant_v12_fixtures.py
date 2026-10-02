@@ -16,7 +16,7 @@ def seed_instant_configuration(name="V12 即时法", input_value_type="raw",
                                instrument="V12 仪器", reagent="V12 试剂", qc_material="V12 质控品",
                                concentration="常规浓度", lot_no="V12-INSTANT-LOT", cv_limit=5.0,
                                target_source="building"):
-    manufacturer = create_manufacturer(display_name=name + " 厂家")
+    manufacturer = create_manufacturer(categories=['instrument', 'reagent', 'qc_material'], display_name=name + " 厂家")
     model = create_instrument_model(manufacturer_id=manufacturer, generic_name="分析仪", model=name)
     instrument_id = create_lab_instrument(instrument_model_id=model, display_name=instrument)
     reagent_id = create_reagent(manufacturer_id=manufacturer, generic_name=reagent)

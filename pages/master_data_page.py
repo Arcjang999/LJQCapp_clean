@@ -17,11 +17,12 @@ def _tabs(labels, key):
 
 
 def _render_manufacturers_tab():
-    render_master_data_workspace('manufacturer')
+    from pages.reference_management_page import render_manufacturer_management
+    render_manufacturer_management()
 
 
 def _render_test_items_tab():
-    st.caption('已收录 WS/T 886—2026 的 296 个定量检验项目。该标准已发布，实施日期为 2026 年 11 月 1 日。')
+    st.caption('先按名称、代码或别名查找检验项目，核对后选用。名称目录收录了 WS/T 886—2026 的296项；该标准实施日期为2026年11月1日，选用名称后仍须另行确认适用的质量要求。')
     render_master_data_workspace('test_item')
     with st.expander('词库来源'):
         sources = list_sources()
@@ -31,21 +32,18 @@ def _render_test_items_tab():
 
 
 def _render_instruments_tab():
-    st.caption('先维护仪器型号，再登记实际使用的仪器。')
-    local, models = _tabs(['已登记仪器', '仪器型号'], 'md_instrument_tabs')
-    with local:
-        render_master_data_workspace('lab_instrument')
-    with models:
-        render_master_data_workspace('instrument_model')
+    from pages.reference_management_page import render_instrument_management
+    render_instrument_management()
 
 
 def _render_reagents_tab():
-    render_master_data_workspace('reagent')
+    from pages.reference_management_page import render_reagent_management
+    render_reagent_management()
 
 
 def _render_qc_materials_tab():
-    from ui.material_catalog import render_material_catalog
-    render_material_catalog(render_dialog=False)
+    from pages.qc_materials_page import render_qc_material_workspace
+    render_qc_material_workspace(render_dialog=False)
 
 
 def _render_methods_units_tab():
@@ -62,10 +60,11 @@ def render_master_data_page():
         if st.button('返回当前工作台', key='close_master_data_page', width='stretch'):
             st.session_state['show_master_data_page'] = False
             st.rerun()
-    render_section_intro(
+    from ui.common import render_module_header
+    render_module_header(
         title='基础资料', eyebrow='资料管理',
         caption='维护医院使用的检验项目、厂家、仪器、试剂、质控品、方法学和单位。请先搜索已有资料，未找到时再新增。',
-        badges=['资料查询', '新增与编辑', '停用与恢复'], tone='accent',
+        tone='materials',
     )
     tabs = _tabs(['厂家', '检验项目', '仪器', '试剂', '质控品与批号', '方法学与单位'], 'md_category_tabs')
     for tab, render in zip(tabs, (_render_manufacturers_tab, _render_test_items_tab,
@@ -77,3 +76,6 @@ def render_master_data_page():
     if not st.session_state.get('master_data_dialog'):
         from ui.material_catalog import render_pending_material_dialog
         render_pending_material_dialog()
+    if not st.session_state.get('master_data_dialog') and not st.session_state.get('material_dialog'):
+        from ui.reagent_lifecycle_workspace import render_pending_reagent_lifecycle_dialog
+        render_pending_reagent_lifecycle_dialog()

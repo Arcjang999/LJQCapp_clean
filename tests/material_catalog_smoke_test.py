@@ -40,7 +40,7 @@ def material_edit(level_id, **changes):
 
 
 def seed_product():
-    manufacturer = create_manufacturer(display_name='材料测试厂家')
+    manufacturer = create_manufacturer(categories=['instrument', 'reagent', 'qc_material'], display_name='材料测试厂家')
     return create_qc_material(manufacturer_id=manufacturer, generic_name='材料测试产品')
 
 

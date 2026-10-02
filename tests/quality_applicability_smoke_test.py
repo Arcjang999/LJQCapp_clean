@@ -1,4 +1,4 @@
-"""Task 0 acceptance: mandatory standards, distinct scales and immutable sources."""
+"""Mandatory numeric standards, editable process references and immutable sources."""
 from pathlib import Path
 import copy
 from datetime import date
@@ -92,15 +92,17 @@ def test_drafts_and_free_text_cannot_bypass_applicable_standard():
         rejected(lambda:activate_project_template(f['template_id']),'质量目标待确认')
 
 
-def test_realtime_pcr_ct_log_and_concentration_adopt_process_requirements():
+def test_realtime_pcr_ct_log_and_concentration_reference_process_requirements():
     for mode,scale in [('ct','ct'),('log','log'),('raw','concentration')]:
         with IsolatedDatabase():
             f,iid=draft('HBV DNA',mode=mode,unit='Ct' if mode=='ct' else 'IU/mL',method='实时荧光 PCR')
             ctx=context(technique='realtime_pcr',result_scale=scale)
-            rejected(lambda:record(iid,ctx,search_record=search(),adopted_standard_ids=[]),'全部适用')
             rejected(lambda:record(iid,ctx,search_record=search('no_applicable')),'已有适用')
             reviewed=record(iid,ctx,search_record=search())
-            assert any(r['id']=='wst230-2024-iqc' and r['disposition']=='adopted' for r in reviewed['candidates'])
+            assert any(r['id']=='wst230-2024-iqc' and r['disposition']=='referenced' for r in reviewed['candidates'])
+            reviewed=record(iid,ctx,search_record=search(),
+                process_requirements={'source_ids': [], 'requirement_text': ''})
+            assert all(r['disposition']=='not_selected' for r in reviewed['candidates'])
             assert not decode(item_context('project',iid)['quality_goal_json'])
             assert item_context('project',iid)['cv_limit'] is None
             assert validate_project_quality(iid)==[]
@@ -119,7 +121,7 @@ def test_sequencing_and_isothermal_do_not_inherit_pcr_or_concentration_cv():
             rejected(lambda:record(iid,wrong,search_record=search()),'方法学不一致')
 
 
-def test_hcv_specialized_source_is_mandatory_only_for_reviewed_identity_and_method():
+def test_hcv_specialized_reference_matches_only_reviewed_identity_and_method():
     identifier = 'cdc-hcv-2023-rna-quantitative-iqc'
     with IsolatedDatabase():
         f, iid = draft('HCV RNA', unit='IU/mL', method='实时荧光 PCR')
@@ -131,12 +133,15 @@ def test_hcv_specialized_source_is_mandatory_only_for_reviewed_identity_and_meth
         rows = assess(item, ctx)
         assert {r['id'] for r in rows if r['status']=='applicable'} == {
             identifier, 'wst230-2024-iqc', 'wst641-2018-iqc'}
-        rejected(lambda: record(iid, ctx, search_record=search(),
-            adopted_standard_ids=['wst230-2024-iqc','wst641-2018-iqc']), '全部适用')
+        partial = record(iid, ctx, search_record=search(), process_requirements={
+            'source_ids': ['wst230-2024-iqc', 'wst641-2018-iqc'],
+            'requirement_text': '按本实验室已确认的对照设置执行。'})
+        assert next(r for r in partial['candidates'] if r['id']==identifier)['disposition']=='not_selected'
+        assert validate_project_quality(iid)==[]
         review = record(iid, ctx, search_record=search())
         selected = next(r for r in review['candidates'] if r['id']==identifier)
         assert selected['standard']['source_type']=='中国疾病预防控制中心技术规范'
-        assert selected['disposition']=='adopted' and not selected['automatic_evaluation']
+        assert selected['disposition']=='referenced' and not selected['automatic_evaluation']
         assert not decode(item_context('project',iid)['quality_goal_json'])
         assert item_context('project',iid)['cv_limit'] is None
 
@@ -156,7 +161,7 @@ def test_hcv_specialized_source_is_mandatory_only_for_reviewed_identity_and_meth
         assert not any(r['id'].startswith('cdc-hcv') for r in assess(item,dict(ctx,purpose='research')))
 
 
-def test_hiv1_rna_quantitative_requires_log10_and_cannot_be_confused_with_other_targets():
+def test_hiv1_rna_reference_requires_log10_for_selection_and_keeps_exact_identity():
     identifier = 'cdc-hiv-iqc-2024-rna-quantitative'
     for mode,scale in [('raw','concentration'), ('ct','ct'), ('log','log')]:
         with IsolatedDatabase():
@@ -166,11 +171,21 @@ def test_hiv1_rna_quantitative_requires_log10_and_cannot_be_confused_with_other_
             row=next(r for r in assess(item,ctx) if r['id']==identifier)
             if mode!='log':
                 assert row['status']=='pending' and 'Log10' in row['reason']
-                rejected(lambda:record(iid,ctx,search_record=search()), '待核查')
+                review=record(iid,ctx,search_record=search(),
+                    process_requirements={'source_ids': [], 'requirement_text': '按当地已确认的对照设置执行。'})
+                assert next(r for r in review['candidates'] if r['id']==identifier)['disposition']=='pending'
+                assert validate_project_quality(iid)==[]
+                try:
+                    record(iid,ctx,search_record=search(),process_requirements={
+                        'source_ids': [identifier], 'requirement_text': ''})
+                except ValueError:
+                    pass
+                else:
+                    raise AssertionError('Pending process references must not be selected as applicable.')
                 continue
             assert row['status']=='applicable'
             review=record(iid,ctx,search_record=search())
-            assert next(r for r in review['candidates'] if r['id']==identifier)['disposition']=='adopted'
+            assert next(r for r in review['candidates'] if r['id']==identifier)['disposition']=='referenced'
             assert item_context('project',iid)['cv_limit'] is None
             for name in ['HIV-2 RNA','HIV-1 DNA','HIV抗体','HIV RNA','CD4计数']:
                 other=dict(item,test_item_name=name,abbreviation='',test_aliases=[])

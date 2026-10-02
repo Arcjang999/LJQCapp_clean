@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 from services.cv_service import calculate_cv_percent
-from services.lot_lifecycle_service import review_import_lots, import_reviewed_results
+from services.lot_lifecycle_service import review_import_lots, import_reviewed_results, save_lj_result_manual_note
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import hashlib
 
 import pandas as pd
 import streamlit as st
 
-from database import add_result, export_batch_results_for_phase, get_batch, get_results, update_result
+from database import add_result, export_batch_results_for_phase, get_batch, get_results
 from import_review import (
     build_lj_building_template_dataframe,
     build_review_issues_dataframe,
@@ -195,8 +195,11 @@ def render_lj_abnormal_note_quick_entry(latest_row: pd.Series | None) -> None:
         return
 
     result_id = int(latest_row["id"])
+    from ui.out_of_control import render_abnormal_entry
+    render_abnormal_entry('lj_result', result_id,
+        warning=str(latest_row.get('status')) == '警告', key='latest')
     current_note = str(latest_row.get("manual_note", "") or "")
-    st.caption("\u5f53\u524d\u5f02\u5e38\u8bb0\u5f55\u53ef\u76f4\u63a5\u8865\u5145\u5f02\u5e38\u5907\u6ce8\uff0c\u5199\u56de\u540c\u4e00\u6761\u68c0\u6d4b\u8bb0\u5f55\u3002")
+    st.caption("在下方填写异常备注并保存，备注会保留在这条检测记录中。")
     with st.form(f"lj_abnormal_note_form_{result_id}"):
         manual_note = st.text_area(
             "\u5f02\u5e38\u5907\u6ce8\uff08\u53ef\u9009\uff09",
@@ -207,16 +210,12 @@ def render_lj_abnormal_note_quick_entry(latest_row: pd.Series | None) -> None:
         submitted = st.form_submit_button("\u4fdd\u5b58\u5f53\u524d\u5f02\u5e38\u5907\u6ce8", width="stretch")
 
         if submitted:
-            update_result(
-                result_id=result_id,
-                test_time=pd.Timestamp(latest_row["test_time"]).strftime("%Y-%m-%d %H:%M:%S"),
-                operator=str(latest_row.get("operator", "") or ""),
-                value=float(latest_row["value"]),
-                log_value=None if pd.isna(latest_row.get("log_value")) else float(latest_row["log_value"]),
-                reagent_lot_changed=int(latest_row.get("reagent_lot_changed", 0) or 0),
-                manual_note=str(manual_note or "").strip(),
-            )
-            st.rerun()
+            try:
+                save_lj_result_manual_note(result_id, manual_note)
+            except ValueError as exc:
+                st.error(str(exc))
+            else:
+                st.rerun()
 
 
 
@@ -539,8 +538,7 @@ def render_lj_entry_and_stats_section(
             st.info(realtime_message)
         st.caption(
             "统计说明：实时统计仅基于当前批次中判定为“在控”的正式数据计算，"
-            "已自动排除警告和失控结果；"
-            "当检测记录被修改或删除后，实时均值 / SD / CV% 会随之自动变化。"
+            "警告和失控结果不参与计算。"
         )
 
 
@@ -663,6 +661,9 @@ def render_lj_records_section(qc_df: pd.DataFrame, input_value_type: str) -> Non
         st.caption("查看当前批次的完整检测记录、规则触发和分析提示。")
         display_df = prepare_display_records(qc_df, input_value_type=input_value_type)
         render_records_table_impl(display_df)
+        from ui.out_of_control import render_record_selector
+        abnormal = qc_df.loc[(qc_df['phase'] == '正式数据') & qc_df['status'].isin(['失控', '警告'])] if not qc_df.empty else qc_df
+        render_record_selector('lj_result', abnormal.to_dict('records'), key='lj_records')
 
 
     if not qc_df.empty:
@@ -742,7 +743,7 @@ def render_lj_maintenance_section(context: dict[str, object]) -> None:
                 f"alpha={DEFAULT_GRUBBS_ALPHA:.2f}"
             )
             if stats.get("has_formal_started"):
-                st.info("正式期启用后，LJ 参数建立期离群值状态将锁定，不再允许保留、禁用或恢复。")
+                st.info("批次已进入正式期，参数建立记录仅供查询，不能再保留、禁用或恢复。")
 
             action_cols = st.columns(3)
             keep_disabled = bool(stats.get("has_formal_started"))
@@ -832,7 +833,7 @@ def _render_lj_export_import_section_impl(
 
     st.markdown("**导出**")
     st.markdown("**分阶段数据导出**")
-    st.caption(f"可分别导出当前批次的参数建立期或正式期数据，主值列统一为“{input_value_type_label}”。")
+    st.caption(f"请选择参数建立期或正式期后导出；检测值按本项目的“{input_value_type_label}”填写和查看。")
     export_format = st.radio(
         "导出数据格式",
         options=["Excel (.xlsx)", "CSV (.csv)"],
@@ -938,8 +939,8 @@ def _render_lj_export_import_section_impl(
     if formal_qc_df.empty:
         st.info("当前批次还没有正式质控数据。")
     else:
-        default_monthly_start = formal_qc_df["test_time"].min().date()
         default_monthly_end = formal_qc_df["test_time"].max().date()
+        default_monthly_start = max(formal_qc_df["test_time"].min().date(), default_monthly_end - timedelta(days=29))
         monthly_col_start, monthly_col_end = st.columns(2)
         monthly_start = monthly_col_start.date_input(
             "开始日期",
@@ -1055,7 +1056,7 @@ def _render_lj_export_import_section_impl(
         type=["csv", "xlsx"],
         key=lj_import_uploader_key,
         disabled=lj_building_import_disabled,
-        help="请优先使用上方标准模板，目前仅支持 CSV。",
+        help="请按上方模板填写，上传 CSV 或仅含一个工作表的 Excel（.xlsx）文件。",
     )
     uploaded_lj_building_bytes = uploaded_lj_building_csv.getvalue() if uploaded_lj_building_csv is not None else b""
     current_lj_import_signature = hashlib.sha256(uploaded_lj_building_bytes).hexdigest() if uploaded_lj_building_bytes else ""
@@ -1097,7 +1098,7 @@ def _render_lj_export_import_section_impl(
         if review_summary["has_blocking_errors"]:
             st.error("审查未通过，请按下方提示修正后重新上传。本次数据尚未导入。")
         else:
-            st.success("审查通过：当前没有阻断错误，可以确认导入。")
+            st.success("审查通过，请核对预览内容后确认导入。")
 
         if review_issues_df.empty:
             st.info("本次审查未发现错误或警告。")
@@ -1132,7 +1133,7 @@ def _render_lj_export_import_section_impl(
 
     st.divider()
     st.markdown("**LJ 正式期 CSV 导入**")
-    st.caption(f"先下载标准模板，再上传 CSV 或单工作表 Excel 审查；导入目标为当前批次正式期，只有无阻断错误时才允许确认导入当前批次{input_value_type_label}数据。")
+    st.caption(f"先下载模板，按“{input_value_type_label}”填写正式期检测结果，再上传 CSV 或单工作表 Excel。修正审查提示的错误后，核对预览并确认导入当前批次。")
     st.markdown("- `试剂批号变更（可选）` 在参数建立期一般不填。")
     st.markdown("- 正式期仅在“更换试剂批号后的第一条记录”填写“是”。")
     st.markdown("- 其余记录填“否”或留空。")
@@ -1147,13 +1148,13 @@ def _render_lj_export_import_section_impl(
         width="stretch",
     )
     if not lj_target_ready:
-        st.info("当前批次尚未完成均值和标准差建立，不能导入正式期数据。你仍可先上传 CSV 做审查。")
+        st.info("请先完成当前批次的均值和标准差建立，再导入正式期结果。现在仍可上传文件，预先核对内容和格式。")
 
     uploaded_lj_formal_csv = st.file_uploader(
         "上传正式期 CSV / Excel",
         type=["csv", "xlsx"],
         key=lj_formal_import_uploader_key,
-        help="请优先使用上方标准模板，目前仅支持 CSV。",
+        help="请按上方模板填写，上传 CSV 或仅含一个工作表的 Excel（.xlsx）文件。",
     )
     uploaded_lj_formal_bytes = uploaded_lj_formal_csv.getvalue() if uploaded_lj_formal_csv is not None else b""
     current_lj_formal_signature = (
@@ -1202,7 +1203,7 @@ def _render_lj_export_import_section_impl(
         if formal_review_summary["has_blocking_errors"]:
             st.error("正式期审查未通过，请按下方提示修正后重新上传。本次数据尚未导入。")
         else:
-            st.success("正式期审查通过：当前没有阻断错误，可以确认导入。")
+            st.success("正式期审查通过，请核对预览内容后确认导入。")
 
         if formal_review_issues_df.empty:
             st.info("本次正式期审查未发现错误或警告。")

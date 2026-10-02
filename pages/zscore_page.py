@@ -319,11 +319,6 @@ def render_zscore_page() -> None:
                 render_zscore_entry_section(context, selected_batch_id)
                 _render_zscore_level_summary_compact_section(context)
 
-        render_section_intro(
-            title="检测记录与数据管理",
-            caption="下方可查看规则记录、厂家参考、维护和导入导出。",
-            tone="muted",
-        )
         render_zscore_rule_records_overview_section(context)
 
         with st.container(border=True):

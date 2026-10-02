@@ -869,6 +869,7 @@ def _save_instant_result_impl(
     value: float,
     log_value: float | None,
     lot_selection: dict | None = None,
+    manual_note: str = "",
 ) -> int:
     result_id = add_instant_result(
         batch_id=batch_id,
@@ -877,6 +878,7 @@ def _save_instant_result_impl(
         value=value,
         log_value=log_value,
         lot_selection=lot_selection,
+        manual_note=manual_note,
     )
     persist_instant_batch_analysis(batch_id)
     return result_id
@@ -925,9 +927,9 @@ def keep_instant_result(result_id: int) -> int:
 
 
 def confirm_instant_transfer_to_lj(batch_id: int) -> dict[str, object]:
+    from database import atomic_write
     transferred_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    with get_connection() as connection:
-        connection.execute("BEGIN IMMEDIATE")
+    with atomic_write() as connection:
         require_active_instant_binding(connection, batch_id)
         from services.lot_lifecycle_service import require_writable
         require_writable(connection,"instant",batch_id)
@@ -1078,6 +1080,11 @@ def confirm_instant_transfer_to_lj(batch_id: int) -> dict[str, object]:
                 batch_id,
             ),
         )
+        # Converted records need the same saved LJ interpretation as normal
+        # entries before the conversion becomes visible in reports/overview.
+        # The shared transaction rolls back the conversion if this step fails.
+        from qc_logic import persist_lj_batch_outlier_snapshot
+        persist_lj_batch_outlier_snapshot(target_batch_id)
 
     return {
         "source_project_id": int(batch["project_id"]),

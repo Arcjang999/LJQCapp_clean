@@ -30,7 +30,7 @@ PROJECT_PACKAGES = [
     "services",
     "ui",
 ]
-PROJECT_DATA_DIRS = ["data/dictionaries", "resources"]
+PROJECT_DATA_DIRS = ["data/dictionaries", "data/catalogs", "resources"]
 
 
 def collect_project_source_datas() -> list[tuple[str, str]]:
@@ -41,7 +41,7 @@ def collect_project_source_datas() -> list[tuple[str, str]]:
     for package_name in PROJECT_PACKAGES:
         package_root = PROJECT_ROOT / package_name
         for file_path in package_root.rglob("*"):
-            if not file_path.is_file():
+            if not file_path.is_file() or "__pycache__" in file_path.parts or file_path.suffix in (".pyc", ".pyo"):
                 continue
             relative_parent = file_path.parent.relative_to(PROJECT_ROOT)
             datas.append((str(file_path), str(relative_parent)))

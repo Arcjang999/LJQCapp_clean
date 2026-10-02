@@ -10,8 +10,8 @@ from streamlit.testing.v1 import AppTest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from database import get_connection
-from services.master_data_service import create_method, create_qc_material
+from database import get_connection, read_snapshot
+from services.master_data_service import create_lab_instrument, create_method, create_qc_material, create_test_item
 from services.project_config_service import get_project_template, list_project_templates, list_template_items, save_template_items
 from services.project_workspace_service import save_project_details, matching_project_ids
 from tests.project_management_v11_smoke_test import TemporaryDatabaseContext, _seed_v11_configuration_dependencies
@@ -77,7 +77,7 @@ def test_defaults_do_not_rewrite_items_and_filters_share_item():
         save_project_details(edit, template_id=tid, expected_revision=current['revision_no'])
         assert list_template_items(tid).to_json(orient='records') == before
         assert get_project_template(tid)['default_qc_method'] == 'instant'
-        different_product = create_qc_material(generic_name='另一个产品')
+        different_product = create_qc_material(manufacturer_id=data['manufacturer_id'],generic_name='另一个产品')
         edit['qc_material_id'] = different_product
         try:
             save_project_details(edit, template_id=tid, expected_revision=get_project_template(tid)['revision_no'])
@@ -154,10 +154,34 @@ def test_project_dialog_create_edit_cancel_disable_restore():
 def test_project_selection_uses_id_and_filter_clears_hidden_selection():
     with TemporaryDatabaseContext():
         data = _seed_v11_configuration_dependencies()
+        with read_snapshot() as connection:
+            model = connection.execute('SELECT instrument_model_id FROM lab_instruments WHERE id=?',
+                (data['lab_instrument_id'],)).fetchone()[0]
+        other_instrument = create_lab_instrument(instrument_model_id=model, display_name='独立二号仪器')
         first = save_project_details(values(data, 'Alpha项目'))
-        second = save_project_details(values(data, 'Beta项目'))
-        app = AppTest.from_function(workspace_page, default_timeout=15).run()
+        second = save_project_details({**values(data, 'Beta项目'), 'lab_instrument_id': other_instrument})
+        save_project_details({**values(data, 'Gamma项目'), 'project_group': '生化'})
+        instant = create_test_item(chinese_name='复合项目即时法检测项', default_unit_id=data['unit_id'])
+        common = dict(input_value_type='raw', unit_id=data['unit_id'], reagent_id=data['reagent_id'],
+            method_id=data['method_id'], target_n=20)
+        save_template_items(first, [dict(common, test_item_id=data['lj_item_id'], qc_method='lj', level_count=1),
+            dict(common, test_item_id=data['zscore_item_id'], qc_method='zscore', level_count=3),
+            dict(common, test_item_id=instant, qc_method='instant', level_count=1)])
+        with read_snapshot() as connection:
+            before = tuple(connection.iterdump())
+        app = AppTest.from_function(workspace_page, default_timeout=15)
+        # These are genuine values from the removed controls. The old filters
+        # would hide the two projects without a matching Z-score item.
+        app.session_state['home_project_filter_way'] = 'zscore'
+        app.session_state['home_project_filter_method'] = 'V11 方法'
+        app.session_state['project_navigation_values'] = {
+            'home_project_filter_way': 'zscore', 'home_project_filter_method': 'V11 方法'}
+        app.run()
+        assert_clean(app)
+        assert not any(box.key in {'home_project_filter_way', 'home_project_filter_method'} for box in app.selectbox)
+        assert {box.key for box in app.selectbox} == {'home_project_filter_group', 'home_project_filter_instrument'}
         names = app.dataframe[0].value['项目名称'].tolist()
+        assert set(names) == {'Alpha项目', 'Beta项目', 'Gamma项目'}
         select_table_row(app, names.index('Beta项目'))
         assert app.session_state['workspace_project_id'] == second
         app.button(key='workspace_back').click().run()
@@ -165,6 +189,14 @@ def test_project_selection_uses_id_and_filter_clears_hidden_selection():
         app.button(key='home_open_project').click().run()
         assert app.session_state['workspace_project_id'] == second
         app.button(key='workspace_back').click().run()
+        app.selectbox(key='home_project_filter_instrument').set_value(data['lab_instrument_id']).run()
+        assert_clean(app)
+        assert set(app.dataframe[0].value['项目名称']) == {'Alpha项目', 'Gamma项目'}
+        assert app.session_state['home_selected_project_id'] is None
+        assert app.button(key='home_edit_project').disabled
+        app.selectbox(key='home_project_filter_group').set_value('生化').run()
+        assert app.dataframe[0].value['项目名称'].tolist() == ['Gamma项目']
+        app.selectbox(key='home_project_filter_group').set_value('血筛').run()
         app.text_input(key='home_project_filter_search').set_value('Alpha').run()
         assert_clean(app)
         assert app.button(key='home_edit_project').disabled
@@ -172,6 +204,27 @@ def test_project_selection_uses_id_and_filter_clears_hidden_selection():
         select_table_row(app, 0)
         assert app.session_state['workspace_project_id'] == first
         assert app.session_state['home_selected_project_id'] == first
+        shown = app.dataframe[0].value
+        assert len(shown) == 3
+        assert dict(zip(shown['质控方法'], shown['水平数'])) == {'单水平（LJ）': 1, '多水平法': 3, '即时法': 1}
+        assert set(shown['方法学']) == {'V11 方法'}
+        app.button(key='workspace_back').click().run()
+        assert app.selectbox(key='home_project_filter_instrument').value == data['lab_instrument_id']
+        assert app.selectbox(key='home_project_filter_group').value == '血筛'
+        assert app.text_input(key='home_project_filter_search').value == 'Alpha'
+        app.text_input(key='home_project_filter_search').set_value('V11 方法').run()
+        assert_clean(app)
+        assert not app.dataframe  # Method names no longer decide the project list.
+        assert app.session_state['home_selected_project_id'] is None
+        assert app.button(key='home_edit_project').disabled
+        app.text_input(key='home_project_filter_search').set_value('').run()
+        app.selectbox(key='home_project_filter_group').set_value('全部').run()
+        app.selectbox(key='home_project_filter_instrument').set_value(other_instrument).run()
+        assert app.dataframe[0].value['项目名称'].tolist() == ['Beta项目']
+        app.selectbox(key='home_project_filter_instrument').set_value(None).run()
+        assert set(app.dataframe[0].value['项目名称']) == {'Alpha项目', 'Beta项目', 'Gamma项目'}
+        with read_snapshot() as connection:
+            assert tuple(connection.iterdump()) == before
 
 
 def test_disable_two_confirmations_preserve_unsaved_edits_and_revision():

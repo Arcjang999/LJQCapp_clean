@@ -58,9 +58,32 @@ def is_frozen_lot(connection, item):
                            (item['id'],)).fetchone())
 
 
+def default_process_requirements(candidates, source_ids=None):
+    """Seed editable local procedure text without changing the source catalog."""
+    rows = [r for r in candidates if r['kind'] == 'process' and r['status'] == 'applicable'
+            and (source_ids is None or r['id'] in source_ids)]
+    return dict(source_ids=[r['id'] for r in rows], requirement_text='\n\n'.join(
+        r['source']['standard'] + ' · ' + r['spec']['name'] + '\n' + '\n'.join(r['spec']['requirements'])
+        for r in rows))
+
+
+def normalize_process_requirements(value, candidates, *, draft=False):
+    if not isinstance(value, dict) or not isinstance(value.get('source_ids'), list):
+        raise ValueError('请重新选择对照与质控要求的参考来源。')
+    identifiers = value['source_ids']
+    allowed = {r['id'] for r in candidates if r['kind'] == 'process'
+               and (draft or r['status'] == 'applicable')}
+    if any(not isinstance(identifier, str) or identifier not in allowed for identifier in identifiers):
+        raise ValueError('对照与质控参考来源与当前检测条件不符，请重新选择。')
+    requirement = value.get('requirement_text', '')
+    if not isinstance(requirement, str) or len(requirement) > 6000:
+        raise ValueError('本实验室对照与质控要求不能超过 6000 字。')
+    return dict(source_ids=sorted(set(identifiers)), requirement_text=requirement.strip())
+
+
 def build_review(connection, item, *, source_spec=None, confirmed_by, evidence,
                  exclusions=None, recorded=None, context=None, search_record=None,
-                 adopted_standard_ids=None, registered_standards=None):
+                 adopted_standard_ids=None, registered_standards=None, process_requirements=None):
     """Build one review for every entry point; free-text exclusions cannot waive it."""
     from services.quality_target_service import source_label
     from services.quality_applicability_service import (assess, context_errors,
@@ -72,7 +95,7 @@ def build_review(connection, item, *, source_spec=None, confirmed_by, evidence,
     if problems:
         raise ValueError('适用条件待补充：' + ' '.join(problems))
     candidates = assess(item, context)
-    pending = [r for r in candidates if r['status'] == 'pending']
+    pending = [r for r in candidates if r['kind'] != 'process' and r['status'] == 'pending']
     if pending:
         raise ValueError('标准适用情况待核查：' + '；'.join(r['reason'] for r in pending))
     selected_standard = source_spec if source_spec and source_spec['origin'] == 'builtin' else None
@@ -81,14 +104,18 @@ def build_review(connection, item, *, source_spec=None, confirmed_by, evidence,
         raise ValueError('已有明确适用标准，必须采用，不能用排除理由或实验室自定要求替代；多个数值依据须先核对冲突及适用条件。')
     if selected_standard and selected_standard['id'] not in {r['id'] for r in numerical}:
         raise ValueError('所选标准与当前检验项目或适用条件不符，不能采用。')
-    process = [r for r in candidates if r['kind'] != 'numeric' and r['status'] == 'applicable']
-    selected_process = {r['id'] for r in process} if adopted_standard_ids is None else set(adopted_standard_ids)
-    if selected_process != {r['id'] for r in process}:
-        raise ValueError('请采用全部适用的过程、对照或定性要求，不能遗漏或关联不适用条款。')
+    nonnumeric = [r for r in candidates if r['kind'] != 'numeric' and r['status'] == 'applicable']
+    mandatory = {r['id'] for r in nonnumeric if r['kind'] != 'process'}
+    selected = {r['id'] for r in nonnumeric} if adopted_standard_ids is None else set(adopted_standard_ids)
+    if not mandatory.issubset(selected) or not selected.issubset({r['id'] for r in nonnumeric}):
+        raise ValueError('请采用全部适用的定性或信号精密度要求，不能关联不适用条款。')
+    local_process = normalize_process_requirements(
+        default_process_requirements(candidates, selected) if process_requirements is None else process_requirements,
+        candidates)
     registered = validate_registered_sources(registered_standards, context)
     search = {}
     if not numerical:
-        search = validate_search_record(search_record, confirmed_by=confirmed_by, has_process=bool(process))
+        search = validate_search_record(search_record, confirmed_by=confirmed_by, has_process=bool(nonnumeric))
         if search['conclusion'] == 'registered' and not registered:
             raise ValueError('已找到未收录标准时，请补充标准全文及核查记录后再确认。')
         if registered and search['conclusion'] != 'registered':
@@ -100,6 +127,10 @@ def build_review(connection, item, *, source_spec=None, confirmed_by, evidence,
     reviewed = []
     for candidate in candidates:
         adopted = candidate['status'] == 'applicable'
+        disposition = 'adopted' if adopted else 'not_applicable'
+        if candidate['kind'] == 'process':
+            disposition = ('referenced' if candidate['id'] in local_process['source_ids'] else
+                           'pending' if candidate['status'] == 'pending' else 'not_selected')
         reviewed.append(dict(id=candidate['id'], fingerprint=_digest(candidate),
                              source=(source_label(candidate['spec']) if candidate['kind'] == 'numeric' else
                                      candidate['source']['standard'] + '；' + candidate['clause'] + '；' + candidate['spec']['name']),
@@ -107,7 +138,7 @@ def build_review(connection, item, *, source_spec=None, confirmed_by, evidence,
                              clause=candidate['clause'], pages=candidate['pages'],
                              requirements=candidate['spec'].get('requirements', []),
                              automatic_evaluation=adopted and candidate['kind'] == 'numeric' and cv_evaluation,
-                             disposition='adopted' if adopted else 'not_applicable',
+                             disposition=disposition,
                              reason=candidate['reason'], evidence=evidence))
     levels = _levels(connection, item)
     if 'lot_config_id' in item and len(levels) != int(item['level_count']):
@@ -127,11 +158,12 @@ def build_review(connection, item, *, source_spec=None, confirmed_by, evidence,
                 selected_source_id=source_spec['id'] if source_spec else None,
                 selected_source_fingerprint=_digest(source_spec) if source_spec else None,
                 candidates=reviewed, recorded=recorded or {}, levels=levels,
+                process_requirements=local_process,
                 search_record=search, registered_standards=registered)
 
 
 def save_pending_review(scope, item_id, *, context, search_record=None, registered_standards=None,
-                        draft_recorded=None):
+                        draft_recorded=None, process_requirements=None):
     """Save incomplete conditions explicitly as a draft, never an authorization."""
     from services.quality_target_service import item_context, _require_draft
     with atomic_write() as connection:
@@ -141,6 +173,10 @@ def save_pending_review(scope, item_id, *, context, search_record=None, register
         review = _json(item.get('quality_review_json'))
         review.update(version=2, status='pending', context=context,
                       search_record=search_record or {}, registered_standards=registered_standards or [])
+        if process_requirements is not None:
+            from services.quality_applicability_service import assess
+            review['process_requirements'] = normalize_process_requirements(
+                process_requirements, assess(item, context), draft=True)
         if draft_recorded is not None:
             review['draft_recorded'] = {k: str(draft_recorded.get(k) or '')[:2000]
                 for k in ('source_name', 'source_version', 'requirement_text')}
@@ -170,7 +206,7 @@ def pending_review_copy(value):
 def save_recorded_requirement(scope, item_id, *, source_name, source_version,
                               requirement_text, confirmed_by, evidence, exclusions=None,
                               context=None, search_record=None, adopted_standard_ids=None,
-                              registered_standards=None):
+                              registered_standards=None, process_requirements=None):
     """Record unsupported/no-applicable-source requirements; adds no new evaluator."""
     from services.quality_target_service import item_context, _require_draft
     if scope not in ('project', 'lot'):
@@ -190,7 +226,7 @@ def save_recorded_requirement(scope, item_id, *, source_name, source_version,
         review = build_review(connection, item, confirmed_by=confirmed_by, evidence=evidence,
                               exclusions=exclusions, recorded=recorded, context=context,
                               search_record=search_record, adopted_standard_ids=adopted_standard_ids,
-                              registered_standards=registered_standards)
+                              registered_standards=registered_standards, process_requirements=process_requirements)
         save_review(connection, scope, item_id, review)
         if scope == 'lot':
             from services.project_config_service import _save_snapshot
@@ -263,6 +299,7 @@ def validate_quality_review(scope, item_id, connection=None):
                 confirmed_by=review['confirmed_by'], evidence=review['evidence'],
                 context=review.get('context'), search_record=review.get('search_record'),
                 recorded=review.get('recorded'), registered_standards=review.get('registered_standards'),
+                process_requirements=review.get('process_requirements'),
                 adopted_standard_ids=[r['id'] for r in review.get('candidates', [])
                     if r.get('kind') != 'numeric' and r.get('disposition') == 'adopted'])
         except (ValueError, KeyError, TypeError) as error:

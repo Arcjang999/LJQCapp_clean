@@ -47,24 +47,37 @@ def _field(state, field, label, widget='text_input', **kwargs):
     return state['draft'][field]
 
 
-def open_reagent_lifecycle_dialog(kind, lot_id=None):
+def open_reagent_lifecycle_dialog(kind, lot_id=None, *, product_id=None):
     if kind not in _TITLES:
         raise ValueError('请选择试剂批号操作。')
     context = get_reagent_workspace_context()
     selected = next((row for row in context['lots'] if row['id'] == lot_id), None)
+    bound_product_id = int(product_id) if product_id is not None else None
+    if bound_product_id is not None:
+        if bound_product_id not in {row['id'] for row in context['products']}:
+            st.error('此试剂产品已停用或不存在，请先核对产品资料。')
+            return
+        if selected is not None and selected['reagent_id'] != bound_product_id:
+            if kind != 'register':
+                st.error('此批号不属于当前试剂产品，请重新选择。')
+                return
+            selected, lot_id = None, None
     if kind != 'register' and selected is None:
         st.error('请选择启用中的试剂批号。')
         return
     if kind == 'register':
-        product = selected['reagent_id'] if selected else st.session_state.get('reagent_product_filter')
+        product = bound_product_id if bound_product_id is not None else (
+            selected['reagent_id'] if selected else st.session_state.get('reagent_product_filter'))
         if product not in {row['id'] for row in context['products']}:
             product = None
         draft = dict(product=product, lot_no='', expiry=None, source='')
     elif kind == 'verify':
-        draft = dict(system=None, conclusion=None, evidence='', person='', when=datetime.now().replace(microsecond=0))
+        focus=st.session_state.get('reagent_focus_system_id')
+        legal={row['id'] for row in _systems(context,lot_id) if row['available']}
+        draft = dict(system=focus if focus in legal else None, conclusion=None, evidence='', person='', when=datetime.now().replace(microsecond=0))
     else:
         draft = dict(systems=[], when=datetime.now().replace(microsecond=0), person='', reason='', confirmed=False)
-    st.session_state[MODAL_KEY] = dict(kind=kind, lot_id=lot_id, context=context,
+    st.session_state[MODAL_KEY] = dict(kind=kind, lot_id=lot_id, context=context, bound_product_id=bound_product_id,
         fingerprint=context['fingerprint'], token=uuid4().hex, draft=deepcopy(draft), initial=draft, discard=False)
     st.rerun(scope='app')
 
@@ -78,13 +91,20 @@ def _close():
 
 def _register_fields(state):
     products = {row['id']: row for row in state['context']['products']}
-    product = _field(state, 'product', '试剂产品 *', 'selectbox', options=[None, *products],
-        placeholder='请选择试剂产品', format_func=lambda value: '请选择试剂产品' if value is None else
-        '｜'.join(filter(None, [_text(products[value].get('manufacturer_name')), products[value]['generic_name']])))
+    if state.get('bound_product_id') is not None:
+        product = state['bound_product_id']
+        state['draft']['product'] = product
+        st.markdown('**试剂产品**')
+        st.write('｜'.join(filter(None, [_text(products[product].get('manufacturer_name')),
+                                       products[product]['generic_name']])))
+    else:
+        product = _field(state, 'product', '试剂产品 *', 'selectbox', options=[None, *products],
+            placeholder='请选择试剂产品', format_func=lambda value: '请选择试剂产品' if value is None else
+            '｜'.join(filter(None, [_text(products[value].get('manufacturer_name')), products[value]['generic_name']])))
     lot_no = _field(state, 'lot_no', '试剂批号 *')
     expiry = _field(state, 'expiry', '效期 *', 'date_input')
     source = _field(state, 'source', '资料来源／厂家说明', 'text_area')
-    st.caption('同一试剂产品的批号不能重复登记；登记后按检验项目完成验证，再切换使用批号。')
+    st.caption('请先核对批号是否已登记；已有批号可直接选用。新批号保存后，按检验项目登记验证，再确认切换使用。')
     return dict(reagent_id=product, lot_no=lot_no, expiry_date=expiry, source_text=source)
 
 
@@ -121,7 +141,7 @@ def _switch_fields(state):
             hide_index=True, width='stretch')
     elif when is not None:
         st.info('请选择本次切换的检验项目，查看新旧批号及验证记录。')
-    st.caption('按实际启用时间核对最新验证。只切换所选检验项目，原均值和标准差继续使用，既往检测保留实际使用批号。')
+    st.caption('请核对所选检验项目、新旧批号、实际启用时间和对应验证，并说明原均值和标准差仍适用的依据。确认后只切换所选项目，既往检测保留原实际批号。')
     person = _field(state, 'person', '操作者 *')
     reason = _field(state, 'reason', '换批原因与原均值和标准差仍适用的依据 *', 'text_area')
     confirmed = _field(state, 'confirmed', '已核对所选检验项目、验证结论和启用时间，并确认原均值和标准差仍适用', 'checkbox')
@@ -184,7 +204,7 @@ def _select(key, ids):
     st.session_state['reagent_selected_lot'] = ids[rows[0]] if rows and 0 <= rows[0] < len(ids) else None
 
 
-def _render_detail(context, lot):
+def _render_detail(context, lot, *, product_id=None):
     st.subheader('试剂批号：' + lot['lot_no'])
     st.caption(_lot_label(lot))
     st.write('资料来源／厂家说明：' + (_text(lot['source_text']) or '未填写'))
@@ -193,9 +213,9 @@ def _render_detail(context, lot):
     active = [row for row in systems if row['available']]
     left, right = st.columns(2)
     if left.button('登记批号验证', key='reagent_verify', disabled=not available or not active, width='stretch'):
-        open_reagent_lifecycle_dialog('verify', lot['id'])
+        open_reagent_lifecycle_dialog('verify', lot['id'], product_id=product_id)
     if right.button('切换到此试剂批号', key='reagent_switch', disabled=not available or not active, type='primary', width='stretch'):
-        open_reagent_lifecycle_dialog('switch', lot['id'])
+        open_reagent_lifecycle_dialog('switch', lot['id'], product_id=product_id)
     if not available:
         st.info('此试剂产品或批号已停用，仅供查询。')
     elif not active:
@@ -232,37 +252,54 @@ def _render_detail(context, lot):
         st.caption('暂无验证记录。')
 
 
-def render_reagent_lifecycle_workspace():
+def render_reagent_lifecycle_workspace(*, product_id=None):
     context = get_reagent_workspace_context()
+    bound_product_id = int(product_id) if product_id is not None else None
+    settings = st.session_state.setdefault('reagent_filters', {})
+    if bound_product_id is not None and st.session_state.get('reagent_workspace_bound_product_id') != bound_product_id:
+        st.session_state['reagent_selected_lot'] = None
+        st.session_state['reagent_search'] = ''
+        settings['reagent_search'] = ''
+    st.session_state['reagent_workspace_bound_product_id'] = bound_product_id
     registered = st.session_state.pop('reagent_pending_registered', None)
-    if registered:
+    receipt_matches = registered is None or bound_product_id is None or registered[1] == bound_product_id
+    if registered and receipt_matches:
         st.session_state['reagent_selected_lot'], st.session_state['reagent_product_filter'] = registered
         st.session_state['reagent_search'] = ''
     notice = st.session_state.pop('reagent_notice', '')
-    if notice:
+    if notice and receipt_matches:
         st.success(notice)
-    st.caption('登记试剂批号，按检验项目完成验证后再切换使用批号。原检测记录和均值、标准差保留。')
-    settings = st.session_state.setdefault('reagent_filters', {})
+    st.caption('先登记试剂批号，再选择检验项目登记验证，最后确认切换批号及启用时间。切换时请核对原均值和标准差是否仍适用；既往检测记录保留。')
     products = {row['id']:row for row in context['all_products']}
     for key, value in [('reagent_search',''), ('reagent_product_filter',None), ('reagent_show_disabled',False)]:
         if key not in st.session_state:
             st.session_state[key] = settings.get(key, value)
-    if st.session_state['reagent_product_filter'] not in products:
-        st.session_state['reagent_product_filter'] = None
-    left, right = st.columns(2)
-    query = left.text_input('搜索试剂、厂家或批号', key='reagent_search', help=SEARCH_HELP)
-    product = right.selectbox('试剂产品', [None, *products], placeholder='全部试剂产品', key='reagent_product_filter',
-        format_func=lambda value: '全部试剂产品' if value is None else
-        '｜'.join(filter(None,[_text(products[value].get('manufacturer_name')), products[value]['generic_name']])))
-    show_disabled = st.checkbox('显示已停用的试剂产品和批号', key='reagent_show_disabled')
+    if bound_product_id is not None:
+        st.session_state['reagent_product_filter'] = bound_product_id
+        if bound_product_id not in products:
+            st.info('未找到此试剂产品，请返回产品列表重新选择。')
+            return
+        product = bound_product_id
+        query = st.text_input('搜索批号', key='reagent_search', help=SEARCH_HELP)
+    else:
+        if st.session_state['reagent_product_filter'] not in products:
+            st.session_state['reagent_product_filter'] = None
+        left, right = st.columns(2)
+        query = left.text_input('搜索试剂、厂家或批号', key='reagent_search', help=SEARCH_HELP)
+        product = right.selectbox('试剂产品', [None, *products], placeholder='全部试剂产品', key='reagent_product_filter',
+            format_func=lambda value: '全部试剂产品' if value is None else
+            '｜'.join(filter(None,[_text(products[value].get('manufacturer_name')), products[value]['generic_name']])))
+    show_disabled = st.checkbox('显示已停用批号' if bound_product_id is not None else '显示已停用的试剂产品和批号',
+                                key='reagent_show_disabled')
     settings.update(reagent_search=query,reagent_product_filter=product,reagent_show_disabled=show_disabled)
-    if st.button('登记试剂批号', key='reagent_register', type='primary', disabled=not context['products']):
-        open_reagent_lifecycle_dialog('register', st.session_state.get('reagent_selected_lot'))
+    can_register = bool(context['products']) if bound_product_id is None else bound_product_id in {row['id'] for row in context['products']}
+    if st.button('登记试剂批号', key='reagent_register', type='primary', disabled=not can_register):
+        open_reagent_lifecycle_dialog('register', st.session_state.get('reagent_selected_lot'), product_id=bound_product_id)
     rows = [row for row in context['all_lots'] if (show_disabled or row['id'] in {x['id'] for x in context['lots']})
             and (product is None or row['reagent_id'] == product)]
     if query.strip():
         rows = [row for row in rows if fuzzy_match(query, *(row.get(field) for field in
-                ('reagent_name','manufacturer_name','lot_no')))]
+                (('lot_no',) if bound_product_id is not None else ('reagent_name','manufacturer_name','lot_no'))))]
     ids = [row['id'] for row in rows]
     if st.session_state.get('reagent_selected_lot') not in ids:
         st.session_state['reagent_selected_lot'] = None
@@ -274,11 +311,13 @@ def render_reagent_lifecycle_workspace():
     frame = pd.DataFrame([{'厂家':_text(row.get('manufacturer_name')),'试剂产品':row['reagent_name'],
         '试剂批号':row['lot_no'],'效期':row['expiry_date'],'资料状态':'可用' if row['id'] in enabled else '已停用',
         '资料来源':row['source_text']} for row in rows])
+    if bound_product_id is not None:
+        frame = frame[['试剂批号', '效期', '资料状态', '资料来源']]
     key = 'reagent_lots_' + sha1(str((ids,st.session_state.get('reagent_table_version',0))).encode()).hexdigest()[:12]
     st.dataframe(frame,hide_index=True,width='stretch',height=min(320,max(115,36*len(ids)+38)),key=key,
         selection_mode='single-row',selection_default={'selection':{'rows':[ids.index(selected)] if selected in ids else []}},
         on_select=partial(_select,key,ids))
     if selected is not None:
-        _render_detail(context,next(row for row in rows if row['id']==selected))
+        _render_detail(context,next(row for row in rows if row['id']==selected), product_id=bound_product_id)
     else:
         st.caption('请选择一行，查看验证记录和使用情况。')

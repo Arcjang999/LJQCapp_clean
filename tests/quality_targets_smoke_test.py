@@ -17,6 +17,7 @@ from services.instant_workbench_service import sync_instant_workbench_bindings
 from services.report_service import build_lj_monthly_report_package,build_zscore_monthly_report_package
 from zscore_logic import create_zscore_run
 from tests.quality_review_fixtures import fixture_conditions
+from services.quality_review_service import runtime_review
 ROOT=Path(__file__).resolve().parents[1]
 
 
@@ -154,10 +155,19 @@ def test_units_categories_and_legacy_changes_do_not_bypass_confirmation():
 def test_three_method_snapshots_and_report_do_not_modify_records():
     for method,count in [('lj',1),('zscore',2),('zscore',3),('instant',1)]:
         with IsolatedDatabase():
-            item,config,_=new_lot(method,count);apply(item,count=count);batch=activate(item,config,method)
+            local_process={'source_ids': [], 'requirement_text': f'本实验室每批核对 {count} 个水平的实际质控品批号，按已确认的操作规程设置对照。'}
+            item,config,_=new_lot(method,count)
+            apply(item,count=count,process_requirements=local_process)
+            adopted_review=decode(item_context('lot',item)['quality_review_json'])
+            assert adopted_review['process_requirements']==local_process
+            batch=activate(item,config,method)
             assert runtime_goal(method,batch)['spec']['id']=='wst403-2024-047'
+            assert runtime_review(method,batch)['process_requirements']==local_process
             if method=='instant':
-                assert batch_quality_summary(method,batch)['rows'][0]['decision'].startswith('即时法');continue
+                summary=batch_quality_summary(method,batch)
+                assert summary['rows'][0]['decision'].startswith('即时法')
+                assert summary['review']['process_requirements']==local_process
+                continue
             for i,value in enumerate([100,101,99,100.5,99.5,100.1,100.2,100.3]):
                 if method=='lj':add_result(batch,f'2026-09-{i+1:02d} 08:00',value,operator='验收')
                 else:create_zscore_run(batch_id=batch,test_time=f'2026-09-{i+1:02d} 08:00',operator='验收',level_results=[dict(level_id=f'Level {j+1}',raw_value=value*(j+1)) for j in range(count)],template_id='2_level_classic' if count==2 else '3_level_threes',required_n=5)
@@ -166,8 +176,24 @@ def test_three_method_snapshots_and_report_do_not_modify_records():
             assert all(r['count']==3 for r in summary['rows']),summary
             assert all(r['decision'].startswith('满足') for r in summary['rows'])
             report=(build_lj_monthly_report_package if method=='lj' else build_zscore_monthly_report_package)(batch,'2026-09').report
-            assert report.quality_summary==summary
-            assert report.to_snapshot_summary()['quality_summary']==summary
+            # Monthly reports group by parameter version as well as level.
+            # This fixture has one confirmed parameter version; the original
+            # requirements, evidence, counts and CV must remain unchanged.
+            with get_connection() as c:
+                profiles=[dict(row) for row in c.execute(
+                    'SELECT id,version_no FROM qc_target_profiles WHERE qc_method=? AND batch_id=?',
+                    (method,batch))]
+            assert len(profiles)==1,profiles
+            profile=profiles[0]
+            expected=dict(summary, statistics_scope='分批次、参数版本及水平；仅正式期在控结果，多水平法按整次在控筛选；SD、偏倚和总误差不自动评价',
+                rows=[dict(row, level=f"{row['level']} / 参数版本 {profile['version_no']}",
+                           level_order=order, profile_id=profile['id'], parameter_version=str(profile['version_no']))
+                      for order,row in enumerate(summary['rows'],1)])
+            assert report.quality_summary==expected
+            assert report.quality_summary['review']==adopted_review
+            assert report.quality_summary['review']['process_requirements']==local_process
+            assert report.to_snapshot_summary()['quality_summary']==expected
+            assert report.to_snapshot_summary()['quality_summary']['review']['process_requirements']==local_process
             with get_connection() as c:assert before==[tuple(r) for r in c.execute('SELECT * FROM qc_result_evaluations ORDER BY id')]
 
 

@@ -24,7 +24,9 @@ def open_project_dialog(kind, template_id=None, item_id=None):
     if kind in ('disable', 'restore'):
         kind = 'project'
     template = _plain(get_project_template(template_id)) if template_id is not None else {}
-    if kind in ('item', 'remove_item', 'quality'):
+    if kind == 'panel':
+        draft = {'rows': [], 'stage': 'source'}
+    elif kind in ('item', 'remove_item', 'quality'):
         items = list_template_items(template_id)
         matches = items[items.id == item_id] if item_id is not None else pd.DataFrame()
         draft = _plain(matches.iloc[0]) if not matches.empty else {
@@ -124,6 +126,35 @@ def _render_discard(ctx):
         _finish()
 
 
+def _render_catalogue_picker(ctx):
+    from services.product_directory_service import list_catalog_product_choices, PRODUCT_LABELS
+    if st.button('从产品名录选择', key='project_catalogue_open'):
+        ctx['catalogue_open'] = not ctx.get('catalogue_open', False)
+    if not ctx.get('catalogue_open'):
+        return
+    with st.container(border=True):
+        st.caption('按产品编号、名称、浓度或浓度编号查找，核对后带入本项目。实际批号在建立批次时选择。')
+        query = st.text_input('搜索名录产品', key='project_catalogue_query_' + ctx['token'])
+        matches = list_catalog_product_choices(query=query)
+        if matches.empty:
+            st.info('没有符合条件的目录产品，请调整搜索内容；也可在质控品管理中新增其他产品。')
+            return
+        st.dataframe(matches[['manufacturer_name', *PRODUCT_LABELS]].rename(columns={'manufacturer_name':'厂商', **PRODUCT_LABELS}), hide_index=True,
+                     width='stretch', height=210)
+        choices = {int(row['product_id']): row for row in matches.to_dict('records')}
+        key = 'project_catalogue_product_' + ctx['token']
+        if st.session_state.get(key) not in choices:
+            st.session_state[key] = None
+        selected = st.selectbox('选择目录产品', [None, *choices], key=key, filter_mode='fuzzy',
+            format_func=lambda value: '请选择' if value is None else '｜'.join(
+                str(choices[value].get(field) or '') for field in ['manufacturer_name', *PRODUCT_LABELS]))
+        if st.button('使用此目录产品', key='project_catalogue_use', disabled=selected is None):
+            ctx['draft']['qc_material_id'] = selected
+            st.session_state[_key(ctx, 'qc_material_id')] = selected
+            ctx['catalogue_open'] = False
+            st.rerun()
+
+
 def _render_project_form(ctx):
     from services.master_data_service import list_lab_instruments, list_qc_materials, list_reagents, list_methods
     st.subheader('编辑项目' if ctx['template_id'] else '新建项目')
@@ -132,12 +163,14 @@ def _render_project_form(ctx):
         return
     locked = ctx['template_id'] is not None and project_identity_locked(ctx['template_id'])
     _text(ctx, 'template_name', '项目名称 *')
+    if not locked:
+        _render_catalogue_picker(ctx)
     left, right = st.columns(2)
     with left:
         _choice(ctx, 'lab_instrument_id', '仪器 *', list_lab_instruments(include_disabled=True), ['display_name'], disabled=locked)
         _choice(ctx, 'default_reagent_id', '默认试剂 *', list_reagents(include_disabled=True), ['generic_name', 'trade_name'])
     with right:
-        _choice(ctx, 'qc_material_id', '质控品 *', list_qc_materials(include_disabled=True), ['generic_name', 'trade_name'], disabled=locked)
+        _choice(ctx, 'qc_material_id', '质控品 *', list_qc_materials(include_disabled=True), ['manufacturer_name', 'catalog_no', 'generic_name'], disabled=locked)
         _choice(ctx, 'default_method_id', '默认方法学', list_methods(include_disabled=True), ['method_name'], optional=True)
     if locked:
         st.caption('已添加检验项目或批次，不能更换仪器和质控品。如需更换，请新建项目。')
@@ -279,6 +312,198 @@ def _render_item_form(ctx):
             _finish('检验项目已保存，请设置质量目标。')
 
 
+_PANEL_FIELDS = {'unit_id': '单位', 'method_id': '方法学', 'reagent_id': '试剂', 'qc_method': '质控方法',
+                 'input_value_type': '输入值类型', 'level_count': '水平数', 'target_n': '参数建立点数'}
+
+
+def _panel_reference_options():
+    from services.master_data_service import list_units, list_methods, list_reagents
+    from services.project_config_service import QC_METHOD_LABELS
+    options = {'qc_method': QC_METHOD_LABELS, 'input_value_type': INPUT_VALUE_TYPE_LABELS}
+    for field, frame, names in [('unit_id', list_units(), ['symbol']), ('method_id', list_methods(), ['method_name']),
+                                ('reagent_id', list_reagents(), ['generic_name', 'trade_name', 'manufacturer_name'])]:
+        options[field] = {int(r['id']): '｜'.join(str(r.get(name) or '') for name in names if r.get(name))
+                          for r in frame.to_dict('records')}
+    return options
+
+
+def _panel_values(ctx, template, options):
+    values = ctx.setdefault('panel_defaults', dict(unit_id=None, method_id=template['default_method_id'],
+        reagent_id=template['default_reagent_id'], qc_method=template['default_qc_method'],
+        input_value_type='raw', level_count=int(template['default_level_count']), target_n=20))
+    for field, label in _PANEL_FIELDS.items():
+        key = 'panel_default_' + ctx['token'] + '_' + field
+        if field in options:
+            choices = options[field]
+            current = values.get(field)
+            values[field] = st.selectbox(label, [None, *choices], index=[None, *choices].index(current) if current in choices else 0,
+                format_func=lambda value, choices=choices: '逐项选择' if value is None else choices[value], key=key)
+        else:
+            values[field] = st.number_input(label, min_value=1 if field == 'level_count' else 5,
+                max_value=3 if field == 'level_count' else 20, value=int(values[field]), step=1, key=key)
+    st.caption('请逐项核对质控方法，质控品有多个水平也不会自动改为多水平法。选择即时法后，累计20个有效建立点再人工确认转入LJ。')
+    return dict(values)
+
+
+def _render_panel_source(ctx, template, options):
+    from services.project_config_service import list_project_templates, template_item_rows, preview_panel_items
+    from services.master_data_service import list_test_items
+    source = st.radio('带入来源', ['已有项目', '质控品适用检验项目', '选择检验项目', '导入配置清单'],
+                      horizontal=True, key='panel_source_' + ctx['token'])
+    candidates = []
+    if source == '已有项目':
+        templates = list_project_templates()
+        names = {int(r['id']): r['template_name'] for r in templates.to_dict('records') if int(r['id']) != ctx['template_id']}
+        chosen = st.selectbox('来源项目', [None, *names], format_func=lambda value: '请选择' if value is None else names[value],
+                              key='panel_source_template_' + ctx['token'])
+        if chosen:
+            candidates = template_item_rows(chosen)
+            st.caption('带入后请核对各项的方法、单位和输入值类型，再逐项确认当前项目的质量要求。')
+    elif source == '导入配置清单':
+        file = st.file_uploader('项目配置 XLSX', type=['xlsx'], key='panel_source_file_' + ctx['token'])
+        if file:
+            from services.project_config_io_service import preview_panel_import_rows
+            try:
+                candidates = preview_panel_import_rows(ctx['template_id'], file.getvalue())
+            except ValueError as exc:
+                st.error(str(exc))
+    else:
+        tests = list_test_items()
+        if source == '质控品适用检验项目':
+            from services.product_directory_service import get_product_relationships
+            coverage = get_product_relationships(int(template['qc_material_id']))['coverage']
+            ids = {int(row['test_item_id']) for row in coverage if not row.get('is_disabled')}
+            tests = tests[tests.id.isin(ids)]
+            if tests.empty:
+                st.info('尚未登记此质控品适用的检验项目。请在基础资料中核对并保存适用项目，或在此逐项选择本次检测项目。')
+        names = {int(r['id']): str(r['chinese_name']) + ('｜' + str(r['standard_code']) if r.get('standard_code') else '')
+                 for r in tests.to_dict('records')}
+        selected = st.multiselect('本次检验项目', list(names), format_func=names.get,
+            default=list(names) if source == '质控品适用检验项目' else [], key='panel_source_tests_' + source + ctx['token'])
+        with st.expander('本次新增项的初始设置', expanded=True):
+            defaults = _panel_values(ctx, template, options)
+        candidates = [dict(test_item_id=tid, **defaults) for tid in selected]
+    if candidates and source in ('已有项目', '导入配置清单'):
+        indices = list(range(len(candidates)))
+        selected = st.multiselect('本次带入项目', indices, default=indices,
+            format_func=lambda i: str(candidates[i].get('test_item_name') or candidates[i]['test_item_id']) + '｜' +
+                str(options['qc_method'].get(candidates[i]['qc_method'], '')) + '｜' +
+                str(options['input_value_type'].get(candidates[i]['input_value_type'], '')),
+            key='panel_candidate_selection_' + ctx['token'] + str(source) + str([r['test_item_id'] for r in candidates]))
+        candidates = [candidates[i] for i in selected]
+    cancel, preview = st.columns(2)
+    if cancel.button('取消', key='panel_source_cancel'):
+        _finish()
+    if preview.button('预览整组带入', type='primary', disabled=not candidates, key='panel_source_preview'):
+        try:
+            prepared = preview_panel_items(ctx['template_id'], candidates, expected_revision=ctx['revision'])
+            if prepared['errors']:
+                raise ValueError('\n'.join(prepared['errors']))
+        except (ValueError, TypeError) as exc:
+            st.error(str(exc))
+        else:
+            ctx['draft'] = dict(rows=prepared['rows'], stage='edit')
+            ctx['panel_preview'] = prepared
+            ctx['editor_version'] = 0
+            st.rerun()
+
+
+def _panel_frame(rows, options):
+    import json
+    display = []
+    for row in rows:
+        try:
+            review = json.loads(row.get('quality_review_json') or '{}')
+        except (TypeError, ValueError):
+            review = {}
+        current = {'行标识': row['row_key'], '检验项目': row.get('test_item_name', ''),
+                   '质量要求': '已确认，修改后需重核' if review.get('status') == 'confirmed' else '待逐项核对',
+                   '备注': row.get('notes', '')}
+        for field, label in _PANEL_FIELDS.items():
+            current[label] = options[field].get(row.get(field), '') if field in options else row.get(field)
+        display.append(current)
+    return pd.DataFrame(display)
+
+
+def _panel_edited_rows(edited, original, options):
+    originals = {row['row_key']: row for row in original}
+    rows = []
+    for shown in edited.to_dict('records'):
+        row = dict(originals[shown['行标识']])
+        for field, label in _PANEL_FIELDS.items():
+            value = shown[label]
+            row[field] = next((key for key, text in options[field].items() if text == value), None) if field in options else value
+        row['notes'] = shown.get('备注') or ''
+        rows.append(row)
+    return rows
+
+
+def _render_panel_form(ctx):
+    from services.project_config_service import preview_panel_defaults, save_panel_items
+    st.subheader('整组添加检验项目')
+    st.caption(ctx['template_name'])
+    template, options = _plain(get_project_template(ctx['template_id'])), _panel_reference_options()
+    if ctx['draft']['stage'] == 'source':
+        _render_panel_source(ctx, template, options)
+        return
+    prepared = ctx['panel_preview']
+    st.info(f"本次新增 {prepared['added_count']} 项，保留已有 {prepared['retained_count']} 项。可逐项修改；保存后仍需核对质量要求。")
+    entries = pd.DataFrame(prepared['entries'])
+    if not entries.empty:
+        with st.expander('带入清单'):
+            st.dataframe(entries[['test_item_name', 'message']].rename(columns={'test_item_name': '检验项目', 'message': '处理结果'}),
+                         hide_index=True, width='stretch')
+    columns = {'行标识': None}
+    for field, choices in options.items():
+        columns[_PANEL_FIELDS[field]] = st.column_config.SelectboxColumn(_PANEL_FIELDS[field], options=['', *choices.values()])
+    columns['水平数'] = st.column_config.NumberColumn('水平数', min_value=1, max_value=3, step=1)
+    columns['参数建立点数'] = st.column_config.NumberColumn('参数建立点数', min_value=5, max_value=20, step=1)
+    edited = st.data_editor(_panel_frame(ctx['draft']['rows'], options), hide_index=True, width='stretch',
+        disabled=['行标识', '检验项目', '质量要求'], column_config=columns,
+        key='panel_rows_' + ctx['token'] + '_' + str(ctx['editor_version']))
+    ctx['draft']['rows'] = _panel_edited_rows(edited, ctx['draft']['rows'], options)
+    with st.expander('为选中项目统一设置'):
+        names = {row['row_key']: row.get('test_item_name', '') for row in ctx['draft']['rows']}
+        selected = st.multiselect('选择项目', list(names), format_func=names.get, key='panel_bulk_rows_' + ctx['token'])
+        fields = st.multiselect('选择需要统一修改的内容', list(_PANEL_FIELDS), format_func=_PANEL_FIELDS.get, key='panel_bulk_fields_' + ctx['token'])
+        values = _panel_values(ctx, template, options)
+        overwrite = st.checkbox('同时替换所选内容的原填写', key='panel_bulk_overwrite_' + ctx['token'])
+        if st.button('预览统一设置', disabled=not selected or not fields, key='panel_bulk_preview'):
+            ctx['bulk_preview'] = preview_panel_defaults(ctx['draft']['rows'], values,
+                selected_row_keys=selected, fields=fields, overwrite=overwrite)
+            ctx['bulk_preview']['original_rows'] = [dict(row) for row in ctx['draft']['rows']]
+        proposed = ctx.get('bulk_preview')
+        if proposed:
+            changes = [{ '检验项目': c['test_item_name'], '修改内容': _PANEL_FIELDS[c['field']],
+                         '原填写': str(options.get(c['field'], {}).get(c['before'], c['before']) or '未填写'),
+                         '改为': str(options.get(c['field'], {}).get(c['after'], c['after']) or '未填写')}
+                       for c in proposed['changes']]
+            st.dataframe(pd.DataFrame(changes), hide_index=True, width='stretch')
+            yes, no = st.columns(2)
+            if yes.button('应用以上设置', key='panel_bulk_apply'):
+                if ctx['draft']['rows'] != proposed['original_rows']:
+                    ctx.pop('bulk_preview', None)
+                    st.error('逐项填写已变化，请重新预览统一设置。')
+                else:
+                    ctx['draft']['rows'] = proposed['rows']
+                    ctx.pop('bulk_preview', None)
+                    ctx['editor_version'] += 1
+                    st.rerun()
+            if no.button('取消统一设置', key='panel_bulk_cancel'):
+                ctx.pop('bulk_preview', None)
+                st.rerun()
+    cancel, save = st.columns(2)
+    if cancel.button('取消', key='panel_edit_cancel'):
+        _cancel(ctx)
+    if save.button('保存整组项目', type='primary', key='panel_save'):
+        try:
+            result = save_panel_items(ctx['template_id'], ctx['draft']['rows'], expected_revision=ctx['revision'])
+        except (TypeError, ValueError) as exc:
+            st.error(str(exc))
+        else:
+            _finish(f"已保存 {result['saved_count']} 项。请逐项核对质量要求后确认项目设置。")
+
+
 def _render_confirmation(ctx):
     if ctx['kind'] != 'remove_item':
         st.error('请从编辑项目中选择停用或恢复。')
@@ -317,6 +542,8 @@ def render_project_dialog():
         _render_project_form(ctx)
     elif ctx['kind'] == 'item':
         _render_item_form(ctx)
+    elif ctx['kind'] == 'panel':
+        _render_panel_form(ctx)
     elif ctx['kind'] == 'quality':
         from ui.quality_targets import render_adoption
         st.subheader('质量目标 · ' + str(ctx['draft'].get('test_item_name', '')))

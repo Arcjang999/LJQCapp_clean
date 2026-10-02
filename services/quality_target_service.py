@@ -125,7 +125,7 @@ def common_cv(goal):
 
 def adopt_requirement(scope, item_id, requirement_id, *, confirmed_by, evidence, levels=None, exclusions=None,
                       context=None, search_record=None, adopted_standard_ids=None,
-                      registered_standards=None, supplemental_cv=None):
+                      registered_standards=None, supplemental_cv=None, process_requirements=None):
     if not str(confirmed_by).strip() or not str(evidence).strip():
         raise ValueError('请填写确认人和适用依据。')
     spec=get_requirement(requirement_id)
@@ -169,7 +169,7 @@ def adopt_requirement(scope, item_id, requirement_id, *, confirmed_by, evidence,
         review=build_review(c,reviewed_item,source_spec=spec,confirmed_by=confirmed_by,
                             evidence=evidence,exclusions=exclusions,context=context,
                             search_record=search_record,adopted_standard_ids=adopted_standard_ids,
-                            registered_standards=registered_standards)
+                            registered_standards=registered_standards,process_requirements=process_requirements)
         save_review(c,scope,item_id,review)
         if scope=='lot':
             from services.project_config_service import _save_snapshot
@@ -290,7 +290,7 @@ def preview_custom_csv(data):
         if index>501:raise ValueError('每次最多导入 500 条要求。')
         if None in row or any(v is None for v in row.values()):raise ValueError(f'第 {index} 行列数不正确。')
         row={k:v.strip() for k,v in row.items()}
-        if any(len(v)>1000 for v in row.values()):raise ValueError(f'第 {index} 行字段不能超过 1000 字。')
+        if any(len(v)>1000 for v in row.values()):raise ValueError(f'第 {index} 行每格内容不能超过 1000 字。')
         for key in ('检验项目','来源名称','版本','实施日期','单位','来源链接或依据','确认人'):
             if not row[key]:raise ValueError(f'第 {index} 行：{key}不能为空。')
         try:date.fromisoformat(row['实施日期'])

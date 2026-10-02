@@ -173,7 +173,8 @@ def assess(item, context=None, *, on_date=None):
             or (rule.get('required_input_value_type') and item.get('input_value_type') != rule['required_input_value_type']))
         reason = (rule.get('method_review_message', '请核对是否为转录介导扩增（TMA），其他恒温扩增方法需另核对适用依据。')
                   if method_pending else ('待补充适用条件或核对现行依据' if missing or state != 'current'
-                                         else '应采用本条款，并人工核对具体要求'))
+                                         else ('可作为本实验室对照与质控设置的参考'
+                                               if rule['kind'] == 'process' else '应采用本条款，并人工核对具体要求')))
         if scale_pending:
             reason = rule['scale_review_message']
         rows.append(dict(id=rule['id'], kind=rule['kind'], spec=rule, source=source,

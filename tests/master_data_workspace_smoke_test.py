@@ -28,8 +28,8 @@ def select(app, entity, row):
 
 def test_new_record_renaming_and_hidden_selection():
     with IsolatedDatabase():
-        first = create_manufacturer(display_name='Alpha 厂家')
-        second = create_manufacturer(display_name='Beta 厂家')
+        first = create_manufacturer(categories=['instrument', 'reagent', 'qc_material'], display_name='Alpha 厂家')
+        second = create_manufacturer(categories=['instrument', 'reagent', 'qc_material'], display_name='Beta 厂家')
         app = make_app('manufacturer')
         select(app, 'manufacturer', 1)
         assert app.session_state['md_selected_manufacturer'] == second
@@ -49,6 +49,7 @@ def test_new_record_renaming_and_hidden_selection():
         app.text_input(key='md_search_manufacturer').set_value('Gamma').run()
         app.button(key='md_create_manufacturer').click().run()
         app.text_input(key=field_key(app, 'display_name')).set_value('Delta 厂家')
+        app.multiselect(key=field_key(app, 'categories')).set_value(['instrument'])
         app.button(key='md_dialog_save').click().run()
         assert_clean(app)
         new_id = app.session_state['md_selected_manufacturer']
@@ -90,7 +91,7 @@ def test_alias_search_edit_keeps_parent_and_switching_parent_clears_child():
 
 def test_notes_save_retains_search_and_selected_row():
     with IsolatedDatabase():
-        record_id = create_manufacturer(display_name='保持筛选厂家')
+        record_id = create_manufacturer(categories=['instrument', 'reagent', 'qc_material'], display_name='保持筛选厂家')
         app = make_app('manufacturer')
         app.text_input(key='md_search_manufacturer').set_value('保持筛选').run()
         select(app, 'manufacturer', 0)
@@ -109,6 +110,7 @@ def test_material_and_reference_drafts_render_one_dialog_at_a_time():
 from pages.master_data_page import render_master_data_page
 render_master_data_page()
 ''', default_timeout=20).run()
+        assert_clean(app)
         app.button(key='material_catalog_add_product').click().run()
         assert_clean(app)
         material_draft = dict(app.session_state['material_dialog'])

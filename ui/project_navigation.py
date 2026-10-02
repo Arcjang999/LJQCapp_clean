@@ -9,39 +9,60 @@ from services.project_config_service import (
     list_project_templates, list_template_items, get_project_template, QC_METHOD_LABELS,
     validate_project_template, activate_project_template,
 )
-from services.project_workspace_service import matching_project_ids, list_item_batches, resolve_batch_binding
+from services.project_workspace_service import list_item_batches, resolve_batch_binding
 from ui.project_dialogs import open_project_dialog, render_pending_project_dialog
+
+
+def _remember_navigation_value(key):
+    values = dict(st.session_state.get('project_navigation_values', {}))
+    values[key] = st.session_state[key]
+    st.session_state['project_navigation_values'] = values
+
+
+def _restore_navigation_value(key):
+    values = st.session_state.get('project_navigation_values', {})
+    if key not in st.session_state and key in values:
+        st.session_state[key] = values[key]
 
 
 def filter_projects(projects, prefix):
     if projects.empty:
         return projects
-    search, group_col, way_col, method_col = st.columns([2, 1, 1, 1.5])
-    search_text = search.text_input('搜索项目', key=prefix+'_search', help=SEARCH_HELP, placeholder='项目名称或仪器')
+    search, group_col, instrument_col = st.columns([2, 1, 1.5])
+    search_key = prefix+'_search'
+    _restore_navigation_value(search_key)
+    search_text = search.text_input('搜索项目', key=search_key, help=SEARCH_HELP, placeholder='项目名称、分组或仪器',
+        on_change=_remember_navigation_value, args=(search_key,))
     groups = sorted({str(x) for x in projects['project_group'] if x})
-    ways = sorted({x for cell in projects['qc_methods'].dropna() for x in cell.split(',')})
-    methods = sorted({x for cell in projects['method_names'].dropna() for x in cell.split(',')})
+    instruments = {int(row['lab_instrument_id']): str(row['instrument_name'] or '未命名仪器')
+        for row in projects.to_dict('records') if pd.notna(row['lab_instrument_id'])}
     def choose(column, label, options, key, formatter=str):
+        _restore_navigation_value(key)
         if st.session_state.get(key) not in options:
             st.session_state[key] = options[0]
-        return column.selectbox(label, options, key=key, format_func=formatter)
+        return column.selectbox(label, options, key=key, format_func=formatter,
+            on_change=_remember_navigation_value, args=(key,))
     group = choose(group_col, '分组', ['全部']+groups, prefix+'_group')
-    way = choose(way_col, '质控方法', ['全部']+ways, prefix+'_way', lambda x: QC_METHOD_LABELS.get(x,x))
-    method = choose(method_col, '方法学', ['全部']+methods, prefix+'_method')
+    instrument = choose(instrument_col, '仪器', [None]+sorted(instruments, key=lambda i: (instruments[i], i)),
+        prefix+'_instrument', lambda i: '全部' if i is None else instruments[i])
     if search_text.strip():
-        projects = filter_frame(projects, search_text, ['template_name', 'instrument_name', 'project_group', 'method_names'])
+        projects = filter_frame(projects, search_text, ['template_name', 'instrument_name', 'project_group'])
     if group != '全部':
         projects = projects[projects.project_group == group]
-    if way != '全部' or method != '全部':
-        ids = matching_project_ids(qc_method='' if way=='全部' else way, method_name='' if method=='全部' else method)
-        projects = projects[projects.id.isin(ids)]
+    if instrument is not None:
+        projects = projects[projects.lab_instrument_id == instrument]
     return projects
 
 
 def open_configured_batch(binding):
+    from ui.daily_navigation import remember_daily_return
+    from ui.common import GLOBAL_PAGE_SESSION_KEYS
+    remember_daily_return()
     from pages.main_page import LJ_ENTRY_LABEL, ZSCORE_ENTRY_LABEL, INSTANT_ENTRY_LABEL
     from ui.common import TEXT
     method = binding['qc_method']
+    if binding.get('template_id') is not None:
+        st.session_state['workspace_project_id'] = int(binding['template_id'])
     prefix = {'lj':'', 'zscore':'zscore_', 'instant':'instant_'}[method]
     for suffix in ('project_selector','batch_selector'):
         st.session_state.pop(prefix+suffix, None)
@@ -50,13 +71,29 @@ def open_configured_batch(binding):
     st.session_state[prefix+'selected_batch_id'] = int(binding['runtime_batch_id'])
     st.session_state[method+'_workbench_tabs'] = TEXT['current_batch']
     st.session_state['pending_top_level_method'] = {'lj':LJ_ENTRY_LABEL,'zscore':ZSCORE_ENTRY_LABEL,'instant':INSTANT_ENTRY_LABEL}[method]
-    for key in ('show_quality_targets_page','show_project_management_page','show_master_data_page','show_report_history_page','show_settings_page'):
+    for key in GLOBAL_PAGE_SESSION_KEYS:
         st.session_state[key] = False
     st.rerun()
 
 
-def open_project_setup(template_id, *, config_id=None):
+def open_project_setup(template_id, *, config_id=None, lot_config_item_id=None,
+                       settings_target='project', system_id=None, reagent_lot_id=None):
     from ui.common import open_global_page
+    from database import read_snapshot
+    item=None;binding=None
+    if lot_config_item_id is not None:
+        with read_snapshot() as connection:
+            found=connection.execute('''SELECT i.*,c.template_id FROM qc_lot_config_items i
+                JOIN qc_lot_configs c ON c.id=i.lot_config_id WHERE i.id=?''',(int(lot_config_item_id),)).fetchone()
+            if found is None or found['template_id']!=int(template_id) or found['lot_config_id']!=int(config_id):
+                raise ValueError('检验项目与所选批次不一致，请返回重新核对。')
+            item=dict(found)
+            found=connection.execute('SELECT id FROM qc_workbench_bindings WHERE lot_config_item_id=?',(int(lot_config_item_id),)).fetchone()
+            binding=found['id'] if found else None
+            if system_id is not None:
+                valid=connection.execute('SELECT 1 FROM qc_detection_systems WHERE id=? AND template_item_id=?',
+                    (system_id,item['source_template_item_id'])).fetchone()
+                if not valid:raise ValueError('试剂检测系统已变化，请返回重新核对。')
     st.session_state['v11_selected_template_id'] = int(template_id)
     st.session_state.pop('v11_template_selector', None)
     if config_id is not None:
@@ -64,6 +101,30 @@ def open_project_setup(template_id, *, config_id=None):
     st.session_state['batch_project_filter'] = int(template_id)
     st.session_state['batch_search'] = ''
     st.session_state['v11_management_tabs'] = '批次管理'
+    if item is not None:
+        st.session_state[f'batch_selected_item_{config_id}']=int(lot_config_item_id)
+        if settings_target in ('parameters','reagent','usage'):
+            st.session_state.pop('v11_pending_existing_config_id',None)
+            st.session_state['v11_selected_lot_config_id']=int(config_id)
+            st.session_state['v11_management_tabs']='批号使用与追溯'
+            if settings_target=='parameters':
+                st.session_state['lot_management_tabs']='均值和标准差管理'
+                st.session_state['target_profile_project']=int(template_id)
+                st.session_state['target_profile_search']=''
+                st.session_state['target_profile_selected_binding']=binding
+            elif settings_target=='usage':
+                st.session_state['lot_management_tabs']='新旧批号比对'
+                st.session_state['qc_lifecycle_project']=int(template_id)
+                st.session_state['qc_lifecycle_search']=''
+                st.session_state['qc_lifecycle_config_id']=int(config_id)
+                st.session_state['qc_lifecycle_binding_id']=binding
+            else:
+                st.session_state['lot_management_tabs']='试剂批号与换批'
+                st.session_state['reagent_product_filter']=item['reagent_id']
+                st.session_state['reagent_search']=''
+                st.session_state['reagent_selected_lot']=reagent_lot_id
+                st.session_state['reagent_focus_system_id']=system_id
+        st.session_state['daily_settings_focus']={'lot_config_item_id':int(lot_config_item_id),'settings_target':settings_target}
     open_global_page('show_project_management_page')
     st.rerun()
 
@@ -131,11 +192,20 @@ def _render_workspace(template_id):
         open_project_dialog('project', template_id)
     if manage.button('批次管理', key='workspace_manage_batches', width='stretch', disabled=bool(template['is_disabled'])):
         open_project_setup(template_id)
-    st.subheader(template['template_name'])
-    st.caption(' · '.join(str(template.get(k) or '') for k in ('project_group','instrument_name','qc_material_name') if template.get(k)))
+    from ui.common import render_module_header
+    render_module_header(template['template_name'],
+        ' · '.join(str(template.get(k) or '') for k in ('project_group','instrument_name','qc_material_name') if template.get(k)),
+        tone='projects', eyebrow='项目工作台')
     if template['is_disabled']:
         st.info('项目已停用，资料和历史仍保留。恢复后可重新确认设置。')
         return
+    with st.container(key='project_daily_actions', border=True):
+        action, description = st.columns([1, 3], vertical_alignment='center')
+        if action.button('整组录入', key='workspace_daily_entry', type='primary', width='stretch'):
+            from ui.daily_navigation import open_project_daily_entry
+            open_project_daily_entry(template_id)
+        description.caption('点击“整组录入”，先核对质控品批号，再按各检验项目填写全部水平的检测值。')
+    st.subheader('检验项目与批次')
     items = list_template_items(template_id)
     controls = st.columns([1,1,1,1])
     selected = st.session_state.get(f'workspace_item_{template_id}')
@@ -144,6 +214,8 @@ def _render_workspace(template_id):
         st.session_state[f'workspace_item_{template_id}'] = selected
     if controls[0].button('添加检验项目', key='workspace_add_item', type='primary', width='stretch'):
         open_project_dialog('item', template_id)
+    if st.button('整组添加检验项目', key='workspace_add_panel'):
+        open_project_dialog('panel', template_id)
     if controls[1].button('编辑检验项目', key='workspace_edit_item', disabled=selected is None, width='stretch'):
         open_project_dialog('item', template_id, selected)
     if controls[2].button('质量目标', key='workspace_quality', disabled=selected is None, width='stretch'):
@@ -180,10 +252,12 @@ def _render_workspace(template_id):
         else:
             choices = {int(r['config_item_id']):r for r in batches.to_dict('records')}
             key = f'workspace_batch_{selected}'
+            _restore_navigation_value(key)
             if st.session_state.get(key) not in choices:
                 st.session_state[key] = next(iter(choices))
             cid = st.selectbox('当前批次', list(choices), key=key,
-                format_func=lambda v: choices[v]['config_name']+' · '+('设置已确认' if choices[v]['status']=='active' else '待确认'))
+                format_func=lambda v: choices[v]['config_name']+' · '+('设置已确认' if choices[v]['status']=='active' else '待确认'),
+                on_change=_remember_navigation_value, args=(key,))
             config = choices[cid]
             from services.material_workflow_service import config_material_summary
             st.caption(config_material_summary(config['lot_config_id']))
@@ -235,6 +309,20 @@ def _render_batch_creation_dialog():
 
 
 def render_workspace_return_bar():
+    focus=st.session_state.get('daily_result_focus')
+    if focus:
+        with st.expander('本次保存的检测记录',expanded=True):
+            if focus['source_type'] in ('lj_result','zscore_run'):
+                from services.out_of_control_service import read_source
+                from ui.out_of_control import render_snapshot
+                render_snapshot(read_source(focus['source_type'],focus['source_id']))
+            else:
+                from database import get_connection
+                with get_connection() as connection:
+                    result=connection.execute('SELECT test_time,value,operator FROM instant_results WHERE id=?',(focus['source_id'],)).fetchone()
+                if result:st.write({'检测时间':result['test_time'],'检测值':result['value'],'检测人':result['operator']})
+            if st.button('收起本次记录定位',key='daily_clear_result_focus'):
+                st.session_state.pop('daily_result_focus',None);st.rerun()
     tid = st.session_state.get('workspace_project_id')
     if not tid:
         return

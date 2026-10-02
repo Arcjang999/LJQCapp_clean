@@ -8,7 +8,7 @@ from uuid import uuid4
 import pandas as pd
 
 from services.search_service import filter_frame
-from database import get_connection
+from database import get_connection, atomic_write
 
 
 MASTER_ENTITY_TABLES = {
@@ -58,8 +58,10 @@ def _date_text(value: object | None) -> str | None:
         raise ValueError("日期必须采用 YYYY-MM-DD 格式。") from exc
 
 
-def _execute_insert(sql: str, params: tuple[object, ...], duplicate_message: str) -> int:
-    with get_connection() as connection:
+def _execute_insert(sql: str, params: tuple[object, ...], duplicate_message: str, *, manufacturer_category=None, manufacturer_id=None) -> int:
+    with atomic_write() as connection:
+        if manufacturer_category:
+            require_manufacturer_category(connection, manufacturer_id, manufacturer_category)
         try:
             cursor = connection.execute(sql, params)
         except sqlite3.IntegrityError as exc:
@@ -76,46 +78,65 @@ def _enabled_clause(include_disabled: bool, prefix: str = "") -> str:
     return "" if include_disabled else f" WHERE {prefix}is_disabled = 0"
 
 
-def create_manufacturer(
-    *,
-    display_name: str,
-    legal_name: str = "",
-    country_or_region: str = "",
-    registration_holder_name: str = "",
-    notes: str = "",
-) -> int:
-    cleaned_display_name = _clean_required(display_name, "厂家名称")
-    cleaned_legal_name = _clean_optional(legal_name) or cleaned_display_name
-    return _execute_insert(
-        """
-        INSERT INTO md_manufacturers (
-            uid, origin_type, legal_name, display_name,
-            country_or_region, registration_holder_name, notes
-        )
-        VALUES (?, 'hospital', ?, ?, ?, ?, ?)
-        """,
-        (
-            _new_uid(),
-            cleaned_legal_name,
-            cleaned_display_name,
-            _clean_optional(country_or_region),
-            _clean_optional(registration_holder_name),
-            _clean_optional(notes),
-        ),
-        "已存在同名的启用厂家。",
-    )
+MANUFACTURER_CATEGORIES = {'instrument': '仪器厂家', 'reagent': '试剂厂家', 'qc_material': '质控品厂家'}
 
 
-def list_manufacturers(include_disabled: bool = False) -> pd.DataFrame:
-    return _read_dataframe(
-        f"""
-        SELECT id, uid, display_name, legal_name, country_or_region,
-               origin_type, is_disabled, created_at
-        FROM md_manufacturers
-        {_enabled_clause(include_disabled)}
-        ORDER BY is_disabled ASC, display_name COLLATE NOCASE ASC, id ASC
-        """
-    )
+def get_manufacturer_categories(manufacturer_id, connection=None):
+    if connection is None:
+        with get_connection() as connection:
+            return get_manufacturer_categories(manufacturer_id, connection)
+    return [row[0] for row in connection.execute('SELECT category FROM md_manufacturer_categories WHERE manufacturer_id=? ORDER BY category', (int(manufacturer_id),))]
+
+
+def require_manufacturer_category(connection, manufacturer_id, category):
+    if category not in MANUFACTURER_CATEGORIES:
+        raise ValueError('请选择有效的厂家业务类别。')
+    row = connection.execute('SELECT display_name,is_disabled FROM md_manufacturers WHERE id=?', (manufacturer_id,)).fetchone()
+    if not row or row['is_disabled'] or category not in get_manufacturer_categories(manufacturer_id, connection):
+        raise ValueError('请选择启用的' + MANUFACTURER_CATEGORIES[category] + '；可先在厂家资料中补充业务类别。')
+
+
+def _save_manufacturer_categories(connection, manufacturer_id, categories):
+    if not isinstance(categories, (list, tuple, set)) or any(value not in MANUFACTURER_CATEGORIES for value in categories):
+        raise ValueError('请选择有效的厂家业务类别。')
+    chosen = set(categories)
+    old = set(get_manufacturer_categories(manufacturer_id, connection))
+    products = {'instrument': ('md_instrument_models','model'), 'reagent': ('md_reagents','generic_name'), 'qc_material': ('md_qc_materials','generic_name')}
+    for category in old - chosen:
+        table, label = products[category]
+        names = [row[0] for row in connection.execute(f'SELECT {label} FROM {table} WHERE manufacturer_id=? AND is_disabled=0', (manufacturer_id,))]
+        if names:
+            raise ValueError('不能移除' + MANUFACTURER_CATEGORIES[category] + '类别，仍在使用：' + '、'.join(names[:8]) + '。请先核对相应产品。')
+    connection.execute('DELETE FROM md_manufacturer_categories WHERE manufacturer_id=?', (manufacturer_id,))
+    connection.executemany('INSERT INTO md_manufacturer_categories(manufacturer_id,category) VALUES (?,?)', [(manufacturer_id,c) for c in sorted(chosen)])
+
+
+def set_manufacturer_categories(manufacturer_id, categories, *, expected_fingerprint):
+    from services.master_data_edit_service import save_master_record
+    return save_master_record('manufacturer', {'categories': list(categories)}, entity_id=manufacturer_id, expected_fingerprint=expected_fingerprint)
+
+
+def create_manufacturer(*, display_name, legal_name='', country_or_region='', registration_holder_name='', notes='', categories=()):
+    name = _clean_required(display_name, '厂家名称')
+    with atomic_write() as connection:
+        identifier = _execute_insert("""INSERT INTO md_manufacturers
+            (uid,origin_type,legal_name,display_name,country_or_region,registration_holder_name,notes)
+            VALUES (?,'hospital',?,?,?,?,?)""", (_new_uid(), _clean_optional(legal_name) or name, name,
+            _clean_optional(country_or_region),_clean_optional(registration_holder_name),_clean_optional(notes)), '已存在同名的启用厂家。')
+        _save_manufacturer_categories(connection, identifier, categories)
+        return identifier
+
+
+def list_manufacturers(include_disabled=False, *, category=None):
+    if category is not None and category not in MANUFACTURER_CATEGORIES:
+        raise ValueError('请选择有效的厂家业务类别。')
+    with get_connection() as connection:
+        frame = pd.read_sql_query("SELECT m.*, (SELECT group_concat(alias_text,' ') FROM md_aliases WHERE entity_type='manufacturer' AND entity_id=m.id AND is_disabled=0) AS aliases FROM md_manufacturers m " + _enabled_clause(include_disabled,'m.') + ' ORDER BY m.is_disabled,m.display_name,m.id', connection)
+        frame['categories'] = [get_manufacturer_categories(int(value), connection) for value in frame.id]
+    frame['category_labels'] = frame.categories.map(lambda values: '、'.join(MANUFACTURER_CATEGORIES[v] for v in values) or '尚未分类')
+    if category:
+        frame = frame[frame.categories.map(lambda values: category in values)]
+    return frame
 
 
 def create_unit(
@@ -297,7 +318,7 @@ def create_instrument_model(
             _clean_optional(catalog_no),
             _clean_optional(notes),
         ),
-        "当前厂家下已存在同型号的启用仪器。",
+        "当前厂家下已存在同型号的启用仪器。", manufacturer_category="instrument", manufacturer_id=manufacturer_id,
     )
 
 
@@ -419,7 +440,7 @@ def create_reagent(
             _clean_optional(applicable_instrument_text),
             _clean_optional(notes),
         ),
-        "当前厂家下已存在同名的启用试剂。",
+        "当前厂家下已存在同名的启用试剂。", manufacturer_category="reagent", manufacturer_id=manufacturer_id,
     )
 
 
@@ -485,7 +506,7 @@ def create_qc_material(
             normalized_level_count,
             _clean_optional(notes),
         ),
-        "当前厂家下已存在同名的启用质控品。",
+        "当前厂家下已存在同名的启用质控品。", manufacturer_category="qc_material", manufacturer_id=manufacturer_id,
     )
 
 
@@ -780,6 +801,9 @@ def set_master_entity_disabled(
             ).fetchone()
             if row is None:
                 raise ValueError("未找到要维护的基础资料。")
+            if not is_disabled and entity_type in ('instrument_model', 'reagent', 'qc_material'):
+                manufacturer_id = connection.execute(f'SELECT manufacturer_id FROM {table_name} WHERE id=?', (int(entity_id),)).fetchone()[0]
+                require_manufacturer_category(connection, manufacturer_id, 'instrument' if entity_type == 'instrument_model' else entity_type)
             connection.execute(
                 f"""
                 UPDATE {table_name}

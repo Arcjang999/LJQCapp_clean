@@ -106,7 +106,7 @@ def _render_instant_transfer_dialog(batch_id: int) -> None:
 
     st.caption(
         "确认后将把当前即时法批次中的有效点转入一个新建的 LJ 批次，"
-        "并冻结当前即时法批次为只读。"
+        "转入后，原即时法记录仅供查询，不能继续录入或维护。"
     )
 
     if transfer_state.get("is_transferred"):
@@ -153,7 +153,7 @@ def _render_instant_transfer_dialog(batch_id: int) -> None:
             [
                 "- 前 20 个有效点将作为 LJ 参数建立数据。",
                 "- 第 21 个及之后的有效点将作为 LJ 正式期数据。",
-                "- 转入后当前即时法批次将冻结为只读，不可继续录入、维护或再次转入。",
+                "- 转入后，原即时法记录仅供查询，不能继续录入、维护或再次转入。",
             ]
         )
     )
@@ -332,7 +332,7 @@ def _render_instant_transfer_section(context: dict[str, object]) -> None:
 
     st.caption(
         "转入规则：前 20 个有效点作为 LJ 参数建立数据；第 21 个及之后的有效点作为 LJ 正式期数据；"
-        "转入后当前即时法批次将冻结为只读。"
+        "转入后，原即时法记录仅供查询，不能继续录入或维护。"
     )
     if st.button(
         "确认转入 LJ 法",
@@ -522,7 +522,7 @@ def _render_instant_maintenance_section(context: dict[str, object]) -> None:
         return
     if bool(transfer_state.get("is_transferred")):
         st.success("该批次已转入 LJ 法。原即时法记录仅供查询，不能修改。")
-        st.caption("如需继续后续质控，请前往对应 LJ 批次；即时法源批次仅保留追溯信息。")
+        st.caption("请打开对应的 LJ 批次继续录入；原即时法记录仍可在此查询。")
         return
 
     option_map = {
@@ -583,13 +583,6 @@ def _render_instant_maintenance_section(context: dict[str, object]) -> None:
             restore_instant_result(selected_result_id)
             st.success("记录已恢复，当前批次统计与离群提示已重算。")
             st.rerun()
-
-    st.button(
-        "更多维护动作（下一阶段开放）",
-        key=f"instant_more_maintenance_{selected_result_id}",
-        disabled=True,
-        width="stretch",
-    )
 
 
 def render_instant_page() -> None:
@@ -652,8 +645,8 @@ def render_instant_page() -> None:
             )
             context_badges.append("已转入 LJ 法")
             context_caption = (
-                f"当前项目：{batch['project_name']}。该即时法批次已转入 LJ 法并冻结为只读，"
-                "请前往对应 LJ 批次继续后续质控。"
+                f"当前项目：{batch['project_name']}。该即时法批次已转入 LJ 法，原记录仅供查询，"
+                "请打开对应的 LJ 批次继续录入。"
             )
         elif transfer_state.get("eligible"):
             context_badges.append("可确认转入 LJ 法")
@@ -693,16 +686,10 @@ def render_instant_page() -> None:
                 )
                 _render_instant_chart_analysis_section(context)
 
-        render_section_intro(
-            title="检测记录与数据管理",
-            caption="下方可查看转入 LJ、记录回顾、维护和即刻法 SI 值说明。",
-            badges=["转入 LJ", "记录回顾", "维护"],
-            tone="muted",
-        )
         with st.container(border=True):
             render_section_intro(
                 title="转入 LJ 法",
-                caption="明确显示当前是否可转入 LJ 法，以及转入后对应的去向项目和批次。",
+                caption="先核对有效点数和待处理提示，再确认转入；转入后可查看对应的 LJ 项目和批次。",
                 tone="muted",
             )
             _render_instant_transfer_section(context)

@@ -72,7 +72,8 @@ def test_home_and_global_navigation_on_empty_database():
     with IsolatedDatabase():
         app = AppTest.from_file(str(ROOT/'app.py'), default_timeout=15).run()
         assert not list(app.exception)
-        assert list(app.radio(key='top_level_method_selector').options) == METHOD_ENTRY_OPTIONS
+        assert not any(r.key == 'top_level_method_selector' for r in app.radio)
+        assert not any(b.key == 'home_daily_entry' for b in app.button)
         for target, close in [('open_master_data_page', 'close_master_data_page'),
                               ('open_project_management_page', 'close_project_management_page'),
                               ('open_report_history_page', 'close_report_history_page')]:
@@ -80,11 +81,13 @@ def test_home_and_global_navigation_on_empty_database():
             assert not list(app.exception)
             app.button(key=close).click().run()
             assert not list(app.exception)
-        for card in ('open_main_lj_card', 'open_main_zscore_card', 'open_main_instant_card'):
-            app.button(key=card).click().run()
+        assert not any(b.key in ('open_main_lj_card', 'open_main_zscore_card', 'open_main_instant_card') for b in app.button)
+        # Internal method routes remain available to exact configured-batch links.
+        for route in METHOD_ENTRY_OPTIONS:
+            app.session_state['pending_top_level_method'] = route
+            app.run()
             assert not list(app.exception)
-            app.radio(key='top_level_method_selector').set_value(METHOD_ENTRY_OPTIONS[0]).run()
-            assert not list(app.exception)
+            assert app.session_state['top_level_method_selector'] == route
 
 
 if __name__ == '__main__':

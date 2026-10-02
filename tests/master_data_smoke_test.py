@@ -58,7 +58,7 @@ class TemporaryDatabaseContext:
 
 
 def _seed_complete_master_data() -> dict[str, int]:
-    manufacturer_id = create_manufacturer(
+    manufacturer_id = create_manufacturer(categories=['instrument', 'reagent', 'qc_material'],
         display_name="示例诊断",
         legal_name="示例诊断技术有限公司",
         country_or_region="中国",
@@ -183,7 +183,7 @@ def test_master_data_page_starts_from_new_navigation() -> None:
         at = AppTest.from_file(APP_FILE_PATH, default_timeout=15)
         at.run()
         assert not list(at.exception)
-        assert MASTER_DATA_ENTRY_LABEL not in at.radio(key="top_level_method_selector").options
+        assert not any(r.key == "top_level_method_selector" for r in at.radio)
         at.button(key="open_master_data_page").click().run()
         assert not list(at.exception)
         subtabs = {'已登记仪器', '仪器型号', '方法学', '单位'}
@@ -195,8 +195,8 @@ def test_master_data_page_starts_from_new_navigation() -> None:
 
 def test_filtered_manufacturer_edit_and_status_require_explicit_save() -> None:
     with TemporaryDatabaseContext():
-        first_id = create_manufacturer(display_name='Alpha厂家')
-        selected_id = create_manufacturer(display_name='Beta厂家')
+        first_id = create_manufacturer(categories=['instrument', 'reagent', 'qc_material'], display_name='Alpha厂家')
+        selected_id = create_manufacturer(categories=['instrument', 'reagent', 'qc_material'], display_name='Beta厂家')
 
         def stored(entity_id):
             with get_connection() as connection:

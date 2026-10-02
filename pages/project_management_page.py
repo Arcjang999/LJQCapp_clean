@@ -24,6 +24,7 @@ from services.project_config_io_service import (
     build_project_template_xlsx,
     import_project_template_xlsx,
     preview_project_template_xlsx,
+    prepare_project_template_import,
 )
 from services.project_config_service import (
     INPUT_VALUE_TYPE_LABELS,
@@ -210,7 +211,7 @@ def _render_template_creation() -> None:
     instrument_labels, instrument_map, _ = _option_map(
         instruments,
         _instrument_label,
-        placeholder="请选择本地仪器",
+        placeholder="请选择仪器",
     )
     material_labels, material_map, _ = _option_map(
         materials,
@@ -222,12 +223,12 @@ def _render_template_creation() -> None:
     )
     with st.expander("新建项目", expanded=False):
         if instruments.empty or materials.empty or reagents.empty:
-            st.warning("请先到“基础资料”完成本地仪器、试剂和质控品维护。")
+            st.warning("请先到“基础资料”登记实际使用的仪器、试剂和质控品，再新建项目。")
         with st.container(border=True):
             template_name = st.text_input("项目名称 *")
             col1, col2, col3 = st.columns(3)
             with col1:
-                instrument_label = st.selectbox("本地仪器 *", instrument_labels)
+                instrument_label = st.selectbox("仪器 *", instrument_labels)
             with col2:
                 reagent_label = st.selectbox("试剂 *", reagent_labels)
             with col3:
@@ -246,7 +247,7 @@ def _render_template_creation() -> None:
             default_method=defaults_right.selectbox('默认检测方法学',method_ids,format_func=lambda k:'请选择，或在检验项目中逐项设置' if k is None else method_names[k],key='create_default_method')
             default_count=st.selectbox('多水平使用数量',[2,3],key='create_default_count') if default_qc=='zscore' else 1
             project_group=st.text_input('工作分组（选填）',placeholder='例如：血筛、生化、分子；用于归类，不限制质控方式',key='create_project_group')
-            st.caption('LJ 图与 Z-score 不按检测专业划分。这里的默认设置在添加检验项目时带入，每项仍可调整；生效方式以各检验项目为准。')
+            st.caption('请选择新增检验项目时带入的默认方法；添加后逐项核对并调整。生化、分子等分组只用于查找，不决定质控方法。')
             notes = st.text_input("项目备注")
             submitted = st.button(
                 "创建项目", key="create_project_submit",
@@ -258,7 +259,7 @@ def _render_template_creation() -> None:
                 material_id = material_map[material_label]
                 reagent_id = reagent_map[reagent_label]
                 if instrument_id is None or material_id is None or reagent_id is None:
-                    st.error("请选择本地仪器、试剂和质控品。")
+                    st.error("请选择本项目实际使用的仪器、试剂和质控品。")
                 else:
                     try:
                         template_id = create_project_template(
@@ -364,7 +365,7 @@ def _save_editor_rows(template_id: int, edited: pd.DataFrame, lookups: dict[str,
             ("试剂", reagent_label, "reagent_id_by_label"),
         ):
             if value and value not in lookups[lookup_key]:
-                raise ValueError(f"第 {index + 1} 行的{field}已不在可选字典中，请重新选择后保存。")
+                raise ValueError(f"第 {index + 1} 行的{field}已无法选择，请核对基础资料后重新选择并保存。")
         rows.append(
             {
                 "test_item_id": int(row["test_item_id"]),
@@ -533,7 +534,7 @@ def _render_template_default_reagent(template) -> None:
     with st.expander("项目默认试剂", expanded=current is None):
         st.caption("用于预填新增加的检验项目。修改默认值不会覆盖已有检验项目、批次或历史记录。")
         if current is None:
-            st.warning("请从字典补选项目默认试剂；已有检验项目的试剂保留原设置。")
+            st.warning("请选择新增检验项目时默认带入的试剂。已有检验项目继续使用各自已选的试剂。")
         selected = st.selectbox(
             "默认试剂 *", labels, index=labels.index(current) if current else 0,
             key=f"v12_default_reagent_{template_id}_{template['revision_no']}",
@@ -736,8 +737,8 @@ def _render_copy_tab() -> None:
 def _render_import_export_tab() -> None:
     st.markdown("**批量导入项目配置**")
     st.caption(
-        "使用系统 XLSX 模板批量维护项目中的检验项目。搜索不到的检验项目、单位、"
-        "方法学、试剂和厂家会作为医院本地词条新增；官方词条不会被覆盖。"
+        "先下载并填写项目配置模板，再选择目标项目、上传文件并核对预览。预览中列出的新增检验项目、单位、"
+        "方法学、试剂和厂家将在确认导入时保存；已有标准资料保留。导入后请逐项核对质量要求。"
     )
     st.download_button(
         "下载项目配置导入模板",
@@ -781,62 +782,70 @@ def _render_import_export_tab() -> None:
     )
     if uploaded is not None:
         uploaded_bytes = uploaded.getvalue()
+        mode_label = st.radio('导入方式', ['合并检验项目', '替换项目内全部检验项目'], horizontal=True,
+            key='v11_project_import_mode', help='选择替换前，请核对预览中的移除清单：文件未列出的检验项目会从当前项目移除，已有检测结果和基础资料仍保留。')
+        mode = 'replace' if mode_label == '替换项目内全部检验项目' else 'merge'
         if len(uploaded_bytes) > 10 * 1024 * 1024:
-            st.error("上传文件超过 10 MB，无法导入。")
+            st.error('上传文件超过 10 MB，无法导入。')
         else:
-            try:
-                preview, errors = preview_project_template_xlsx(uploaded_bytes)
-            except ValueError as exc:
-                st.error(str(exc))
-            else:
-                st.markdown("**导入预览**")
-                if not preview.empty:
-                    st.dataframe(preview, hide_index=True, width="stretch")
-                if errors:
-                    st.error("文件中存在以下问题：\n\n" + "\n".join(f"- {item}" for item in errors))
-                mode_label = st.radio(
-                    "导入方式",
-                    options=["合并检验项目", "替换项目内全部检验项目"],
-                    horizontal=True,
-                    key="v11_project_import_mode",
-                    help="替换只会停用当前项目内未出现在文件中的检验项目，不删除基础资料。",
-                )
-                if st.button(
-                    "确认批量导入",
-                    type="primary",
-                    width="stretch",
-                    key="v11_confirm_project_import",
-                    disabled=bool(errors) or target_template_id is None,
-                ):
-                    try:
-                        result = import_project_template_xlsx(
-                            int(target_template_id),
-                            uploaded_bytes,
-                            mode=(
-                                "replace"
-                                if mode_label == "替换项目内全部检验项目"
-                                else "merge"
-                            ),
-                        )
-                    except (TypeError, ValueError) as exc:
-                        st.error(str(exc))
-                    else:
-                        created_text = "、".join(
-                            f"{name} {count} 条"
-                            for name, count in result["created"].items()
-                            if int(count) > 0
-                        )
-                        suffix = f"；新增本地词条：{created_text}" if created_text else ""
-                        st.success(
-                            f"已导入 {result['imported_count']} 个检验项目，"
-                            f"当前项目共包含 {result['saved_count']} 个检验项目{suffix}。"
-                            "项目已回到待确认状态，请校验后确认设置。"
-                        )
+            if st.button('核对导入预览', disabled=target_template_id is None, key='v11_prepare_project_import'):
+                try:
+                    st.session_state['v11_import_prepared'] = prepare_project_template_import(
+                        int(target_template_id), uploaded_bytes, mode=mode)
+                except (ValueError, TypeError) as exc:
+                    st.session_state.pop('v11_import_prepared', None)
+                    st.error(str(exc))
+            prepared = st.session_state.get('v11_import_prepared')
+            if prepared:
+                import hashlib
+                matches = (prepared['template_id'] == target_template_id and prepared['mode'] == mode
+                           and prepared['file_sha256'] == hashlib.sha256(uploaded_bytes).hexdigest())
+                fresh = matches and int(get_project_template(int(target_template_id))['revision_no']) == prepared['expected_revision']
+                if not matches:
+                    st.info('目标项目、文件或导入方式已变化，请重新核对导入预览。')
+                else:
+                    st.markdown('**导入预览**')
+                    st.dataframe(prepared['preview'], hide_index=True, width='stretch')
+                    if prepared['errors']:
+                        st.error('文件中存在以下问题：\n\n' + '\n'.join('- ' + error for error in prepared['errors']))
+                    if not fresh:
+                        st.warning('目标项目已发生变化，请重新核对导入预览。')
+                    created = '、'.join(f'{name} {count} 条' for name, count in prepared['created'].items() if count)
+                    if created:
+                        st.caption('确认后将新增本地资料：' + created)
+                    confirmed = False
+                    if mode == 'replace':
+                        removals = prepared['removals']
+                        st.warning(f'替换后将移除当前项目中的 {len(removals)} 项配置。')
+                        if removals:
+                            st.dataframe(pd.DataFrame([{'检验项目': r['test_item_name'],
+                                '质控方法': QC_METHOD_LABELS[r['qc_method']],
+                                '输入值类型': INPUT_VALUE_TYPE_LABELS[r['input_value_type']]} for r in removals]),
+                                hide_index=True, width='stretch')
+                        confirmed = st.checkbox('已核对以上移除清单，确认以文件中的配置替换',
+                            key='v11_import_replace_' + str(prepared['template_id']) + '_' +
+                            str(prepared['expected_revision']) + '_' + prepared['file_sha256'])
+                    apply, cancel = st.columns(2)
+                    if cancel.button('取消本次导入', key='v11_cancel_project_import'):
+                        st.session_state.pop('v11_import_prepared', None)
                         st.rerun()
+                    if apply.button('确认批量导入', type='primary', key='v11_confirm_project_import',
+                                    disabled=bool(prepared['errors']) or not fresh or (mode == 'replace' and not confirmed)):
+                        try:
+                            result = import_project_template_xlsx(int(target_template_id), uploaded_bytes, mode=mode,
+                                expected_revision=prepared['expected_revision'], file_sha256=prepared['file_sha256'],
+                                product_version=prepared['product_version'], replace_confirmed=confirmed)
+                        except (ValueError, TypeError) as exc:
+                            st.error(str(exc))
+                        else:
+                            st.session_state.pop('v11_import_prepared', None)
+                            st.session_state['project_workspace_notice'] = (
+                                f"已导入 {result['imported_count']} 项，当前项目共 {result['saved_count']} 项。请逐项核对质量要求后确认项目设置。")
+                            st.rerun()
 
     st.divider()
     st.markdown("**导出批次**")
-    st.caption("导出批号、项目、各水平均值和标准差及修订记录；结果数据和质控计算不包含在此文件中。")
+    st.caption("此文件可用于核对批号、检验项目、各水平的均值和标准差及历次修改。需要查看检测结果和质控图时，请在工作台或报告历史中查看。")
     configs = list_lot_configs()
     config_labels, config_map, _ = _option_map(
         configs,
@@ -872,28 +881,28 @@ def render_project_management_page() -> None:
             st.session_state["show_project_management_page"] = False
             st.rerun()
 
-    render_section_intro(
+    from ui.common import render_module_header
+    render_module_header(
         title="项目 / 批次管理",
         eyebrow="资料管理",
         caption=(
-            "从基础资料字典选择本地仪器、试剂和质控品，建立项目；"
+            "先选择已登记的仪器、试剂和质控品建立项目；"
             "再为具体质控品批号建立批次，设置水平、均值和标准差。各检验项目可分别调整试剂。"
         ),
-        badges=["检验项目批量设置", "更换质控品批次", "变更记录"],
-        tone="accent",
+        tone="projects",
     )
     dictionary_counts = {
-        "本地仪器": len(list_lab_instruments()),
+        "仪器": len(list_lab_instruments()),
         "试剂": len(list_reagents()),
         "质控品": len(list_qc_materials()),
     }
     missing = [name for name, count in dictionary_counts.items() if count == 0]
     if missing:
         st.warning(
-            "、".join(missing) + "字典暂无可选记录。请先在基础资料中新增实际使用的产品，再回到这里选择。"
-            "当前内置检验项目、方法学和单位，尚未内置仪器、试剂及质控品产品目录。"
+            "、".join(missing) + "暂无可选资料。请先在基础资料中登记实际使用的仪器或产品，再回到这里选择。"
+            "检验项目、方法学、单位和邦德盛产品目录可先搜索核对；实际使用的仪器、试剂和质控品仍需登记。"
         )
-    if st.button("维护仪器、试剂和质控品字典", key="v11_open_product_dictionaries"):
+    if st.button("维护仪器、试剂和质控品资料", key="v11_open_product_dictionaries"):
         open_global_page("show_master_data_page")
     copied_id = st.session_state.pop("v11_pending_copied_config_id", None)
     if copied_id is not None:

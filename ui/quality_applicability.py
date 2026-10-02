@@ -9,6 +9,14 @@ from services.quality_applicability_service import (
 )
 
 
+def _applicability_label(row):
+    if row['kind'] == 'process':
+        return {'applicable': '可参考，可按当地要求修改', 'pending': '参考条件待核对',
+                'not_applicable': '当前条件不适用'}[row['status']]
+    return {'applicable': '适用，须采用', 'pending': '待核查',
+            'not_applicable': '当前条件不适用'}[row['status']]
+
+
 def render_draft_standard_preview(draft):
     """Show actual method-dependent candidates before saving the item draft."""
     from database import get_connection
@@ -38,7 +46,7 @@ def render_draft_standard_preview(draft):
         for row in candidates:
             if source_status(row['source']) != 'current':
                 continue
-            state = {'applicable':'适用，须采用', 'pending':'待补充条件', 'not_applicable':'当前条件不适用'}[row['status']]
+            state = _applicability_label(row)
             st.caption(row['source']['standard']+' · '+row['spec']['name']+'｜'+KIND_LABELS[row['kind']]+'｜'+state)
         if not candidates:
             st.info('目录尚未收录此检测条件的质量要求，保存后请登记官方查找结果或补充来源。')
@@ -68,18 +76,18 @@ def render_conditions(item, review, prefix):
     context['specimen'] = st.text_input('标本或基质', value=saved.get('specimen', ''),
         key=prefix+'_context_specimen', max_chars=200)
     rows = assess(item, context)
-    labels = {'applicable': '适用，须采用', 'pending': '待核查', 'not_applicable': '不适用'}
     for row in rows:
         if source_status(row['source']) != 'current':
             continue
         name = row['spec']['name']
-        st.caption(f"{row['source']['standard']} · {name}｜{labels[row['status']]}：{row['reason']}")
-    process = [r for r in rows if r['kind'] != 'numeric' and r['status'] == 'applicable']
+        st.caption(f"{row['source']['standard']} · {name}｜{_applicability_label(row)}：{row['reason']}")
+    local_process = render_process_requirements(rows, review, prefix)
+    process = [r for r in rows if r['kind'] not in ('numeric', 'process') and r['status'] == 'applicable']
     process_ids = [r['id'] for r in process]
     if process:
         names = {r['id']: r['source']['standard']+' · '+r['spec']['name'] for r in process}
-        adopted = st.multiselect('同时采用的过程及定性要求', process_ids,
-            default=process_ids, format_func=names.get, key=prefix+'_process_sources')
+        adopted = st.multiselect('同时采用的定性与信号精密度要求', process_ids,
+            default=process_ids, format_func=names.get, key=prefix+'_mandatory_sources')
         for row in process:
             st.caption('；'.join(row['spec']['requirements']))
             st.link_button('查看 '+row['source']['standard']+' 原文', row['source']['source_url'])
@@ -100,14 +108,59 @@ def render_conditions(item, review, prefix):
             search['official_url'] = st.text_input('官方查询结果或标准链接',value=prior.get('official_url',''),key=prefix+'_search_url',max_chars=2000)
             search['checked_on'] = str(st.date_input('核查日期',value=date.fromisoformat(prior['checked_on']) if prior.get('checked_on') else date.today(),max_value=date.today(),key=prefix+'_search_date'))
             choices = {'': '待核查', 'no_applicable': '已核查，无适用分析质量标准',
-                       'no_numeric': '有关条款已关联，无对应尺度的数值限值', 'registered': '找到未收录标准，已补充登记'}
+                       'no_numeric': '已核对参考标准，无对应尺度的数值限值', 'registered': '找到未收录标准，已补充登记'}
             keys=list(choices)
             search['conclusion'] = st.selectbox('复核结论',keys,index=keys.index(prior.get('conclusion','')) if prior.get('conclusion','') in keys else 0,format_func=choices.get,key=prefix+'_search_conclusion')
             search['rationale'] = st.text_area('查找结果及适用依据',value=prior.get('rationale',''),key=prefix+'_search_rationale',max_chars=2000)
         if search['conclusion'] == 'registered':
             registered = render_registered_sources(review.get('registered_standards', []), prefix)
     return dict(context=context, search_record=search, adopted_standard_ids=adopted,
-                registered_standards=registered), rows
+                registered_standards=registered, process_requirements=local_process), rows
+
+
+def render_process_requirements(rows, review, prefix):
+    from services.quality_review_service import default_process_requirements
+    process = [r for r in rows if r['kind'] == 'process' and r['status'] == 'applicable']
+    names = {r['id']: r['source']['standard'] + ' · ' + r['spec']['name'] for r in process}
+    prior = review.get('process_requirements')
+    if prior is None:
+        prior = default_process_requirements(rows)
+    source_key = prefix + '_process_sources'
+    text_key = prefix + '_process_text'
+    seed_key = prefix + '_process_seed'
+    seen_key = prefix + '_process_seen'
+    if seen_key not in st.session_state:
+        st.session_state[seen_key] = list(names) if 'process_requirements' in review else []
+    newly_available = [identifier for identifier in names if identifier not in st.session_state[seen_key]]
+    if source_key not in st.session_state:
+        st.session_state[source_key] = [identifier for identifier in prior['source_ids'] if identifier in names]
+    else:
+        st.session_state[source_key] = [identifier for identifier in st.session_state[source_key] if identifier in names]
+    st.session_state[source_key] = list(dict.fromkeys(st.session_state[source_key] + newly_available))
+    st.session_state[seen_key] = list(dict.fromkeys(st.session_state[seen_key] + list(names)))
+    st.markdown('**对照与质控要求**')
+    st.caption('首次设置自动带入匹配的标准参考内容，可按当地或本实验室要求修改、删减，也可留空。参考来源与本实验室实际要求分别保存。')
+    selected = st.multiselect('参考标准（可调整）', list(names), key=source_key, format_func=names.get)
+    seed = default_process_requirements(rows, selected)['requirement_text']
+    if text_key not in st.session_state:
+        st.session_state[text_key] = prior['requirement_text']
+    elif seed_key in st.session_state and st.session_state[text_key] == st.session_state[seed_key]:
+        st.session_state[text_key] = seed
+    st.session_state[seed_key] = seed
+    if st.button('重新带入所选参考要求', key=prefix+'_process_reset', disabled=not selected,
+                 help='用当前所选标准的参考内容替换下方尚未保存的要求。'):
+        st.session_state[text_key] = seed
+    requirement = st.text_area('本实验室对照与质控要求（可修改、可留空）',
+        key=text_key, max_chars=6000, height=180)
+    if selected:
+        with st.expander('查看参考标准原文'):
+            for row in process:
+                if row['id'] in selected:
+                    st.caption(names[row['id']] + '｜' + row['clause'])
+                    for text in row['spec']['requirements']:
+                        st.write(text)
+                    st.link_button('查看 '+row['source']['standard']+' 原文', row['source']['source_url'])
+    return dict(source_ids=selected, requirement_text=requirement)
 
 
 def render_registered_sources(prior, prefix):

@@ -17,7 +17,7 @@ def seed_zscore_configuration(name="V12 Z-score", level_count=2, input_value_typ
                              concentration="", lot_no="V12-ZS-LOT", target_n=5,
                              level_1_label=None, level_2_label=None, level_3_label=None,
                              cv_limit=5.0, target_source="building"):
-    manufacturer = create_manufacturer(display_name=name + " 厂家")
+    manufacturer = create_manufacturer(categories=['instrument', 'reagent', 'qc_material'], display_name=name + " 厂家")
     model = create_instrument_model(manufacturer_id=manufacturer, generic_name="分析仪", model=name)
     instrument_id = create_lab_instrument(instrument_model_id=model, display_name=instrument)
     reagent_id = create_reagent(manufacturer_id=manufacturer, generic_name=reagent)

@@ -29,23 +29,23 @@ def render_zscore_monthly_report_section(selected_batch_id: int) -> None:
     with st.container(border=True):
         render_section_intro(
             title="多水平法月度质控报告",
-            caption="基于当前批次生成多水平法月度质控报告。",
+            caption="选择报告月份，核对当前项目、质控批号和各水平资料后生成 PDF。",
             tone="accent",
         )
         render_workbench_context_bar(
             title="月报设置",
-            caption="沿用当前多水平法工作台的项目和批次；报告统计仅包含所选月份内的正式期检测记录。",
+            caption="报告使用当前所选项目和批次，仅统计所选月份的正式期检测记录。",
             items=[
                 ("方法", QC_METHOD_LABELS['zscore']),
                 ("项目名称", batch["project_name"]),
                 ("批次标识", _build_batch_display(batch)),
-                ("报告支持范围", "仅支持 Z-score 多水平月报"),
+                ("统计范围", "当前批次、所选月份的正式期检测"),
             ],
             badges=[QC_METHOD_LABELS['zscore'], "月度报告"],
         )
 
         if not available_months:
-            st.info("当前批次暂无可选检测月份，请先录入数据后再生成月度报告。")
+            st.info("当前批次暂无正式期检测记录，暂不能生成月报。进入正式期并录入检测结果后，再选择报告月份。")
             st.session_state.pop(preview_key, None)
             return
 
@@ -65,12 +65,12 @@ def render_zscore_monthly_report_section(selected_batch_id: int) -> None:
         if generate_clicked:
             try:
                 package = build_zscore_monthly_report_package(selected_batch_id, selected_month)
+                pdf_bytes = build_zscore_monthly_report_pdf(package)
+                snapshot_id = save_zscore_monthly_report_snapshot(package, pdf_bytes)
             except ValueError as exc:
                 st.session_state.pop(preview_key, None)
                 st.warning(str(exc))
             else:
-                pdf_bytes = build_zscore_monthly_report_pdf(package)
-                snapshot_id = save_zscore_monthly_report_snapshot(package)
                 st.session_state[preview_key] = {
                     "batch_id": selected_batch_id,
                     "report_month": selected_month,
@@ -99,7 +99,7 @@ def render_zscore_monthly_report_section(selected_batch_id: int) -> None:
             key=f"{report_scope}_download",
             width="stretch",
         )
-        st.caption(f"已保存报告记录，编号：{preview_state['snapshot_id']}")
+        st.caption(f"报告已保存，编号：{preview_state['snapshot_id']}。以后可在“报告历史”中查找和下载。")
 
 
 def _preview_matches(
@@ -202,7 +202,7 @@ def _render_report_preview(package: ZScoreMonthlyReportPackage) -> None:
     st.dataframe(pd.DataFrame(level_rows), hide_index=True, width="stretch")
 
     st.markdown("**异常/失控汇总表**")
-    st.caption("本次检测结论为最终判定，各水平触发证据用于说明规则触发情况。")
+    st.caption("请以“本次检测结论”判断整次检测是否在控；各水平的规则提示用于核对判定原因。")
     abnormal_rows = [asdict(record) for record in report.abnormal_records]
     if not abnormal_rows:
         st.info("本月未发现警告或失控检测记录。")
@@ -227,6 +227,12 @@ def _render_report_preview(package: ZScoreMonthlyReportPackage) -> None:
             st.markdown(f"- {action}")
     else:
         st.write(report.corrective_actions_empty_text)
+
+    if report.handling_summaries:
+        from services.out_of_control_report_service import handling_summary_paragraphs
+        st.markdown("**失控处理摘要**")
+        for paragraph in handling_summary_paragraphs(report.handling_summaries):
+            st.write(paragraph)
 
     st.markdown("**异常说明**")
     st.write(report.abnormal_summary_text)

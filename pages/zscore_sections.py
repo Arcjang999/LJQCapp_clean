@@ -6,7 +6,7 @@ from services.cv_service import calculate_cv_percent
 from services.lot_lifecycle_service import review_import_lots, import_reviewed_results
 
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timedelta
 import hashlib
 import math
 from typing import Any
@@ -225,8 +225,11 @@ def render_zscore_abnormal_note_quick_entry(latest_run: dict[str, Any] | None) -
         return
 
     run_id = int(latest_run["run_id"])
+    from ui.out_of_control import render_abnormal_entry
+    render_abnormal_entry('zscore_run', run_id,
+        warning=latest_run.get('run_status') == 'warning', key='latest')
     current_note = str(latest_run.get("manual_note", "") or "")
-    st.caption("当前异常记录可直接补充备注，并写回同一条检测记录。")
+    st.caption("在下方填写异常备注并保存，备注会保留在这条检测记录中。")
     with st.form(f"zscore_abnormal_note_form_{run_id}"):
         manual_note = st.text_area(
             "\u5f02\u5e38\u5907\u6ce8\uff08\u53ef\u9009\uff09",
@@ -588,6 +591,9 @@ def render_zscore_rule_records_overview_section(context: dict[str, object]) -> N
                 st.info("当前正式期暂无警告或失控记录。")
             else:
                 st.dataframe(abnormal_records_df, hide_index=True, width="stretch")
+                from ui.out_of_control import render_record_selector
+                render_record_selector('zscore_run', [r for r in formal_runs if r.get('run_status') in ('reject', 'warning')],
+                    key='zscore_records')
 
         with st.expander("当前批次检测记录", expanded=False):
             st.caption("查看当前批次参数建立期与正式期的完整检测记录。")
@@ -1657,7 +1663,7 @@ def render_zscore_maintenance_section(context: dict[str, object]) -> None:
                 ]
             )
             if bool(run_status_summary["has_inconsistent_status"]):
-                st.caption("当前记录存在历史状态不一致，建议用下方操作统一。")
+                st.caption("本次检测的各水平保留或禁用状态不一致。请先核对，再通过下方操作同时处理全部水平。")
 
             st.markdown("**各水平明细**")
             st.caption(f"G 与 G临界值按 alpha={DEFAULT_GRUBBS_ALPHA:.2f} 展示。")
@@ -1673,7 +1679,7 @@ def render_zscore_maintenance_section(context: dict[str, object]) -> None:
 
             st.markdown("**本次检测维护操作**")
             if formal_rules_enabled:
-                st.caption("当前批次已满足正式期条件，参数建立维护已锁定。")
+                st.caption("批次已进入正式期，参数建立记录仅供查询，不能再保留、禁用或恢复。")
             else:
                 st.caption("以下操作会同时更新本次检测的全部水平。")
             action_cols = st.columns(3)
@@ -1837,9 +1843,9 @@ def _render_zscore_export_import_section_impl(
         str(max((pd.Timestamp(run["test_time"]) for run in history_runs if run.get("test_time") is not None), default="")),
     )
 
-    st.caption(f"导出当前批次数据与图表，并按模板导入 CSV；各水平主值列统一为“{input_value_type_label}”。")
+    st.caption(f"可在下方导出数据和图表，或下载模板后导入结果。各水平的检测值请按“{input_value_type_label}”填写。")
     st.markdown("**导出**")
-    st.caption("当前批次数据按每次检测展开为宽表，参数建立期与正式期可分别导出。")
+    st.caption("导出文件中每行是一整次检测，各水平结果分别列出。请按需要选择参数建立期或正式期。")
     zscore_export_format = st.radio(
         "导出数据格式",
         options=["Excel (.xlsx)", "CSV (.csv)"],
@@ -1933,7 +1939,7 @@ def _render_zscore_export_import_section_impl(
     st.caption("参数建立期和正式期分别提供模板下载、审查和导入。")
     st.markdown("**参数建立期 CSV 导入**")
     st.caption(
-        f"先下载当前批次标准模板，再上传 CSV 或单工作表 Excel 审查；只有无阻断错误时，才允许确认导入当前批次参数建立期{input_value_type_label}检测记录。"
+        f"先下载当前批次模板，按“{input_value_type_label}”填写参数建立期各水平结果，再上传 CSV 或单工作表 Excel。修正审查提示的错误后，核对预览并确认导入。"
     )
     st.download_button(
         label="下载参数建立期 CSV 模板",
@@ -1945,7 +1951,7 @@ def _render_zscore_export_import_section_impl(
         width="stretch",
     )
     if zscore_building_import_disabled:
-        st.info("当前批次已完成均值和标准差建立。当前入口仅支持参数建立期 CSV 导入，不支持继续追加正式期检测记录。")
+        st.info("当前批次已完成均值和标准差建立，请使用下方“正式期 CSV 导入”录入后续结果。")
         st.session_state.pop(zscore_building_import_review_state_key, None)
 
     uploaded_zscore_building_csv = st.file_uploader(
@@ -1953,7 +1959,7 @@ def _render_zscore_export_import_section_impl(
         type=["csv", "xlsx"],
         key=zscore_building_import_uploader_key,
         disabled=zscore_building_import_disabled,
-        help="模板会按当前批次的 2 水平 / 3 水平自动生成，目前仅支持 CSV。",
+        help="请使用当前批次的 2 水平或 3 水平模板，一次填写全部水平。可上传 CSV 或仅含一个工作表的 Excel（.xlsx）。",
     )
     uploaded_zscore_building_bytes = (
         uploaded_zscore_building_csv.getvalue() if uploaded_zscore_building_csv is not None else b""
@@ -2012,7 +2018,7 @@ def _render_zscore_export_import_section_impl(
         if zscore_review_summary["has_blocking_errors"]:
             st.error("审查未通过，请按下方提示修正后重新上传。本次数据尚未导入。")
         else:
-            st.success("审查通过：当前没有阻断错误，可以确认导入。")
+            st.success("审查通过，请核对预览内容后确认导入。")
 
         if zscore_review_issues_df.empty:
             st.info("本次审查未发现错误或警告。")
@@ -2052,7 +2058,7 @@ def _render_zscore_export_import_section_impl(
 
     st.markdown("**正式期 CSV 导入**")
     st.caption(
-        f"先下载当前批次标准模板，再上传 CSV 或单工作表 Excel 审查；导入目标为当前批次正式期，只有无阻断错误时才允许确认导入当前批次{input_value_type_label}数据。"
+        f"先下载当前批次模板，按“{input_value_type_label}”填写正式期各水平结果，再上传 CSV 或单工作表 Excel。修正审查提示的错误后，核对预览并确认导入当前批次。"
     )
     st.download_button(
         label="下载正式期 CSV 模板",
@@ -2064,13 +2070,13 @@ def _render_zscore_export_import_section_impl(
         width="stretch",
     )
     if not zscore_target_ready:
-        st.info("当前批次尚未完成均值和标准差建立，不能导入正式期数据。你仍可先上传 CSV 做审查。")
+        st.info("请先完成当前批次的均值和标准差建立，再导入正式期结果。现在仍可上传文件，预先核对内容和格式。")
 
     uploaded_zscore_formal_csv = st.file_uploader(
         "上传正式期 CSV / Excel",
         type=["csv", "xlsx"],
         key=zscore_formal_import_uploader_key,
-        help="模板会按当前批次的 2 水平 / 3 水平自动生成，目前仅支持 CSV。",
+        help="请使用当前批次的 2 水平或 3 水平模板，一次填写全部水平。可上传 CSV 或仅含一个工作表的 Excel（.xlsx）。",
     )
     uploaded_zscore_formal_bytes = (
         uploaded_zscore_formal_csv.getvalue() if uploaded_zscore_formal_csv is not None else b""
@@ -2130,7 +2136,7 @@ def _render_zscore_export_import_section_impl(
         if zscore_formal_review_summary["has_blocking_errors"]:
             st.error("正式期审查未通过，请按下方提示修正后重新上传。本次数据尚未导入。")
         else:
-            st.success("正式期审查通过：当前没有阻断错误，可以确认导入。")
+            st.success("正式期审查通过，请核对预览内容后确认导入。")
 
         if zscore_formal_review_issues_df.empty:
             st.info("本次正式期审查未发现错误或警告。")
@@ -2185,8 +2191,8 @@ def _render_zscore_export_import_section_impl(
     if formal_plot_df.empty:
         st.info("当前批次还没有正式质控数据。")
     else:
-        default_monthly_start = formal_plot_df["test_time"].min().date()
         default_monthly_end = formal_plot_df["test_time"].max().date()
+        default_monthly_start = max(formal_plot_df["test_time"].min().date(), default_monthly_end - timedelta(days=29))
         monthly_col_start, monthly_col_end = st.columns(2)
         monthly_start = monthly_col_start.date_input(
             "开始日期",

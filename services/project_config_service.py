@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import math
 from typing import Any
 from uuid import uuid4
 
 import pandas as pd
 
-from database import get_connection
+from database import atomic_write, get_connection
 from services.cv_service import normalize_cv_limit
 
 
@@ -165,6 +166,7 @@ def list_project_templates(include_disabled: bool = False) -> pd.DataFrame:
             templates.uid,
             templates.template_name,
             templates.project_group,
+            templates.lab_instrument_id,
             GROUP_CONCAT(DISTINCT CASE WHEN items.is_disabled=0 THEN items.qc_method END) AS qc_methods,
             GROUP_CONCAT(DISTINCT CASE WHEN items.is_disabled=0 THEN methods.method_name END) AS method_names,
             local.display_name AS instrument_name,
@@ -278,8 +280,18 @@ def _normalize_template_item(row: dict[str, object], sort_order: int) -> dict[st
     if input_value_type not in INPUT_VALUE_TYPE_LABELS:
         raise ValueError("输入值类型必须为真实检测值、Ct值或log值。")
 
-    level_count = int(row.get("level_count") or 1)
-    target_n = int(row.get("target_n") or 20)
+    def integer(value, label, default=None):
+        if value is None or value == '':
+            value = default
+        try:
+            number = float(value)
+            if not math.isfinite(number) or not number.is_integer():
+                raise ValueError()
+            return int(number)
+        except (ValueError, TypeError):
+            raise ValueError(f'{label}必须为整数。') from None
+    level_count = integer(row.get('level_count'), '水平数', 1)
+    target_n = integer(row.get('target_n'), '参数建立点数', 20)
     if qc_method in {"lj", "instant"} and level_count != 1:
         raise ValueError(f"{QC_METHOD_LABELS[qc_method]}只能配置 1 个水平。")
     if qc_method == "zscore" and level_count not in {2, 3}:
@@ -307,7 +319,89 @@ def _normalize_template_item(row: dict[str, object], sort_order: int) -> dict[st
     }
 
 
-def save_template_items(template_id: int, rows: list[dict[str, object]]) -> None:
+def template_item_key(row: dict) -> tuple[int, str, str]:
+    return int(row['test_item_id']), str(row['qc_method']), str(row['input_value_type'])
+
+
+def template_item_rows(template_id: int) -> list[dict]:
+    """Editable full rows with stable identities and no pandas missing scalars."""
+    frame = list_template_items(template_id)
+    return frame.astype(object).where(pd.notna(frame), None).to_dict('records')
+
+
+def preview_panel_items(template_id: int, candidate_rows: list[dict], *, expected_revision: int | None = None) -> dict:
+    """Read-only merge. Existing exact identities always retain their settings."""
+    template = get_project_template(template_id)
+    revision = int(template['revision_no'])
+    if expected_revision is not None and revision != int(expected_revision):
+        raise ValueError('项目配置已发生变化，请重新带入整组项目。')
+    rows = template_item_rows(template_id)
+    existing = {template_item_key(row): row for row in rows}
+    existing_test_ids = {int(row['test_item_id']) for row in rows}
+    seen = set(existing)
+    entries, errors = [], []
+    with get_connection() as connection:
+        for position, candidate in enumerate(candidate_rows, 1):
+            try:
+                row = _normalize_template_item(candidate, len(rows) + 1)
+                item = connection.execute('SELECT chinese_name,is_disabled FROM md_test_items WHERE id=?',
+                                          (row['test_item_id'],)).fetchone()
+                if item is None or item['is_disabled']:
+                    raise ValueError('检验项目不存在或已停用。')
+                key = template_item_key(row)
+                entry = dict(test_item_id=row['test_item_id'], test_item_name=item['chinese_name'],
+                             qc_method=row['qc_method'], input_value_type=row['input_value_type'])
+                if row['test_item_id'] in existing_test_ids:
+                    entry.update(status='existing', message='已有此检验项目，保留原方法、尺度及全部现有配置')
+                elif key in seen:
+                    entry.update(status='existing', message='已有相同设置，保留原配置' if key in existing else '本组重复，保留首次选择')
+                else:
+                    row.update(row_key=str(candidate.get('row_key') or uuid4().hex), test_item_name=item['chinese_name'])
+                    rows.append(row)
+                    seen.add(key)
+                    entry.update(status='added', message='待添加；质量要求逐项确认')
+                entries.append(entry)
+            except (TypeError, ValueError, KeyError) as exc:
+                errors.append(f'第 {position} 项：{exc}')
+    for row in rows:
+        row.setdefault('row_key', str(row.get('uid') or uuid4().hex))
+    return dict(template_id=int(template_id), expected_revision=revision, rows=rows, entries=entries,
+                errors=errors, added_count=sum(entry['status'] == 'added' for entry in entries),
+                retained_count=len(existing))
+
+
+PANEL_DEFAULT_FIELDS = ('unit_id', 'method_id', 'reagent_id', 'qc_method', 'input_value_type', 'level_count', 'target_n')
+
+
+def preview_panel_defaults(rows: list[dict], values: dict, *, selected_row_keys: list[str], fields: list[str], overwrite: bool = False) -> dict:
+    """Return a proposed draft; only explicit selected rows/fields can change."""
+    if set(fields) - set(PANEL_DEFAULT_FIELDS):
+        raise ValueError('所选内容不能统一修改。请打开各检验项目分别设置，质量要求须逐项确认。')
+    selected = set(selected_row_keys)
+    proposed, changes = [], []
+    for source in rows:
+        row = dict(source)
+        if str(row.get('row_key')) in selected:
+            for field in fields:
+                before, after = row.get(field), values.get(field)
+                if after is not None and before != after and (overwrite or before in (None, '')):
+                    row[field] = after
+                    changes.append(dict(row_key=row['row_key'], test_item_name=row.get('test_item_name', ''),
+                                        field=field, before=before, after=after))
+        proposed.append(row)
+    return dict(rows=proposed, changes=changes)
+
+
+def save_panel_items(template_id: int, rows: list[dict], *, expected_revision: int) -> dict:
+    """Full draft save, never activate or borrow a source panel's confirmations."""
+    with atomic_write():
+        save_template_items(template_id, rows, expected_revision=expected_revision)
+        return dict(saved_count=len(rows), revision_no=int(get_project_template(template_id)['revision_no']),
+                    errors=validate_project_template(template_id))
+
+
+def save_template_items(template_id: int, rows: list[dict[str, object]], *, expected_revision: int | None = None) -> None:
+    """Replace the entire active item set; callers must include retained rows."""
     normalized_rows = [
         _normalize_template_item(dict(row), sort_order=index)
         for index, row in enumerate(rows, start=1)
@@ -323,13 +417,22 @@ def save_template_items(template_id: int, rows: list[dict[str, object]]) -> None
     if len(normalized_keys) != len(normalized_rows):
         raise ValueError("同一项目内存在重复的检验项目、质控方法和输入值类型组合。")
 
-    with get_connection() as connection:
+    with atomic_write() as connection:
         template = connection.execute(
-            "SELECT id FROM qc_project_templates WHERE id = ? AND is_disabled = 0",
+            "SELECT id, revision_no FROM qc_project_templates WHERE id = ? AND is_disabled = 0",
             (int(template_id),),
         ).fetchone()
         if template is None:
             raise ValueError("未找到启用中的项目。")
+        if expected_revision is not None and int(template['revision_no']) != int(expected_revision):
+            raise ValueError("项目配置已发生变化，请重新预览后再保存。本次填写仍保留。")
+        for index, row in enumerate(normalized_rows, 1):
+            for field, table, label in (('test_item_id', 'md_test_items', '检验项目'),
+                                       ('unit_id', 'md_units', '单位'), ('method_id', 'md_methods', '方法学'),
+                                       ('reagent_id', 'md_reagents', '试剂')):
+                if row[field] is not None and not connection.execute(
+                        f'SELECT id FROM {table} WHERE id=? AND is_disabled=0', (row[field],)).fetchone():
+                    raise ValueError(f"第 {index} 项：{label}不存在或已停用，请重新选择。")
 
         connection.execute(
             """
@@ -344,6 +447,9 @@ def save_template_items(template_id: int, rows: list[dict[str, object]]) -> None
         )
 
         for row in normalized_rows:
+            old = connection.execute('''SELECT * FROM qc_project_template_items
+                WHERE template_id=? AND test_item_id=? AND qc_method=? AND input_value_type=?''',
+                (int(template_id), *template_item_key(row))).fetchone()
             connection.execute(
                 """
                 INSERT INTO qc_project_template_items (
@@ -392,6 +498,11 @@ def save_template_items(template_id: int, rows: list[dict[str, object]]) -> None
                     row["notes"],
                 ),
             )
+            if old and any(old[field] != row[field] for field in (
+                    'unit_id', 'method_id', 'reagent_id', 'level_count', 'cv_limit', 'quality_target_source_text')):
+                from services.quality_review_service import pending_review_copy
+                connection.execute('UPDATE qc_project_template_items SET quality_review_json=? WHERE id=?',
+                                   (pending_review_copy(old['quality_review_json']), old['id']))
 
         connection.execute(
             """
@@ -409,16 +520,23 @@ def validate_project_template(template_id: int) -> list[str]:
     template = get_project_template(template_id)
     items = list_template_items(template_id)
     errors: list[str] = []
+    if template['is_disabled']:
+        errors.append('项目已停用。')
     if template["lab_instrument_id"] is None:
         errors.append("未选择本地仪器。")
     if template["qc_material_id"] is None:
         errors.append("未选择质控品。")
+    with get_connection() as connection:
+        for field, table, label in (('lab_instrument_id', 'lab_instruments', '仪器'), ('qc_material_id', 'md_qc_materials', '质控品')):
+            if template[field] is not None and not connection.execute(
+                    f'SELECT id FROM {table} WHERE id=? AND is_disabled=0', (template[field],)).fetchone():
+                errors.append(f'{label}已停用，请重新核对。')
     if items.empty:
         errors.append("至少需要配置 1 个检验项目。")
         return errors
 
-    for _, row in items.iterrows():
-        item_name = str(row["test_item_name"])
+    for index, (_, row) in enumerate(items.iterrows(), 1):
+        item_name = f"第 {index} 项 {row['test_item_name']}（{QC_METHOD_LABELS[row['qc_method']]} / {INPUT_VALUE_TYPE_LABELS[row['input_value_type']]}）"
         if pd.isna(row["unit_id"]):
             errors.append(f"{item_name}：未配置单位。")
         if pd.isna(row["method_id"]):
@@ -427,14 +545,23 @@ def validate_project_template(template_id: int) -> list[str]:
             errors.append(f"{item_name}：未配置试剂。")
         from services.quality_review_service import validate_project_quality
         errors.extend(f"{item_name}：{message}" for message in validate_project_quality(int(row['id'])))
+        with get_connection() as connection:
+            for field, table, label in (('test_item_id', 'md_test_items', '检验项目'), ('unit_id', 'md_units', '单位'),
+                                       ('method_id', 'md_methods', '方法学'), ('reagent_id', 'md_reagents', '试剂')):
+                if not pd.isna(row[field]) and not connection.execute(
+                        f'SELECT id FROM {table} WHERE id=? AND is_disabled=0', (int(row[field]),)).fetchone():
+                    errors.append(f'{item_name}：{label}已停用。')
     return errors
 
 
-def activate_project_template(template_id: int) -> None:
-    errors = validate_project_template(template_id)
-    if errors:
-        raise ValueError("项目暂不能启用：\n" + "\n".join(f"- {item}" for item in errors))
-    with get_connection() as connection:
+def activate_project_template(template_id: int, *, expected_revision: int | None = None) -> None:
+    with atomic_write() as connection:
+        template = get_project_template(template_id)
+        if expected_revision is not None and int(template['revision_no']) != int(expected_revision):
+            raise ValueError('项目配置已发生变化，请重新核对后确认。')
+        errors = validate_project_template(template_id)
+        if errors:
+            raise ValueError("项目暂不能启用：\n" + "\n".join(f"- {item}" for item in errors))
         connection.execute(
             """
             UPDATE qc_project_templates

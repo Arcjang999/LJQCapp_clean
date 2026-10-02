@@ -10,7 +10,10 @@ from typing import Any
 import pandas as pd
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib.backends.backend_agg import RendererAgg
+from matplotlib.font_manager import FontProperties
 from matplotlib.lines import Line2D
+from matplotlib.legend import Legend
 
 from plotting import CONFIGURED_FONT_FALLBACKS as PLOT_CONFIGURED_FONT_FALLBACKS, plot_lj_chart
 from zscore_logic import format_level_id_display
@@ -88,9 +91,9 @@ def render_lj_monthly_report_pdf(package: Any, font_name: str) -> bytes:
             metadata["CreationDate"] = datetime.now()
 
             pages: list[tuple[Any, str]] = [
-                (_build_lj_summary_page(report), "摘要页"),
-                (_build_lj_chart_page(package), "图表页"),
+                (figure, "摘要页") for figure in _build_lj_summary_pages(report)
             ]
+            pages.append((_build_lj_chart_page(package), "图表页"))
             if report.abnormal_records:
                 for abnormal_index, figure in enumerate(_build_lj_abnormal_pages(report), start=1):
                     pages.append((figure, f"异常记录页 {abnormal_index}"))
@@ -117,7 +120,7 @@ def render_zscore_monthly_report_pdf(package: Any, font_name: str) -> bytes:
             metadata["CreationDate"] = datetime.now()
 
             pages: list[tuple[Any, str]] = [
-                (_build_zscore_summary_page(report), "摘要页"),
+                (figure, "摘要页") for figure in _build_zscore_summary_pages(report)
             ]
             for level_index, level_id in enumerate(package.active_levels, start=1):
                 pages.append((_build_zscore_level_chart_page(package, level_id), f"水平图页 {level_index}"))
@@ -169,38 +172,104 @@ def _build_pdf_rc_params(font_name: str) -> dict[str, object]:
     }
 
 
-def _build_lj_summary_page(report: Any):
-    canvas = _new_canvas(
-        report_title=report.title,
-        page_title="报告摘要",
-        subtitle_lines=[
-            f"实验室名称：{report.basic_info.lab_name}    科室名称：{report.basic_info.department_name}",
-            f"项目名称：{report.basic_info.project_name}    报告月份：{report.report_month_label}",
-            f"报告期间：{report.report_period_label}    生成时间：{report.generated_at}",
-            (
-                f"方法标识：{report.method_label}"
-                f"    质控负责人：{report.basic_info.qc_owner_name}"
-                f"    审核人：{report.basic_info.reviewer_name}"
-            ),
-        ],
-    )
+def _wrap_measured_text(text: str, max_width_points: float, font_size: float) -> str:
+    """Wrap mixed Chinese/Latin text to its actual PDF column width."""
+    renderer = RendererAgg(1, 1, 72)
+    font = FontProperties(size=font_size)
+    lines: list[str] = []
+    for paragraph in str(text or "-").splitlines():
+        line = ""
+        for character in paragraph:
+            candidate = line + character
+            width = renderer.get_text_width_height_descent(candidate, font, False)[0]
+            if line and width > max_width_points:
+                lines.append(line.rstrip())
+                line = character.lstrip()
+            else:
+                line = candidate
+        lines.append(line.rstrip())
+    return "\n".join(lines) or "-"
 
+
+def _summary_table_rows(rows, column_widths, font_size):
+    page_width_points = A4_PAGE_SIZE[0] * 72 * PAGE_WIDTH
+    return [
+        [_wrap_measured_text(str(cell), page_width_points * width * 0.86, font_size)
+         for cell, width in zip(row, column_widths, strict=True)]
+        for row in rows
+    ]
+
+
+def _build_summary_pages(
+    report: Any, *, basic_rows, basic_font_size, statistics_title,
+    statistics_rows, statistics_widths,
+) -> list[Any]:
+    subtitle_lines = [
+        f"实验室名称：{report.basic_info.lab_name}    科室名称：{report.basic_info.department_name}",
+        f"项目名称：{report.basic_info.project_name}    报告月份：{report.report_month_label}",
+        f"报告期间：{report.report_period_label}    生成时间：{report.generated_at}",
+        f"方法标识：{report.method_label}    质控负责人：{report.basic_info.qc_owner_name}    审核人：{report.basic_info.reviewer_name}",
+    ]
+    pages: list[Any] = []
+
+    def new_page():
+        return _new_canvas(report_title=report.title,
+                           page_title="报告摘要" if not pages else "报告摘要（续）",
+                           subtitle_lines=subtitle_lines)
+
+    canvas = new_page()
+
+    def advance_page():
+        nonlocal canvas
+        pages.append(canvas.figure)
+        canvas = new_page()
+
+    def draw_table(title, rows, widths, font_size):
+        prepared = _summary_table_rows(rows, widths, font_size)
+        # Use the normal table row height: it reserves enough line leading for
+        # multi-line material names as well as one-line statistical values.
+        full_height = _full_page_table_max_height() - SECTION_GAP
+        for index, chunk in enumerate(_chunk_rows_by_height(prepared, max_height=full_height, include_header=False)):
+            height = SECTION_TITLE_HEIGHT + _estimate_table_height(_build_row_units(chunk, include_header=False)) + SECTION_GAP
+            if not _has_space(canvas, height) and not _is_fresh_page(canvas):
+                advance_page()
+            _draw_table_section(canvas, title=title if index == 0 else f"{title}（续）",
+                                cell_text=chunk, col_widths=widths, font_size=font_size)
+
+    def draw_text(title, text):
+        nonlocal canvas
+        # Wrap to physical width, then paginate long text without losing lines.
+        lines = _wrap_measured_text(text, A4_PAGE_SIZE[0] * 72 * PAGE_WIDTH * 0.98, 10.5).splitlines()
+        continued = False
+        while lines:
+            required = SECTION_TITLE_HEIGHT + len(lines) * PARAGRAPH_LINE_HEIGHT + SECTION_GAP
+            if not _has_space(canvas, required) and not _is_fresh_page(canvas):
+                advance_page()
+            capacity = max(1, int((canvas.cursor_y - CONTENT_BOTTOM - SECTION_TITLE_HEIGHT - SECTION_GAP) / PARAGRAPH_LINE_HEIGHT))
+            current, lines = lines[:capacity], lines[capacity:]
+            _draw_section_title(canvas, title if not continued else f"{title}（续）")
+            _draw_text_block(canvas, "\n".join(current), width=1000)
+            continued = True
+            if lines:
+                advance_page()
+
+    draw_table("基本信息", basic_rows, [0.18, 0.32, 0.18, 0.32], basic_font_size)
+    draw_text("本月质控概况", report.overview_text)
+    draw_table(statistics_title, statistics_rows, statistics_widths, 9.0)
+    draw_text("月度结论", report.conclusion)
+    pages.append(canvas.figure)
+    return pages
+
+
+def _build_lj_summary_pages(report: Any) -> list[Any]:
     basic_rows = [
         ["方法", report.basic_info.method_label, "输入值类型", report.basic_info.input_value_type_label],
         ["检测方法", report.basic_info.detection_method, "单位", report.basic_info.unit_symbol],
-        ["质控品批号", report.basic_info.lot_no, "仪器", report.basic_info.instrument],
+        ["质控品批号", _wrap_text(report.basic_info.lot_no, 24), "仪器", report.basic_info.instrument],
         ["试剂", report.basic_info.reagent, "质控品", report.basic_info.qc_material],
-        ["浓度", report.basic_info.concentration, "均值和标准差\n来源", report.basic_info.target_source_label],
+        ["浓度", _wrap_text(report.basic_info.concentration, 16), "均值和标准差\n来源", report.basic_info.target_source_label],
         ["来源说明", _wrap_text(report.basic_info.target_source_detail, 18), "", ""],
     ]
-    _draw_table_section(
-        canvas,
-        title="基本信息",
-        cell_text=basic_rows,
-        col_widths=[0.18, 0.32, 0.18, 0.32],
-        font_size=8.8,
-    )
-    _draw_text_section(canvas, "本月质控概况", report.overview_text, width=58)
 
     summary_rows = [
         ["月度正式期总记录数", str(report.statistics.formal_count), "在控记录数", str(report.statistics.in_control_count)],
@@ -209,16 +278,20 @@ def _build_lj_summary_page(report: Any):
         ["实测变异系数（%）", _format_lj_metric(report.statistics, "cv"), "当前设定均值", _format_float(report.statistics.target_mean)],
         ["当前设定 SD", _format_float(report.statistics.target_sd), "批次允许不精密度（CV）", _format_float(report.statistics.cv_limit, digits=2, suffix="%")],
     ]
-    _draw_table_section(
-        canvas,
-        title="月度统计摘要",
-        cell_text=summary_rows,
-        col_widths=[0.23, 0.27, 0.23, 0.27],
-        font_size=9.0,
-    )
-    _draw_text_section(canvas, "月度结论", report.conclusion, width=58)
-    return canvas.figure
 
+    return _build_summary_pages(
+        report, basic_rows=basic_rows, basic_font_size=8.8,
+        statistics_title="月度统计摘要", statistics_rows=summary_rows,
+        statistics_widths=[0.23, 0.27, 0.23, 0.27],
+    )
+
+
+def _build_lj_summary_page(report: Any):
+    """Keep the first-page helper for existing report preview callers."""
+    pages = _build_lj_summary_pages(report)
+    for figure in pages[1:]:
+        plt.close(figure)
+    return pages[0]
 
 def _build_lj_chart_page(package: Any):
     figure = plot_lj_chart(
@@ -277,39 +350,16 @@ def _build_lj_abnormal_pages(report: Any) -> list[Any]:
     return pages
 
 
-def _build_zscore_summary_page(report: Any):
-    canvas = _new_canvas(
-        report_title=report.title,
-        page_title="报告摘要",
-        subtitle_lines=[
-            f"实验室名称：{report.basic_info.lab_name}    科室名称：{report.basic_info.department_name}",
-            f"项目名称：{report.basic_info.project_name}    报告月份：{report.report_month_label}",
-            f"报告期间：{report.report_period_label}    生成时间：{report.generated_at}",
-            (
-                f"方法标识：{report.method_label}"
-                f"    质控负责人：{report.basic_info.qc_owner_name}"
-                f"    审核人：{report.basic_info.reviewer_name}"
-            ),
-        ],
-    )
-
+def _build_zscore_summary_pages(report: Any) -> list[Any]:
     basic_rows = [
         ["方法", report.basic_info.method_label, "输入值类型", report.basic_info.input_value_type_label],
         ["水平数", report.basic_info.level_count_label, "各水平说明", _wrap_text(report.basic_info.level_summary, 20)],
         ["单位", report.basic_info.unit_symbol, "检测方法", report.basic_info.detection_method],
-        ["当前规则组合", report.basic_info.template_label, "质控品批号", report.basic_info.lot_no],
+        ["当前规则组合", report.basic_info.template_label, "质控品批号", _wrap_text(report.basic_info.lot_no, 24)],
         ["仪器", report.basic_info.instrument, "试剂", report.basic_info.reagent],
-        ["质控品", report.basic_info.qc_material, "浓度", report.basic_info.concentration],
+        ["质控品", report.basic_info.qc_material, "浓度", _wrap_text(report.basic_info.concentration, 16)],
         ["均值和标准差\n来源", report.basic_info.target_source_label, "来源说明", _wrap_text(report.basic_info.target_source_detail, 20)],
     ]
-    _draw_table_section(
-        canvas,
-        title="基本信息",
-        cell_text=basic_rows,
-        col_widths=[0.18, 0.32, 0.18, 0.32],
-        font_size=8.6,
-    )
-    _draw_text_section(canvas, "本月质控概况", report.overview_text, width=58)
 
     run_summary_rows = [
         ["本月正式期检测记录数", str(report.statistics.formal_count), "在控检测记录数", str(report.statistics.in_control_count)],
@@ -317,16 +367,20 @@ def _build_zscore_summary_page(report: Any):
         ["当前规则组合", report.statistics.template_label, "当前阶段", report.statistics.current_phase_label],
         ["全部水平已完成\n均值和标准差建立", "是" if report.statistics.all_levels_ready else "否", "", ""],
     ]
-    _draw_table_section(
-        canvas,
-        title="检测记录统计摘要",
-        cell_text=run_summary_rows,
-        col_widths=[0.24, 0.26, 0.24, 0.26],
-        font_size=9.0,
-    )
-    _draw_text_section(canvas, "月度结论", report.conclusion, width=58)
-    return canvas.figure
 
+    return _build_summary_pages(
+        report, basic_rows=basic_rows, basic_font_size=8.6,
+        statistics_title="检测记录统计摘要", statistics_rows=run_summary_rows,
+        statistics_widths=[0.24, 0.26, 0.24, 0.26],
+    )
+
+
+def _build_zscore_summary_page(report: Any):
+    """Keep the first-page helper for existing report preview callers."""
+    pages = _build_zscore_summary_pages(report)
+    for figure in pages[1:]:
+        plt.close(figure)
+    return pages[0]
 
 def _build_zscore_level_chart_page(package: Any, level_id: str):
     level_label = next(
@@ -351,6 +405,17 @@ def _build_zscore_level_chart_page(package: Any, level_id: str):
             f"报告期间：{package.report.report_period_label}    当前规则组合：{package.report.statistics.template_label}",
         ],
     )
+    # Reserve a separate key below the plot so a first/last extreme point and
+    # its rule/value labels never sit behind either legend in the PDF.
+    if figure.axes:
+        axis = figure.axes[0]
+        axis.set_position([0.10, 0.30, 0.80, 0.46])
+        legends = [artist for artist in axis.get_children() if isinstance(artist, Legend)]
+        for index, legend in enumerate(legends):
+            right = index > 0
+            legend.set_loc("upper right" if right else "upper left")
+            legend.set_bbox_to_anchor((PAGE_RIGHT if right else PAGE_LEFT, 0.218), transform=figure.transFigure)
+            legend.set_in_layout(False)
     return figure
 
 
@@ -575,6 +640,7 @@ def _draw_table_section(
     col_labels: list[str] | None = None,
     col_widths: list[float] | None = None,
     font_size: float = 9.0,
+    row_unit_height: float = TABLE_UNIT_HEIGHT,
 ) -> None:
     _draw_section_title(canvas, title)
     column_count = len(col_labels) if col_labels else (len(cell_text[0]) if cell_text else 1)
@@ -583,7 +649,7 @@ def _draw_table_section(
     if col_labels:
         header_lines = max(str(label).count("\n") + 1 for label in col_labels)
         row_units[0] += (header_lines - 1) * TABLE_EXTRA_LINE_UNITS
-    table_height = _estimate_table_height(row_units)
+    table_height = sum(row_units) * row_unit_height
     table_bottom = canvas.cursor_y - table_height
     table = canvas.axis.table(
         cellText=rows,
@@ -893,6 +959,30 @@ def _quality_section(title, paragraphs):
     return _TextSectionSpec(title, chunks, width=DECLARATION_TEXT_WIDTH)
 
 
+def _process_requirement_report_sections(review):
+    """Keep locally recorded process text separate from untouched source text."""
+    process = review.get('process_requirements')
+    if not isinstance(process, dict):
+        return []
+    requirement = str(process.get('requirement_text') or '').strip()
+    title = ('本实验室对照与质控要求（待确认）' if review.get('status') == 'pending'
+             else '本实验室实际对照与质控要求')
+    sections = [(title, [requirement or '未填写；参考条款不作为本实验室实际要求。'])]
+    selected_ids = set(process.get('source_ids') or [])
+    references = []
+    for source in review.get('candidates', []):
+        if (source.get('kind') != 'process' or source.get('id') not in selected_ids
+                or source.get('disposition') not in ('referenced', 'pending')):
+            continue
+        state = '待核对参考来源' if source.get('disposition') == 'pending' else '参考来源'
+        original = '；'.join(source.get('requirements') or []) or '未提供'
+        references.append(f"{state}：{source.get('source') or '未记录'}；"
+                          f"PDF 页码 {source.get('pages') or '未提供'}。参考原文：{original}")
+    if references:
+        sections.append(('对照与质控要求参考来源', references))
+    return sections
+
+
 def _build_quality_pages(report):
     summary=getattr(report,'quality_summary',{})
     if not summary:return []
@@ -918,6 +1008,8 @@ def _build_quality_pages(report):
         if search:
             evidence.append('标准查找复核：'+search.get('checked_on','')+'；'+search.get('query','')+'；'+search.get('rationale',''))
     extra=[_quality_section('适用标准及补充依据',evidence)] if evidence else []
+    extra.extend(_quality_section(title, paragraphs)
+                 for title, paragraphs in _process_requirement_report_sections(review))
     goal=summary.get('goal')
     if not goal:
         return _build_text_pages(report_title=report.title,page_title='质量目标采用依据',

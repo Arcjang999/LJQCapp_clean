@@ -73,7 +73,7 @@ class TemporaryDatabaseContext:
 
 
 def _seed_v11_configuration_dependencies() -> dict[str, object]:
-    manufacturer_id = create_manufacturer(display_name="V11 厂家")
+    manufacturer_id = create_manufacturer(categories=['instrument', 'reagent', 'qc_material'], display_name="V11 厂家")
     instrument_model_id = create_instrument_model(
         manufacturer_id=manufacturer_id,
         generic_name="全自动质控分析仪",
@@ -124,6 +124,7 @@ def _seed_v11_configuration_dependencies() -> dict[str, object]:
     target_lot_id, target_levels = create_lot_with_levels("V11-LOT-002")
     return {
         "lab_instrument_id": lab_instrument_id,
+        "manufacturer_id": manufacturer_id,
         "reagent_id": reagent_id,
         "qc_material_id": qc_material_id,
         "unit_id": unit_id,
@@ -264,7 +265,7 @@ def test_project_management_page_starts_from_new_navigation() -> None:
         at = AppTest.from_file(APP_FILE_PATH, default_timeout=15)
         at.run()
         assert not list(at.exception)
-        assert PROJECT_MANAGEMENT_ENTRY_LABEL not in at.radio(key="top_level_method_selector").options
+        assert not any(r.key == "top_level_method_selector" for r in at.radio)
         at.button(key="open_project_management_page").click().run()
         assert not list(at.exception)
         assert "批号使用与追溯" in [tab.label for tab in at.tabs]
@@ -313,7 +314,7 @@ def test_empty_product_dictionaries_offer_a_working_maintenance_entry() -> None:
 def test_creation_requires_three_dictionaries_and_prefills_selected_reagent() -> None:
     with TemporaryDatabaseContext():
         data = _seed_v11_configuration_dependencies()
-        alternate_id = create_reagent(generic_name="另一项目试剂")
+        alternate_id = create_reagent(manufacturer_id=data['manufacturer_id'], generic_name="另一项目试剂")
         at = AppTest.from_file(APP_FILE_PATH, default_timeout=15).run()
         at.button(key="home_create_project").click().run()
 
@@ -367,7 +368,7 @@ def test_default_change_preserves_items_lots_and_snapshots_and_rejects_disabled(
         items_before = list_template_items(template_id)
         lots_before = list_lot_config_items(config_id)
         snapshots_before = list_config_snapshots(config_id)
-        alternate_id = create_reagent(generic_name="下一项目默认试剂")
+        alternate_id = create_reagent(manufacturer_id=data['manufacturer_id'], generic_name="下一项目默认试剂")
         set_template_default_reagent(template_id, alternate_id)
         assert get_project_template(template_id)["default_reagent_id"] == alternate_id
         assert items_before.equals(list_template_items(template_id))

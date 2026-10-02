@@ -31,6 +31,7 @@ from migrations.v1_2_lot_lifecycle import ensure_lot_lifecycle_schema
 from migrations.quality_targets import ensure_quality_target_schema
 from migrations.material_workflow import ensure_material_workflow_schema
 from migrations.quality_review import ensure_quality_review_schema
+from migrations.out_of_control import ensure_out_of_control_schema
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -168,7 +169,10 @@ class _DatabaseConnection(sqlite3.Connection):
     def __exit__(self, exc_type, exc_value, traceback):
         if _transaction_connection.get() is self:
             return False
-        return super().__exit__(exc_type, exc_value, traceback)
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
 
 
 @contextmanager
@@ -188,6 +192,28 @@ def atomic_write():
         connection.rollback()
         raise
     finally:
+        _transaction_connection.reset(token)
+        connection.close()
+
+
+@contextmanager
+def read_snapshot():
+    """Pin service reads to one snapshot; standalone queries cannot write or migrate."""
+    existing = _transaction_connection.get()
+    if existing is not None:
+        yield existing
+        return
+    connection = sqlite3.connect(Path(DB_PATH).resolve().as_uri() + '?mode=ro', uri=True,
+                                 check_same_thread=False, factory=_DatabaseConnection)
+    connection.row_factory = sqlite3.Row
+    connection.execute('PRAGMA foreign_keys = ON')
+    connection.execute('PRAGMA query_only = ON')
+    token = _transaction_connection.set(connection)
+    try:
+        connection.execute('BEGIN')
+        yield connection
+    finally:
+        connection.rollback()
         _transaction_connection.reset(token)
         connection.close()
 
@@ -226,7 +252,18 @@ def init_db() -> None:
         ensure_lot_lifecycle_schema(connection)
         ensure_quality_target_schema(connection)
         ensure_material_workflow_schema(connection)
+        from migrations.product_directory import ensure_product_directory_schema
+        ensure_product_directory_schema(connection)
         ensure_quality_review_schema(connection)
+        ensure_out_of_control_schema(connection)
+        from services.out_of_control_attachment_service import ensure_attachment_schema
+        from migrations.out_of_control_reports import ensure_out_of_control_reports_schema
+        ensure_attachment_schema(connection)
+        ensure_out_of_control_reports_schema(connection)
+        from migrations.daily_entry import ensure_daily_entry_schema
+        ensure_daily_entry_schema(connection)
+        from migrations.batch_monthly_reports import ensure_batch_monthly_reports_schema
+        ensure_batch_monthly_reports_schema(connection)
         _rebind_legacy_batches_foreign_keys(connection)
         connection.execute(
             """

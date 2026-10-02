@@ -12,7 +12,7 @@ def render_quality_targets_page():
     st.subheader('质量目标')
     if st.button('返回工作台',key='quality_back'):
         st.session_state['show_quality_targets_page']=False;st.rerun()
-    st.caption('为检验项目选择适用标准；无适用标准时，填写实验室自定要求及依据。新批次需逐水平核对质量目标。')
+    st.caption('为检验项目选择适用的质量标准；对照与质控要求自动带入参考内容，可按当地要求修改。新批次需逐水平核对质量目标。')
     project,browse,custom=st.tabs(['质量目标设置','分析质量要求','实验室自定要求'])
     with browse:
         from ui.quality_catalog import render_quality_catalog

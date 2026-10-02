@@ -19,7 +19,7 @@ _LISTERS = {
     'reagent': master.list_reagents, 'method': master.list_methods, 'unit': master.list_units,
 }
 _COLUMNS = {
-    'manufacturer': {'display_name': '厂家名称', 'legal_name': '法定名称', 'country_or_region': '国家或地区'},
+    'manufacturer': {'display_name': '厂家名称', 'legal_name': '法定名称', 'country_or_region': '国家或地区', 'category_labels': '业务类别'},
     'test_item': {'chinese_name': '检验项目', 'standard_code': '标准代码', 'abbreviation': '常用缩写',
                   'category_name': '专业分类', 'specimen_type': '样本类型', 'default_unit': '默认单位'},
     'instrument_model': {'manufacturer_name': '厂家', 'generic_name': '通用名称', 'brand_name': '品牌',
@@ -32,7 +32,7 @@ _COLUMNS = {
     'unit': {'symbol': '单位符号', 'unit_name': '单位名称', 'ucum_code': 'UCUM 代码', 'quantity_kind': '量纲 / 类型'},
     'alias': {'alias_text': '别名内容', 'alias_type': '别名类型'},
 }
-_ORIGINS = {'official': '系统收录', 'hospital': '本地新增', 'import': '导入'}
+_ORIGINS = {'official': '系统收录', 'hospital': '自行登记', 'import': '导入'}
 
 
 def _text(value):
@@ -48,6 +48,8 @@ def _rows(entity_type, *, query='', include_disabled=False, parent_id=None):
         frame = _LISTERS[entity_type](include_disabled=include_disabled)
     if query.strip() and not frame.empty:
         fields = list(_COLUMNS[entity_type])
+        if entity_type == 'manufacturer':
+            fields.append('aliases')
         frame = filter_frame(frame, query, fields)
     return frame
 
@@ -80,7 +82,10 @@ def _prepare_saved(entity_type, parent_id):
     current = _rows(entity_type, query=st.session_state.get(search_key, ''),
                     include_disabled=st.session_state.get(disabled_key, False), parent_id=parent_id)
     if record_id not in current.id.tolist():
-        st.session_state[search_key] = ''
+        if entity_type == 'reagent':
+            st.session_state['md_reagent_reveal'] = (record_id, st.session_state.get(search_key, ''))
+        else:
+            st.session_state[search_key] = ''
     st.session_state['md_selected_' + entity_type] = record_id
     st.session_state.pop('md_saved_entity', None)
     notice = st.session_state.pop('md_notice', None)
@@ -88,12 +93,14 @@ def _prepare_saved(entity_type, parent_id):
         st.success(notice)
 
 
-def _select_row(widget_key, ids, selection_key):
+def _select_row(widget_key, ids, selection_key, on_open=None):
     rows = st.session_state.get(widget_key, {}).get('selection', {}).get('rows', [])
     st.session_state[selection_key] = ids[rows[0]] if rows and 0 <= rows[0] < len(ids) else None
+    if on_open is not None and st.session_state[selection_key] is not None:
+        on_open(st.session_state[selection_key])
 
 
-def _table(entity_type, frame, parent_id):
+def _table(entity_type, frame, parent_id, on_open=None):
     ids = [int(value) for value in frame.id]
     selection_key = 'md_selected_' + entity_type
     selected = st.session_state.get(selection_key)
@@ -108,17 +115,19 @@ def _table(entity_type, frame, parent_id):
         display['alias_type'] = display.alias_type.map(ALIAS_TYPE_LABELS).fillna('其他')
     display.rename(columns=_COLUMNS[entity_type], inplace=True)
     if 'origin_type' in frame:
-        display['来源'] = frame.origin_type.map(_ORIGINS).fillna('本地资料')
+        display['来源'] = frame.origin_type.map(_ORIGINS).fillna('其他资料')
     display['状态'] = frame.is_disabled.map({0: '启用', 1: '已停用'})
     st.dataframe(display, hide_index=True, width='stretch', height=min(340, max(115, 36 * len(ids) + 38)),
         key=key, selection_mode='single-row',
         selection_default={'selection': {'rows': [ids.index(selected)] if selected in ids else []}},
-        on_select=partial(_select_row, key, ids, selection_key))
+        on_select=partial(_select_row, key, ids, selection_key, on_open))
     return st.session_state.get(selection_key)
 
 
 def _detail_value(entity_type, field, record, list_row):
     value = record.get(field)
+    if field == 'categories':
+        return '、'.join(master.MANUFACTURER_CATEGORIES[v] for v in value) or '尚未分类'
     if field == 'manufacturer_id':
         return list_row.get('manufacturer_name') or '未填写'
     if field == 'default_unit_id':
@@ -135,7 +144,7 @@ def _source_records(entity_type, entity_id):
     with get_connection() as connection:
         return pd.read_sql_query('''
             SELECT s.source_name AS 来源名称, s.publisher AS 发布机构,
-                   s.version_label AS 版本, r.external_record_id AS 来源代码,
+                   s.version_label AS 版本,
                    s.effective_date AS 生效日期
             FROM md_source_records r JOIN md_sources s ON s.id=r.source_id
             WHERE r.entity_type=? AND r.entity_id=? ORDER BY s.source_code
@@ -167,11 +176,17 @@ def _render_detail(entity_type, record_id, list_row):
             st.session_state['md_selected_alias'] = None
             st.session_state['md_search_alias'] = ''
         st.markdown('**项目别名**')
-        st.caption('为所选检验项目维护简称、英文名称或 LIS 代码，便于搜索。')
+        st.caption('可为此检验项目添加常用简称、英文名称或 LIS 代码，之后可用这些名称搜索同一检验项目。')
         render_master_data_workspace('alias', parent_id=record_id, allow_create=not record['is_disabled'])
 
 
-def render_master_data_workspace(entity_type, *, parent_id=None, allow_create=True):
+def render_master_data_record(entity_type, record_id, list_row):
+    """Show one record below its product heading, without repeating its list."""
+    _prepare_saved(entity_type, None)
+    _render_detail(entity_type, record_id, list_row)
+
+
+def render_master_data_workspace(entity_type, *, parent_id=None, allow_create=True, manufacturer_category=None, on_open=None, show_detail=True):
     """Render one list; callers render the shared pending dialog once after all lists."""
     if entity_type not in _COLUMNS:
         raise ValueError('不支持的基础资料类型。')
@@ -187,6 +202,8 @@ def render_master_data_workspace(entity_type, *, parent_id=None, allow_create=Tr
             st.session_state[key] = settings.get(key, default)
     _prepare_saved(entity_type, parent_id)
     label = ENTITY_LABELS[entity_type]
+    if entity_type == 'manufacturer' and manufacturer_category in master.MANUFACTURER_CATEGORIES:
+        label = master.MANUFACTURER_CATEGORIES[manufacturer_category]
     left, right = st.columns([3, 1])
     query = left.text_input('搜索' + label, key='md_search_' + entity_type, help=SEARCH_HELP,
                            placeholder='名称、代码或别名' if entity_type == 'test_item' else '名称或代码')
@@ -194,6 +211,24 @@ def render_master_data_workspace(entity_type, *, parent_id=None, allow_create=Tr
     settings['md_search_' + entity_type] = query
     settings['md_show_disabled_' + entity_type] = include_disabled
     frame = _rows(entity_type, query=query, include_disabled=include_disabled, parent_id=parent_id)
+    if entity_type == 'reagent':
+        reveal = st.session_state.get('md_reagent_reveal')
+        if reveal and reveal[1] != query:
+            st.session_state.pop('md_reagent_reveal', None)
+        elif reveal and reveal[0] not in frame.id.tolist():
+            all_records = _rows(entity_type, include_disabled=include_disabled)
+            saved_row = all_records.loc[all_records.id == reveal[0]]
+            if not saved_row.empty:
+                frame = pd.concat([saved_row, frame], ignore_index=True)
+                st.caption('已显示刚保存的试剂，原搜索条件保留。')
+    if entity_type == 'manufacturer':
+        category = manufacturer_category
+        if category is None:
+            category = st.selectbox('厂家业务类别筛选', [None,*master.MANUFACTURER_CATEGORIES],
+                placeholder='全部类别',
+                format_func=lambda value: '全部类别' if value is None else master.MANUFACTURER_CATEGORIES[value], key='md_manufacturer_category_filter')
+        if category:
+            frame = frame.loc[frame.categories.map(lambda values: category in values).astype(bool)]
     selected = st.session_state.get('md_selected_' + entity_type)
     if selected not in frame.id.tolist():
         st.session_state['md_selected_' + entity_type] = None
@@ -202,17 +237,20 @@ def render_master_data_workspace(entity_type, *, parent_id=None, allow_create=Tr
     add, edit, status = st.columns(3)
     if add.button('新增' + label, key='md_create_' + entity_type, type='primary',
                   disabled=not allow_create, width='stretch'):
-        open_master_data_dialog(entity_type, parent_id=parent_id)
-    if edit.button('编辑' + label, key='md_edit_' + entity_type, disabled=row is None,
+        open_master_data_dialog(entity_type, parent_id=parent_id, manufacturer_category=manufacturer_category)
+    if on_open is None and edit.button('编辑' + label, key='md_edit_' + entity_type,
+                   disabled=row is None or (entity_type == 'reagent' and bool(row['is_disabled'])),
                    width='stretch'):
         open_master_data_dialog(entity_type, selected, parent_id=parent_id)
     action = '恢复' if row and row['is_disabled'] else '停用'
-    if status.button(action + label, key='md_status_' + entity_type, disabled=row is None,
+    if on_open is None and status.button(action + label, key='md_status_' + entity_type, disabled=row is None,
                      width='stretch'):
         open_master_data_dialog(entity_type, selected, kind='status', parent_id=parent_id)
-    st.caption(f'共 {len(frame)} 条。选择一行查看详情。')
-    selected = _table(entity_type, frame, parent_id)
-    if selected is not None:
+    hint = '点击行首选择框，进入产品管理。' if on_open is not None else (
+        '选择一行查看详情。' if show_detail else '单选一款试剂后，可编辑、停用或管理批号。')
+    st.caption(f'共 {len(frame)} 条。' + hint)
+    selected = _table(entity_type, frame, parent_id, on_open)
+    if selected is not None and on_open is None and show_detail:
         _render_detail(entity_type, int(selected), frame[frame.id == selected].iloc[0].to_dict())
     elif frame.empty:
         st.info('没有符合条件的记录，请调整搜索内容，或新增资料。')

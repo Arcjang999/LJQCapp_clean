@@ -136,7 +136,7 @@ def test_seed_timestamp_refresh_allows_save_but_business_edits_stay_stale():
 def test_verification_product_and_disabled_identity_are_rejected():
     with TemporaryDatabaseContext():
         data = fixture()
-        other = create_reagent(generic_name='另一试剂产品')
+        other = create_reagent(generic_name='另一试剂产品', manufacturer_id=data['data']['manufacturer_id'])
         wrong_lot = register(data, 'R-OTHER', reagent_id=other)
         system = data['systems']['lj']
         rejected(lambda: verification(system, wrong_lot), '不属于')
@@ -272,7 +272,7 @@ def test_correction_rejects_cross_product_and_stale_verification():
         context = get_reagent_correction_context(event)
         values = dict(reagent_lot_id=lot, verification_id=passed, effective_at='2026-09-04', operator='更正人', reason='不能绕过失败验证', confirmed=True)
         rejected(lambda: save_reagent_correction(event, values, expected_fingerprint=context['fingerprint']), '后续结论')
-        other = create_reagent(generic_name='更正不可跨用试剂')
+        other = create_reagent(generic_name='更正不可跨用试剂', manufacturer_id=data['data']['manufacturer_id'])
         foreign = register(data, 'R-FOREIGN', reagent_id=other)
         context = get_reagent_correction_context(event)
         rejected(lambda: save_reagent_correction(event, {**values, 'reagent_lot_id': foreign}, expected_fingerprint=context['fingerprint']), '不属于')

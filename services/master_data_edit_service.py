@@ -10,7 +10,7 @@ from services import master_data_service as master
 
 
 EDIT_FIELDS = {
-    'manufacturer': frozenset(('display_name', 'legal_name', 'country_or_region', 'registration_holder_name', 'notes')),
+    'manufacturer': frozenset(('display_name', 'legal_name', 'country_or_region', 'registration_holder_name', 'notes', 'categories')),
     'test_item': frozenset(('chinese_name', 'standard_code', 'english_name', 'abbreviation', 'category_name', 'specimen_type', 'default_unit_id', 'notes')),
     'instrument_model': frozenset(('manufacturer_id', 'generic_name', 'brand_name', 'model', 'registration_no', 'device_category_code', 'catalog_no', 'notes')),
     'lab_instrument': frozenset(('instrument_model_id', 'display_name', 'asset_code', 'serial_number', 'department_name', 'instrument_group', 'location', 'notes')),
@@ -68,6 +68,8 @@ def _is_referenced(connection, table: str, entity_id: int) -> bool:
     tables = connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall()
     for item in tables:
         child = item['name']
+        if child == 'md_manufacturer_categories':
+            continue
         for foreign_key in connection.execute(f'PRAGMA foreign_key_list({_quoted(child)})'):
             if foreign_key['table'] != table or foreign_key['to'] not in ('id', None):
                 continue
@@ -85,6 +87,8 @@ def _context(connection, entity_type: str, entity_id: int) -> dict:
     if raw is None:
         raise ValueError('未找到所选资料，请重新选择。')
     record = dict(raw)
+    if entity_type == 'manufacturer':
+        record['categories'] = master.get_manufacturer_categories(entity_id, connection)
     referenced = _is_referenced(connection, table, int(entity_id)) or bool(connection.execute(
         'SELECT 1 FROM md_source_records WHERE entity_type=? AND entity_id=? LIMIT 1',
         (entity_type, int(entity_id)),
@@ -95,7 +99,7 @@ def _context(connection, entity_type: str, entity_id: int) -> dict:
         locked = EDIT_FIELDS[entity_type] - {'notes'}
         reason = '此条资料为系统收录内容，名称、代码等不能直接修改；可以补充备注。'
     elif referenced:
-        safe = _SAFE_REFERENCED_FIELDS
+        safe = _SAFE_REFERENCED_FIELDS | ({'categories'} if entity_type == 'manufacturer' else set())
         if entity_type == 'lab_instrument':
             safe = safe | {'department_name', 'instrument_group', 'location'}
         locked = EDIT_FIELDS[entity_type] - safe
@@ -104,6 +108,8 @@ def _context(connection, entity_type: str, entity_id: int) -> dict:
         locked = set(locked) | {'entity_type', 'entity_id'}
         if not reason:
             reason = '别名所属的资料不能更换；需要更换时请新增别名。'
+    if entity_type == 'manufacturer':
+        locked = set(locked) - {'categories'}
     return {'record': record, 'fingerprint': _fingerprint(entity_type, record),
             'locked_fields': sorted(locked), 'lock_reason': reason, 'referenced': referenced}
 
@@ -138,7 +144,11 @@ def _clean_values(entity_type: str, supplied: dict, record: dict | None) -> dict
     values = {field: record[field] for field in EDIT_FIELDS[entity_type]} if record else {}
     foreign = _FOREIGN_FIELDS.get(entity_type, {})
     for field, value in supplied.items():
-        if field in foreign:
+        if entity_type == 'manufacturer' and field == 'categories':
+            if not isinstance(value, (list,tuple,set)) or any(v not in master.MANUFACTURER_CATEGORIES for v in value):
+                raise ValueError('请选择有效的厂家业务类别。')
+            values[field] = sorted(set(value))
+        elif field in foreign:
             target, required = foreign[field]
             values[field] = _id(value, _LABELS[target], required=required)
         elif entity_type == 'alias' and field == 'entity_id':
@@ -178,6 +188,8 @@ def _check_foreign(connection, entity_type: str, values: dict, original: dict | 
             unchanged = unchanged and original.get('entity_type') == target
         if row['is_disabled'] and not unchanged:
             raise ValueError(f'所选{label}已停用，请选择其他资料，或先恢复后再使用。')
+        if field == 'manufacturer_id' and not unchanged:
+            master.require_manufacturer_category(connection, identifier, 'instrument' if entity_type == 'instrument_model' else 'reagent')
 
 
 def save_master_record(entity_type: str, values: dict, *, entity_id: int | None = None,
@@ -202,6 +214,8 @@ def save_master_record(entity_type: str, values: dict, *, entity_id: int | None 
                 connection.execute(f'UPDATE {table} SET notes=? WHERE id=?', (normalized['notes'], identifier))
             return identifier
         changes = {field: value for field, value in normalized.items() if value != original[field]}
+        if entity_type == 'manufacturer' and 'categories' in changes:
+            master._save_manufacturer_categories(connection, entity_id, changes.pop('categories'))
         if not changes:
             return int(entity_id)
         if entity_type == 'alias' and 'alias_text' in changes:
@@ -213,6 +227,53 @@ def save_master_record(entity_type: str, values: dict, *, entity_id: int | None 
         except sqlite3.IntegrityError as exc:
             raise ValueError(f'已有同名或同编码的{_LABELS[entity_type]}，请核对填写内容。') from exc
         return int(entity_id)
+
+
+def save_lab_instrument_details(values: dict, *, entity_id: int | None = None,
+                                expected_fingerprint: str | None = None) -> int:
+    """Save one device and resolve its shared model within the same transaction."""
+    allowed = (EDIT_FIELDS['lab_instrument'] - {'instrument_model_id'}) | {'manufacturer_id', 'model'}
+    if not isinstance(values, dict) or set(values) - allowed:
+        raise ValueError('提交的仪器资料不完整或包含不能编辑的内容，请重新打开窗口。')
+    identifier = _id(entity_id, '仪器', required=True) if entity_id is not None else None
+    with atomic_write() as connection:
+        context = _context(connection, 'lab_instrument', identifier) if identifier is not None else None
+        original_model = None
+        if context:
+            _check_fingerprint(context, expected_fingerprint)
+            if context['record']['is_disabled']:
+                raise ValueError('此条资料已停用，请先恢复，再编辑。')
+            original_model = connection.execute(
+                'SELECT * FROM md_instrument_models WHERE id=?',
+                (context['record']['instrument_model_id'],),
+            ).fetchone()
+        manufacturer_id = _id(values.get('manufacturer_id', original_model['manufacturer_id'] if original_model else None),
+                              '仪器厂家', required=True)
+        model_text = master._clean_required(values.get('model', original_model['model'] if original_model else None), '仪器型号')
+        model_key = model_text.casefold()
+        unchanged = (original_model is not None and original_model['manufacturer_id'] == manufacturer_id
+                     and master._clean_optional(original_model['model']).casefold() == model_key)
+        if unchanged:
+            model_id = original_model['id']
+        else:
+            if context and 'instrument_model_id' in context['locked_fields']:
+                raise ValueError(context['lock_reason'])
+            master.require_manufacturer_category(connection, manufacturer_id, 'instrument')
+            candidates = connection.execute(
+                'SELECT id,model FROM md_instrument_models WHERE manufacturer_id=? AND is_disabled=0 ORDER BY id',
+                (manufacturer_id,),
+            ).fetchall()
+            matches = [row['id'] for row in candidates
+                       if master._clean_optional(row['model']).casefold() == model_key]
+            if len(matches) > 1:
+                raise ValueError('当前厂家下有多条相同型号资料，请核对厂家和型号，或联系资料维护人员处理。')
+            model_id = matches[0] if matches else save_master_record('instrument_model', {
+                'manufacturer_id': manufacturer_id, 'model': model_text, 'generic_name': model_text,
+            })
+        instrument_values = {field: value for field, value in values.items() if field not in {'manufacturer_id', 'model'}}
+        instrument_values['instrument_model_id'] = model_id
+        return save_master_record('lab_instrument', instrument_values, entity_id=identifier,
+                                  expected_fingerprint=expected_fingerprint)
 
 
 def change_master_status(entity_type: str, entity_id: int, *, disabled: bool,

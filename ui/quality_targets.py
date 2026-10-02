@@ -48,10 +48,14 @@ def render_review_summary(review, *, historical=False):
         st.caption('来源：' + recorded.get('source_name', '') + ' / ' + recorded.get('source_version', ''))
         st.caption('请按这些要求人工核对；均值和标准差按本批次设置使用。')
     st.caption('确认人：' + review.get('confirmed_by', '') + '｜依据：' + review.get('evidence', ''))
+    local_process = review.get('process_requirements')
+    if local_process is not None:
+        st.write('本实验室对照与质控要求：' + (local_process.get('requirement_text') or '未设置'))
     for row in review.get('candidates', []):
         if not historical and not _current_source(row.get('standard', {})):
             continue
-        state = '已采用' if row.get('disposition') == 'adopted' else '不适用'
+        state = {'adopted': '已采用', 'referenced': '参考来源', 'not_selected': '未选为参考',
+                 'pending': '参考条件待核对', 'not_applicable': '不适用'}.get(row.get('disposition'), '待核对')
         st.caption(f"{row['source']}｜{state}：{row.get('reason', '')}")
         if row.get('disposition') == 'adopted' and row.get('kind') not in (None, 'numeric'):
             st.caption('；'.join(row.get('requirements', [])) + '｜请人工核对')
@@ -109,6 +113,7 @@ def render_adoption(scope,item_id,*,embedded=False,expected_revision=None,on_sav
                 check_current()
                 save_pending_review(scope,item_id,context=condition_args['context'],
                     search_record=condition_args['search_record'],registered_standards=condition_args['registered_standards'],
+                    process_requirements=condition_args['process_requirements'],
                     draft_recorded={key: st.session_state.get(prefix+'_'+suffix, '')
                         for key,suffix in [('source_name','source_name'),('source_version','source_version'),
                                            ('requirement_text','recorded_text')]})

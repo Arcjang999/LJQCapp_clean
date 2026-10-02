@@ -68,7 +68,7 @@ class TemporaryDatabaseContext:
 
 
 def _seed_active_lj_configuration() -> int:
-    manufacturer_id = create_manufacturer(display_name="V12 LJ 厂家")
+    manufacturer_id = create_manufacturer(categories=['instrument', 'reagent', 'qc_material'], display_name="V12 LJ 厂家")
     instrument_model_id = create_instrument_model(
         manufacturer_id=manufacturer_id,
         generic_name="全自动生化分析仪",
@@ -217,7 +217,8 @@ def test_v12_lj_page_uses_global_configuration_selection() -> None:
         app = AppTest.from_file(APP_FILE_PATH)
         app.run()
         assert not list(app.exception)
-        app.radio(key="top_level_method_selector").set_value(LJ_ENTRY_LABEL).run()
+        app.session_state["pending_top_level_method"] = LJ_ENTRY_LABEL
+        app.run()
         assert not list(app.exception)
         assert any(selectbox.key == "v12_lj_project_selector" for selectbox in app.selectbox)
         assert not any(button.label == "创建项目" for button in app.button)

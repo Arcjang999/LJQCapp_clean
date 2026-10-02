@@ -41,6 +41,8 @@ def fill(app, values):
         key = field_key(app, field)
         if field in ('manufacturer_id', 'instrument_model_id', 'default_unit_id', 'alias_type'):
             app.selectbox(key=key).set_value(value)
+        elif field == 'categories':
+            app.multiselect(key=key).set_value(value)
         elif field == 'notes':
             app.text_area(key=key).set_value(value)
         else:
@@ -57,21 +59,29 @@ def assert_closed(app):
     assert not app.exception and 'master_data_dialog' not in app.session_state.filtered_state
 
 
+def record_with_instrument_details(entity, identifier):
+    record = dict(get_master_record_context(entity, identifier)['record'])
+    if entity == 'lab_instrument':
+        model = get_master_record_context('instrument_model', record['instrument_model_id'])['record']
+        record.update(manufacturer_id=model['manufacturer_id'], model=model['model'])
+    return record
+
+
 def test_create_and_edit_all_eight_entities_preserves_every_field():
     with IsolatedDatabase():
-        manufacturer = create_manufacturer(display_name='弹窗依赖厂家')
+        manufacturer = create_manufacturer(categories=['instrument', 'reagent', 'qc_material'], display_name='弹窗依赖厂家')
         unit = create_unit(symbol='UI-test/L', unit_name='弹窗单位')
         model = create_instrument_model(manufacturer_id=manufacturer, generic_name='检验仪', model='DEPEND-001')
         parent = create_test_item(chinese_name='弹窗别名归属项目')
         cases = {
             'manufacturer': dict(display_name='弹窗新增厂家', legal_name='弹窗厂家有限公司', country_or_region='中国',
-                registration_holder_name='弹窗登记人', notes='厂家备注'),
+                registration_holder_name='弹窗登记人', categories=['instrument'], notes='厂家备注'),
             'unit': dict(symbol='UI-dialog/L', unit_name='界面验收单位', ucum_code='UI/L', quantity_kind='浓度', notes='单位备注'),
             'test_item': dict(chinese_name='弹窗检验项目', standard_code='UI-TEST-001', abbreviation='UI-T',
                 english_name='UI test', category_name='免疫', specimen_type='血清', default_unit_id=unit, notes='项目备注'),
             'instrument_model': dict(manufacturer_id=manufacturer, generic_name='弹窗检验仪', brand_name='弹窗品牌',
                 model='UI-MODEL', registration_no='UI-REG-001', device_category_code='22', catalog_no='UI-CAT', notes='型号备注'),
-            'lab_instrument': dict(instrument_model_id=model, display_name='弹窗 1 号仪器', asset_code='ASSET-1',
+            'lab_instrument': dict(manufacturer_id=manufacturer, model='DEPEND-001', display_name='弹窗 1 号仪器', asset_code='ASSET-1',
                 serial_number='SN-1', department_name='免疫室', instrument_group='常规组', location='二楼', notes='仪器备注'),
             'reagent': dict(manufacturer_id=manufacturer, generic_name='弹窗试剂', trade_name='示例试剂', specification='100次',
                 registration_no='REG-R', catalog_no='CAT-R', applicable_instrument_text='弹窗检验仪', notes='试剂备注'),
@@ -86,8 +96,10 @@ def test_create_and_edit_all_eight_entities_preserves_every_field():
             app.button(key='md_dialog_save').click().run()
             assert_closed(app)
             saved_id = app.session_state['md_selected_' + entity]
-            record = get_master_record_context(entity, saved_id)['record']
+            record = record_with_instrument_details(entity, saved_id)
             assert all(record[key] == value for key, value in values.items()), (entity, record)
+            if entity == 'lab_instrument':
+                assert record['instrument_model_id'] == model
             assert app.session_state['md_saved_entity'] == (entity, saved_id)
             assert app.session_state['md_table_version'] == 1 and app.session_state['md_notice']
             if entity == 'alias':
@@ -99,7 +111,7 @@ def test_create_and_edit_all_eight_entities_preserves_every_field():
             fill(edited, {editable_field: '编辑后保留的内容'})
             edited.button(key='md_dialog_save').click().run()
             assert_closed(edited)
-            after = get_master_record_context(entity, saved_id)['record']
+            after = record_with_instrument_details(entity, saved_id)
             assert after[editable_field] == '编辑后保留的内容'
             assert all(after[key] == value for key, value in values.items() if key != editable_field)
 
@@ -129,7 +141,7 @@ def test_failed_save_and_cancel_continue_keep_draft_then_reopen_cleanly():
 
 def test_status_requires_confirmation_keeps_history_and_disabled_edit_is_readonly():
     with IsolatedDatabase():
-        identifier = create_manufacturer(display_name='停用恢复厂家', notes='完整备注')
+        identifier = create_manufacturer(categories=['instrument', 'reagent', 'qc_material'], display_name='停用恢复厂家', notes='完整备注')
         app = make_app({'status': dict(entity_type='manufacturer', entity_id=identifier, kind='status'),
                         'edit': dict(entity_type='manufacturer', entity_id=identifier)})
         before = snapshot()
@@ -163,7 +175,7 @@ def test_status_requires_confirmation_keeps_history_and_disabled_edit_is_readonl
 
 def test_official_and_referenced_names_are_locked_but_notes_remain_editable():
     with IsolatedDatabase():
-        manufacturer = create_manufacturer(display_name='已使用厂家', notes='原备注')
+        manufacturer = create_manufacturer(categories=['instrument', 'reagent', 'qc_material'], display_name='已使用厂家', notes='原备注')
         create_reagent(manufacturer_id=manufacturer, generic_name='已登记试剂')
         official = int(list_test_items().loc[lambda rows: rows.origin_type == 'official', 'id'].iloc[0])
         for entity, identifier, field in [('manufacturer', manufacturer, 'display_name'), ('test_item', official, 'chinese_name')]:
@@ -180,9 +192,9 @@ def test_official_and_referenced_names_are_locked_but_notes_remain_editable():
 
 def test_dropdowns_preserve_existing_disabled_relation_without_offering_other_disabled_records():
     with IsolatedDatabase():
-        original = create_manufacturer(display_name='原停用厂家')
-        unrelated = create_manufacturer(display_name='其他停用厂家')
-        current = create_manufacturer(display_name='可用厂家')
+        original = create_manufacturer(categories=['instrument', 'reagent', 'qc_material'], display_name='原停用厂家')
+        unrelated = create_manufacturer(categories=['instrument', 'reagent', 'qc_material'], display_name='其他停用厂家')
+        current = create_manufacturer(categories=['instrument', 'reagent', 'qc_material'], display_name='可用厂家')
         reagent = create_reagent(manufacturer_id=original, generic_name='停用关联试剂', notes='原备注')
         set_master_entity_disabled('manufacturer', original, is_disabled=True, reason='关联保留')
         set_master_entity_disabled('manufacturer', unrelated, is_disabled=True, reason='不供新增选择')
@@ -229,8 +241,8 @@ def test_stale_edit_and_status_cannot_overwrite_updated_record():
 
 def test_consecutive_records_and_alias_parent_never_share_drafts():
     with IsolatedDatabase():
-        first = create_manufacturer(display_name='厂家甲', notes='甲备注')
-        second = create_manufacturer(display_name='厂家乙', notes='乙备注')
+        first = create_manufacturer(categories=['instrument', 'reagent', 'qc_material'], display_name='厂家甲', notes='甲备注')
+        second = create_manufacturer(categories=['instrument', 'reagent', 'qc_material'], display_name='厂家乙', notes='乙备注')
         parent = create_test_item(chinese_name='别名归属甲')
         other = create_test_item(chinese_name='别名归属乙')
         alias = create_alias(entity_type='test_item', entity_id=parent, alias_text='旧别名', alias_type='historical')

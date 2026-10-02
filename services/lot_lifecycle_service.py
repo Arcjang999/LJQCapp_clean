@@ -31,7 +31,7 @@ def _required(value, label):
     return value
 
 
-def source_context(connection, method, batch_id):
+def source_context(connection, method, batch_id, *, read_only=False):
     if method not in CONTEXT_COLUMNS:
         raise ValueError('不支持的质控方法。')
     binding = connection.execute('SELECT * FROM qc_workbench_bindings WHERE qc_method=? AND runtime_batch_id=?', (method,batch_id)).fetchone()
@@ -56,9 +56,11 @@ def source_context(connection, method, batch_id):
     identity = source.get('identity') or []
     if source.get('project_template_item_id') and len(identity) >= 8:
         system_identity = json.dumps([source['project_template_item_id'], *[identity[i] for i in (0,3,4,5,6,7)]])
-        connection.execute('INSERT OR IGNORE INTO qc_detection_systems(template_item_id,identity_json,snapshot_json) VALUES(?,?,?)',
-            (source['project_template_item_id'],system_identity,json.dumps(source,ensure_ascii=False)))
-        source['system_id'] = connection.execute('SELECT id FROM qc_detection_systems WHERE identity_json=?',(system_identity,)).fetchone()[0]
+        if not read_only:
+            connection.execute('INSERT OR IGNORE INTO qc_detection_systems(template_item_id,identity_json,snapshot_json) VALUES(?,?,?)',
+                (source['project_template_item_id'],system_identity,json.dumps(source,ensure_ascii=False)))
+        system = connection.execute('SELECT id FROM qc_detection_systems WHERE identity_json=?',(system_identity,)).fetchone()
+        source['system_id'] = system[0] if system else None
     return source, binding, batch
 
 
@@ -634,10 +636,59 @@ def import_reviewed_results(method,batch_id,rows,*,template_id=None,required_n=N
     return len(rows)
 
 
+def _result_edit_restriction(connection, method, batch_id):
+    """Original formal results cannot be overwritten by the building editor."""
+    if method not in ('lj', 'zscore'):
+        return ''
+    has_parameters = connection.execute(
+        'SELECT 1 FROM qc_target_profiles WHERE qc_method=? AND batch_id=? LIMIT 1',
+        (method, batch_id)).fetchone()
+    formal_result = connection.execute(f'''SELECT 1 FROM qc_result_evaluations e
+        JOIN qc_result_contexts x ON x.id=e.context_id
+        JOIN {RESULT_TABLES[method]} r ON r.id=x.{CONTEXT_COLUMNS[method]}
+        WHERE r.batch_id=? AND (
+            json_extract(e.evaluation_json,'$.phase') IN ('formal_qc','正式数据')
+            OR json_extract(e.evaluation_json,'$.result.phase') IN ('formal_qc','正式数据')) LIMIT 1''',
+        (batch_id,)).fetchone()
+    if not formal_result and method == 'zscore':
+        formal_result = connection.execute(
+            "SELECT 1 FROM zscore_runs WHERE batch_id=? AND phase='formal_qc' LIMIT 1", (batch_id,)).fetchone()
+    if has_parameters or formal_result:
+        return '该批次已确认控制参数或进入正式期，检测时间、检测人及原始检测值仅供查询；可在备注入口补充说明，不能覆盖原始记录。'
+    return ''
+
+
+def get_result_edit_availability(method, result_id):
+    """Read-only availability for the existing record-maintenance dialog."""
+    if method not in ('lj', 'zscore'):
+        return {'allowed': False, 'reason': '该方法不支持在此修改原始检测记录。'}
+    from database import read_snapshot
+    with read_snapshot() as connection:
+        row = connection.execute(f'SELECT batch_id FROM {RESULT_TABLES[method]} WHERE id=?', (result_id,)).fetchone()
+        if row is None:
+            return {'allowed': False, 'reason': '未找到检测记录。'}
+        reason = _result_edit_restriction(connection, method, row['batch_id'])
+        return {'allowed': not reason, 'reason': reason}
+
+
+def save_lj_result_manual_note(result_id, manual_note):
+    """Keep the existing note action separate from original measurement edits."""
+    with atomic_write() as connection:
+        row = connection.execute('SELECT batch_id FROM results WHERE id=?', (result_id,)).fetchone()
+        if row is None:
+            raise ValueError('未找到检测记录。')
+        require_writable(connection, 'lj', row['batch_id'])
+        connection.execute('UPDATE results SET manual_note=? WHERE id=?',
+                           (str(manual_note or '').strip(), result_id))
+
+
 def validate_result_edit(connection,method,result_id,new_time=None):
     row=connection.execute(f'SELECT * FROM {RESULT_TABLES[method]} WHERE id=?',(result_id,)).fetchone()
     if row is None:raise ValueError('未找到检测记录。')
     require_writable(connection,method,row['batch_id'],new_time)
+    restriction = _result_edit_restriction(connection, method, row['batch_id'])
+    if restriction:
+        raise ValueError(restriction)
     context=connection.execute(f'SELECT * FROM qc_result_contexts WHERE {CONTEXT_COLUMNS[method]}=?',(result_id,)).fetchone()
     if new_time and context:
         profile=target_profile(method,row['batch_id'],new_time) if method!='instant' else None
@@ -672,7 +723,7 @@ def report_lot_trace(method,batch_id,month,frame):
                 'evidence':profile['evidence'] if profile else '原有建靶记录；历史参数资料未记录时不补造',
                 'confirmed_by':profile['confirmed_by'] if profile else '', 'effective_at':profile['effective_at'] if profile else ''})
     with get_connection() as c:
-        source,_,_=source_context(c,method,batch_id)
+        source,_,_=source_context(c,method,batch_id,read_only=True)
         events=[dict(r) for r in c.execute('SELECT * FROM qc_lot_change_events WHERE system_id=? AND substr(effective_at,1,7)=? ORDER BY effective_at,id',(source.get('system_id'),month))]
     return _json_safe({'actual_lots':df.to_dict('records'),'statistics_by_target_version':groups,'events':events,
         'basis':'按本次结果保存的批号及参数版本回顾；累计判定按各版本自己的窗口，缺失历史批号显示未记录。'})

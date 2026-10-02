@@ -46,7 +46,7 @@ def test_alias_keywords_disabled_scope_and_exact_adoption_identity():
 
 def test_report_filters_use_same_rules_and_preserve_exact_facets():
     row = SimpleNamespace(project_name='搜索验收免疫球蛋白G', method_label='LJ',
-        batch_label='罗氏 QC-2026-09', file_name='report.pdf', report_month='2026-09')
+        batch_label='罗氏 QC-2026-09', file_name='report.pdf', report_month='2026-09', summary_json={})
     assert filter_report_history_records([row],project_query='Ｉｇｇ') == []
     assert filter_report_history_records([row],project_query='免球蛋白',batch_query='2026 罗氏') == [row]
     assert filter_report_history_records([row],batch_query='QC2027') == []

@@ -11,12 +11,15 @@ from services.report_service import (
     LJ_METHOD_LABEL,
     REPORT_TYPE_LJ_MONTHLY,
     REPORT_TYPE_ZSCORE_MONTHLY,
+    REPORT_TYPE_EVENT,
     ReportHistoryRecord,
     ZSCORE_METHOD_LABEL,
     build_report_history_statistics_summary,
     filter_report_history_records,
     list_report_history_records,
+    get_report_history_record,
     regenerate_report_from_history,
+    read_report_history_pdf,
 )
 from services.project_config_service import QC_METHOD_LABELS, QC_METHOD_LEGACY_LABELS
 from ui.common import (
@@ -39,15 +42,37 @@ def render_report_history_page() -> None:
     with action_column:
         if st.button("返回当前页面", key="close_report_history_page", use_container_width=True):
             st.session_state["show_report_history_page"] = False
+            destination = st.session_state.pop('report_history_return_page', None)
+            st.session_state.pop('report_history_selected_export_id', None)
+            if destination:
+                from ui.common import open_global_page
+                open_global_page(destination)
             st.rerun()
 
+    if st.button("批量月报与月度汇总", key="history_batch_monthly"):
+        from ui.common import open_global_page
+        open_global_page("show_batch_monthly_reports_page")
+
     records = list_report_history_records()
-    render_section_intro(
+    selected_export = st.session_state.get('report_history_selected_export_id')
+    if selected_export is not None:
+        st.subheader('所选报告')
+        try:
+            selected_record = get_report_history_record(int(selected_export))
+        except ValueError as exc:
+            st.error(str(exc))
+        else:
+            _render_report_history_card(selected_record)
+        if st.button('显示全部报告历史', key='report_history_clear_selected'):
+            st.session_state.pop('report_history_selected_export_id', None)
+            st.rerun()
+        return
+    from ui.common import render_module_header
+    render_module_header(
         title="报告历史",
-        caption="查看单水平（LJ）和多水平法月报，可按项目、质控方法、批次和月份筛选。",
+        caption="查看月度质控报告和失控处理报告。可下载当时保存的原报告，也可按当前资料生成新报告。",
         eyebrow="报告管理",
-        badges=["项目筛选", "摘要查看", "按当前数据重新生成"],
-        tone="accent",
+        tone="reports",
     )
     render_workbench_context_bar(
         title="历史记录概览",
@@ -57,22 +82,26 @@ def render_report_history_page() -> None:
             ("涉及项目数", len({record.project_name for record in records})),
             ("单水平（LJ）", sum(1 for record in records if record.report_type == REPORT_TYPE_LJ_MONTHLY)),
             ("多水平法", sum(1 for record in records if record.report_type == REPORT_TYPE_ZSCORE_MONTHLY)),
+            ("失控处理报告", sum(1 for record in records if record.report_type == REPORT_TYPE_EVENT)),
         ],
-        badges=["报告摘要", "筛选定位", "重新生成报告"],
     )
 
     if not records:
-        st.info("当前还没有可展示的月度报告历史。请先在 LJ 或 Z-score 月报入口生成至少一份报告。")
+        st.info("当前还没有报告历史，可从月报或失控处理记录生成报告。")
         return
 
     with st.container():
         render_section_intro(
             title="筛选条件",
             caption="可按项目名称、质控方法、批次和报告月份筛选。",
-            badges=["可组合筛选", "组内按时间倒序"],
             tone="muted",
         )
         project_query, method_label, batch_query, report_month = _render_filters(records)
+        type_col, instrument_col = st.columns(2)
+        type_labels = {"": "全部报告", REPORT_TYPE_LJ_MONTHLY: "单水平月报", REPORT_TYPE_ZSCORE_MONTHLY: "多水平月报", REPORT_TYPE_EVENT: "失控处理报告"}
+        report_type = type_col.selectbox("报告类型", list(type_labels), format_func=type_labels.get,
+                                        key="report_history_type_filter")
+        instrument_query = instrument_col.text_input("仪器筛选", key="report_history_instrument_query", help=SEARCH_HELP)
 
     filtered_records = filter_report_history_records(
         records,
@@ -80,6 +109,8 @@ def render_report_history_page() -> None:
         method_label=method_label,
         batch_query=batch_query,
         report_month=report_month,
+        report_type=report_type,
+        instrument_query=instrument_query,
     )
     if not filtered_records:
         st.info("当前筛选条件下没有匹配的历史记录，请调整项目名称、质控方法、批次或报告月份。")
@@ -174,6 +205,9 @@ def _render_record_meta_row(record: ReportHistoryRecord) -> None:
 
 
 def _render_report_history_card(record: ReportHistoryRecord) -> None:
+    if record.report_type == REPORT_TYPE_EVENT:
+        _render_event_report_card(record)
+        return
     export_identifier = record.file_name or f"历史记录 #{record.export_id}"
     regeneration_state_key = f"{REGENERATION_STATE_PREFIX}{record.export_id}"
 
@@ -224,6 +258,7 @@ def _render_report_history_card(record: ReportHistoryRecord) -> None:
                 st.markdown("**结论摘要**")
                 st.write(record.conclusion_text)
 
+        _render_archived_download(record)
         action_left, action_right = st.columns(2, gap="small")
         with action_left:
             if st.button(
@@ -247,7 +282,7 @@ def _render_report_history_card(record: ReportHistoryRecord) -> None:
 
         regeneration_state = st.session_state.get(regeneration_state_key)
         if isinstance(regeneration_state, dict):
-            st.caption("此 PDF 根据当前数据生成，内容可能与原报告不同。")
+            st.caption("这份新报告使用当前检测数据和设置，内容可能与原报告不同；原报告仍可下载。")
             with action_right:
                 st.download_button(
                     label="下载重新生成的 PDF",
@@ -266,3 +301,46 @@ def _render_report_history_card(record: ReportHistoryRecord) -> None:
                     disabled=True,
                     use_container_width=True,
                 )
+
+
+def _render_archived_download(record: ReportHistoryRecord) -> None:
+    try:
+        data = read_report_history_pdf(record)
+    except ValueError as exc:
+        st.caption(str(exc))
+    else:
+        st.download_button("下载已保存的原 PDF", data, file_name=record.file_name, mime="application/pdf",
+                           key=f"report_history_original_{record.export_id}", use_container_width=True)
+
+
+def _render_event_report_card(record: ReportHistoryRecord) -> None:
+    from ui.out_of_control import navigate_event
+    package = record.summary_json
+    event = package["event"]
+    origin = event["origin_snapshot"]
+    with st.container(border=True):
+        st.markdown(f"**{record.project_name} · 失控处理报告**")
+        st.caption(f"报告编号：{package['event_report_no']}｜生成时间：{record.generated_at_label}")
+        st.write(record.summary_text)
+        st.caption(f"仪器：{package['instrument_name']}｜原检测：{record.report_period_label}｜实际质控批号：{record.batch_label}")
+        with st.expander("查看生成报告时的处理记录"):
+            content = event.get("content") or {}
+            st.caption(f"本报告采用第 {package['revision_no']} 版处理记录。后续补充或更正处理内容，不会改变这份报告。")
+            for key, label in (("cause_analysis", "原因分析"), ("corrective_action", "纠正措施"),
+                               ("effect_description", "处理效果"), ("handler_text", "处理人"),
+                               ("confirmer_text", "确认人"), ("confirmed_at", "确认时间")):
+                st.markdown(f"**{label}**")
+                st.write(content.get(key) or "未记录")
+        _render_archived_download(record)
+        if st.button("查看当前处理记录", key=f"report_history_event_{record.export_id}"):
+            navigate_event(event["source_type"], event["source_id"], event_id=event["event_id"])
+            st.rerun()
+        if st.button("按当前处理版本生成报告", key=f"report_history_event_regenerate_{record.export_id}"):
+            try:
+                result = regenerate_report_from_history(record)
+            except ValueError as exc:
+                st.warning(str(exc))
+            else:
+                st.download_button("下载当前处理版本报告", result.pdf_bytes, file_name=result.file_name,
+                                   mime="application/pdf", key=f"report_history_event_new_{record.export_id}")
+                st.caption("处理记录未修改时，下载的是此前保存的报告。补充或更正处理记录后，可生成新报告。")

@@ -12,6 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from services.export_utils import dataframes_to_xlsx_bytes, xlsx_bytes_to_dataframes
 from services.project_config_io_service import (
     PROJECT_IMPORT_COLUMNS,
+    PROJECT_IDENTITY_COLUMNS,
     build_lot_config_xlsx,
     build_project_import_template_xlsx,
     build_project_template_xlsx,
@@ -113,7 +114,7 @@ def test_project_import_export_and_lot_export_round_trip() -> None:
         exported_template = xlsx_bytes_to_dataframes(
             build_project_template_xlsx(template_id)
         )
-        assert list(exported_template) == ["项目信息", "项目配置", "填写说明", "质量目标（供查阅）", "标准适用情况（供查阅）"]
+        assert list(exported_template) == ["项目信息", "项目配置", "产品来源", "产品覆盖", "填写说明", "质量目标（供查阅）", "标准适用情况（供查阅）"]
         assert len(exported_template["项目配置"].index) == 2
         assert "项目名称" in exported_template["项目信息"]["字段"].tolist()
         for info_sheet in ("项目信息", "模板信息"):
@@ -130,7 +131,7 @@ def test_project_import_export_and_lot_export_round_trip() -> None:
         )
         assert len(list_lot_config_items(lot_config_id).index) == 2
         exported_lot = xlsx_bytes_to_dataframes(build_lot_config_xlsx(lot_config_id))
-        assert list(exported_lot) == ["批次信息", "项目配置", "水平均值和标准差", "修订记录", "质量目标（供查阅）", "标准适用情况（供查阅）"]
+        assert list(exported_lot) == ["批次信息", "项目配置", "水平均值和标准差", "产品来源", "产品覆盖", "修订记录", "质量目标（供查阅）", "标准适用情况（供查阅）"]
         assert len(exported_lot["项目配置"].index) == 2
         assert exported_lot["水平均值和标准差"].empty
 
@@ -148,7 +149,7 @@ def test_quality_review_export_is_readable_but_cannot_confirm_an_import() -> Non
         original = decode(item_context('project', item_id)['quality_review_json'])
         payload = build_project_template_xlsx(fixture['template_id'])
         sheets = xlsx_bytes_to_dataframes(payload)
-        assert list(sheets['项目配置'].columns) == PROJECT_IMPORT_COLUMNS
+        assert list(sheets['项目配置'].columns) == PROJECT_IMPORT_COLUMNS + PROJECT_IDENTITY_COLUMNS
         source = sheets['质量目标（供查阅）'].iloc[0]
         assert source['来源名称'] == 'PCR 检测 SOP'
         assert source['来源版本或编号'] == 'QC-PCR-2026-09'

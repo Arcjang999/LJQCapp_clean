@@ -187,13 +187,6 @@ def render_lj_work_tab(
                 )
                 figure, chart_state = render_lj_chart_and_analysis_section(context)
 
-        render_section_intro(
-            title="检测记录与数据管理",
-            caption="下方可查看规则回顾、检测记录、维护和导入导出。",
-            badges=["记录回顾", "维护", "导入导出"],
-            tone="muted",
-        )
-
         with st.container(border=True):
             render_section_intro(
                 title="规则与记录概览",

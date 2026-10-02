@@ -977,7 +977,7 @@ def test_create_zscore_run_rejects_unexpected_level_for_two_level_batch() -> Non
             raise AssertionError("2-level batch should reject Level 3 input")
 
 
-def test_edit_saved_run_rebuilds_targets_realtime_and_status() -> None:
+def test_formal_saved_run_rejects_overwrite_and_preserves_all_evidence() -> None:
     with TemporaryDatabaseContext():
         project_id = create_zscore_project("Edit Rebuild Project", level_count=2)
         batch_id = create_zscore_batch(
@@ -1018,33 +1018,29 @@ def test_edit_saved_run_rebuilds_targets_realtime_and_status() -> None:
         initial_runs = get_zscore_runs(batch_id, "2_level_classic")
         assert initial_runs[-1]["run_status"] == "warning"
 
-        rebuild_state = update_saved_zscore_run(
-            run_id=int(initial_runs[6]["run_id"]),
-            test_time=BASE_TIME + pd.Timedelta(hours=6),
-            operator="editor-6",
-            level_results=[
-                {"level_id": "Level 1", "raw_value": 100.2},
-                {"level_id": "Level 2", "raw_value": 150.0},
-            ],
-        )
+        with database.read_snapshot() as connection:
+            original_database = '\n'.join(connection.iterdump())
+        try:
+            update_saved_zscore_run(
+                run_id=int(initial_runs[6]["run_id"]),
+                test_time=BASE_TIME + pd.Timedelta(hours=6),
+                operator="editor-6",
+                level_results=[
+                    {"level_id": "Level 1", "raw_value": 100.2},
+                    {"level_id": "Level 2", "raw_value": 150.0},
+                ],
+            )
+        except ValueError as exc:
+            assert '不能覆盖原始记录' in str(exc)
+        else:
+            raise AssertionError('Formal edits require versioned originals and downstream recalculation')
+        with database.read_snapshot() as connection:
+            assert '\n'.join(connection.iterdump()) == original_database
 
         updated_targets = get_zscore_level_targets(batch_id, "2_level_classic", required_n=5)
         updated_runs = get_zscore_runs(batch_id, "2_level_classic")
-        assert rebuild_state["overall_phase"] == PHASE_FORMAL_QC
-        assert updated_runs[6]["operator"] == "editor-6"
-        assert updated_runs[-1]["run_status"] == "accept"
-        assert math.isclose(
-            float(initial_targets["Level 1"]["final_target_mean"]),
-            float(updated_targets["Level 1"]["final_target_mean"]),
-            rel_tol=1e-9,
-            abs_tol=1e-9,
-        )
-        assert round(updated_targets["Level 1"]["final_target_mean"], 6) == round(
-            (100.0 + 101.0 + 99.0 + 100.0 + 100.5) / 5.0,
-            6,
-        )
-        assert round(updated_targets["Level 1"]["realtime_mean"], 6) == round((99.5 + 100.2) / 2.0, 6)
-        assert round(updated_targets["Level 1"]["realtime_sd"], 6) == round(math.sqrt(0.245), 6)
+        assert updated_targets == initial_targets
+        assert updated_runs == initial_runs
 
 
 def test_delete_saved_run_rebuilds_batch_and_plot_points() -> None:
@@ -1171,16 +1167,25 @@ def test_saved_run_maintenance_respects_level_count_for_two_and_three_level_batc
             )
 
         runs_before_delete = get_zscore_runs(batch_id_3, "3_level_threes")
-        update_saved_zscore_run(
-            run_id=int(runs_before_delete[5]["run_id"]),
-            test_time=BASE_TIME + pd.Timedelta(hours=5),
-            operator="editor-5",
-            level_results=[
-                {"level_id": "Level 1", "raw_value": 102.0},
-                {"level_id": "Level 2", "raw_value": 151.0},
-                {"level_id": "Level 3", "raw_value": 202.0},
-            ],
-        )
+        with database.read_snapshot() as connection:
+            original_database = '\n'.join(connection.iterdump())
+        try:
+            update_saved_zscore_run(
+                run_id=int(runs_before_delete[5]["run_id"]),
+                test_time=BASE_TIME + pd.Timedelta(hours=5),
+                operator="editor-5",
+                level_results=[
+                    {"level_id": "Level 1", "raw_value": 102.0},
+                    {"level_id": "Level 2", "raw_value": 151.0},
+                    {"level_id": "Level 3", "raw_value": 202.0},
+                ],
+            )
+        except ValueError as exc:
+            assert '不能覆盖原始记录' in str(exc)
+        else:
+            raise AssertionError('A formal three-level run must preserve its originals')
+        with database.read_snapshot() as connection:
+            assert '\n'.join(connection.iterdump()) == original_database
         try:
             delete_saved_zscore_run(int(runs_before_delete[6]["run_id"]))
         except ValueError as exc:assert '保留追溯' in str(exc)
@@ -1279,7 +1284,7 @@ def test_building_runs_lock_after_batch_enters_formal() -> None:
                 ],
             )
         except ValueError as exc:
-            assert "已锁定" in str(exc)
+            assert "不能覆盖原始记录" in str(exc)
         else:
             raise AssertionError("Locked building run should not be editable")
 
@@ -1795,8 +1800,8 @@ def test_formal_phase_hides_building_maintenance_section_and_keeps_locked_histor
         assert "保留本次检测" not in dialog_button_labels
         assert "禁用本次检测" not in dialog_button_labels
         assert "恢复本次检测" not in dialog_button_labels
-        assert any("只读" in value for value in info_values)
-        assert any("不能修改" in value or "不能删除" in value for value in info_values)
+        assert any("仅供查询" in value for value in info_values)
+        assert any("不能修改" in value or "不能覆盖原始记录" in value for value in info_values)
 
 
 def test_plotting_all_view_visually_splits_building_and_formal_phases() -> None:
@@ -1913,7 +1918,7 @@ def run_all_tests() -> None:
         test_plot_phase_filtering_views,
         test_collected_n_matches_building_plot_points,
         test_create_zscore_run_rejects_unexpected_level_for_two_level_batch,
-        test_edit_saved_run_rebuilds_targets_realtime_and_status,
+        test_formal_saved_run_rejects_overwrite_and_preserves_all_evidence,
         test_delete_saved_run_rebuilds_batch_and_plot_points,
         test_saved_run_maintenance_respects_level_count_for_two_and_three_level_batches,
         test_building_runs_lock_after_batch_enters_formal,

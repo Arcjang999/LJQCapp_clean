@@ -12,6 +12,12 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
+from ui.module_styles import (
+    module_styles,
+    render_module_card,
+    render_module_header,
+)
+
 from services.outlier_service import (
     get_outlier_manual_status_label,
     get_outlier_status_label,
@@ -110,7 +116,7 @@ ZSCORE_Y_AXIS_OPTIONS = ["标准视图", "全范围视图"]
 
 APP_TITLE = TEXT["app_title"]
 
-GLOBAL_PAGE_WATERMARK_TEXT = "邦德盛质控软件 · 演示与试用版。"
+GLOBAL_PAGE_WATERMARK_TEXT = "邦德盛质控软件"
 GLOBAL_PAGE_WATERMARK_ROTATION_DEGREES = -24
 GLOBAL_PAGE_WATERMARK_FONT_SIZE_PX = 28
 GLOBAL_PAGE_WATERMARK_FILL_COLOR = "#c3ccd9"
@@ -1092,9 +1098,17 @@ def inject_global_styles() -> None:
         """,
         unsafe_allow_html=True,
     )
+    st.html(module_styles(_active_module_tone()))
 
 GLOBAL_PAGE_SESSION_KEYS = (
+    "show_user_guide_page",
+    "show_batch_monthly_reports_page",
+    "show_daily_overview_page",
+    "show_daily_entry_page",
+    "show_out_of_control_page",
     "show_master_data_page",
+    "show_qc_materials_page",
+    "show_reference_management_page",
     "show_quality_targets_page",
     "show_project_management_page",
     "show_report_history_page",
@@ -1106,6 +1120,8 @@ def open_global_page(page_key: str, *, rerun: bool = True) -> None:
     if page_key not in GLOBAL_PAGE_SESSION_KEYS:
         raise ValueError(f"未知全局页面：{page_key}")
 
+    from ui.daily_navigation import remember_daily_return
+    remember_daily_return()
     for session_key in GLOBAL_PAGE_SESSION_KEYS:
         st.session_state[session_key] = session_key == page_key
     if page_key == "show_settings_page":
@@ -1119,35 +1135,96 @@ def _open_management_page(page_key: str) -> None:
     open_global_page(page_key, rerun=False)
 
 
-def render_page_chrome() -> None:
-    title_column, action_column = st.columns([0.50, 0.50], gap="medium", vertical_alignment="top")
-    with title_column:
-        st.title(APP_TITLE)
+def _open_user_guide_page(practical: bool = False) -> None:
+    st.session_state["global_help_menu"] = False
+    st.session_state["user_guide_practical"] = practical
+    open_global_page("show_user_guide_page", rerun=False)
 
-    with action_column:
-        management_column, history_column, settings_column, feedback_column = st.columns(4, gap="small")
-        with management_column:
-            with st.popover("资料与批次", width="stretch", key="global_management_menu", on_change="rerun"):
-                st.button("基础资料", key="open_master_data_page", width="stretch",
-                          on_click=_open_management_page, args=("show_master_data_page",))
-                st.button("项目/批次管理", key="open_project_management_page", width="stretch",
-                          on_click=_open_management_page, args=("show_project_management_page",))
-                st.button("质量目标", key="open_quality_targets_page", width="stretch",
-                          on_click=_open_management_page, args=("show_quality_targets_page",))
-        with history_column:
-            if st.button("报告历史", key="open_report_history_page", use_container_width=True):
-                open_global_page("show_report_history_page")
-        with settings_column:
-            if st.button("系统设置", key="open_system_settings", use_container_width=True):
-                open_global_page("show_settings_page")
-        with feedback_column:
-            with st.popover("帮助", width="stretch"):
-                st.caption("首页使用指南提供准备资料、日常录入、换批和报告操作说明。")
-                st.link_button(
-                    "问题反馈",
-                    "https://docs.qq.com/sheet/DY3V4b0FqS3psbkdK?tab=BB08J2",
-                    use_container_width=True,
-                )
+
+def open_reference_management(kind: str, *, category=None, rerun=True) -> None:
+    if kind not in ('manufacturer', 'instrument', 'reagent'):
+        raise ValueError('请选择要维护的资料。')
+    st.session_state['reference_management_kind'] = kind
+    st.session_state['global_management_menu'] = False
+    if category is not None:
+        st.session_state['reference_pending_manufacturer_category'] = category
+    open_global_page('show_reference_management_page', rerun=rerun)
+
+
+def _active_module_tone() -> str:
+    routes = (
+        ("show_user_guide_page", "guide"),
+        ("show_batch_monthly_reports_page", "reports"),
+        ("show_daily_overview_page", "daily"),
+        ("show_daily_entry_page", "daily"),
+        ("show_out_of_control_page", "handling"),
+        ("show_quality_targets_page", "projects"),
+        ("show_settings_page", "settings"),
+        ("show_report_history_page", "reports"),
+        ("show_master_data_page", "materials"),
+        ("show_qc_materials_page", "materials"),
+        ("show_reference_management_page", "materials"),
+        ("show_project_management_page", "projects"),
+    )
+    for flag, tone in routes:
+        if st.session_state.get(flag):
+            return tone
+    if st.session_state.get("top_level_method_selector") in ("单水平（LJ）", "多水平法", "即时法"):
+        return "daily"
+    return "projects"
+
+
+def render_page_chrome() -> None:
+    with st.container(key="module_topbar"):
+        title_column, action_column = st.columns([0.40, 0.60], gap="medium", vertical_alignment="center")
+        with title_column:
+            st.markdown(
+                '<div class="app-wordmark"><span class="app-wordmark-mark" aria-hidden="true">质控</span>'
+                f'<div><div class="app-wordmark-title">{html_escape(APP_TITLE)}</div>'
+                '<div class="app-wordmark-caption">项目 · 检测 · 处理 · 报告</div></div></div>',
+                unsafe_allow_html=True,
+            )
+        with action_column:
+            with st.container(key="module_navigation"):
+                qc_column, management_column, history_column, settings_column, feedback_column = st.columns([1.15, 1.25, 1, 1, 0.8], gap="small")
+                with qc_column:
+                    if st.button("质控品管理", key="open_qc_materials_page", width="stretch"):
+                        open_global_page("show_qc_materials_page")
+                with management_column:
+                    with st.container(key="module_nav_materials"):
+                        with st.popover("资料与批次", width="stretch", key="global_management_menu", on_change="rerun"):
+                            st.button("厂家管理", key="open_manufacturer_management", width="stretch",
+                                      on_click=open_reference_management, args=('manufacturer',), kwargs={'rerun': False})
+                            st.button("仪器管理", key="open_instrument_management", width="stretch",
+                                      on_click=open_reference_management, args=('instrument',), kwargs={'rerun': False})
+                            st.button("试剂管理", key="open_reagent_management", width="stretch",
+                                      on_click=open_reference_management, args=('reagent',), kwargs={'rerun': False})
+                            st.button("基础资料", key="open_master_data_page", width="stretch",
+                                      on_click=_open_management_page, args=("show_master_data_page",))
+                            st.button("项目/批次管理", key="open_project_management_page", width="stretch",
+                                      on_click=_open_management_page, args=("show_project_management_page",))
+                            st.button("质量目标", key="open_quality_targets_page", width="stretch",
+                                      on_click=_open_management_page, args=("show_quality_targets_page",))
+                            st.button("异常处理", key="open_out_of_control_page", width="stretch",
+                                      on_click=_open_management_page, args=("show_out_of_control_page",))
+                with history_column:
+                    if st.button("报告历史", key="open_report_history_page", use_container_width=True):
+                        open_global_page("show_report_history_page")
+                with settings_column:
+                    if st.button("系统设置", key="open_system_settings", use_container_width=True):
+                        open_global_page("show_settings_page")
+                with feedback_column:
+                    with st.container(key="module_nav_help"):
+                        with st.popover("帮助", width="stretch", key="global_help_menu", on_change="rerun"):
+                            st.caption("查看资料准备、日常录入、异常处理和报告操作说明。")
+                            st.button("使用说明", key="open_user_guide_page", width="stretch", on_click=_open_user_guide_page)
+                            st.button("操作说明", key="open_operation_guide_page", width="stretch",
+                                      on_click=_open_user_guide_page, args=(True,))
+                            st.link_button(
+                                "问题反馈",
+                                "https://docs.qq.com/sheet/DY3V4b0FqS3psbkdK?tab=BB08J2",
+                                use_container_width=True,
+                            )
 
 def _stringify_display_value(value: Any, fallback: str = "-") -> str:
     if value is None:
@@ -2030,14 +2107,14 @@ def render_import_review_summary(review_summary: dict[str, Any]) -> None:
     if file_error_count > 0 or file_warning_count > 0:
         parts: list[str] = []
         if file_error_count > 0:
-            parts.append(f"文件级阻断：{file_error_count} 条")
+            parts.append(f"需修改后才能导入的问题：{file_error_count} 条")
         if file_warning_count > 0:
-            parts.append(f"文件级提醒：{file_warning_count} 条")
+            parts.append(f"需核对的文件内容：{file_warning_count} 条")
         st.caption("；".join(parts))
 
     row_warning_groups = list(review_summary.get("row_warning_groups") or [])
     if row_warning_groups:
-        st.caption("行级警告汇总：")
+        st.caption("请按以下提示核对相应数据行：")
         for group in row_warning_groups:
             st.markdown(f"- {group['label']}：{group['row_count']} 行")
 

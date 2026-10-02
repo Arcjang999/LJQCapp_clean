@@ -169,6 +169,8 @@ def get_material_product(product_id: int) -> dict:
         row['lot_count'] = c.execute('SELECT COUNT(*) FROM md_qc_material_lots WHERE qc_material_id=?', (product_id,)).fetchone()[0]
         row['project_count'] = c.execute('SELECT COUNT(*) FROM qc_project_templates WHERE qc_material_id=?', (product_id,)).fetchone()[0]
         row['identity_locked'] = bool(row['lot_count'] or row['project_count'])
+        row['directory_managed'] = bool(c.execute('SELECT 1 FROM md_product_directory_keys WHERE product_id=?',(product_id,)).fetchone())
+        row['identity_locked'] = row['identity_locked'] or row['directory_managed']
         row['edit_version'] = _version(row)
         return row
 

@@ -6,7 +6,7 @@ from uuid import uuid4
 import pandas as pd
 import streamlit as st
 
-from services.master_data_service import list_instrument_models, list_manufacturers, list_units
+from services.master_data_service import list_instrument_models, list_manufacturers, list_units, MANUFACTURER_CATEGORIES
 
 MODAL_KEY = 'master_data_dialog'
 _CLEANUP_KEY = 'master_data_dialog_cleanup'
@@ -15,8 +15,8 @@ ENTITY_LABELS = {
     'lab_instrument': '仪器', 'reagent': '试剂', 'method': '方法学', 'unit': '单位', 'alias': '项目别名',
 }
 FIELD_LABELS = {
-    'display_name': '显示名称', 'legal_name': '法定名称', 'country_or_region': '国家或地区',
-    'registration_holder_name': '注册人 / 备案人', 'notes': '备注',
+    'display_name': '名称', 'legal_name': '法定名称', 'country_or_region': '国家或地区',
+    'registration_holder_name': '注册人 / 备案人', 'notes': '备注', 'categories': '厂家业务类别',
     'chinese_name': '检验项目名称', 'standard_code': '标准代码', 'english_name': '英文名称',
     'abbreviation': '常用缩写', 'category_name': '专业分类', 'specimen_type': '样本类型',
     'default_unit_id': '默认单位', 'manufacturer_id': '厂家', 'generic_name': '通用名称',
@@ -31,12 +31,12 @@ FIELD_LABELS = {
     'entity_id': '检验项目', 'entity_type': '所属资料', 'alias_text': '别名内容', 'alias_type': '别名类型',
 }
 _FIELDS = {
-    'manufacturer': ('display_name', 'legal_name', 'country_or_region', 'registration_holder_name', 'notes'),
+    'manufacturer': ('display_name', 'legal_name', 'country_or_region', 'registration_holder_name', 'categories', 'notes'),
     'test_item': ('chinese_name', 'standard_code', 'abbreviation', 'english_name', 'category_name',
                   'specimen_type', 'default_unit_id', 'notes'),
     'instrument_model': ('manufacturer_id', 'generic_name', 'brand_name', 'model', 'registration_no',
                          'device_category_code', 'catalog_no', 'notes'),
-    'lab_instrument': ('instrument_model_id', 'display_name', 'asset_code', 'serial_number',
+    'lab_instrument': ('display_name', 'manufacturer_id', 'model', 'asset_code', 'serial_number',
                        'department_name', 'instrument_group', 'location', 'notes'),
     'reagent': ('manufacturer_id', 'generic_name', 'trade_name', 'specification', 'registration_no',
                 'catalog_no', 'applicable_instrument_text', 'notes'),
@@ -72,7 +72,7 @@ def _clear_widgets(prefix):
             st.session_state.pop(key, None)
 
 
-def open_master_data_dialog(entity_type, entity_id=None, *, kind='edit', parent_id=None):
+def open_master_data_dialog(entity_type, entity_id=None, *, kind='edit', parent_id=None, manufacturer_category=None):
     from services.master_data_edit_service import get_master_record_context
     if entity_type not in ENTITY_LABELS or kind not in ('edit', 'status'):
         raise ValueError('请选择要维护的基础资料。')
@@ -89,8 +89,16 @@ def open_master_data_dialog(entity_type, entity_id=None, *, kind='edit', parent_
         parent = get_master_record_context('test_item', int(parent_id))['record']
     else:
         parent = None
-    initial = {field: (int(record[field]) if record.get(field) is not None else None)
+    initial = {field: list(record.get(field) or []) if field == 'categories' else
+               (int(record[field]) if record.get(field) is not None else None)
                if field in _RELATIONS else _text(record.get(field)) for field in _FIELDS[entity_type]}
+    if entity_type == 'manufacturer':
+        initial['categories'] = list(record.get('categories') or [])
+        if entity_id is None and manufacturer_category in MANUFACTURER_CATEGORIES:
+            initial['categories'] = [manufacturer_category]
+    if entity_type == 'lab_instrument' and record:
+        model = get_master_record_context('instrument_model', record['instrument_model_id'])['record']
+        initial.update(manufacturer_id=model['manufacturer_id'], model=model['model'])
     if entity_type == 'alias':
         initial.update(entity_type='test_item', entity_id=int(parent_id))
         initial['alias_type'] = record.get('alias_type') or 'custom'
@@ -119,9 +127,10 @@ def _saved(state, record_id, message):
     _close()
 
 
-def _relation_options(field, original):
+def _relation_options(field, original, category=None):
     if field == 'manufacturer_id':
-        records = list_manufacturers(include_disabled=True).to_dict('records')
+        all_records = list_manufacturers(include_disabled=True).to_dict('records')
+        records = [row for row in all_records if category is None or category in row['categories'] or row['id'] == original]
         label = lambda row: row['display_name']
     elif field == 'instrument_model_id':
         records = list_instrument_models(include_disabled=True).to_dict('records')
@@ -138,21 +147,28 @@ def _relation_options(field, original):
 
 def _render_field(state, field, locked):
     draft, initial = state['draft'], state['initial']
-    label = FIELD_LABELS[field] + (' *' if field in _REQUIRED else '')
+    label = ('仪器名称' if state['entity_type'] == 'lab_instrument' and field == 'display_name'
+             else FIELD_LABELS[field]) + (' *' if field in _REQUIRED else '')
     key = _key(state, field, draft[field])
     if field in _RELATIONS:
-        options, labels = _relation_options(field, initial[field])
+        category = {'instrument_model': 'instrument', 'lab_instrument': 'instrument', 'reagent': 'reagent'}.get(state['entity_type'])
+        options, labels = _relation_options(field, initial[field], category)
         # A previously selected active relation can become disabled while this dialog is open.
         # Keep the user's draft visible; the service will reject adopting a disabled record.
         if draft[field] is not None and draft[field] not in options:
             options.append(draft[field])
             labels[draft[field]] = '所选记录已停用或不存在，请重新选择'
         draft[field] = st.selectbox(label, options, key=key, disabled=locked,
+            placeholder='不设置默认单位' if field == 'default_unit_id' else '请选择' + FIELD_LABELS[field],
             format_func=lambda value: ('不设置默认单位' if field == 'default_unit_id' else '请选择')
             if value is None else labels[value])
+    elif field == 'categories':
+        draft[field] = st.multiselect(label, list(MANUFACTURER_CATEGORIES), key=key, disabled=locked,
+            format_func=MANUFACTURER_CATEGORIES.get, placeholder='请选择厂家业务类别，可多选')
+        st.caption('请按该厂家实际业务至少选择一类；经营多类产品时可以多选。')
     elif field == 'alias_type':
         draft[field] = st.selectbox(label, list(ALIAS_TYPE_LABELS), key=key, disabled=locked,
-                                    format_func=ALIAS_TYPE_LABELS.get)
+                                    format_func=ALIAS_TYPE_LABELS.get, placeholder='请选择别名类型')
     elif field == 'notes':
         draft[field] = st.text_area(label, key=key, disabled=locked)
     else:
@@ -174,7 +190,7 @@ def _cancel(state):
 
 
 def _render_edit(state, current):
-    from services.master_data_edit_service import save_master_record
+    from services.master_data_edit_service import save_master_record, save_lab_instrument_details
     entity, record_id = state['entity_type'], state['entity_id']
     if state['discard']:
         st.warning('本次修改尚未保存，是否放弃？')
@@ -187,6 +203,8 @@ def _render_edit(state, current):
         return
     readonly = bool(current and current['record']['is_disabled'])
     locked = set(current['locked_fields']) if current else set()
+    if entity == 'lab_instrument' and 'instrument_model_id' in locked:
+        locked.update(('manufacturer_id', 'model'))
     if readonly:
         st.info('此记录已停用，暂不能编辑。恢复后可继续维护。')
     elif current and current['lock_reason']:
@@ -195,8 +213,8 @@ def _render_edit(state, current):
         st.warning('此记录已修改。当前填写内容仍保留，请关闭后重新打开，核对最新资料。')
     if entity == 'alias':
         st.caption('检验项目：' + state['parent']['chinese_name'])
-    if entity == 'lab_instrument' and record_id is None:
-        st.caption('先选择已有仪器型号；需要新增型号时，请取消后在“仪器型号”中新增。')
+    if entity == 'lab_instrument':
+        st.caption('填写本机名称、厂家和型号；同型号的多台仪器请使用不同名称，并填写各自的资产编号或序列号。')
     fields = [field for field in _FIELDS[entity] if field != 'notes']
     for start in range(0, len(fields), 2):
         columns = st.columns(2)
@@ -213,12 +231,18 @@ def _render_edit(state, current):
             open_master_data_dialog(entity, record_id, kind='status')
     elif right.button('保存', key='md_dialog_save', type='primary', width='stretch'):
         try:
-            if record_id is None and entity in ('instrument_model', 'reagent') and state['draft']['manufacturer_id'] is None:
-                raise ValueError('请选择厂家；如列表中没有，请取消后到“厂家”中新增。')
+            if entity == 'manufacturer' and not state['draft']['categories']:
+                raise ValueError('请至少选择一类：仪器厂家、试剂厂家或质控品厂家。')
+            if record_id is None and entity in ('instrument_model', 'lab_instrument', 'reagent') and state['draft']['manufacturer_id'] is None:
+                raise ValueError('请选择厂家；如列表中没有，请取消后到“资料与批次 → 厂家管理”中登记对应类别的厂家。')
             values = {field: value for field, value in state['draft'].items()
                       if record_id is None or value != state['initial'][field]}
-            saved_id = save_master_record(entity, values, entity_id=record_id,
-                                          expected_fingerprint=state['fingerprint'])
+            if entity == 'lab_instrument':
+                saved_id = save_lab_instrument_details(dict(state['draft']), entity_id=record_id,
+                                                       expected_fingerprint=state['fingerprint'])
+            else:
+                saved_id = save_master_record(entity, values, entity_id=record_id,
+                                              expected_fingerprint=state['fingerprint'])
         except ValueError as error:
             st.error(str(error))
         else:

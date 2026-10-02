@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import datetime, timedelta
 from html import escape as html_escape
 from io import BytesIO
 import math
@@ -347,6 +348,27 @@ def _column_index_from_reference(reference: str) -> int:
     return result - 1
 
 
+def _xlsx_date_styles(archive: ZipFile) -> set[int]:
+    """Date-bearing cell styles; number/time-only formats remain numeric."""
+    if 'xl/styles.xml' not in archive.namelist():
+        return set()
+    try:
+        styles = ET.fromstring(archive.read('xl/styles.xml'))
+        formats = {int(entry.attrib['numFmtId']): entry.attrib.get('formatCode', '')
+                   for entry in styles.findall(f'{{{_SPREADSHEET_NS}}}numFmts/{{{_SPREADSHEET_NS}}}numFmt')}
+        dates = set()
+        for index, style in enumerate(styles.findall(f'{{{_SPREADSHEET_NS}}}cellXfs/{{{_SPREADSHEET_NS}}}xf')):
+            format_id = int(style.attrib.get('numFmtId', '0'))
+            # Quoted text, escaped characters, colors and locale tags are literals.
+            code = formats.get(format_id, '').split(';', 1)[0]
+            code = re.sub(r'"[^"]*"|\\.|_.|\*.|\[[^\]]*\]', '', code)
+            if format_id in {14, 15, 16, 17, 22} or re.search(r'[dy]', code, re.IGNORECASE):
+                dates.add(index)
+        return dates
+    except (ET.ParseError, KeyError, ValueError) as exc:
+        raise ValueError('XLSX 的日期格式资料已损坏，请重新保存文件后再导入。') from exc
+
+
 def xlsx_bytes_to_dataframes(data: bytes) -> dict[str, pd.DataFrame]:
     """Read values from ordinary XLSX worksheets used by the V1.1 import flow."""
     if not data:
@@ -363,6 +385,10 @@ def xlsx_bytes_to_dataframes(data: bytes) -> dict[str, pd.DataFrame]:
             rels_root = ET.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
         except (KeyError, ET.ParseError) as exc:
             raise ValueError("XLSX 缺少工作簿结构或结构已损坏。") from exc
+        date_styles = _xlsx_date_styles(archive)
+        properties = workbook_root.find(f'{{{_SPREADSHEET_NS}}}workbookPr')
+        date1904 = properties is not None and properties.attrib.get('date1904') in ('1', 'true')
+        date_epoch = datetime(1904, 1, 1) if date1904 else datetime(1899, 12, 30)
 
         shared_strings: list[str] = []
         if "xl/sharedStrings.xml" in archive.namelist():
@@ -433,6 +459,13 @@ def xlsx_bytes_to_dataframes(data: bytes) -> dict[str, pd.DataFrame]:
                             value = int(number) if number.is_integer() else number
                         except ValueError:
                             value = raw_value
+                        if isinstance(value, (int, float)) and int(cell.attrib.get('s', '0')) in date_styles:
+                            try:
+                                # Excel's 1900 calendar includes a nonexistent leap day.
+                                adjusted = number + 1 if not date1904 and 0 < number < 60 else number
+                                value = date_epoch + timedelta(milliseconds=round(adjusted * 86400000))
+                            except (ValueError, OverflowError) as exc:
+                                raise ValueError(f'工作表“{sheet_name}”含有无效日期，请核对后再导入。') from exc
                     row_values[column_index] = value
                 matrix.append(row_values)
 
