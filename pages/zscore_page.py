@@ -6,9 +6,6 @@ import pandas as pd
 import streamlit as st
 
 from plotting import close_figure
-from pages.management import (
-    guard_work_tab_selection,
-)
 from pages.zscore_config_section import prepare_zscore_v12_project_batch_context, render_zscore_v12_configuration_selection
 from pages.zscore_report_section import render_zscore_monthly_report_section
 from pages.zscore_sections import (
@@ -17,9 +14,6 @@ from pages.zscore_sections import (
     render_zscore_chart_analysis_section,
     render_zscore_chart_controls,
     render_zscore_entry_section,
-    render_zscore_export_import_section,
-    render_zscore_record_maintenance_entry,
-    render_zscore_maintenance_section,
     render_zscore_rule_records_overview_section,
     render_zscore_vendor_reference_section,
 )
@@ -27,14 +21,10 @@ from ui.common import (
     TEXT,
     format_optional_float,
     format_zscore_template_display_name,
-    render_level_summary_cards,
-    render_section_intro,
-    render_zscore_batch_header,
 )
 from zscore_logic import (
     PHASE_FORMAL_QC,
     calculate_formal_realtime_stats,
-    format_zscore_level_label_summary,
 )
 
 
@@ -195,166 +185,72 @@ def _render_zscore_level_summary_compact_section(context: dict[str, object]) -> 
                     st.warning(range_warning)
 
 
-def _render_zscore_maintenance_summary(context: dict[str, object]) -> None:
-    history_runs = context["history_runs"]
-    latest_run = context["latest_run"]
-    level_summary = _build_level_building_summary(context)
-    disabled_total = sum(item["disabled_n"] for item in level_summary.values())
-    effective_total = sum(item["effective_n"] for item in level_summary.values())
-    abnormal_run_count = sum(
-        1 for run in history_runs if str(run.get("run_status") or "") in {"warning", "reject"}
-    )
-    latest_test_time = (
-        pd.to_datetime(latest_run["test_time"]).strftime("%Y-%m-%d %H:%M")
-        if latest_run is not None and latest_run.get("test_time") is not None
-        else "-"
-    )
-    render_level_summary_cards(
-        [
-            {
-                "title": "维护概览",
-                "chips": [
-                    f"当前记录 {len(history_runs)} 次",
-                    f"生效参数建立点 {effective_total} 个",
-                    f"已禁用点 {disabled_total} 个",
-                    f"异常记录 {abnormal_run_count} 次",
-                    f"最新检测 {latest_test_time}",
-                ],
-                "sections": [],
-                "footer": "",
-            }
-        ]
-    )
-
-
 def render_zscore_page() -> None:
     st.subheader("多水平法")
-    st.caption("适用于 2 水平或 3 水平项目的联合判断。")
     projects_df, selected_project_id, batches_df, selected_batch_id, issues = prepare_zscore_v12_project_batch_context()
+    if selected_batch_id is None:
+        render_zscore_v12_configuration_selection(
+            st.container(), projects_df, selected_project_id, batches_df, selected_batch_id, issues,
+        )
+        from ui.record_actions import render_pending_record_dialog
+        from ui.data_transfer import render_pending_transfer_dialog
+        from ui.zscore_reference_dialog import render_pending_zscore_reference_dialog
+        if st.session_state.get('qc_record_dialog'):
+            render_pending_record_dialog('zscore', None)
+        elif st.session_state.get('qc_transfer_dialog'):
+            render_pending_transfer_dialog('zscore')
+        else:
+            render_pending_zscore_reference_dialog()
+        return
+    tab_names = [TEXT["current_batch"], "月度报告"]
     if st.session_state.get('zscore_workbench_tabs') == 'Z-score 月报':
         st.session_state['zscore_workbench_tabs'] = '月度报告'
-    manage_tab, work_tab, report_tab = st.tabs(["项目与批次", TEXT["current_batch"], "月度报告"], key='zscore_workbench_tabs', on_change='rerun')
-    render_zscore_v12_configuration_selection(
-        manage_tab,
-        projects_df,
-        selected_project_id,
-        batches_df,
-        selected_batch_id,
-        issues,
-    )
-    guard_work_tab_selection(work_tab, selected_project_id, selected_batch_id)
-    guard_work_tab_selection(report_tab, selected_project_id, selected_batch_id)
-
+    if st.session_state.get('zscore_workbench_tabs') not in tab_names:
+        st.session_state['zscore_workbench_tabs'] = TEXT['current_batch']
+    work_tab, report_tab = st.tabs(tab_names, key='zscore_workbench_tabs', on_change='rerun')
     context = build_zscore_workbench_context(selected_batch_id)
     batch = context["batch"]
     template = context["template"]
-    cv_limit = context["cv_limit"]
     input_value_type_label = context["input_value_type_label"]
     level_count = int(context["level_count"])
     required_n = int(context["required_n"])
-    template_label = format_zscore_template_display_name(template)
-    level_summary = format_zscore_level_label_summary(batch, context["required_level_ids"])
 
     with work_tab:
-        render_zscore_batch_header(
-            project_name=batch["project_name"],
-            batch_id=batch["id"],
-            phase_label=context["overall_phase_label"],
-            level_count=level_count,
-            required_n=required_n,
-            input_value_type_label=input_value_type_label,
-            template_label=template_label,
-            instrument=batch["instrument"],
-            reagent=batch["reagent"],
-            qc_material=batch["qc_material"],
-            concentration=batch["concentration"],
-            level_summary=level_summary,
-            lot_no=batch["lot_no"],
-            cv_limit=cv_limit,
-            unit_symbol=dict(batch).get("unit_symbol"),
-            method_name=dict(batch).get("method_name"),
-            config_name=dict(batch).get("v11_config_name"),
-            expiry_date=dict(batch).get("v11_expiry_date"),
-        )
-
-        render_section_intro(
-            title="本次质控",
-            caption=None,
-            badges=["多水平法", f"{level_count} 水平", context["overall_phase_label"], input_value_type_label],
-            tone="accent",
-        )
-        from ui.quality_targets import render_batch_quality
-        render_batch_quality("zscore", selected_batch_id)
+        st.caption(f"{batch['project_name']} · {batch['instrument']} · 质控批号 {batch['lot_no']} · "
+                   f"{level_count} 水平 · {context['overall_phase_label']} · {input_value_type_label}")
+        with st.expander('批次资料与质量目标', expanded=False):
+            st.write(f"质控品：{batch['qc_material']}｜试剂：{batch['reagent']}｜浓度：{batch['concentration']}")
+            batch_details = dict(batch)
+            st.caption(f"单位：{batch_details.get('unit_symbol') or '-'} · "
+                       f"检测方法：{batch_details.get('method_name') or '-'} · "
+                       f"批号效期：{batch_details.get('v11_expiry_date') or '-'}")
+            st.caption(f"规则组合：{format_zscore_template_display_name(template)}｜参数建立点数：{required_n}")
+            from ui.quality_targets import render_batch_quality
+            render_batch_quality("zscore", selected_batch_id)
         entry_col, chart_col = st.columns([0.94, 1.24], gap="large")
-
         with chart_col:
-            with st.container():
-                render_section_intro(
-                    title="图表与最新结果分析",
-                    caption=None,
-                    tone="accent",
-                )
-                phase_scope, view_mode, selected_level, y_axis_mode, standard_sd_limit = render_zscore_chart_controls(
-                    selected_batch_id,
-                    template,
-                    context["default_phase_scope"],
-                    context["level_label_map"],
-                )
-                chart_panel_state = render_zscore_chart_analysis_section(
-                    context,
-                    phase_scope,
-                    view_mode,
-                    selected_level,
-                    y_axis_mode,
-                    standard_sd_limit,
-                )
-
-        with entry_col:
-            with st.container():
-                render_section_intro(
-                    title="本次检测录入",
-                    caption=f"请填写检测时间、检测人与各水平{input_value_type_label}。",
-                    tone="accent",
-                )
-                render_zscore_entry_section(context, selected_batch_id)
-                _render_zscore_level_summary_compact_section(context)
-
-        render_zscore_rule_records_overview_section(context)
-
-        with st.container(border=True):
-            render_section_intro(
-                title="厂家参考值（仅作参考）",
-                caption="可按水平查看或补充厂家参考值与来源备注。",
-                tone="muted",
+            st.markdown('**图表与最新结果分析**')
+            phase_scope, view_mode, selected_level, y_axis_mode, standard_sd_limit = render_zscore_chart_controls(
+                selected_batch_id, template, context["default_phase_scope"], context["level_label_map"],
             )
-            render_zscore_vendor_reference_section(context, selected_batch_id)
-
-        lower_left, lower_right = st.columns([1.0, 1.0], gap="large")
-        with lower_left:
-            with st.container():
-                if context["overall_phase"] == PHASE_FORMAL_QC:
-                    render_section_intro(
-                        title="检测记录维护",
-                        caption="参数建立记录已锁定，可在维护记录中查看。",
-                        tone="muted",
-                    )
-                    render_zscore_record_maintenance_entry(context["history_runs"], context["batch_context"])
-                else:
-                    render_section_intro(
-                        title="检测记录维护",
-                        caption="先看结论，再看各水平明细，再执行维护操作。",
-                        tone="muted",
-                    )
-                    _render_zscore_maintenance_summary(context)
-                    render_zscore_maintenance_section(context)
-        with lower_right:
-            with st.container(border=True):
-                with st.expander("导出与导入", expanded=False):
-                    render_zscore_export_import_section(context, selected_batch_id, chart_panel_state)
+            chart_panel_state = render_zscore_chart_analysis_section(
+                context, phase_scope, view_mode, selected_level, y_axis_mode, standard_sd_limit,
+            )
+        with entry_col:
+            st.markdown('**本次检测录入**')
+            render_zscore_entry_section(context, selected_batch_id)
+            _render_zscore_level_summary_compact_section(context)
+        from ui.data_transfer import render_transfer_toolbar
+        render_transfer_toolbar('zscore', context, selected_batch_id, chart_panel_state)
+        render_zscore_rule_records_overview_section(context)
+        render_zscore_vendor_reference_section(context, selected_batch_id)
         close_figure(chart_panel_state.get("figure"))
-
-        from pages.lot_lifecycle_section import render_result_provenance
-        render_result_provenance("zscore",selected_batch_id)
-
     with report_tab:
         render_zscore_monthly_report_section(selected_batch_id)
+    # A page run can render only one native dialog, including other tab actions.
+    from ui.record_actions import render_pending_record_dialog
+    from ui.zscore_reference_dialog import render_pending_zscore_reference_dialog
+    if not st.session_state.get('qc_record_dialog') and not st.session_state.get('qc_transfer_dialog'):
+        render_pending_zscore_reference_dialog()
+    elif st.session_state.get('qc_record_dialog') and not st.session_state.get('qc_transfer_dialog'):
+        render_pending_record_dialog('zscore', selected_batch_id)

@@ -172,24 +172,25 @@ def test_lj_building_maintenance_shows_current_effective_status_after_restore() 
         at.session_state["test_batch_id"] = batch_id
         at.run()
 
-        initial_options = [str(option) for option in at.selectbox(key="lj_outlier_record_selector").options]
-        assert any("疑似离群" in option for option in initial_options)
-        assert not any("已恢复" in option for option in initial_options)
-
-        at.button(key=f"lj_disable_{suspect_id}").click().run()
-        disabled_captions = [str(item.value) for item in at.caption]
-        assert any("当前状态：已禁用" in value for value in disabled_captions)
-
-        at.button(key=f"lj_restore_{suspect_id}").click().run()
-        restored_options = [str(option) for option in at.selectbox(key="lj_outlier_record_selector").options]
-        restored_captions = [str(item.value) for item in at.caption]
-        success_values = [str(item.value) for item in at.success]
-
-        assert any("当前状态：疑似离群" in value for value in restored_captions)
-        assert any("疑似离群" in option for option in restored_options)
-        assert not any("已恢复" in option for option in restored_options)
-        assert not any("已恢复" in value for value in restored_captions if "当前状态：" in value)
-        assert any("参数建立点已恢复" in value for value in success_values)
+        assert not list(at.exception), str(list(at.exception))
+        at.session_state[f'lj_records_{batch_id}_selected'] = suspect_id
+        at.run()
+        assert '疑似离群' in at.dataframe[0].value['判定'].tolist()
+        at.button(key=f"qc_record_lj_{batch_id}_disable").click().run()
+        next(widget for widget in at.text_area if widget.label == '维护原因').set_value('操作核查，暂不纳入建靶')
+        at.button(key='record_save').click().run()
+        assert not list(at.exception), str(list(at.exception))
+        assert '已禁用' in at.dataframe[0].value['判定'].tolist()
+        assert build_lj_workbench_context(batch_id)['stats']['effective_building_count'] == 4
+        at.button(key=f"qc_record_lj_{batch_id}_restore").click().run()
+        next(widget for widget in at.text_area if widget.label == '维护原因').set_value('复核完成，恢复建靶统计')
+        at.button(key='record_save').click().run()
+        assert not list(at.exception), str(list(at.exception))
+        restored_statuses = at.dataframe[0].value['判定'].tolist()
+        assert '疑似离群' in restored_statuses
+        assert '已恢复' not in restored_statuses
+        assert build_lj_workbench_context(batch_id)['stats']['effective_building_count'] == 5
+        assert any('恢复记录已保存' in str(item.value) for item in at.success)
 
 
 def test_lj_latest_analysis_switches_between_building_and_formal() -> None:

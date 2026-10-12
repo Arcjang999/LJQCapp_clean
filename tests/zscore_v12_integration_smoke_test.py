@@ -193,21 +193,38 @@ def test_page_selection_and_disabled_selection_are_consistent():
         assert not any(button.label in ("创建项目", "创建批次") for button in at.button)
         selector = at.selectbox(key="v12_zscore_project_selector")
         selector.set_value(selector.options[1]).run()
+        assert at.session_state["zscore_selected_project_id"] == fixture["project_id"]
+        assert at.session_state["zscore_selected_batch_id"] is None
         selector = at.selectbox(key="v12_zscore_batch_selector")
+        assert selector.value == "请选择设置已确认的批次"
         selector.set_value(selector.options[1]).run()
         assert not list(at.exception)
         assert at.session_state["zscore_selected_batch_id"] == fixture["batch_id"]
-        text = " ".join(str(item.value) for item in at.markdown) + " " + " ".join(item.proto.body for item in at.get("html"))
+        assert not any(selector.key in ("v12_zscore_project_selector", "v12_zscore_batch_selector") for selector in at.selectbox)
+        assert [tab.label for tab in at.tabs] == ["当前批次", "月度报告"]
+        text = " ".join(str(item.value) for item in [*at.markdown, *at.caption]) + " " + " ".join(item.proto.body for item in at.get("html"))
         assert "mg/L" in text and "V12 Z-score 检测法" in text
-        selector = at.selectbox(key="v12_zscore_project_selector")
-        selector.set_value(next(option for option in selector.options if "第二个项目" in option)).run()
+        assert any("V12 Z-score" in item.value and "V12-ZS-LOT" in item.value for item in at.caption)
+
+        # Change the inherited context through the project workspace.
+        at.button(key="back_project_home").click().run()
+        at.session_state["home_selected_project_id"] = second["template_id"]
+        at.run()
+        at.button(key="home_open_project").click().run()
+        at.button(key="home_open_batch").click().run()
+        assert not list(at.exception)
         assert at.session_state["zscore_selected_project_id"] == second["project_id"]
-        assert at.session_state["zscore_selected_batch_id"] is None
-        assert at.selectbox(key="v12_zscore_batch_selector").value == "请选择设置已确认的批次"
-        selector = at.selectbox(key="v12_zscore_project_selector")
-        selector.set_value(next(option for option in selector.options if "V12 Z-score" in option)).run()
-        selector = at.selectbox(key="v12_zscore_batch_selector")
-        selector.set_value(selector.options[1]).run()
+        assert at.session_state["zscore_selected_batch_id"] == second["batch_id"]
+        assert any("第二个项目" in item.value and "第二台仪器" in item.value for item in at.caption)
+        at.button(key="back_project_home").click().run()
+        at.button(key="workspace_back").click().run()
+        at.session_state["home_selected_project_id"] = fixture["template_id"]
+        at.run()
+        at.button(key="home_open_project").click().run()
+        at.button(key="home_open_batch").click().run()
+        assert not list(at.exception)
+        assert at.session_state["zscore_selected_project_id"] == fixture["project_id"]
+        assert at.session_state["zscore_selected_batch_id"] == fixture["batch_id"]
         set_lot_config_disabled(fixture["config_id"], is_disabled=True, reason="停用")
         at.run()
         assert not list(at.exception)

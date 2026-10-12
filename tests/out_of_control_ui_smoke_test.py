@@ -361,8 +361,11 @@ _render_instant_records_section(st.session_state['context'])
                         app.run()
                         self.assert_healthy(app)
                         if mode.endswith('_records'):
-                            self.fill(app, 'selectbox', '选择需要处理的异常记录', source['source_id'])
-                        self.click(app, '打开失控处理')
+                            app.session_state[f"{method}_records_{binding['runtime_batch_id']}_selected"] = source['source_id']
+                            app.run()
+                            self.click(app, '异常处理')
+                        else:
+                            self.click(app, '打开失控处理')
                         selection = app.session_state['ooc_selection']
                         self.assertEqual(selection['source_type'], source['source_type'])
                         self.assertEqual(selection['source_id'], source['source_id'])

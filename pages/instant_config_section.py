@@ -20,11 +20,12 @@ def prepare_instant_v12_project_batch_context():
     return projects, project_id, batches, batch_id, issues
 
 
-def render_instant_v12_configuration_selection(manage_tab, projects, project_id, batches, batch_id, issues):
-    with manage_tab:
+def render_instant_v12_configuration_selection(selection_area, projects, project_id, batches, batch_id, issues):
+    """Safe fallback for a missing context, not a second selector in the workbench."""
+    with selection_area:
         render_section_intro(
-            title="即时法项目与批次选择",
-            caption="请选择已确认设置的即时法项目和批次。逐次录入本批质控结果，建立均值和标准差。",
+            title="选择即时法批次",
+            caption="请返回项目工作台进入已确认的批次，或在此选择后继续。",
             badges=["单水平", "3 点开始检验", "20 点后可转 LJ"], tone="accent",
         )
         if issues:
@@ -62,7 +63,7 @@ def render_instant_v12_configuration_selection(manage_tab, projects, project_id,
                 st.session_state["instant_selected_batch_id"] = batch_map[label]
                 st.rerun()
         if batch_id is None:
-            st.info("请选择批次后进入“当前批次”。")
+            st.info("请选择已确认的批次，继续录入和查看记录。")
         elif not batches.empty:
             display = batches.copy()
             display["transfer_status"] = display["transfer_status"].map({"transferred": "已转入 LJ", "not_transferred": "未转入"}).fillna("未转入")

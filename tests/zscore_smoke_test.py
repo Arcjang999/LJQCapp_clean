@@ -1695,31 +1695,47 @@ def test_building_maintenance_page_exposes_only_run_level_actions() -> None:
         at.run()
 
         assert not list(at.exception)
-        run_option_labels = [
-            str(option) for option in at.selectbox(key="zscore_outlier_run_selector").options
-        ]
-        button_labels = [str(button.label) for button in at.button]
-        caption_values = [str(item.value) for item in at.caption]
-        expander_states = {str(expander.label): bool(expander.proto.expanded) for expander in at.expander}
+        record_tables = [dataframe.value for dataframe in at.dataframe
+                         if {"检测序号", "阶段", "维护状态"}.issubset(dataframe.value.columns)]
+        assert len(record_tables) == 1
+        assert len(record_tables[0]) == 3
+        assert not any(widget.key in ("zscore_outlier_run_selector", "zscore_run_selector") for widget in at.selectbox)
+        assert at.button(key=f"qc_record_zscore_{batch_id}_view").disabled
+        assert "导出与导入" not in [expander.label for expander in at.expander]
 
-        assert run_option_labels
-        assert all(" | 正常" in label for label in run_option_labels)
-        assert not any("已恢复" in label for label in run_option_labels)
-        assert any("当前状态：正常" in value for value in caption_values)
-        assert "保留本次检测" in button_labels
-        assert "禁用本次检测" in button_labels
-        assert "恢复本次检测" in button_labels
-        assert "保留" not in button_labels
-        assert "禁用" not in button_labels
-        assert "恢复" not in button_labels
-        assert any("以下操作会同时更新本次检测的全部水平" in value for value in caption_values)
-        static_caption_values = [
-            value
-            for value in caption_values
-            if "项目：" not in value and "检测人：" not in value
-        ]
-        assert not any("run" in value.lower() or "level" in value.lower() for value in static_caption_values)
-        assert expander_states["导出与导入"] is False
+        original_runs = get_zscore_runs(batch_id, template_id)
+        selected_id = int(original_runs[1]["run_id"])
+        original_values = {int(run["run_id"]): {level["level_id"]: level["raw_value"]
+                          for level in run["level_results"]} for run in original_runs}
+        at.session_state[f"zscore_records_{batch_id}_selected"] = selected_id
+        at.run()
+        actions = [button.label for button in at.button if button.key.startswith(f"qc_record_zscore_{batch_id}_")]
+        assert actions == ["查看", "编辑", "保留", "禁用"]
+        at.button(key=f"qc_record_zscore_{batch_id}_disable").click().run()
+        assert not list(at.exception)
+        assert at.session_state["qc_record_dialog"]["record_id"] == selected_id
+        assert any("全部水平" in item.value for item in at.caption)
+        next(widget for widget in at.text_area if widget.label == "维护原因").set_value("本次检测操作有误，整次暂不参加建靶")
+        at.button(key="record_save").click().run()
+        assert not list(at.exception)
+        assert not list(at.error)
+        disabled_runs = get_zscore_runs(batch_id, template_id)
+        for run in disabled_runs:
+            assert len(run["level_results"]) == 2
+            assert {level["level_id"]: level["raw_value"] for level in run["level_results"]} == original_values[int(run["run_id"])]
+            assert all(bool(level["is_building_included"]) == (int(run["run_id"]) != selected_id)
+                       for level in run["level_results"])
+
+        at.selectbox(key=f"zscore_records_{batch_id}_filter_widget").set_value("已禁用").run()
+        at.session_state[f"zscore_records_{batch_id}_selected"] = selected_id
+        at.run()
+        at.button(key=f"qc_record_zscore_{batch_id}_restore").click().run()
+        next(widget for widget in at.text_area if widget.label == "维护原因").set_value("已核实检测结果，整次恢复参加建靶")
+        at.button(key="record_save").click().run()
+        assert not list(at.exception)
+        assert not list(at.error)
+        assert all(level["is_building_included"] for run in get_zscore_runs(batch_id, template_id)
+                   for level in run["level_results"])
 
 
 def test_formal_phase_hides_building_maintenance_section_and_keeps_locked_history_read_only() -> None:
@@ -1764,44 +1780,44 @@ def test_formal_phase_hides_building_maintenance_section_and_keeps_locked_histor
         at.run()
 
         assert not list(at.exception)
-        button_labels = [str(button.label) for button in at.button]
-        caption_values = [str(item.value) for item in at.caption]
-        expander_states = {str(expander.label): bool(expander.proto.expanded) for expander in at.expander}
-
-        assert "打开维护记录" in button_labels
-        assert "保留本次检测" not in button_labels
-        assert "禁用本次检测" not in button_labels
-        assert "恢复本次检测" not in button_labels
-        assert expander_states["导出与导入"] is False
-
-        at.button(key="open_zscore_record_maintenance_dialog").click().run()
-
+        locked_runs = get_zscore_runs(batch_id, template_id)
+        assert all(run["is_locked_for_maintenance"] for run in locked_runs)
+        assert not any(run["phase"] == PHASE_FORMAL_QC for run in locked_runs)
+        assert "导出与导入" not in [expander.label for expander in at.expander]
+        at.selectbox(key=f"zscore_records_{batch_id}_filter_widget").set_value("参数建立期").run()
+        selected_id = int(locked_runs[1]["run_id"])
+        from services.record_maintenance_service import get_record_context, save_record_action
+        locked_context = get_record_context("zscore", selected_id, batch_id)
+        assert locked_context["edit_allowed"] is False
+        before = get_zscore_runs_with_levels_for_batch(batch_id)
+        try:
+            save_record_action("zscore", batch_id, selected_id, "edit", reason="锁定后不得覆盖原始检测",
+                               expected_fingerprint=locked_context["fingerprint"], request_key="locked-no-formal-edit",
+                               changes={"test_time": locked_context["record"]["test_time"], "operator": "试图修改人员",
+                                        "level_values": {level["level_id"]: level["raw_value"] + 1
+                                                         for level in locked_context["record"]["level_results"]}})
+        except ValueError as exc:
+            assert str(exc) == locked_context["edit_reason"]
+        else:
+            raise AssertionError("建靶完成后仍允许覆盖原始检测记录")
+        assert get_zscore_runs_with_levels_for_batch(batch_id) == before
+        at.session_state[f"zscore_records_{batch_id}_selected"] = selected_id
+        at.run()
         assert not list(at.exception)
-        maintenance_tables = [
-            dataframe.value
-            for dataframe in at.dataframe
-            if {"检测序号", "阶段", "维护状态", "水平摘要"}.issubset(set(dataframe.value.columns))
-        ]
-        assert maintenance_tables
-        maintenance_df = maintenance_tables[0]
-        assert "均值和标准差建立中" in maintenance_df["阶段"].tolist()
-        assert "参数建立期只读" in maintenance_df["维护状态"].tolist()
-
-        run_options = list(at.selectbox(key="zscore_run_selector").options)
-        assert len(run_options) > 1
-        at.selectbox(key="zscore_run_selector").set_value(run_options[1]).run()
-
+        actions = [button.label for button in at.button if button.key.startswith(f"qc_record_zscore_{batch_id}_")]
+        assert actions == ["查看"]
+        at.button(key=f"qc_record_zscore_{batch_id}_view").click().run()
         assert not list(at.exception)
-        dialog_button_labels = [str(button.label) for button in at.button]
-        info_values = [str(item.value) for item in at.info]
-
-        assert "保存记录修改" not in dialog_button_labels
-        assert "删除所选记录" not in dialog_button_labels
-        assert "保留本次检测" not in dialog_button_labels
-        assert "禁用本次检测" not in dialog_button_labels
-        assert "恢复本次检测" not in dialog_button_labels
-        assert any("仅供查询" in value for value in info_values)
-        assert any("不能修改" in value or "不能覆盖原始记录" in value for value in info_values)
+        assert at.session_state["qc_record_dialog"]["record_id"] == selected_id
+        assert at.session_state["qc_record_dialog"]["action"] == "view"
+        assert not any(str(widget.key).startswith("record_") for widget in at.number_input)
+        assert not any(str(widget.key).startswith("record_") for widget in at.text_input)
+        assert not any(button.key == "record_save" for button in at.button)
+        assert any(locked_context["edit_reason"] == item.value for item in at.info)
+        assert any(len(frame.value) == 2 and "参与建靶统计" in frame.value for frame in at.dataframe)
+        at.button(key="record_view_close").click().run()
+        assert not list(at.exception)
+        assert get_zscore_runs_with_levels_for_batch(batch_id) == before
 
 
 def test_plotting_all_view_visually_splits_building_and_formal_phases() -> None:

@@ -561,24 +561,35 @@ def test_instant_page_uses_business_labels_and_single_judgment_area() -> None:
         at.run()
 
         assert len(at.warning) == 0
-        project_options = list(at.selectbox(key="v12_instant_project_selector").options)
-        batch_options = list(at.selectbox(key="v12_instant_batch_selector").options)
-        assert project_options == ["请选择设置已确认的即时法项目", "AlphaProject｜Inst-A｜Ct值"]
-        assert batch_options[0] == "请选择设置已确认的批次"
-        assert batch_options[1].startswith("质控批号：AlphaPro-LOT")
-        assert "项目 1" not in batch_options[1]
-        assert "批次 1" not in batch_options[1]
+        assert not list(at.exception)
+        selector_keys = {item.key for item in at.selectbox}
+        assert "v12_instant_project_selector" not in selector_keys
+        assert "v12_instant_batch_selector" not in selector_keys
+        assert not any(str(key).startswith("instant_maintenance_selector_") for key in selector_keys)
+        assert not list(at.get("tab"))
 
-        batch_table = at.dataframe[0].value
-        assert {"检验项目", "批次名称", "质控品批号", "仪器", "试剂", "质控品", "单位", "检测方法"} <= set(batch_table.columns)
-        assert batch_table.iloc[0]["单位"] == "mg/L"
-        assert batch_table.iloc[0]["试剂"] == "Reagent-A"
-        assert "编号" not in batch_table.columns
+        details = next(table.value for table in at.dataframe if list(table.value.columns) == ["项目", "内容"])
+        batch_details = dict(zip(details["项目"], details["内容"]))
+        assert batch_details["检验项目"] == "AlphaProject"
+        assert batch_details["仪器"] == "Inst-A"
+        assert batch_details["质控品批号"].startswith("AlphaPro-LOT")
+        assert batch_details["单位"] == "mg/L"
+        assert batch_details["试剂"] == "Reagent-A"
+        assert batch_details["输入值类型"] == "Ct值"
+
+        record_tables = [table.value for table in at.dataframe if "记录序号" in table.value.columns]
+        assert len(record_tables) == 1
+        assert {"记录序号", "检测时间", "检测人", "Ct值", "状态", "手工处理状态"} <= set(record_tables[0].columns)
+        assert len(record_tables[0]) == 8
+        assert "编号" not in record_tables[0].columns
+        assert record_tables[0]["检测人"].tolist() == ["tester"] * 8
 
         caption_values = [item.value for item in at.caption]
+        assert any("AlphaProject" in value and "AlphaPro-LOT" in value for value in caption_values)
         assert not any("当前批次：1" in value for value in caption_values)
-        context_text = " ".join(item.proto.body for item in at.get("html"))
-        assert "AlphaPro-LOT" in context_text
+        assert sum("在此查看当前批次的最新判定" in value for value in caption_values) == 1
+        assert not any("记录维护区" in str(item.value) for item in at.markdown)
+
 
 
 def test_transferred_instant_page_is_read_only_and_lj_page_shows_source() -> None:
@@ -653,28 +664,18 @@ def test_lj_page_uses_business_labels_and_marks_instant_origin() -> None:
         at.session_state["selected_batch_id"] = transfer_result["target_batch_id"]
         at.run()
 
-        project_options = list(at.selectbox(key="v12_lj_project_selector").options)
-        batch_options = list(at.selectbox(key="v12_lj_batch_selector").options)
-        assert not any(option.startswith("项目 ") for option in project_options[1:])
-        assert any("由即时法转入" in option for option in project_options[1:])
-        assert not any("LJ普通项目" in option for option in project_options[1:])
-        assert not any(option.startswith("批次 ") for option in batch_options[1:])
-        assert any("由即时法转入" in option for option in batch_options[1:])
-        assert any(option.startswith("质控批号：Transfer-LOT") for option in batch_options[1:])
-
-        batch_tables = [
-            element.value
-            for element in at.dataframe
-            if "质控品批号" in element.value.columns and "来源" in element.value.columns
-        ]
-        assert batch_tables
-        batch_table = batch_tables[0]
-        assert "编号" not in batch_table.columns
-        assert batch_table["来源"].tolist() == ["由即时法转入"]
-        assert any("来源：即时法" in str(item.value) for item in at.info)
-        expander_states = {str(expander.label): bool(expander.proto.expanded) for expander in at.expander}
-        assert expander_states["当前批次检测记录"] is False
-        assert expander_states["导出与导入"] is False
+        assert not list(at.exception)
+        assert [tab.label for tab in at.tabs] == ['当前批次', '月度报告']
+        assert not any(widget.key in ('v12_lj_project_selector', 'v12_lj_batch_selector') for widget in at.selectbox)
+        captions = [str(item.value) for item in at.caption]
+        assert any('TransferUI' in value and 'Transfer-LOT' in value for value in captions)
+        assert not any('LJ普通项目' in value for value in captions)
+        assert not any(value.startswith(('项目 1', '批次 1')) for value in captions)
+        assert any('来源：即时法' in str(item.value) and '转入时间' in str(item.value) for item in at.info)
+        assert any(button.label == '导入数据' for button in at.button)
+        assert any(button.label == '导出' for button in at.button)
+        records = [element.value for element in at.dataframe if '判定' in element.value.columns]
+        assert len(records) == 1 and len(records[0]) == 20
 
 
 def test_zscore_page_uses_business_labels_in_management_and_context() -> None:
@@ -699,21 +700,14 @@ def test_zscore_page_uses_business_labels_in_management_and_context() -> None:
         at.run()
 
         assert not list(at.exception)
-        project_options = list(at.selectbox(key="v12_zscore_project_selector").options)
-        batch_options = list(at.selectbox(key="v12_zscore_batch_selector").options)
-        assert project_options == ["请选择设置已确认的 Z-score 项目", "ZAlpha｜Z-Inst｜2 水平｜Ct值"]
-        assert batch_options[0] == "请选择设置已确认的批次"
-        assert batch_options[1].startswith("质控批号：ZLOT-01")
-        assert "项目 1" not in project_options[1]
-        assert "批次 1" not in batch_options[1]
-
-        batch_table = at.dataframe[0].value
-        assert {"检验项目", "批次名称", "质控品批号", "水平数", "单位", "检测方法"}.issubset(batch_table.columns)
-        assert "编号" not in batch_table.columns
-
-        text_values = [str(item.value) for item in at.text]
-        assert any("ZLOT-01" in item.proto.body for item in at.get("html"))
-        assert not any("批次：1" in value for value in text_values)
+        assert [tab.label for tab in at.tabs] == ['当前批次', '月度报告']
+        assert not any(widget.key in ('v12_zscore_project_selector', 'v12_zscore_batch_selector') for widget in at.selectbox)
+        captions = [str(item.value) for item in at.caption]
+        assert any('ZAlpha' in value and 'Z-Inst' in value and 'ZLOT-01' in value and '2 水平' in value and 'Ct值' in value for value in captions)
+        assert not any('项目 1' in value or '批次：1' in value for value in captions)
+        assert any(button.label == '导入数据' for button in at.button)
+        assert any(button.label == '导出' for button in at.button)
+        assert '批次资料与质量目标' in [expander.label for expander in at.expander]
 
 
 def run_all_tests() -> None:

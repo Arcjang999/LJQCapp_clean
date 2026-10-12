@@ -5,7 +5,6 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from pages.management import guard_work_tab_selection
 from pages.instant_config_section import (
     prepare_instant_v12_project_batch_context,
     render_instant_v12_configuration_selection,
@@ -16,10 +15,7 @@ from services.instant_service import (
     build_instant_transfer_preview,
     build_instant_workbench_context,
     confirm_instant_transfer_to_lj,
-    disable_instant_result,
     get_instant_manual_status_label,
-    keep_instant_result,
-    restore_instant_result,
     save_instant_result,
 )
 from services.value_type_service import (
@@ -27,12 +23,9 @@ from services.value_type_service import (
     parse_project_input_value,
 )
 from ui.common import (
-    TEXT,
     format_optional_float,
     render_compact_stat_metrics,
     render_latest_analysis_card,
-    render_section_intro,
-    render_workbench_context_bar,
 )
 
 
@@ -87,6 +80,7 @@ def _navigate_to_lj_batch(project_id: int | None, batch_id: int | None) -> None:
 
 def _close_instant_transfer_dialog() -> None:
     st.session_state["show_instant_transfer_dialog"] = False
+    st.session_state.pop('instant_transfer_dialog_batch_id', None)
 
 
 @st.dialog("确认转入 LJ 法", width="large", on_dismiss=_close_instant_transfer_dialog)
@@ -192,7 +186,7 @@ def _render_instant_entry_and_summary_section(
     context: dict[str, object],
     selected_batch_id: int,
 ) -> None:
-    from pages.lot_lifecycle_section import render_result_lot_choice,is_batch_writable
+    from pages.lot_lifecycle_section import render_result_lot_choice
     batch = context["batch"]
     input_value_type = context["input_value_type"]
     input_value_type_label = context["input_value_type_label"]
@@ -205,10 +199,9 @@ def _render_instant_entry_and_summary_section(
     if transfer_notice:
         st.success(transfer_notice)
 
-    st.markdown("**结果录入区**")
-    if is_transferred:
-        st.info("该批次已转入 LJ 法，请在 LJ 页面继续录入。此处仅供查询。")
-    elif is_batch_writable("instant",selected_batch_id):
+    if not is_transferred:
+        st.markdown("**结果录入**")
+    if not is_transferred and context.get("is_writable", True):
         if st.session_state.get("instant_entry_batch_id") != selected_batch_id:
             st.session_state["instant_entry_batch_id"] = selected_batch_id
             st.session_state["instant_entry_operator"] = operator_options[0] if operator_options else ""
@@ -273,12 +266,9 @@ def _render_instant_entry_and_summary_section(
                 st.session_state["instant_reset_entry_form"] = True
                 st.rerun()
 
-    st.divider()
-    st.markdown("**累计统计区**")
+    st.markdown("**累计统计**")
     render_compact_stat_metrics(
         [
-            ("总记录数", str(summary["total_count"])),
-            ("有效点数", str(summary["effective_count"])),
             ("均值", format_optional_float(summary["mean"])),
             ("SD", format_optional_float(summary["sd"])),
             ("实测变异系数（%）", format_optional_float(summary["cv"], digits=2, suffix="%")),
@@ -293,17 +283,7 @@ def _render_instant_transfer_section(context: dict[str, object]) -> None:
     is_transferred = bool(transfer_state.get("is_transferred"))
 
     if is_transferred:
-        st.success("该即时法批次已转入 LJ 法，后续请在对应 LJ 批次继续流程。")
-        render_compact_stat_metrics(
-            [
-                ("当前状态", "已转入 LJ 法"),
-                ("转入时间", _format_instant_datetime_text(transfer_state.get("transferred_at"))),
-                ("转入有效点数", str(transfer_state.get("transferred_effective_count") or 0)),
-                ("去向 LJ 项目", str(transfer_state.get("transferred_to_lj_project_name") or "-")),
-                ("去向 LJ 批次", str(transfer_state.get("transferred_to_lj_batch_display") or "-")),
-            ]
-        )
-        st.caption("转入后请在 LJ 页面继续录入，原即时法记录仅供查询；LJ 批次会注明“由即时法转入”。")
+        st.success("已转入 LJ 法；原记录仅供查询，请在对应 LJ 批次继续录入。")
         if st.button(
             "前往对应 LJ 批次",
             key="instant_go_to_transferred_lj_batch",
@@ -317,35 +297,29 @@ def _render_instant_transfer_section(context: dict[str, object]) -> None:
             st.rerun()
         return
 
-    render_compact_stat_metrics(
-        [
-            ("当前有效点数", str(summary["effective_count"])),
-            ("达到转入阈值", "是" if summary.get("transfer_ready") else "否"),
-            ("待处理疑似离群点", str(summary.get("pending_outlier_review_count", 0))),
-            ("目标阈值", str(INSTANT_TRANSFER_READY_COUNT)),
-        ]
+    progress, action = st.columns([3, 1], vertical_alignment="center")
+    effective_count = int(summary["effective_count"])
+    pending_count = int(summary.get("pending_outlier_review_count", 0))
+    progress.caption(
+        f"有效点 {effective_count}/{INSTANT_TRANSFER_READY_COUNT} · "
+        f"已禁用 {summary['disabled_count']} · 待核对疑似离群 {pending_count}"
     )
-    if summary.get("transfer_ready"):
-        st.success("已达到 20 个有效点，可确认转入 LJ 法。")
-    else:
-        st.caption(f"达到 {INSTANT_TRANSFER_READY_COUNT} 个有效点后，才可执行“确认转入 LJ 法”。")
-
-    st.caption(
-        "转入规则：前 20 个有效点作为 LJ 参数建立数据；第 21 个及之后的有效点作为 LJ 正式期数据；"
-        "转入后，原即时法记录仅供查询，不能继续录入或维护。"
-    )
-    if st.button(
+    if action.button(
         "确认转入 LJ 法",
         key="open_instant_transfer_dialog",
         type="primary",
-        disabled=not bool(transfer_state.get("eligible")),
+        disabled=(not bool(transfer_state.get("eligible"))
+                  or bool(st.session_state.get("qc_record_dialog")
+                          or st.session_state.get("qc_transfer_dialog"))),
         width="stretch",
     ):
         st.session_state["show_instant_transfer_dialog"] = True
+        st.session_state['instant_transfer_dialog_batch_id'] = int(context['batch']['id'])
         st.rerun()
     blockers = list(transfer_state.get("blockers", []))
     if blockers:
-        st.info("当前暂不可转入：\n" + "\n".join(f"- {reason}" for reason in blockers))
+        with st.expander("查看转入条件"):
+            st.caption("\n".join(f"- {reason}" for reason in blockers))
 
 
 def _resolve_instant_tone_key(status: str) -> str | None:
@@ -488,232 +462,112 @@ def _build_instant_display_dataframe(
 
 
 def _render_instant_records_section(context: dict[str, object]) -> None:
-    analysis_df = context["analysis_df"]
-    input_value_type_label = context["input_value_type_label"]
-    with st.expander("当前记录表（点击折叠/展开）", expanded=False):
-        st.caption("当前批次历史记录、疑似离群提示状态与手工处理状态都会保留在此。")
-        display_df = _build_instant_display_dataframe(analysis_df, input_value_type_label)
-        st.dataframe(display_df, width="stretch", hide_index=True)
+    from ui.record_workspace import render_record_selection
+    from ui.record_actions import render_record_toolbar
 
-
-def _build_maintenance_option_label(row: pd.Series, input_value_type_label: str) -> str:
-    test_time = pd.Timestamp(row["test_time"]).strftime("%Y-%m-%d %H:%M")
-    value_text = f"{float(row['value']):.4f}"
-    return (
-        f"记录 #{int(row['sequence'])} | {test_time} | {row['operator']} | "
-        f"{input_value_type_label}={value_text} | {row['status']}"
+    analysis_df = context["analysis_df"].sort_values(['test_time', 'id'], ascending=False)
+    batch_id = int(context["batch"]["id"])
+    st.markdown("**检测记录**")
+    filter_key = f'instant_{batch_id}_filter'
+    widget_key = filter_key + '_widget'
+    if widget_key not in st.session_state:
+        st.session_state[widget_key] = st.session_state.get(filter_key, '全部')
+    def remember_filter():
+        st.session_state[filter_key] = st.session_state[widget_key]
+    scope = st.selectbox('记录范围', ['全部', '有效点', '待核对', '已禁用'], key=widget_key, on_change=remember_filter)
+    st.session_state[filter_key] = scope
+    if scope == '有效点':
+        analysis_df = analysis_df.loc[analysis_df.is_effective == 1]
+    elif scope == '待核对':
+        analysis_df = analysis_df.loc[(analysis_df.is_outlier_suspect == 1) & (analysis_df.manual_status == 'pending_review')]
+    elif scope == '已禁用':
+        analysis_df = analysis_df.loc[analysis_df.is_effective == 0]
+    display = _build_instant_display_dataframe(analysis_df, context["input_value_type_label"])
+    if not display.empty:
+        display = display[["记录序号", "有效序号", "检测时间", "检测人",
+                           context["input_value_type_label"], "状态", "手工处理状态", "疑似离群"]]
+    selected_id = render_record_selection(
+        display, analysis_df["id"].astype(int).tolist() if not analysis_df.empty else [],
+        scope=f"instant_{batch_id}",
+    )
+    selected = analysis_df.loc[analysis_df["id"] == selected_id] if selected_id is not None else pd.DataFrame()
+    row = selected.iloc[0] if not selected.empty else None
+    render_record_toolbar(
+        "instant", batch_id, selected_id,
+        allow_edit=False,
+        allow_status=row is not None and bool(context.get("is_writable")) and not bool(context["transfer_state"].get("is_transferred")),
+        included=bool(row["is_effective"]) if row is not None else None,
+        abnormal=(bool(row["is_outlier_suspect"]) and str(row["manual_status"]) == "pending_review") if row is not None else False,
     )
 
 
-def _render_instant_maintenance_section(context: dict[str, object]) -> None:
-    analysis_df = context["analysis_df"]
-    summary = context["summary"]
-    input_value_type_label = context["input_value_type_label"]
-    transfer_state = context["transfer_state"]
-    render_compact_stat_metrics(
-        [
-            ("总记录数", str(summary["total_count"])),
-            ("有效建立点数", str(summary["effective_count"])),
-            ("已禁用点数", str(summary["disabled_count"])),
-        ]
-    )
-    if analysis_df.empty:
-        st.info("当前批次暂无记录可维护。")
-        return
-    if bool(transfer_state.get("is_transferred")):
-        st.success("该批次已转入 LJ 法。原即时法记录仅供查询，不能修改。")
-        st.caption("请打开对应的 LJ 批次继续录入；原即时法记录仍可在此查询。")
-        return
-
-    option_map = {
-        _build_maintenance_option_label(row, input_value_type_label): int(row["id"])
-        for _, row in analysis_df.iterrows()
-    }
-    selector_key = f"instant_maintenance_selector_{int(context['batch']['id'])}"
-    if st.session_state.get(selector_key) not in option_map:
-        st.session_state[selector_key] = next(iter(option_map.keys()))
-    selected_label = st.selectbox(
-        "选择需要维护的记录",
-        options=list(option_map.keys()),
-        key=selector_key,
-    )
-    selected_result_id = option_map[selected_label]
-    selected_row = analysis_df.loc[analysis_df["id"] == selected_result_id].iloc[0]
-
-    st.caption(str(selected_row.get("analysis_prompt", "") or "当前记录暂无额外分析提示。"))
-    render_compact_stat_metrics(
-        [
-            ("当前状态", str(selected_row["status"])),
-            ("手工处理", get_instant_manual_status_label(selected_row["manual_status"])),
-            ("SI上限", format_optional_float(selected_row["si_upper"])),
-            ("SI下限", format_optional_float(selected_row["si_lower"])),
-            ("n2s", format_optional_float(selected_row["si_n2s"], digits=2)),
-            ("n3s", format_optional_float(selected_row["si_n3s"], digits=2)),
-        ]
-    )
-    st.caption("禁用后原始记录不会删除，只是不再参与即时法统计和图表默认展示。")
-
-    if int(selected_row["is_effective"]) == 1:
-        if (
-            int(selected_row.get("is_outlier_suspect", 0) or 0) == 1
-            and str(selected_row.get("manual_status", "") or "") == "pending_review"
-        ):
-            if st.button(
-                "保留该记录",
-                key=f"instant_keep_result_{selected_result_id}",
-                width="stretch",
-            ):
-                keep_instant_result(selected_result_id)
-                st.success("该疑似离群记录已标记为保留，可继续参与统计与转入判断。")
-                st.rerun()
-        if st.button(
-            "禁用该记录",
-            key=f"instant_disable_result_{selected_result_id}",
-            width="stretch",
-        ):
-            disable_instant_result(selected_result_id)
-            st.success("记录已禁用，当前批次统计与离群提示已重算。")
-            st.rerun()
-    else:
-        if st.button(
-            "恢复该记录",
-            key=f"instant_restore_result_{selected_result_id}",
-            width="stretch",
-        ):
-            restore_instant_result(selected_result_id)
-            st.success("记录已恢复，当前批次统计与离群提示已重算。")
-            st.rerun()
-
-
-def render_instant_page() -> None:
-    st.subheader("即时法")
-    st.caption(
-        "即时法是单水平质控建立均值和标准差的一种方法；"
-        "3 个有效点后开始检验，20 个有效建立点后可人工确认转入 LJ。"
-    )
-    projects_df, selected_project_id, batches_df, selected_batch_id, issues = prepare_instant_v12_project_batch_context()
-    manage_tab, work_tab = st.tabs([TEXT["manage"], TEXT["current_batch"]], key='instant_workbench_tabs', on_change='rerun')
-    render_instant_v12_configuration_selection(
-        manage_tab,
-        projects_df,
-        selected_project_id,
-        batches_df,
-        selected_batch_id,
-        issues,
-    )
-    guard_work_tab_selection(work_tab, selected_project_id, selected_batch_id)
-
-    context = build_instant_workbench_context(selected_batch_id)
+def _render_instant_context(context: dict[str, object]) -> None:
     batch = context["batch"]
     summary = context["summary"]
     transfer_state = context["transfer_state"]
-    input_value_type_label = context["input_value_type_label"]
-    with work_tab:
-        context_items = [
-            ("项目名称", batch["project_name"]),
-            ("质控品批号", batch["lot_no"]),
-            ("输入值类型", input_value_type_label),
-            ("当前有效点数", summary["effective_count"]),
-            ("总记录数", summary["total_count"]),
+    st.caption(
+        f"{batch['project_name']} · {_build_instant_batch_summary(batch)} · "
+        f"{context['input_value_type_label']} · 共 {summary['total_count']} 条记录"
+    )
+    with st.expander("查看批次资料"):
+        items = [
+            ("检验项目", batch["project_name"]),
             ("仪器", batch["instrument"]),
             ("试剂", batch["reagent"]),
             ("质控品", batch["qc_material"]),
             ("浓度", batch["concentration"]),
+            ("质控品批号", batch["lot_no"]),
             ("质控水平", batch["level_name"] or "-"),
             ("单位", batch["unit_symbol"] or "-"),
             ("检测方法", batch["method_name"] or "-"),
             ("批次名称", batch["v11_config_name"] or "-"),
             ("批号效期", batch["v11_expiry_date"] or "-"),
+            ("输入值类型", context["input_value_type_label"]),
         ]
-        context_badges = [
-            f"质控批号 {batch['lot_no']}",
-            input_value_type_label,
-            f"有效点 {summary['effective_count']}/{INSTANT_TRANSFER_READY_COUNT}",
-        ]
-        context_caption = (
-            f"当前项目：{batch['project_name']}。请确认输入值类型（{input_value_type_label}）后再录入结果。"
-            "达到 3 个有效点后开始即刻法 SI 判定，满足条件后可执行“确认转入 LJ 法”。"
-        )
         if transfer_state.get("is_transferred"):
-            context_items.extend(
-                [
-                    ("当前状态", "已转入 LJ 法"),
-                    ("转入时间", _format_instant_datetime_text(transfer_state.get("transferred_at"))),
-                    ("去向 LJ 项目", transfer_state.get("transferred_to_lj_project_name") or "-"),
-                    ("去向 LJ 批次", transfer_state.get("transferred_to_lj_batch_display") or "-"),
-                ]
-            )
-            context_badges.append("已转入 LJ 法")
-            context_caption = (
-                f"当前项目：{batch['project_name']}。该即时法批次已转入 LJ 法，原记录仅供查询，"
-                "请打开对应的 LJ 批次继续录入。"
-            )
-        elif transfer_state.get("eligible"):
-            context_badges.append("可确认转入 LJ 法")
+            items.extend([
+                ("转入时间", _format_instant_datetime_text(transfer_state.get("transferred_at"))),
+                ("转入有效点数", str(transfer_state.get("transferred_effective_count") or 0)),
+                ("去向 LJ 项目", transfer_state.get("transferred_to_lj_project_name") or "-"),
+                ("去向 LJ 批次", transfer_state.get("transferred_to_lj_batch_display") or "-"),
+            ])
+        st.dataframe(pd.DataFrame(items, columns=["项目", "内容"]), hide_index=True, width="stretch")
 
-        render_workbench_context_bar(
-            title="即时法当前批次",
-            caption=context_caption,
-            items=context_items,
-            badges=context_badges,
+
+def render_instant_page() -> None:
+    from pages.lot_lifecycle_section import is_batch_writable
+    from ui.record_actions import render_pending_record_dialog
+
+    st.subheader("即时法")
+    projects_df, selected_project_id, batches_df, selected_batch_id, issues = prepare_instant_v12_project_batch_context()
+    if selected_project_id is None or selected_batch_id is None:
+        render_instant_v12_configuration_selection(
+            st.container(), projects_df, selected_project_id, batches_df, selected_batch_id, issues,
         )
+        if st.session_state.get('qc_record_dialog'):
+            render_pending_record_dialog('instant', None)
+        elif st.session_state.get('show_instant_transfer_dialog') and st.session_state.get('instant_transfer_dialog_batch_id'):
+            _render_instant_transfer_dialog(st.session_state['instant_transfer_dialog_batch_id'])
+        return
 
-        if st.session_state.get("show_instant_transfer_dialog"):
-            _render_instant_transfer_dialog(selected_batch_id)
-        render_section_intro(
-            title="本次质控",
-            caption=None,
-            badges=["即时法", "过渡方法", f"有效点 {summary['effective_count']}/{INSTANT_TRANSFER_READY_COUNT}", input_value_type_label],
-            tone="accent",
-        )
-        from ui.quality_targets import render_batch_quality
-        render_batch_quality("instant", selected_batch_id)
-        entry_col, chart_col = st.columns([0.98, 1.12], gap="large")
-        with entry_col:
-            with st.container():
-                render_section_intro(
-                    title="结果录入与累计统计",
-                    caption="在此录入结果并查看累计统计。",
-                    tone="accent",
-                )
-                _render_instant_entry_and_summary_section(context, selected_batch_id)
-        with chart_col:
-            with st.container():
-                render_section_intro(
-                    title="图表与最新判定",
-                    caption="在此查看趋势图和最新判定。",
-                    tone="accent",
-                )
-                _render_instant_chart_analysis_section(context)
+    context = build_instant_workbench_context(selected_batch_id)
+    transfer_state = context["transfer_state"]
+    context["is_writable"] = not bool(transfer_state.get("is_transferred")) and is_batch_writable("instant", selected_batch_id)
+    _render_instant_context(context)
+    _render_instant_transfer_section(context)
 
-        with st.container(border=True):
-            render_section_intro(
-                title="转入 LJ 法",
-                caption="先核对有效点数和待处理提示，再确认转入；转入后可查看对应的 LJ 项目和批次。",
-                tone="muted",
-            )
-            _render_instant_transfer_section(context)
+    from ui.quality_targets import render_batch_quality
+    render_batch_quality("instant", selected_batch_id)
+    entry_col, chart_col = st.columns([0.98, 1.12], gap="large")
+    with entry_col:
+        _render_instant_entry_and_summary_section(context, selected_batch_id)
+    with chart_col:
+        _render_instant_chart_analysis_section(context)
 
-        lower_left, lower_right = st.columns([1.0, 1.0], gap="large")
-        with lower_left:
-            with st.container(border=True):
-                render_section_intro(
-                    title="当前记录表",
-                    caption="查看历史记录、疑似离群状态和手工处理状态。",
-                    tone="muted",
-                )
-                _render_instant_records_section(context)
-        with lower_right:
-            with st.container(border=True):
-                render_section_intro(
-                    title="记录维护区",
-                    caption="可保留、禁用或恢复记录；转入 LJ 后仅供查看。",
-                    tone="muted",
-                )
-                _render_instant_maintenance_section(context)
+    _render_instant_records_section(context)
+    _render_instant_si_method_explanation(context["summary"])
 
-        with st.container(border=True):
-            _render_instant_si_method_explanation(summary)
-
-        from pages.lot_lifecycle_section import render_result_provenance
-        render_result_provenance("instant",selected_batch_id)
+    if st.session_state.get("show_instant_transfer_dialog"):
+        _render_instant_transfer_dialog(st.session_state.get('instant_transfer_dialog_batch_id', selected_batch_id))
+    else:
+        render_pending_record_dialog("instant", selected_batch_id)

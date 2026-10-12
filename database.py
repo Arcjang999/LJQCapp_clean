@@ -264,6 +264,8 @@ def init_db() -> None:
         ensure_daily_entry_schema(connection)
         from migrations.batch_monthly_reports import ensure_batch_monthly_reports_schema
         ensure_batch_monthly_reports_schema(connection)
+        from migrations.record_maintenance import ensure_record_maintenance_schema
+        ensure_record_maintenance_schema(connection)
         _rebind_legacy_batches_foreign_keys(connection)
         connection.execute(
             """

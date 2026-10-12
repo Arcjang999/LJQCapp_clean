@@ -7,7 +7,6 @@ import pandas as pd
 import streamlit as st
 
 from database import get_zscore_batch
-from services.project_config_service import QC_METHOD_LABELS
 from services.report_service import (
     ZScoreMonthlyReportPackage,
     build_zscore_monthly_preview_summary,
@@ -16,7 +15,7 @@ from services.report_service import (
     list_zscore_report_month_options,
     save_zscore_monthly_report_snapshot,
 )
-from ui.common import render_compact_stat_metrics, render_section_intro, render_workbench_context_bar
+from ui.common import render_compact_stat_metrics, render_section_intro
 from zscore_plotting import plot_zscore_single_level
 
 
@@ -32,17 +31,7 @@ def render_zscore_monthly_report_section(selected_batch_id: int) -> None:
             caption="选择报告月份，核对当前项目、质控批号和各水平资料后生成 PDF。",
             tone="accent",
         )
-        render_workbench_context_bar(
-            title="月报设置",
-            caption="报告使用当前所选项目和批次，仅统计所选月份的正式期检测记录。",
-            items=[
-                ("方法", QC_METHOD_LABELS['zscore']),
-                ("项目名称", batch["project_name"]),
-                ("批次标识", _build_batch_display(batch)),
-                ("统计范围", "当前批次、所选月份的正式期检测"),
-            ],
-            badges=[QC_METHOD_LABELS['zscore'], "月度报告"],
-        )
+        st.caption(f"{batch['project_name']} · {_build_batch_display(batch)} · 正式期月报")
 
         if not available_months:
             st.info("当前批次暂无正式期检测记录，暂不能生成月报。进入正式期并录入检测结果后，再选择报告月份。")
@@ -89,8 +78,6 @@ def render_zscore_monthly_report_section(selected_batch_id: int) -> None:
         if not isinstance(package, ZScoreMonthlyReportPackage):
             return
 
-        st.divider()
-        _render_report_preview(package)
         st.download_button(
             label="下载 PDF",
             data=preview_state["pdf_bytes"],
@@ -100,6 +87,8 @@ def render_zscore_monthly_report_section(selected_batch_id: int) -> None:
             width="stretch",
         )
         st.caption(f"报告已保存，编号：{preview_state['snapshot_id']}。以后可在“报告历史”中查找和下载。")
+        with st.expander("报告预览", expanded=False):
+            _render_report_preview(package)
 
 
 def _preview_matches(

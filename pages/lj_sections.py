@@ -1,37 +1,19 @@
 from __future__ import annotations
 
 from services.cv_service import calculate_cv_percent
-from services.lot_lifecycle_service import review_import_lots, import_reviewed_results, save_lj_result_manual_note
+from services.lot_lifecycle_service import save_lj_result_manual_note
 
-from datetime import datetime, timedelta
-import hashlib
+from datetime import datetime
 
 import pandas as pd
 import streamlit as st
 
-from database import add_result, export_batch_results_for_phase, get_batch, get_results
-from import_review import (
-    build_lj_building_template_dataframe,
-    build_review_issues_dataframe,
-    review_lj_building_import_csv,
-    review_lj_formal_import_csv,
-)
-from plotting import figure_to_png_bytes, plot_lj_chart
-from qc_logic import (
-    calculate_realtime_stats,
-    calculate_target_building_cv_hint,
-    disable_lj_building_result,
-    keep_lj_building_result,
-    persist_lj_batch_outlier_snapshot,
-    restore_lj_building_result,
-)
+from database import add_result, get_batch, get_results
+from plotting import plot_lj_chart
+from qc_logic import calculate_realtime_stats, calculate_target_building_cv_hint, persist_lj_batch_outlier_snapshot
 from services.outlier_service import (
     DEFAULT_GRUBBS_ALPHA,
     get_current_outlier_status_label,
-)
-from services.export_utils import (
-    dataframe_to_csv_bytes,
-    dataframe_to_xlsx_bytes as shared_dataframe_to_xlsx_bytes,
 )
 from services.profiling import profile_timer
 from services.value_type_service import (
@@ -39,26 +21,7 @@ from services.value_type_service import (
     normalize_input_value_type,
     parse_project_input_value,
 )
-from ui.common import (
-    build_chart_control_title,
-    build_operator_options,
-    build_safe_export_name,
-    format_rule_code,
-    format_rule_description,
-    get_saved_batch_cv_limit,
-    prepare_display_records,
-    render_compact_stat_metrics,
-    render_cv_limit_hint,
-    render_import_review_summary,
-    render_rule_summary_metrics,
-    render_standard_view_help,
-    render_status_panel,
-)
-from ui.dialogs import (
-    bump_record_maintenance_dialog_nonce as bump_record_maintenance_dialog_nonce_impl,
-    render_record_maintenance_dialog as render_record_maintenance_dialog_impl,
-    render_records_table as render_records_table_impl,
-)
+from ui.common import build_chart_control_title, build_operator_options, format_rule_code, format_rule_description, get_saved_batch_cv_limit, render_compact_stat_metrics, render_cv_limit_hint, render_rule_summary_metrics, render_standard_view_help, render_status_panel
 
 def get_latest_status_context(qc_df: pd.DataFrame) -> tuple[str, str]:
     if qc_df.empty:
@@ -170,7 +133,7 @@ def render_lj_building_outlier_panel(
             f"alpha={float(suspect_details['alpha']):.2f} | "
             f"状态={suspect_details['status_label']}"
         )
-    st.caption("如需保留、禁用或恢复，请到“检测记录维护”区处理。")
+    st.caption("如需保留、禁用或恢复，在下方“检测记录”中选中记录，再点击相应操作。")
 
 
 def render_lj_formal_westgard_panel(
@@ -495,8 +458,7 @@ def render_lj_entry_and_stats_section(
                 "当前控制参数" if confirmed_target else "当前累计均值和标准差建立",
             )
 
-    with st.container(border=True):
-        st.markdown("**实时统计**")
+    with st.expander("实时统计", expanded=False):
         sorted_results = results_df.sort_values(["test_time", "id"]).reset_index(drop=True)
         if sorted_results.empty:
             st.info("暂无数据，无法计算实时统计。")
@@ -656,585 +618,74 @@ def render_lj_rule_summary_section(stats: dict[str, object]) -> None:
             st.markdown(f"- `{format_rule_code(rule_id)}`：{format_rule_description(rule_id)}")
 
 
-def render_lj_records_section(qc_df: pd.DataFrame, input_value_type: str) -> None:
-    with st.expander("当前批次检测记录", expanded=False):
-        st.caption("查看当前批次的完整检测记录、规则触发和分析提示。")
-        display_df = prepare_display_records(qc_df, input_value_type=input_value_type)
-        render_records_table_impl(display_df)
-        from ui.out_of_control import render_record_selector
-        abnormal = qc_df.loc[(qc_df['phase'] == '正式数据') & qc_df['status'].isin(['失控', '警告'])] if not qc_df.empty else qc_df
-        render_record_selector('lj_result', abnormal.to_dict('records'), key='lj_records')
+def render_lj_records_section(qc_df: pd.DataFrame, input_value_type: str, *, context=None) -> None:
+    from database import read_snapshot
+    from services.lot_lifecycle_service import get_result_edit_availability, require_writable
+    from ui.record_workspace import render_record_selection
+    from ui.record_actions import render_record_toolbar
+    if context is None:
+        if qc_df.empty:
+            st.info("当前批次暂无检测记录。")
+            return
+        context = build_lj_workbench_context(int(qc_df["batch_id"].iloc[0]))
+    batch_id = int(context["batch"]["id"])
+    scope = f'lj_records_{batch_id}'
+    filters = ['全部', '参数建立期', '正式期', '警告 / 失控', '已禁用']
+    filter_key, widget_key = scope + '_filter', scope + '_filter_widget'
+    if widget_key not in st.session_state:
+        st.session_state[widget_key] = st.session_state.get(filter_key, '全部')
+    def remember_filter():
+        st.session_state[filter_key] = st.session_state[widget_key]
+    with st.container(border=True):
+        st.markdown('**检测记录**')
+        selected_filter = st.selectbox('记录范围', filters, key=widget_key, on_change=remember_filter)
+        st.session_state[filter_key] = selected_filter
+        records = qc_df.copy()
+        if not records.empty:
+            if selected_filter == '参数建立期':
+                records = records.loc[records.phase == '建靶数据']
+            elif selected_filter == '正式期':
+                records = records.loc[records.phase == '正式数据']
+            elif selected_filter == '警告 / 失控':
+                records = records.loc[(records.phase == '正式数据') & records.status.isin(['警告', '失控'])]
+            elif selected_filter == '已禁用':
+                records = records.loc[(records.phase == '建靶数据') & (records.is_building_included == 0)]
+            records = records.sort_values(['test_time', 'id'], ascending=False)
+        display = pd.DataFrame([{
+            '序号': int(row.get('sequence', 0) or 0),
+            '检测时间': pd.Timestamp(row['test_time']).strftime('%Y-%m-%d %H:%M'),
+            '检测人': row.get('operator') or '-',
+            get_input_value_type_label(input_value_type): row['value'],
+            '阶段': '参数建立期' if row['phase'] == '建靶数据' else '正式期',
+            '判定': _get_lj_building_record_current_status_label(row) if row['phase'] == '建靶数据' else row['status'],
+            '规则': row.get('rule_hits') or '-',
+        } for _, row in records.iterrows()])
+        selected_id = render_record_selection(display, records['id'].astype(int).tolist(), scope=scope)
+        selected = records.loc[records.id == selected_id]
+        row = None if selected.empty else selected.iloc[0]
+        try:
+            with read_snapshot() as connection:
+                require_writable(connection, 'lj', batch_id, read_only=True)
+            writable = True
+        except ValueError:
+            writable = False
+        availability = get_result_edit_availability('lj', selected_id) if row is not None else {'allowed': False, 'reason': ''}
+        render_record_toolbar('lj', batch_id, selected_id,
+            allow_edit=bool(writable and availability['allowed']),
+            allow_status=bool(row is not None and writable and row['phase'] == '建靶数据'
+                              and not context['stats'].get('has_formal_started')),
+            included=bool(row.get('is_building_included', 1)) if row is not None else None,
+            abnormal=bool(row is not None and row['phase'] == '正式数据' and row['status'] in ('警告', '失控')))
+        if row is not None and not availability['allowed'] and availability.get('reason'):
+            st.caption(availability['reason'])
+        st.caption(f"本批次共 {len(qc_df)} 条记录；先选择一条记录，再查看或处理。")
 
-
-    if not qc_df.empty:
-        from pages.lot_lifecycle_section import render_result_provenance
-        render_result_provenance("lj",int(qc_df["batch_id"].iloc[0]))
 
 def render_lj_maintenance_section(context: dict[str, object]) -> None:
-    qc_df = context["qc_df"]
-    input_value_type = context["input_value_type"]
-    stats = context["stats"]
-
-    building_df = (
-        qc_df[qc_df["phase"] == "建靶数据"]
-        .sort_values(["test_time", "id"], ascending=[False, False])
-        .reset_index(drop=True)
-    )
-    notice_message = str(st.session_state.pop("lj_outlier_notice", "") or "")
-    if notice_message:
-        st.success(notice_message)
-
-    with st.container(border=True):
-        render_compact_stat_metrics(
-            [
-                ("总记录数", f"{stats.get('building_total_count', 0)}"),
-                ("生效参数建立点", f"{stats.get('effective_building_count', 0)}"),
-                ("已禁用点", f"{stats.get('disabled_building_count', 0)}"),
-                ("当前设定均值" if stats.get("target_profile_id") else "均值", "-" if stats.get("mean") is None else f"{stats['mean']:.4f}"),
-                ("SD", "-" if stats.get("sd") is None else f"{stats['sd']:.4f}"),
-                ("设定变异系数（%）" if stats.get("target_profile_id") else "实测变异系数（%）", "-" if stats.get("cv") is None else f"{stats['cv']:.2f}%"),
-            ]
-        )
-
-        suspect_row = stats.get("current_suspect_row")
-        if suspect_row is not None:
-            suspect_time = pd.Timestamp(suspect_row["test_time"]).strftime("%Y-%m-%d %H:%M")
-            st.warning(
-                "当前存在疑似离群参数建立点："
-                f"序号 #{int(suspect_row.get('sequence', 0) or 0)} | "
-                f"时间 {suspect_time} | "
-                f"G={float(suspect_row.get('grubbs_statistic') or 0.0):.4f} | "
-                f"G临界值={float(suspect_row.get('grubbs_threshold') or 0.0):.4f} | "
-                f"alpha={DEFAULT_GRUBBS_ALPHA:.2f} | "
-                f"状态={_get_lj_building_record_current_status_label(suspect_row)}"
-            )
-
-        if building_df.empty:
-            st.info("当前批次暂无参数建立期记录可维护。")
-        else:
-            option_map: dict[str, int] = {}
-            option_labels: list[str] = []
-            for _, row in building_df.iterrows():
-                label = (
-                    f"序号 #{int(row.get('sequence', 0) or 0)} | "
-                    f"{pd.Timestamp(row['test_time']).strftime('%Y-%m-%d %H:%M')} | "
-                    f"{_get_lj_building_record_current_status_label(row)}"
-                )
-                option_labels.append(label)
-                option_map[label] = int(row["id"])
-
-            selected_label = st.selectbox(
-                "选择需要处理的参数建立点",
-                options=option_labels,
-                key="lj_outlier_record_selector",
-            )
-            selected_result_id = option_map[selected_label]
-            selected_row = building_df[building_df["id"] == selected_result_id].iloc[0]
-            statistic_text = ""
-            if not pd.isna(selected_row.get("grubbs_statistic")):
-                statistic_text = f"{float(selected_row.get('grubbs_statistic')):.4f}"
-            threshold_text = ""
-            if not pd.isna(selected_row.get("grubbs_threshold")):
-                threshold_text = f"{float(selected_row.get('grubbs_threshold')):.4f}"
-            st.caption(
-                f"当前状态：{_get_lj_building_record_current_status_label(selected_row)} | "
-                f"G={statistic_text} | "
-                f"G临界值={threshold_text} | "
-                f"alpha={DEFAULT_GRUBBS_ALPHA:.2f}"
-            )
-            if stats.get("has_formal_started"):
-                st.info("批次已进入正式期，参数建立记录仅供查询，不能再保留、禁用或恢复。")
-
-            action_cols = st.columns(3)
-            keep_disabled = bool(stats.get("has_formal_started"))
-            disable_disabled = bool(stats.get("has_formal_started")) or int(selected_row.get("is_building_included", 1) or 0) == 0
-            restore_disabled = bool(stats.get("has_formal_started")) or int(selected_row.get("is_building_included", 1) or 0) == 1
-
-            if action_cols[0].button("保留", key=f"lj_keep_{selected_result_id}", width="stretch", disabled=keep_disabled):
-                keep_lj_building_result(int(selected_result_id))
-                st.session_state["lj_outlier_notice"] = "参数建立点已标记为保留，并已重算参数建立统计。"
-                st.rerun()
-            if action_cols[1].button("禁用", key=f"lj_disable_{selected_result_id}", width="stretch", disabled=disable_disabled):
-                disable_lj_building_result(int(selected_result_id))
-                st.session_state["lj_outlier_notice"] = "参数建立点已禁用，并已重算参数建立统计。"
-                st.rerun()
-            if action_cols[2].button("恢复", key=f"lj_restore_{selected_result_id}", width="stretch", disabled=restore_disabled):
-                restore_lj_building_result(int(selected_result_id))
-                st.session_state["lj_outlier_notice"] = "参数建立点已恢复，并已重算参数建立统计。"
-                st.rerun()
-
-        if st.button(
-            "打开检测记录维护",
-            key="open_record_maintenance_dialog",
-            width="stretch",
-            disabled=qc_df.empty,
-        ):
-            bump_record_maintenance_dialog_nonce_impl()
-            st.session_state["show_record_maintenance_dialog"] = True
-
-    if st.session_state.get("show_record_maintenance_dialog", False):
-        render_record_maintenance_dialog_impl(qc_df, input_value_type=input_value_type)
-
-
-def _render_lj_export_import_section_impl(
-    context: dict[str, object],
-    selected_batch_id: int,
-    figure,
-    chart_state: dict[str, object],
-) -> None:
-    batch = context["batch"]
-    input_value_type = context["input_value_type"]
-    input_value_type_label = context["input_value_type_label"]
-    qc_df = context["qc_df"]
-    stats = context["stats"]
-    results_df = context["results_df"]
-
-    building_export_empty = (
-        qc_df.empty
-        or "phase" not in qc_df.columns
-        or qc_df[qc_df["phase"] == "建靶数据"].empty
-    )
-    formal_export_empty = (
-        qc_df.empty
-        or "phase" not in qc_df.columns
-        or qc_df[qc_df["phase"] == "正式数据"].empty
-    )
-    export_data_signature = (selected_batch_id, _dataframe_signature(qc_df))
-    project_name_fragment = build_safe_export_name(
-        batch["project_name"] if "project_name" in batch.keys() else None,
-        "project",
-    )
-    lot_no_fragment = build_safe_export_name(
-        batch["lot_no"] if "lot_no" in batch.keys() else None,
-        f"batch_{batch['id']}",
-    )
-    lj_building_template_df = build_lj_building_template_dataframe(input_value_type)
-    lj_building_template_csv_bytes = lj_building_template_df.to_csv(index=False).encode("utf-8-sig")
-    lj_import_scope = f"lj_building_import_{selected_batch_id}"
-    lj_import_review_state_key = f"{lj_import_scope}_review"
-    lj_import_success_key = f"{lj_import_scope}_success"
-    lj_import_uploader_nonce_key = f"{lj_import_scope}_uploader_nonce"
-    lj_import_uploader_nonce = int(st.session_state.get(lj_import_uploader_nonce_key, 0))
-    lj_import_uploader_key = f"{lj_import_scope}_file_{lj_import_uploader_nonce}"
-    lj_building_import_disabled = bool(stats.get("target_ready"))
-    lj_import_success_message = str(st.session_state.pop(lj_import_success_key, "") or "")
-    if lj_import_success_message:
-        st.success(lj_import_success_message)
-    lj_formal_import_scope = f"lj_formal_import_{selected_batch_id}"
-    lj_formal_import_review_state_key = f"{lj_formal_import_scope}_review"
-    lj_formal_import_success_key = f"{lj_formal_import_scope}_success"
-    lj_formal_import_uploader_nonce_key = f"{lj_formal_import_scope}_uploader_nonce"
-    lj_formal_import_uploader_nonce = int(st.session_state.get(lj_formal_import_uploader_nonce_key, 0))
-    lj_formal_import_uploader_key = f"{lj_formal_import_scope}_file_{lj_formal_import_uploader_nonce}"
-    lj_target_ready = bool(stats.get("target_ready"))
-    lj_formal_import_success_message = str(st.session_state.pop(lj_formal_import_success_key, "") or "")
-    if lj_formal_import_success_message:
-        st.success(lj_formal_import_success_message)
-
-    st.markdown("**导出**")
-    st.markdown("**分阶段数据导出**")
-    st.caption(f"请选择参数建立期或正式期后导出；检测值按本项目的“{input_value_type_label}”填写和查看。")
-    export_format = st.radio(
-        "导出数据格式",
-        options=["Excel (.xlsx)", "CSV (.csv)"],
-        horizontal=True,
-        key="export_format",
-    )
-    building_payload_key = f"lj_building_export_payload_{selected_batch_id}"
-    formal_payload_key = f"lj_formal_export_payload_{selected_batch_id}"
-    png_payload_key = f"lj_current_chart_payload_{selected_batch_id}"
-    building_signature = (*export_data_signature, "building", export_format)
-    formal_signature = (*export_data_signature, "formal", export_format)
-    png_signature = (*export_data_signature, "current_png", tuple(sorted(chart_state.items())))
-    def _build_building_export_bytes() -> bytes:
-        building_export_df_for_payload = export_batch_results_for_phase(batch, qc_df, "building")
-        return (
-            shared_dataframe_to_xlsx_bytes(building_export_df_for_payload)
-            if export_format == "Excel (.xlsx)"
-            else dataframe_to_csv_bytes(building_export_df_for_payload)
-        )
-
-    def _build_formal_export_bytes() -> bytes:
-        formal_export_df_for_payload = export_batch_results_for_phase(batch, qc_df, "formal")
-        return (
-            shared_dataframe_to_xlsx_bytes(formal_export_df_for_payload)
-            if export_format == "Excel (.xlsx)"
-            else dataframe_to_csv_bytes(formal_export_df_for_payload)
-        )
-
-    building_payload = _ensure_download_payload(
-        building_payload_key,
-        building_signature,
-        _build_building_export_bytes,
-        disabled=building_export_empty,
-    )
-    formal_payload = _ensure_download_payload(
-        formal_payload_key,
-        formal_signature,
-        _build_formal_export_bytes,
-        disabled=formal_export_empty,
-    )
-    png_payload = _ensure_download_payload(
-        png_payload_key,
-        png_signature,
-        lambda: figure_to_png_bytes(figure),
-    )
-
-    building_export_df = pd.DataFrame({"prepared": [1]}) if building_payload is not None else pd.DataFrame()
-    formal_export_df = pd.DataFrame({"prepared": [1]}) if formal_payload is not None else pd.DataFrame()
-    building_csv_bytes = building_payload["data"] if building_payload is not None and export_format != "Excel (.xlsx)" else b""
-    building_xlsx_bytes = building_payload["data"] if building_payload is not None and export_format == "Excel (.xlsx)" else b""
-    formal_csv_bytes = formal_payload["data"] if formal_payload is not None and export_format != "Excel (.xlsx)" else b""
-    formal_xlsx_bytes = formal_payload["data"] if formal_payload is not None and export_format == "Excel (.xlsx)" else b""
-    png_bytes = png_payload["data"] if png_payload is not None else b""
-    phase_export_cols = st.columns(2)
-    phase_export_cols[0].download_button(
-        label="导出参数建立期数据",
-        data=building_xlsx_bytes if export_format == "Excel (.xlsx)" else building_csv_bytes,
-        file_name=(
-            f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_target_building_results.xlsx"
-            if export_format == "Excel (.xlsx)"
-            else f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_target_building_results.csv"
-        ),
-        mime=(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            if export_format == "Excel (.xlsx)"
-            else "text/csv"
-        ),
-        width="stretch",
-        disabled=building_export_df.empty,
-    )
-    phase_export_cols[1].download_button(
-        label="导出正式期数据",
-        data=formal_xlsx_bytes if export_format == "Excel (.xlsx)" else formal_csv_bytes,
-        file_name=(
-            f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_formal_qc_results.xlsx"
-            if export_format == "Excel (.xlsx)"
-            else f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_formal_qc_results.csv"
-        ),
-        mime=(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            if export_format == "Excel (.xlsx)"
-            else "text/csv"
-        ),
-        width="stretch",
-        disabled=formal_export_df.empty,
-    )
-    st.download_button(
-        label="导出当前 LJ 图 PNG",
-        data=png_bytes,
-        file_name=(
-            f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_"
-            f"{build_safe_export_name(chart_state['view_mode'], 'chart')}.png"
-        ),
-        mime="image/png",
-        width="stretch",
-        disabled=png_payload is None,
-    )
-
-    st.divider()
-    st.markdown("**月度质控图导出**")
-    st.caption("仅导出正式数据，日期范围最长 30 天。")
-    formal_qc_df = qc_df[qc_df["phase"] == "正式数据"].copy() if "phase" in qc_df.columns else pd.DataFrame()
-    if formal_qc_df.empty:
-        st.info("当前批次还没有正式质控数据。")
-    else:
-        default_monthly_end = formal_qc_df["test_time"].max().date()
-        default_monthly_start = max(formal_qc_df["test_time"].min().date(), default_monthly_end - timedelta(days=29))
-        monthly_col_start, monthly_col_end = st.columns(2)
-        monthly_start = monthly_col_start.date_input(
-            "开始日期",
-            value=default_monthly_start,
-            key="monthly_export_start",
-        )
-        monthly_end = monthly_col_end.date_input(
-            "结束日期",
-            value=default_monthly_end,
-            key="monthly_export_end",
-        )
-
-        monthly_error = ""
-        day_span = (pd.Timestamp(monthly_end).date() - pd.Timestamp(monthly_start).date()).days + 1
-        if monthly_end < monthly_start:
-            monthly_error = "结束日期不能早于开始日期。"
-        elif day_span > 30:
-            monthly_error = "月度质控图导出范围最长为30天，请重新选择日期范围。"
-
-        if monthly_error:
-            st.warning(monthly_error)
-            st.session_state.pop(f"lj_monthly_png_payload_{selected_batch_id}", None)
-        else:
-            monthly_qc_df = build_monthly_export_dataframe(
-                qc_df=qc_df,
-                start_date=monthly_start,
-                end_date=monthly_end,
-            )
-            if monthly_qc_df.empty:
-                st.info("所选日期范围内没有正式质控数据，无法导出月度质控图。")
-                st.session_state.pop(f"lj_monthly_png_payload_{selected_batch_id}", None)
-            else:
-                monthly_payload_key = f"lj_monthly_png_payload_{selected_batch_id}"
-                monthly_signature = (
-                    "monthly_png",
-                    _dataframe_signature(monthly_qc_df),
-                    str(monthly_start),
-                    str(monthly_end),
-                    chart_state["y_axis_mode"],
-                    float(st.session_state.get("chart_standard_sd_limit", 4.0)),
-                )
-                monthly_payload = _clear_stale_download_payload(
-                    monthly_payload_key,
-                    monthly_signature,
-                )
-                monthly_file_name = (
-                    f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_monthly_qc_"
-                    f"{monthly_start.strftime('%Y-%m-%d')}_to_{monthly_end.strftime('%Y-%m-%d')}.png"
-                )
-                if st.button(
-                    "生成月度质控图 PNG",
-                    key=f"generate_lj_monthly_png_{selected_batch_id}",
-                    width="stretch",
-                ):
-                    monthly_title = build_monthly_chart_title(
-                        batch=batch,
-                        start_date=monthly_start,
-                        end_date=monthly_end,
-                    )
-                    monthly_figure = plot_lj_chart(
-                        qc_df=monthly_qc_df,
-                        stats=stats,
-                        title=monthly_title,
-                        view_mode="正式质控图",
-                        y_axis_mode=chart_state["y_axis_mode"],
-                        standard_sd_limit=float(st.session_state.get("chart_standard_sd_limit", 4.0)),
-                        y_axis_label=input_value_type_label,
-                    )
-                    monthly_payload = {
-                        "data": figure_to_png_bytes(monthly_figure, close=True),
-                        "file_name": monthly_file_name,
-                        "signature": monthly_signature,
-                    }
-                    st.session_state[monthly_payload_key] = monthly_payload
-
-                st.download_button(
-                    label="导出月度质控图 PNG",
-                    data=monthly_payload["data"] if monthly_payload is not None else b"",
-                    file_name=(
-                        monthly_payload["file_name"]
-                        if monthly_payload is not None
-                        else monthly_file_name
-                    ),
-                    mime="image/png",
-                    width="stretch",
-                    disabled=monthly_payload is None,
-                )
-
-    st.divider()
-    st.markdown("**CSV 导入**")
-    st.caption("参数建立期和正式期分别提供模板下载、审查和导入。")
-    st.markdown("**参数建立期 CSV 导入**")
-    st.caption(f"先下载标准模板，再上传 CSV 或单工作表 Excel 审查；所有必填内容和数据格式检查通过后，才可确认导入当前批次参数建立期{input_value_type_label}数据。")
-    st.markdown("- `试剂批号变更（可选）` 在参数建立期一般不填。")
-    st.markdown("- 正式期仅在“更换试剂批号后的第一条记录”填写“是”。")
-    st.markdown("- 其余记录填“否”或留空。")
-    st.markdown("- 只在首次改用新试剂批号的那条记录中填写，后续记录不必重复填写。")
-    st.download_button(
-        label="下载参数建立期 CSV 模板",
-        data=lj_building_template_csv_bytes,
-        file_name=(
-            f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_target_building_import_template.csv"
-        ),
-        mime="text/csv",
-        width="stretch",
-    )
-    if lj_building_import_disabled:
-        st.info("当前批次已完成均值和标准差建立，请使用正式期导入。")
-        st.session_state.pop(lj_import_review_state_key, None)
-
-    uploaded_lj_building_csv = st.file_uploader(
-        "上传参数建立期 CSV / Excel",
-        type=["csv", "xlsx"],
-        key=lj_import_uploader_key,
-        disabled=lj_building_import_disabled,
-        help="请按上方模板填写，上传 CSV 或仅含一个工作表的 Excel（.xlsx）文件。",
-    )
-    uploaded_lj_building_bytes = uploaded_lj_building_csv.getvalue() if uploaded_lj_building_csv is not None else b""
-    current_lj_import_signature = hashlib.sha256(uploaded_lj_building_bytes).hexdigest() if uploaded_lj_building_bytes else ""
-
-    lj_import_review_state = st.session_state.get(lj_import_review_state_key)
-    if not current_lj_import_signature:
-        st.session_state.pop(lj_import_review_state_key, None)
-        lj_import_review_state = None
-    elif (
-        lj_import_review_state is not None
-        and lj_import_review_state.get("file_signature") != current_lj_import_signature
-    ):
-        st.session_state.pop(lj_import_review_state_key, None)
-        lj_import_review_state = None
-
-    import_action_cols = st.columns(2)
-    review_lj_building_clicked = import_action_cols[0].button(
-        "审查 CSV",
-        key=f"{lj_import_scope}_review_button",
-        width="stretch",
-        disabled=lj_building_import_disabled or uploaded_lj_building_csv is None,
-    )
-    if review_lj_building_clicked:
-        lj_import_review_state = review_lj_building_import_csv(
-            file_bytes=uploaded_lj_building_bytes,
-            existing_results_df=results_df,
-            target_n=int(batch["target_n"]),
-            input_value_type=input_value_type,
-        )
-        lj_import_review_state=review_import_lots(lj_import_review_state,"lj",selected_batch_id)
-        lj_import_review_state["file_signature"] = current_lj_import_signature
-        st.session_state[lj_import_review_state_key] = lj_import_review_state
-
-    confirm_lj_import_disabled = True
-    if lj_import_review_state is not None:
-        review_summary = lj_import_review_state["summary"]
-        review_issues_df = build_review_issues_dataframe(lj_import_review_state["issues"])
-        render_import_review_summary(review_summary)
-        if review_summary["has_blocking_errors"]:
-            st.error("审查未通过，请按下方提示修正后重新上传。本次数据尚未导入。")
-        else:
-            st.success("审查通过，请核对预览内容后确认导入。")
-
-        if review_issues_df.empty:
-            st.info("本次审查未发现错误或警告。")
-        else:
-            st.dataframe(review_issues_df, hide_index=True, width="stretch")
-
-        confirm_lj_import_disabled = (
-            lj_building_import_disabled
-            or review_summary["has_blocking_errors"]
-            or not lj_import_review_state["normalized_rows"]
-        )
-
-    confirm_lj_import_clicked = import_action_cols[1].button(
-        "确认导入参数建立期数据",
-        key=f"{lj_import_scope}_confirm_button",
-        width="stretch",
-        disabled=confirm_lj_import_disabled,
-    )
-    if confirm_lj_import_clicked and lj_import_review_state is not None:
-        try:
-            import_reviewed_results("lj",selected_batch_id,lj_import_review_state["normalized_rows"])
-        except ValueError as exc:
-            st.error(f"导入未保存：{exc}")
-            return
-        imported_row_count = len(lj_import_review_state["normalized_rows"])
-        st.session_state.pop(lj_import_review_state_key, None)
-        st.session_state[lj_import_uploader_nonce_key] = lj_import_uploader_nonce + 1
-        st.session_state[lj_import_success_key] = (
-            f"已追加导入 {imported_row_count} 条参数建立期记录，并自动重算当前参数建立统计。"
-        )
-        st.rerun()
-
-    st.divider()
-    st.markdown("**LJ 正式期 CSV 导入**")
-    st.caption(f"先下载模板，按“{input_value_type_label}”填写正式期检测结果，再上传 CSV 或单工作表 Excel。修正审查提示的错误后，核对预览并确认导入当前批次。")
-    st.markdown("- `试剂批号变更（可选）` 在参数建立期一般不填。")
-    st.markdown("- 正式期仅在“更换试剂批号后的第一条记录”填写“是”。")
-    st.markdown("- 其余记录填“否”或留空。")
-    st.markdown("- 只在首次改用新试剂批号的那条记录中填写，后续记录不必重复填写。")
-    st.download_button(
-        label="下载正式期 CSV 模板",
-        data=lj_building_template_csv_bytes,
-        file_name=(
-            f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_formal_qc_import_template.csv"
-        ),
-        mime="text/csv",
-        width="stretch",
-    )
-    if not lj_target_ready:
-        st.info("请先完成当前批次的均值和标准差建立，再导入正式期结果。现在仍可上传文件，预先核对内容和格式。")
-
-    uploaded_lj_formal_csv = st.file_uploader(
-        "上传正式期 CSV / Excel",
-        type=["csv", "xlsx"],
-        key=lj_formal_import_uploader_key,
-        help="请按上方模板填写，上传 CSV 或仅含一个工作表的 Excel（.xlsx）文件。",
-    )
-    uploaded_lj_formal_bytes = uploaded_lj_formal_csv.getvalue() if uploaded_lj_formal_csv is not None else b""
-    current_lj_formal_signature = (
-        f"{hashlib.sha256(uploaded_lj_formal_bytes).hexdigest()}:{int(lj_target_ready)}:{len(results_df)}"
-        if uploaded_lj_formal_bytes
-        else ""
-    )
-
-    lj_formal_import_review_state = st.session_state.get(lj_formal_import_review_state_key)
-    if not current_lj_formal_signature:
-        st.session_state.pop(lj_formal_import_review_state_key, None)
-        lj_formal_import_review_state = None
-    elif (
-        lj_formal_import_review_state is not None
-        and lj_formal_import_review_state.get("file_signature") != current_lj_formal_signature
-    ):
-        st.session_state.pop(lj_formal_import_review_state_key, None)
-        lj_formal_import_review_state = None
-
-    formal_import_action_cols = st.columns(2)
-    review_lj_formal_clicked = formal_import_action_cols[0].button(
-        "审查正式期 CSV",
-        key=f"{lj_formal_import_scope}_review_button",
-        width="stretch",
-        disabled=uploaded_lj_formal_csv is None,
-    )
-    if review_lj_formal_clicked:
-        lj_formal_import_review_state = review_lj_formal_import_csv(
-            file_bytes=uploaded_lj_formal_bytes,
-            existing_results_df=results_df,
-            target_n=int(batch["target_n"]),
-            target_ready=lj_target_ready,
-            input_value_type=input_value_type,
-        )
-        lj_formal_import_review_state=review_import_lots(lj_formal_import_review_state,"lj",selected_batch_id)
-        lj_formal_import_review_state["file_signature"] = current_lj_formal_signature
-        st.session_state[lj_formal_import_review_state_key] = lj_formal_import_review_state
-
-    confirm_lj_formal_import_disabled = True
-    if lj_formal_import_review_state is not None:
-        formal_review_summary = lj_formal_import_review_state["summary"]
-        formal_review_issues_df = build_review_issues_dataframe(
-            lj_formal_import_review_state["issues"]
-        )
-        render_import_review_summary(formal_review_summary)
-        if formal_review_summary["has_blocking_errors"]:
-            st.error("正式期审查未通过，请按下方提示修正后重新上传。本次数据尚未导入。")
-        else:
-            st.success("正式期审查通过，请核对预览内容后确认导入。")
-
-        if formal_review_issues_df.empty:
-            st.info("本次正式期审查未发现错误或警告。")
-        else:
-            st.dataframe(formal_review_issues_df, hide_index=True, width="stretch")
-
-        confirm_lj_formal_import_disabled = (
-            (not lj_target_ready)
-            or formal_review_summary["has_blocking_errors"]
-            or not lj_formal_import_review_state["normalized_rows"]
-        )
-
-    confirm_lj_formal_import_clicked = formal_import_action_cols[1].button(
-        "确认导入正式期数据",
-        key=f"{lj_formal_import_scope}_confirm_button",
-        width="stretch",
-        disabled=confirm_lj_formal_import_disabled,
-    )
-    if confirm_lj_formal_import_clicked and lj_formal_import_review_state is not None:
-        try:
-            import_reviewed_results("lj",selected_batch_id,lj_formal_import_review_state["normalized_rows"])
-        except ValueError as exc:
-            st.error(f"导入未保存：{exc}")
-            return
-        imported_formal_row_count = len(lj_formal_import_review_state["normalized_rows"])
-        st.session_state.pop(lj_formal_import_review_state_key, None)
-        st.session_state[lj_formal_import_uploader_nonce_key] = lj_formal_import_uploader_nonce + 1
-        st.session_state[lj_formal_import_success_key] = (
-            f"已追加导入 {imported_formal_row_count} 条正式期记录，并自动刷新 LJ 图、最新结果分析和规则统计。"
-        )
-        st.rerun()
+    # Compatibility entry for callers that render the record workspace alone.
+    from ui.record_actions import render_pending_record_dialog
+    render_lj_records_section(context['qc_df'], context['input_value_type'], context=context)
+    render_pending_record_dialog('lj', int(context['batch']['id']))
 
 
 def render_lj_export_import_section(
@@ -1243,5 +694,6 @@ def render_lj_export_import_section(
     figure,
     chart_state: dict[str, object],
 ) -> None:
+    from ui.data_transfer import render_transfer_toolbar
     with profile_timer("render_lj_export_import_section", batch_id=selected_batch_id):
-        _render_lj_export_import_section_impl(context, selected_batch_id, figure, chart_state)
+        render_transfer_toolbar('lj', context, selected_batch_id, chart_state)

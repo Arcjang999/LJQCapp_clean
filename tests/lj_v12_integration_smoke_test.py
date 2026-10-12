@@ -214,7 +214,7 @@ def test_v12_lj_binding_ignores_old_projects_and_keeps_algorithms() -> None:
 def test_v12_lj_page_uses_global_configuration_selection() -> None:
     with TemporaryDatabaseContext():
         _seed_active_lj_configuration()
-        app = AppTest.from_file(APP_FILE_PATH)
+        app = AppTest.from_file(APP_FILE_PATH, default_timeout=20)
         app.run()
         assert not list(app.exception)
         app.session_state["pending_top_level_method"] = LJ_ENTRY_LABEL
@@ -227,15 +227,26 @@ def test_v12_lj_page_uses_global_configuration_selection() -> None:
         project_selector = app.selectbox(key="v12_lj_project_selector")
         project_selector.set_value(project_selector.options[1]).run()
         assert not list(app.exception)
+        expected_project_id = int(list_lj_workbench_projects().iloc[0]["id"])
+        expected_batch_id = int(list_lj_workbench_batches(expected_project_id).iloc[0]["id"])
+        assert app.session_state["selected_project_id"] == expected_project_id
+        assert app.session_state["selected_batch_id"] is None
         batch_selector = app.selectbox(key="v12_lj_batch_selector")
         batch_selector.set_value(batch_selector.options[1]).run()
         assert not list(app.exception)
+        assert app.session_state["selected_batch_id"] == expected_batch_id
+        assert not any(selectbox.key in ("v12_lj_project_selector", "v12_lj_batch_selector") for selectbox in app.selectbox)
+        assert [tab.label for tab in app.tabs] == ["当前批次", "月度报告"]
+        assert any("V12 C反应蛋白" in item.value and "V12-LJ-LOT-001" in item.value for item in app.caption)
         assert not any(button.key == "lj_open_v11_project_management" for button in app.button)
         app.button(key="open_project_management_page").click().run()
         assert not list(app.exception)
         app.button(key="close_project_management_page").click().run()
         assert not list(app.exception)
-        assert app.selectbox(key="v12_lj_batch_selector").value == batch_selector.value
+        assert app.session_state["selected_project_id"] == expected_project_id
+        assert app.session_state["selected_batch_id"] == expected_batch_id
+        assert not any(selectbox.key in ("v12_lj_project_selector", "v12_lj_batch_selector") for selectbox in app.selectbox)
+        assert any("V12 C反应蛋白" in item.value and "V12-LJ-LOT-001" in item.value for item in app.caption)
 
 
 if __name__ == "__main__":

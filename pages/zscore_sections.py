@@ -2,64 +2,22 @@ from __future__ import annotations
 
 from services.terminology_service import display_generated_text
 
-from services.cv_service import calculate_cv_percent
-from services.lot_lifecycle_service import review_import_lots, import_reviewed_results
 
-from copy import deepcopy
-from datetime import datetime, timedelta
-import hashlib
+from datetime import datetime
 import math
 from typing import Any
 
 import pandas as pd
 import streamlit as st
 
-from import_review import (
-    build_review_issues_dataframe,
-    build_zscore_building_template_dataframe,
-    review_zscore_building_import_csv,
-    review_zscore_formal_import_csv,
-)
-from plotting import figure_to_png_bytes
 from services.value_type_service import (
     build_level_measurement_label,
     get_input_value_type_label,
     normalize_input_value_type,
     parse_project_input_value,
 )
-from ui.common import (
-    ZSCORE_PHASE_VIEW_OPTIONS,
-    ZSCORE_Y_AXIS_OPTIONS,
-    build_safe_export_name,
-    build_zscore_operator_options,
-    format_error_type_label,
-    format_optional_float,
-    format_optional_input_value,
-    format_rule_code,
-    format_rule_description,
-    format_zscore_status_label,
-    format_zscore_template_display_name,
-    get_saved_batch_cv_limit,
-    parse_numeric_input,
-    render_compact_stat_metrics,
-    render_cv_limit_hint,
-    render_import_review_summary,
-    render_latest_analysis_card,
-    render_standard_view_help,
-)
-from ui.dialogs import (
-    bump_zscore_record_maintenance_dialog_nonce as bump_zscore_record_maintenance_dialog_nonce_impl,
-    render_zscore_record_maintenance_dialog as render_zscore_record_maintenance_dialog_impl,
-)
-from services.outlier_service import (
-    DEFAULT_GRUBBS_ALPHA,
-    get_current_outlier_status_label,
-    get_outlier_manual_status_label,
-)
-from services.export_utils import (
-    dataframe_to_csv_bytes,
-    dataframe_to_xlsx_bytes as shared_dataframe_to_xlsx_bytes,
-)
+from ui.common import ZSCORE_PHASE_VIEW_OPTIONS, ZSCORE_Y_AXIS_OPTIONS, build_safe_export_name, build_zscore_operator_options, format_error_type_label, format_optional_float, format_optional_input_value, format_rule_code, format_rule_description, format_zscore_status_label, format_zscore_template_display_name, get_saved_batch_cv_limit, render_compact_stat_metrics, render_cv_limit_hint, render_latest_analysis_card, render_standard_view_help
+from services.outlier_service import get_current_outlier_status_label, get_outlier_manual_status_label
 from services.profiling import profile_timer
 from zscore_logic import (
     PHASE_FORMAL_QC,
@@ -72,13 +30,8 @@ from zscore_logic import (
     get_zscore_display_sequence,
     get_zscore_level_targets,
     get_zscore_runs,
-    keep_zscore_building_run,
     resolve_zscore_batch_context,
-    restore_zscore_building_run,
     should_enable_formal_rules,
-    update_saved_zscore_run_manual_note,
-    upsert_zscore_level_target,
-    disable_zscore_building_run,
 )
 from zscore_plotting import plot_zscore_overlay, plot_zscore_single_level
 
@@ -217,32 +170,15 @@ def render_zscore_latest_analysis_panel(
     )
 
 def render_zscore_abnormal_note_quick_entry(latest_run: dict[str, Any] | None) -> None:
-    if latest_run is None or latest_run.get("is_preview"):
+    """Compatibility entry for a known abnormal run, without an inline editor."""
+    if latest_run is None or latest_run.get('is_preview') or latest_run.get('phase') != PHASE_FORMAL_QC:
         return
-    if str(latest_run.get("phase")) != PHASE_FORMAL_QC:
+    if latest_run.get('run_status') not in ('warning', 'reject'):
         return
-    if str(latest_run.get("run_status", "") or "") not in {"warning", "reject"}:
-        return
-
-    run_id = int(latest_run["run_id"])
     from ui.out_of_control import render_abnormal_entry
-    render_abnormal_entry('zscore_run', run_id,
-        warning=latest_run.get('run_status') == 'warning', key='latest')
-    current_note = str(latest_run.get("manual_note", "") or "")
-    st.caption("在下方填写异常备注并保存，备注会保留在这条检测记录中。")
-    with st.form(f"zscore_abnormal_note_form_{run_id}"):
-        manual_note = st.text_area(
-            "\u5f02\u5e38\u5907\u6ce8\uff08\u53ef\u9009\uff09",
-            value=current_note,
-            height=88,
-            key=f"zscore_abnormal_note_{run_id}",
-        )
-        submitted = st.form_submit_button("\u4fdd\u5b58\u5f53\u524d\u5f02\u5e38\u5907\u6ce8", width="stretch")
+    render_abnormal_entry('zscore_run', int(latest_run['run_id']),
+                          warning=latest_run.get('run_status') == 'warning', key='latest')
 
-        if submitted:
-            update_saved_zscore_run_manual_note(run_id, str(manual_note or "").strip())
-            st.session_state["zscore_notice"] = "Z-score \u624b\u52a8\u5907\u6ce8\u5df2\u4fdd\u5b58\u3002"
-            st.rerun()
 
 def render_zscore_rules_config_expander(
     template: dict[str, Any],
@@ -276,43 +212,11 @@ def render_zscore_vendor_reference_editor_body(
     required_n: int,
     profile: dict[str, Any],
 ) -> None:
-    mean_default = format_optional_input_value(profile.get("vendor_reference_mean"))
-    sd_default = format_optional_input_value(profile.get("vendor_reference_sd"))
-    source_default = str(profile.get("vendor_reference_source_note", "") or "")
-    state_prefix = f"zscore_vendor_{batch_id}_{template_id}_{level_id.replace(' ', '_')}"
-    form_key = f"{state_prefix}_form"
-    with st.form(form_key):
-        mean_text = st.text_input("参考均值", value=mean_default, key=f"{state_prefix}_mean")
-        sd_text = st.text_input("参考标准差", value=sd_default, key=f"{state_prefix}_sd")
-        source_note = st.text_input("来源备注（可选）", value=source_default, key=f"{state_prefix}_source")
-        vendor_mean, _, _ = parse_numeric_input(mean_text)
-        vendor_sd, _, _ = parse_numeric_input(sd_text)
-        vendor_cv = None
-        if vendor_mean is not None and vendor_sd is not None and not math.isclose(vendor_mean, 0.0, abs_tol=1e-12):
-            vendor_cv = calculate_cv_percent(vendor_mean, vendor_sd)
-        st.caption(f"参考变异系数（%）：{format_optional_float(vendor_cv, digits=2, suffix='%')}")
-        submitted = st.form_submit_button("保存厂家参考值", width="stretch")
+    """Keep the prior entry point while editing only in the reference dialog."""
+    from ui.zscore_reference_dialog import render_zscore_reference_summary
+    render_zscore_reference_summary(batch_id, template_id, required_n,
+                                   {level_id: profile}, [level_id], {level_id: level_display_name})
 
-        if submitted:
-            validation_errors: list[str] = []
-            if mean_text.strip() and vendor_mean is None:
-                validation_errors.append("厂家参考均值必须为有效正数。")
-            if sd_text.strip() and vendor_sd is None:
-                validation_errors.append("厂家参考标准差必须为有效正数。")
-
-            if validation_errors:
-                st.error("\n".join(validation_errors))
-            else:
-                upsert_zscore_level_target(
-                    batch_id=batch_id,
-                    level_id=level_id,
-                    vendor_reference_mean=vendor_mean,
-                    vendor_reference_sd=vendor_sd,
-                    vendor_reference_source_note=source_note.strip() or None,
-                    required_n=int(required_n),
-                )
-                st.session_state["zscore_notice"] = f"{level_display_name}的厂家参考值已保存。"
-                st.rerun()
 
 def render_zscore_vendor_reference_editor(
     batch_id: int,
@@ -534,79 +438,82 @@ def _build_zscore_run_records_dataframe(
     return pd.DataFrame(rows)
 
 
+def filter_zscore_record_runs(history_runs: list[dict[str, Any]], record_filter: str) -> list[dict[str, Any]]:
+    """One run identity drives every view and action, including filtered lists."""
+    rows = [run for run in history_runs if run.get('run_id', run.get('id')) is not None]
+    if record_filter == '参数建立期':
+        rows = [run for run in rows if run.get('phase') == PHASE_TARGET_BUILDING]
+    elif record_filter == '正式期':
+        rows = [run for run in rows if run.get('phase') == PHASE_FORMAL_QC]
+    elif record_filter == '警告 / 失控':
+        rows = [run for run in rows if run.get('phase') == PHASE_FORMAL_QC and run.get('run_status') in ('warning', 'reject')]
+    elif record_filter == '已禁用':
+        rows = [run for run in rows if build_zscore_building_run_status_summary(run)['any_excluded']]
+    return sorted(rows, key=lambda run: (pd.Timestamp(run['test_time']), int(run.get('run_id', run.get('id')))), reverse=True)
+
+
 def render_zscore_rule_records_overview_section(context: dict[str, object]) -> None:
-    history_runs = list(context["history_runs"])
-    template = context["template"]
-    required_level_ids = list(context["required_level_ids"])
-    level_label_map = dict(context["level_label_map"])
-    overall_phase = str(context["overall_phase"])
-    formal_rules_enabled = bool(context["formal_rules_enabled"])
-    formal_runs = [
-        run for run in history_runs if str(run.get("phase") or "") == PHASE_FORMAL_QC
-    ]
-    rule_ids = list(template["rule_ids"])
-    rule_summary = _build_zscore_rule_summary(formal_runs, rule_ids)
-    abnormal_records_df = _build_zscore_abnormal_records_dataframe(
-        formal_runs,
-        level_label_map,
-    )
-    run_records_df = _build_zscore_run_records_dataframe(
-        history_runs,
-        required_level_ids,
-    )
-
+    from database import read_snapshot
+    from services.lot_lifecycle_service import get_result_edit_availability, require_writable
+    from ui.record_workspace import render_record_selection
+    from ui.record_actions import render_record_toolbar
+    batch_id = int(context['batch']['id'])
+    history_runs = list(context['history_runs'])
+    scope = f'zscore_records_{batch_id}'
+    filter_key = scope + '_filter'
+    widget_key = scope + '_filter_widget'
+    filters = ['全部', '参数建立期', '正式期', '警告 / 失控', '已禁用']
+    if widget_key not in st.session_state:
+        st.session_state[widget_key] = st.session_state.get(filter_key, '全部')
+    def remember_filter():
+        st.session_state[filter_key] = st.session_state[widget_key]
     with st.container(border=True):
-        st.markdown("**规则与记录概览**")
-        st.caption(
-            "正式期重点查看多水平规则命中、警告 / 失控记录和完整检测记录；"
-            "参数建立期重点查看各水平参数建立状态。"
-        )
-
-        st.markdown("**本批次规则汇总**")
-        render_compact_stat_metrics(
-            [
-                *[
-                    (format_rule_code(rule_id), str(rule_summary.get(rule_id, 0)))
-                    for rule_id in rule_ids
-                ],
-                ("警告次数", str(rule_summary.get("warning_count", 0))),
-                ("失控次数", str(rule_summary.get("reject_count", 0))),
-            ]
-        )
-        rule_rows = [
-            {
-                "规则": format_rule_code(rule_id),
-                "命中次数": rule_summary.get(rule_id, 0),
-                "规则说明": format_rule_description(rule_id),
-            }
-            for rule_id in rule_ids
-        ]
-        st.dataframe(pd.DataFrame(rule_rows), hide_index=True, width="stretch")
-
-        with st.expander(
-            "警告 / 失控记录",
-            expanded=not abnormal_records_df.empty,
-        ):
-            if abnormal_records_df.empty:
-                st.info("当前正式期暂无警告或失控记录。")
-            else:
-                st.dataframe(abnormal_records_df, hide_index=True, width="stretch")
-                from ui.out_of_control import render_record_selector
-                render_record_selector('zscore_run', [r for r in formal_runs if r.get('run_status') in ('reject', 'warning')],
-                    key='zscore_records')
-
-        with st.expander("当前批次检测记录", expanded=False):
-            st.caption("查看当前批次参数建立期与正式期的完整检测记录。")
-            if run_records_df.empty:
-                st.info("当前批次暂无检测记录。")
-            else:
-                st.dataframe(run_records_df, hide_index=True, width="stretch")
-
-        render_zscore_rules_config_expander(
-            template,
-            overall_phase,
-            formal_rules_enabled,
-        )
+        st.markdown('**检测记录**')
+        current_filter = st.selectbox('记录范围', filters, key=widget_key, on_change=remember_filter)
+        st.session_state[filter_key] = current_filter
+        runs = filter_zscore_record_runs(history_runs, current_filter)
+        display = _build_zscore_run_records_dataframe(runs, list(context['required_level_ids']))
+        if not display.empty:
+            display = display.drop(columns=['分析提示', '误差类型', '备注',
+                                           *[column for column in display if column.endswith((' Z值', ' 状态'))]])
+            display = display.rename(columns={
+                f"{_build_zscore_export_level_prefix(level_id)} 值":
+                f"{format_zscore_level_display(level_id, context['level_label_map'])[0]} 值"
+                for level_id in context['required_level_ids']
+            })
+            display['维护状态'] = [build_zscore_building_run_status_summary(run)['current_status_label']
+                                  if run.get('phase') == PHASE_TARGET_BUILDING and not context['formal_rules_enabled'] else '只读' for run in runs]
+        record_ids = [int(run.get('run_id', run.get('id'))) for run in runs]
+        selected_id = render_record_selection(display, record_ids, scope=scope)
+        selected = next((run for run in runs if int(run.get('run_id', run.get('id'))) == selected_id), None)
+        try:
+            with read_snapshot() as connection:
+                require_writable(connection, 'zscore', batch_id, read_only=True)
+            writable = True
+        except ValueError:
+            writable = False
+        summary = build_zscore_building_run_status_summary(selected) if selected else None
+        included = None if not summary or summary['has_inconsistent_status'] else not summary['all_excluded']
+        allow_status = bool(selected and writable and not context['formal_rules_enabled']
+                            and selected.get('phase') == PHASE_TARGET_BUILDING)
+        availability = get_result_edit_availability('zscore', selected_id) if selected else {'allowed': False, 'reason': ''}
+        render_record_toolbar('zscore', batch_id, selected_id,
+                              allow_edit=bool(writable and availability['allowed'] and not context['formal_rules_enabled']
+                                              and not (selected or {}).get('is_locked_for_maintenance')), allow_status=allow_status,
+                              included=included,
+                              abnormal=bool(selected and selected.get('phase') == PHASE_FORMAL_QC
+                                            and selected.get('run_status') in ('warning', 'reject')))
+        if selected and not availability['allowed'] and availability.get('reason'):
+            st.caption(availability['reason'])
+        if summary and summary['has_inconsistent_status']:
+            st.caption('各水平维护状态不一致；保留、禁用或恢复会同时应用于整次检测的全部水平。')
+        formal_runs = [run for run in history_runs if run.get('phase') == PHASE_FORMAL_QC]
+        rule_summary = _build_zscore_rule_summary(formal_runs, list(context['template']['rule_ids']))
+        st.caption(f"本批次共 {len(history_runs)} 次检测｜警告 {rule_summary['warning_count']} 次｜失控 {rule_summary['reject_count']} 次")
+        with st.expander('规则汇总与说明', expanded=False):
+            st.dataframe(pd.DataFrame([{'规则': format_rule_code(rule_id), '命中次数': rule_summary[rule_id],
+                                      '规则说明': format_rule_description(rule_id)}
+                                     for rule_id in context['template']['rule_ids']]), hide_index=True, width='stretch')
 
 
 def render_zscore_record_maintenance_entry(
@@ -615,20 +522,11 @@ def render_zscore_record_maintenance_entry(
     *,
     caption_text: str | None = None,
 ) -> None:
+    """Compatibility wrapper: the record list owns selection and maintenance."""
     if caption_text:
         st.caption(caption_text)
-    if st.button(
-        "打开维护记录",
-        key="open_zscore_record_maintenance_dialog",
-        width="stretch",
-        disabled=not history_runs,
-    ):
-        bump_zscore_record_maintenance_dialog_nonce_impl()
-        st.session_state["show_zscore_record_maintenance_dialog"] = True
-    if not history_runs:
-        st.info("当前批次暂无已保存的检测记录可维护。")
-    if st.session_state.get("show_zscore_record_maintenance_dialog", False):
-        render_zscore_record_maintenance_dialog_impl(history_runs, batch_context)
+    from ui.record_actions import render_pending_record_dialog
+    render_pending_record_dialog('zscore', int(batch_context['batch']['id']))
 
 def build_zscore_chart_control_title(
     template: dict[str, Any],
@@ -1472,38 +1370,11 @@ def render_zscore_vendor_reference_section(
     context: dict[str, object],
     selected_batch_id: int,
 ) -> None:
-    template_id = context["template_id"]
-    required_n = context["required_n"]
-    level_label_map = context["level_label_map"]
-    level_target_profiles = context["level_target_profiles"]
-    required_level_ids = context["required_level_ids"]
-
-    with st.expander("查看各水平参考值与来源备注", expanded=False):
-        vendor_cols = st.columns(len(required_level_ids), gap="large")
-        for vendor_col, level_id in zip(vendor_cols, required_level_ids):
-            profile = level_target_profiles[level_id]
-            display_label, level_caption = format_zscore_level_display(level_id, level_label_map)
-            with vendor_col:
-                with st.container(border=True):
-                    st.markdown(f"**{display_label}**")
-                    if level_caption:
-                        st.caption(level_caption)
-                    render_zscore_profile_stat_line(
-                        "当前厂家参考",
-                        profile.get("vendor_reference_mean"),
-                        profile.get("vendor_reference_sd"),
-                        profile.get("vendor_reference_cv"),
-                    )
-                    if profile.get("vendor_reference_source_note"):
-                        st.caption(f"来源备注：{profile['vendor_reference_source_note']}")
-                    render_zscore_vendor_reference_editor_body(
-                        batch_id=selected_batch_id,
-                        template_id=template_id,
-                        level_id=level_id,
-                        level_display_name=display_label,
-                        required_n=required_n,
-                        profile=profile,
-                    )
+    from ui.zscore_reference_dialog import render_zscore_reference_summary
+    labels = {level_id: format_zscore_level_display(level_id, context['level_label_map'])[0]
+              for level_id in context['required_level_ids']}
+    render_zscore_reference_summary(selected_batch_id, context['template_id'], context['required_n'],
+                                   context['level_target_profiles'], context['required_level_ids'], labels)
 
 
 def render_zscore_chart_analysis_section(
@@ -1554,7 +1425,6 @@ def render_zscore_chart_analysis_section(
         st.pyplot(figure, clear_figure=False, width="stretch")
     with st.container(border=True):
         render_zscore_latest_analysis_panel(latest_run, overall_phase, formal_rules_enabled)
-    render_zscore_abnormal_note_quick_entry(latest_run)
 
     project_name_fragment = build_safe_export_name(
         batch["project_name"] if "project_name" in batch.keys() else None,
@@ -1589,718 +1459,11 @@ def render_zscore_chart_analysis_section(
 
 
 def render_zscore_maintenance_section(context: dict[str, object]) -> None:
-    history_runs = context["history_runs"]
-    batch_context = context["batch_context"]
-    level_label_map = dict(batch_context["level_label_map"])
-    formal_rules_enabled = bool(context["formal_rules_enabled"])
-    input_value_type_label = str(context["input_value_type_label"] or "检测值")
-    building_runs = [
-        run for run in history_runs if str(run.get("phase") or "") == PHASE_TARGET_BUILDING
-    ]
-
-    notice_message = str(st.session_state.pop("zscore_outlier_notice", "") or "")
-    if notice_message:
-        st.success(notice_message)
-
-    with st.container(border=True):
-        if not building_runs:
-            st.info("当前批次暂无参数建立期检测记录。")
-        else:
-            ordered_runs = sorted(
-                building_runs,
-                key=lambda run: (
-                    get_zscore_display_sequence(run),
-                    int(run.get("run_id") or 0),
-                ),
-                reverse=True,
-            )
-            run_options: dict[str, int] = {}
-            run_labels: list[str] = []
-            for run in ordered_runs:
-                run_status_summary = build_zscore_building_run_status_summary(run)
-                label = (
-                    f"第 {get_zscore_display_sequence(run)} 次检测 | "
-                    f"{pd.Timestamp(run['test_time']).strftime('%Y-%m-%d %H:%M')} | "
-                    f"{run_status_summary['current_status_label']}"
-                )
-                run_labels.append(label)
-                run_options[label] = int(run["run_id"])
-
-            st.markdown("**选择参数建立期检测记录**")
-            selected_run_label = st.selectbox(
-                "检测记录",
-                options=run_labels,
-                key="zscore_outlier_run_selector",
-            )
-            selected_run_id = run_options[selected_run_label]
-            selected_run = next(
-                run for run in ordered_runs if int(run["run_id"]) == int(selected_run_id)
-            )
-            selected_sequence = get_zscore_display_sequence(selected_run)
-            selected_run_time = pd.Timestamp(selected_run["test_time"]).strftime("%Y-%m-%d %H:%M")
-            selected_level_results = list(selected_run.get("level_results", []))
-            run_status_summary = build_zscore_building_run_status_summary(selected_run)
-            any_excluded = bool(run_status_summary["any_excluded"])
-            all_excluded = bool(run_status_summary["all_excluded"])
-            suspect_levels = [
-                format_zscore_level_display(str(level_result.get("level_id") or ""), level_label_map)[0]
-                for level_result in selected_level_results
-                if int(level_result.get("is_outlier_suspect", 0) or 0) == 1
-            ]
-
-            st.markdown("**本次检测结论**")
-            st.caption(
-                f"第 {selected_sequence} 次检测 | {selected_run_time} | "
-                f"检测人：{str(selected_run.get('operator', '') or '')} | "
-                f"当前状态：{run_status_summary['current_status_label']}"
-            )
-            render_compact_stat_metrics(
-                [
-                    ("当前阶段", display_generated_text(str(selected_run.get("phase_label") or get_phase_label(selected_run.get("phase"))))),
-                    ("当前状态", str(run_status_summary["current_status_label"])),
-                    ("疑似离群水平", "、".join(suspect_levels) if suspect_levels else "无"),
-                    ("涉及水平", f"{len(selected_level_results)} 个水平"),
-                ]
-            )
-            if bool(run_status_summary["has_inconsistent_status"]):
-                st.caption("本次检测的各水平保留或禁用状态不一致。请先核对，再通过下方操作同时处理全部水平。")
-
-            st.markdown("**各水平明细**")
-            st.caption(f"G 与 G临界值按 alpha={DEFAULT_GRUBBS_ALPHA:.2f} 展示。")
-            st.dataframe(
-                build_zscore_building_run_evidence_dataframe(
-                    selected_run,
-                    level_label_map,
-                    input_value_type_label,
-                ),
-                hide_index=True,
-                width="stretch",
-            )
-
-            st.markdown("**本次检测维护操作**")
-            if formal_rules_enabled:
-                st.caption("批次已进入正式期，参数建立记录仅供查询，不能再保留、禁用或恢复。")
-            else:
-                st.caption("以下操作会同时更新本次检测的全部水平。")
-            action_cols = st.columns(3)
-            keep_disabled = formal_rules_enabled
-            disable_disabled = formal_rules_enabled or all_excluded
-            restore_disabled = formal_rules_enabled or not any_excluded
-            if action_cols[0].button(
-                "保留本次检测",
-                key=f"zscore_keep_run_{selected_run_id}",
-                width="stretch",
-                disabled=keep_disabled,
-            ):
-                keep_zscore_building_run(int(selected_run_id))
-                st.session_state["zscore_outlier_notice"] = (
-                    f"第 {selected_sequence} 次检测已标记为保留。"
-                )
-                st.rerun()
-            if action_cols[1].button(
-                "禁用本次检测",
-                key=f"zscore_disable_run_{selected_run_id}",
-                width="stretch",
-                disabled=disable_disabled,
-            ):
-                disable_zscore_building_run(int(selected_run_id))
-                st.session_state["zscore_outlier_notice"] = (
-                    f"第 {selected_sequence} 次检测已禁用。"
-                )
-                st.rerun()
-            if action_cols[2].button(
-                "恢复本次检测",
-                key=f"zscore_restore_run_{selected_run_id}",
-                width="stretch",
-                disabled=restore_disabled,
-            ):
-                restore_zscore_building_run(int(selected_run_id))
-                st.session_state["zscore_outlier_notice"] = (
-                    f"第 {selected_sequence} 次检测已恢复。"
-                )
-                st.rerun()
-        st.markdown("**维护记录**")
-        render_zscore_record_maintenance_entry(history_runs, batch_context)
+    """Compatibility wrapper for the unified record list and action toolbar."""
+    render_zscore_rule_records_overview_section(context)
 
 
-def _render_zscore_export_import_section_impl(
-    context: dict[str, object],
-    selected_batch_id: int,
-    chart_panel_state: dict[str, object],
-) -> None:
-    batch = context["batch"]
-    history_runs = context["history_runs"]
-    input_value_type = context["input_value_type"]
-    input_value_type_label = context["input_value_type_label"]
-    level_count = context["level_count"]
-    required_level_ids = context["required_level_ids"]
-    required_n = context["required_n"]
-    overall_phase = context["overall_phase"]
-    formal_rules_enabled = context["formal_rules_enabled"]
-    plot_df = context["plot_df"]
-    template_id = context["template_id"]
-
-    project_name_fragment = chart_panel_state["project_name_fragment"]
-    lot_no_fragment = chart_panel_state["lot_no_fragment"]
-    phase_scope_fragment = chart_panel_state["phase_scope_fragment"]
-    current_view_label = chart_panel_state["current_view_label"]
-    current_view_fragment = chart_panel_state["current_view_fragment"]
-    phase_scope = chart_panel_state["phase_scope"]
-    view_mode = chart_panel_state["view_mode"]
-    selected_level = chart_panel_state["selected_level"]
-    y_axis_mode = chart_panel_state["y_axis_mode"]
-    standard_sd_limit = chart_panel_state["standard_sd_limit"]
-    current_png_payload_key = f"zscore_current_chart_payload_{selected_batch_id}"
-    current_png_signature = (
-        selected_batch_id,
-        "current_png",
-        len(history_runs),
-        max((int(run.get("run_id") or 0) for run in history_runs), default=0),
-        phase_scope,
-        view_mode,
-        selected_level,
-        y_axis_mode,
-        float(standard_sd_limit),
-    )
-    current_png_payload = _ensure_download_payload(
-        current_png_payload_key,
-        current_png_signature,
-        lambda: figure_to_png_bytes(chart_panel_state["figure"]),
-    )
-    chart_panel_state["current_png_bytes"] = (
-        current_png_payload["data"] if current_png_payload is not None else b""
-    )
-
-    zscore_building_template_df = build_zscore_building_template_dataframe(
-        level_count,
-        input_value_type=input_value_type,
-    )
-    zscore_building_template_csv_bytes = zscore_building_template_df.to_csv(index=False).encode("utf-8-sig")
-    zscore_building_import_scope = f"zscore_building_import_{selected_batch_id}"
-    zscore_building_import_review_state_key = f"{zscore_building_import_scope}_review"
-    zscore_building_import_success_key = f"{zscore_building_import_scope}_success"
-    zscore_building_import_uploader_nonce_key = f"{zscore_building_import_scope}_uploader_nonce"
-    zscore_building_import_uploader_nonce = int(
-        st.session_state.get(zscore_building_import_uploader_nonce_key, 0)
-    )
-    zscore_building_import_uploader_key = (
-        f"{zscore_building_import_scope}_file_{zscore_building_import_uploader_nonce}"
-    )
-    zscore_building_import_disabled = overall_phase != PHASE_TARGET_BUILDING
-    existing_building_runs = [
-        run
-        for run in history_runs
-        if str(run.get("phase") or "") == PHASE_TARGET_BUILDING
-    ]
-    existing_all_runs_df = pd.DataFrame(
-        {
-            "test_time": [run.get("test_time") for run in history_runs],
-        }
-    )
-    existing_building_runs_df = pd.DataFrame(
-        {
-            "test_time": [run.get("test_time") for run in existing_building_runs],
-        }
-    )
-    existing_formal_runs = [
-        run
-        for run in history_runs
-        if str(run.get("phase") or "") == PHASE_FORMAL_QC
-    ]
-    zscore_target_ready = bool(formal_rules_enabled)
-    zscore_building_import_success_message = str(
-        st.session_state.pop(zscore_building_import_success_key, "") or ""
-    )
-    if zscore_building_import_success_message:
-        st.success(zscore_building_import_success_message)
-
-    zscore_formal_import_scope = f"zscore_formal_import_{selected_batch_id}"
-    zscore_formal_import_review_state_key = f"{zscore_formal_import_scope}_review"
-    zscore_formal_import_success_key = f"{zscore_formal_import_scope}_success"
-    zscore_formal_import_uploader_nonce_key = f"{zscore_formal_import_scope}_uploader_nonce"
-    zscore_formal_import_uploader_nonce = int(
-        st.session_state.get(zscore_formal_import_uploader_nonce_key, 0)
-    )
-    zscore_formal_import_uploader_key = (
-        f"{zscore_formal_import_scope}_file_{zscore_formal_import_uploader_nonce}"
-    )
-    zscore_formal_import_success_message = str(
-        st.session_state.pop(zscore_formal_import_success_key, "") or ""
-    )
-    if zscore_formal_import_success_message:
-        st.success(zscore_formal_import_success_message)
-
-    building_export_empty = not any(
-        str(run.get("phase") or "") == PHASE_TARGET_BUILDING for run in history_runs
-    )
-    formal_export_empty = not any(
-        str(run.get("phase") or "") == PHASE_FORMAL_QC for run in history_runs
-    )
-    export_data_signature = (
-        selected_batch_id,
-        len(history_runs),
-        max((int(run.get("run_id") or 0) for run in history_runs), default=0),
-        str(max((pd.Timestamp(run["test_time"]) for run in history_runs if run.get("test_time") is not None), default="")),
-    )
-
-    st.caption(f"可在下方导出数据和图表，或下载模板后导入结果。各水平的检测值请按“{input_value_type_label}”填写。")
-    st.markdown("**导出**")
-    st.caption("导出文件中每行是一整次检测，各水平结果分别列出。请按需要选择参数建立期或正式期。")
-    zscore_export_format = st.radio(
-        "导出数据格式",
-        options=["Excel (.xlsx)", "CSV (.csv)"],
-        horizontal=True,
-        key="zscore_export_format",
-    )
-    building_payload_key = f"zscore_building_export_payload_{selected_batch_id}"
-    formal_payload_key = f"zscore_formal_export_payload_{selected_batch_id}"
-    building_signature = (*export_data_signature, "building", zscore_export_format)
-    formal_signature = (*export_data_signature, "formal", zscore_export_format)
-    def _build_building_export_bytes() -> bytes:
-        building_export_df_for_payload = build_zscore_phase_export_dataframe(
-            history_runs,
-            required_level_ids,
-            "building",
-            input_value_type,
-        )
-        return (
-            shared_dataframe_to_xlsx_bytes(building_export_df_for_payload)
-            if zscore_export_format == "Excel (.xlsx)"
-            else dataframe_to_csv_bytes(building_export_df_for_payload)
-        )
-
-    def _build_formal_export_bytes() -> bytes:
-        formal_export_df_for_payload = build_zscore_phase_export_dataframe(
-            history_runs,
-            required_level_ids,
-            "formal",
-            input_value_type,
-        )
-        return (
-            shared_dataframe_to_xlsx_bytes(formal_export_df_for_payload)
-            if zscore_export_format == "Excel (.xlsx)"
-            else dataframe_to_csv_bytes(formal_export_df_for_payload)
-        )
-
-    building_payload = _ensure_download_payload(
-        building_payload_key,
-        building_signature,
-        _build_building_export_bytes,
-        disabled=building_export_empty,
-    )
-    formal_payload = _ensure_download_payload(
-        formal_payload_key,
-        formal_signature,
-        _build_formal_export_bytes,
-        disabled=formal_export_empty,
-    )
-
-    building_export_df = pd.DataFrame({"prepared": [1]}) if building_payload is not None else pd.DataFrame()
-    formal_export_df = pd.DataFrame({"prepared": [1]}) if formal_payload is not None else pd.DataFrame()
-    building_csv_bytes = building_payload["data"] if building_payload is not None and zscore_export_format != "Excel (.xlsx)" else b""
-    building_xlsx_bytes = building_payload["data"] if building_payload is not None and zscore_export_format == "Excel (.xlsx)" else b""
-    formal_csv_bytes = formal_payload["data"] if formal_payload is not None and zscore_export_format != "Excel (.xlsx)" else b""
-    formal_xlsx_bytes = formal_payload["data"] if formal_payload is not None and zscore_export_format == "Excel (.xlsx)" else b""
-    zscore_data_export_cols = st.columns(2)
-    zscore_data_export_cols[0].download_button(
-        label="导出参数建立期数据",
-        data=building_xlsx_bytes if zscore_export_format == "Excel (.xlsx)" else building_csv_bytes,
-        file_name=(
-            f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_zscore_building_runs.xlsx"
-            if zscore_export_format == "Excel (.xlsx)"
-            else f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_zscore_building_runs.csv"
-        ),
-        mime=(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            if zscore_export_format == "Excel (.xlsx)"
-            else "text/csv"
-        ),
-        width="stretch",
-        disabled=building_export_df.empty,
-    )
-    zscore_data_export_cols[1].download_button(
-        label="导出正式期数据",
-        data=formal_xlsx_bytes if zscore_export_format == "Excel (.xlsx)" else formal_csv_bytes,
-        file_name=(
-            f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_zscore_formal_runs.xlsx"
-            if zscore_export_format == "Excel (.xlsx)"
-            else f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_zscore_formal_runs.csv"
-        ),
-        mime=(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            if zscore_export_format == "Excel (.xlsx)"
-            else "text/csv"
-        ),
-        width="stretch",
-        disabled=formal_export_df.empty,
-    )
-
-    st.markdown("**CSV 导入**")
-    st.caption("参数建立期和正式期分别提供模板下载、审查和导入。")
-    st.markdown("**参数建立期 CSV 导入**")
-    st.caption(
-        f"先下载当前批次模板，按“{input_value_type_label}”填写参数建立期各水平结果，再上传 CSV 或单工作表 Excel。修正审查提示的错误后，核对预览并确认导入。"
-    )
-    st.download_button(
-        label="下载参数建立期 CSV 模板",
-        data=zscore_building_template_csv_bytes,
-        file_name=(
-            f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_zscore_building_import_template.csv"
-        ),
-        mime="text/csv",
-        width="stretch",
-    )
-    if zscore_building_import_disabled:
-        st.info("当前批次已完成均值和标准差建立，请使用下方“正式期 CSV 导入”录入后续结果。")
-        st.session_state.pop(zscore_building_import_review_state_key, None)
-
-    uploaded_zscore_building_csv = st.file_uploader(
-        "上传参数建立期 CSV / Excel",
-        type=["csv", "xlsx"],
-        key=zscore_building_import_uploader_key,
-        disabled=zscore_building_import_disabled,
-        help="请使用当前批次的 2 水平或 3 水平模板，一次填写全部水平。可上传 CSV 或仅含一个工作表的 Excel（.xlsx）。",
-    )
-    uploaded_zscore_building_bytes = (
-        uploaded_zscore_building_csv.getvalue() if uploaded_zscore_building_csv is not None else b""
-    )
-    current_zscore_building_signature = (
-        (
-            f"{hashlib.sha256(uploaded_zscore_building_bytes).hexdigest()}:"
-            f"{overall_phase}:{len(existing_building_runs)}:{required_n}:{level_count}"
-        )
-        if uploaded_zscore_building_bytes
-        else ""
-    )
-
-    zscore_building_import_review_state = st.session_state.get(
-        zscore_building_import_review_state_key
-    )
-    if not current_zscore_building_signature:
-        st.session_state.pop(zscore_building_import_review_state_key, None)
-        zscore_building_import_review_state = None
-    elif (
-        zscore_building_import_review_state is not None
-        and zscore_building_import_review_state.get("file_signature")
-        != current_zscore_building_signature
-    ):
-        st.session_state.pop(zscore_building_import_review_state_key, None)
-        zscore_building_import_review_state = None
-
-    zscore_import_action_cols = st.columns(2)
-    review_zscore_building_clicked = zscore_import_action_cols[0].button(
-        "审查 CSV",
-        key=f"{zscore_building_import_scope}_review_button",
-        width="stretch",
-        disabled=zscore_building_import_disabled or uploaded_zscore_building_csv is None,
-    )
-    if review_zscore_building_clicked:
-        zscore_building_import_review_state = review_zscore_building_import_csv(
-            file_bytes=uploaded_zscore_building_bytes,
-            existing_results_df=existing_building_runs_df,
-            level_count=level_count,
-            target_n=required_n,
-            input_value_type=input_value_type,
-        )
-        zscore_building_import_review_state=review_import_lots(zscore_building_import_review_state,"zscore",selected_batch_id)
-        zscore_building_import_review_state["file_signature"] = current_zscore_building_signature
-        st.session_state[zscore_building_import_review_state_key] = (
-            zscore_building_import_review_state
-        )
-
-    confirm_zscore_building_import_disabled = True
-    if zscore_building_import_review_state is not None:
-        zscore_review_summary = zscore_building_import_review_state["summary"]
-        zscore_review_issues_df = build_review_issues_dataframe(
-            zscore_building_import_review_state["issues"]
-        )
-        render_import_review_summary(zscore_review_summary)
-        if zscore_review_summary["has_blocking_errors"]:
-            st.error("审查未通过，请按下方提示修正后重新上传。本次数据尚未导入。")
-        else:
-            st.success("审查通过，请核对预览内容后确认导入。")
-
-        if zscore_review_issues_df.empty:
-            st.info("本次审查未发现错误或警告。")
-        else:
-            st.dataframe(zscore_review_issues_df, hide_index=True, width="stretch")
-
-        confirm_zscore_building_import_disabled = (
-            zscore_building_import_disabled
-            or zscore_review_summary["has_blocking_errors"]
-            or not zscore_building_import_review_state["normalized_rows"]
-        )
-
-    confirm_zscore_building_import_clicked = zscore_import_action_cols[1].button(
-        "确认导入参数建立期数据",
-        key=f"{zscore_building_import_scope}_confirm_button",
-        width="stretch",
-        disabled=confirm_zscore_building_import_disabled,
-    )
-    if (
-        confirm_zscore_building_import_clicked
-        and zscore_building_import_review_state is not None
-    ):
-        imported_row_count = 0
-        try:
-            imported_row_count=import_reviewed_results("zscore",selected_batch_id,zscore_building_import_review_state["normalized_rows"],template_id=template_id,required_n=required_n)
-        except ValueError as exc:
-            st.error(f"导入中断：{exc}。请重新审查当前文件后再试。")
-        else:
-            st.session_state.pop(zscore_building_import_review_state_key, None)
-            st.session_state[zscore_building_import_uploader_nonce_key] = (
-                zscore_building_import_uploader_nonce + 1
-            )
-            st.session_state[zscore_building_import_success_key] = (
-                f"已追加导入 {imported_row_count} 条参数建立期检测记录，并自动更新当前参数建立统计与参数建立进度。"
-            )
-            st.rerun()
-
-    st.markdown("**正式期 CSV 导入**")
-    st.caption(
-        f"先下载当前批次模板，按“{input_value_type_label}”填写正式期各水平结果，再上传 CSV 或单工作表 Excel。修正审查提示的错误后，核对预览并确认导入当前批次。"
-    )
-    st.download_button(
-        label="下载正式期 CSV 模板",
-        data=zscore_building_template_csv_bytes,
-        file_name=(
-            f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_zscore_formal_import_template.csv"
-        ),
-        mime="text/csv",
-        width="stretch",
-    )
-    if not zscore_target_ready:
-        st.info("请先完成当前批次的均值和标准差建立，再导入正式期结果。现在仍可上传文件，预先核对内容和格式。")
-
-    uploaded_zscore_formal_csv = st.file_uploader(
-        "上传正式期 CSV / Excel",
-        type=["csv", "xlsx"],
-        key=zscore_formal_import_uploader_key,
-        help="请使用当前批次的 2 水平或 3 水平模板，一次填写全部水平。可上传 CSV 或仅含一个工作表的 Excel（.xlsx）。",
-    )
-    uploaded_zscore_formal_bytes = (
-        uploaded_zscore_formal_csv.getvalue() if uploaded_zscore_formal_csv is not None else b""
-    )
-    current_zscore_formal_signature = (
-        (
-            f"{hashlib.sha256(uploaded_zscore_formal_bytes).hexdigest()}:"
-            f"{int(zscore_target_ready)}:{overall_phase}:{len(history_runs)}:{len(existing_formal_runs)}:{required_n}:{level_count}"
-        )
-        if uploaded_zscore_formal_bytes
-        else ""
-    )
-
-    zscore_formal_import_review_state = st.session_state.get(
-        zscore_formal_import_review_state_key
-    )
-    if not current_zscore_formal_signature:
-        st.session_state.pop(zscore_formal_import_review_state_key, None)
-        zscore_formal_import_review_state = None
-    elif (
-        zscore_formal_import_review_state is not None
-        and zscore_formal_import_review_state.get("file_signature")
-        != current_zscore_formal_signature
-    ):
-        st.session_state.pop(zscore_formal_import_review_state_key, None)
-        zscore_formal_import_review_state = None
-
-    zscore_formal_import_action_cols = st.columns(2)
-    review_zscore_formal_clicked = zscore_formal_import_action_cols[0].button(
-        "审查正式期 CSV",
-        key=f"{zscore_formal_import_scope}_review_button",
-        width="stretch",
-        disabled=uploaded_zscore_formal_csv is None,
-    )
-    if review_zscore_formal_clicked:
-        zscore_formal_import_review_state = review_zscore_formal_import_csv(
-            file_bytes=uploaded_zscore_formal_bytes,
-            existing_results_df=existing_all_runs_df,
-            level_count=level_count,
-            target_ready=zscore_target_ready,
-            existing_formal_count=len(existing_formal_runs),
-            input_value_type=input_value_type,
-        )
-        zscore_formal_import_review_state=review_import_lots(zscore_formal_import_review_state,"zscore",selected_batch_id)
-        zscore_formal_import_review_state["file_signature"] = current_zscore_formal_signature
-        st.session_state[zscore_formal_import_review_state_key] = (
-            zscore_formal_import_review_state
-        )
-
-    confirm_zscore_formal_import_disabled = True
-    if zscore_formal_import_review_state is not None:
-        zscore_formal_review_summary = zscore_formal_import_review_state["summary"]
-        zscore_formal_review_issues_df = build_review_issues_dataframe(
-            zscore_formal_import_review_state["issues"]
-        )
-        render_import_review_summary(zscore_formal_review_summary)
-        if zscore_formal_review_summary["has_blocking_errors"]:
-            st.error("正式期审查未通过，请按下方提示修正后重新上传。本次数据尚未导入。")
-        else:
-            st.success("正式期审查通过，请核对预览内容后确认导入。")
-
-        if zscore_formal_review_issues_df.empty:
-            st.info("本次正式期审查未发现错误或警告。")
-        else:
-            st.dataframe(zscore_formal_review_issues_df, hide_index=True, width="stretch")
-
-        confirm_zscore_formal_import_disabled = (
-            (not zscore_target_ready)
-            or zscore_formal_review_summary["has_blocking_errors"]
-            or not zscore_formal_import_review_state["normalized_rows"]
-        )
-
-    confirm_zscore_formal_import_clicked = zscore_formal_import_action_cols[1].button(
-        "确认导入正式期数据",
-        key=f"{zscore_formal_import_scope}_confirm_button",
-        width="stretch",
-        disabled=confirm_zscore_formal_import_disabled,
-    )
-    if (
-        confirm_zscore_formal_import_clicked
-        and zscore_formal_import_review_state is not None
-    ):
-        imported_formal_row_count = 0
-        try:
-            imported_row_count=import_reviewed_results("zscore",selected_batch_id,zscore_formal_import_review_state["normalized_rows"],template_id=template_id,required_n=required_n)
-        except ValueError as exc:
-            st.error(f"正式期导入中断：{exc}。请重新审查当前文件后再试。")
-        else:
-            st.session_state.pop(zscore_formal_import_review_state_key, None)
-            st.session_state[zscore_formal_import_uploader_nonce_key] = (
-                zscore_formal_import_uploader_nonce + 1
-            )
-            st.session_state[zscore_formal_import_success_key] = (
-                f"已追加导入 {imported_formal_row_count} 条正式期检测记录，并自动刷新各水平 Z-score、判定结果、图表与最新结果分析。"
-            )
-            st.rerun()
-
-    st.markdown("**图导出**")
-    st.download_button(
-        label="导出当前 Z-score 图 PNG",
-        data=chart_panel_state["current_png_bytes"],
-        file_name=(
-            f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_"
-            f"zscore_current_{phase_scope_fragment}_{current_view_fragment}.png"
-        ),
-        mime="image/png",
-        width="stretch",
-        disabled=current_png_payload is None,
-    )
-    st.caption("月度图固定只导正式期，日期范围最长 30 天；单水平视图导出单水平月度图，合并视图导出合并月度图。")
-    formal_plot_df = plot_df[plot_df["phase"] == PHASE_FORMAL_QC].copy() if "phase" in plot_df.columns else pd.DataFrame()
-    if formal_plot_df.empty:
-        st.info("当前批次还没有正式质控数据。")
-    else:
-        default_monthly_end = formal_plot_df["test_time"].max().date()
-        default_monthly_start = max(formal_plot_df["test_time"].min().date(), default_monthly_end - timedelta(days=29))
-        monthly_col_start, monthly_col_end = st.columns(2)
-        monthly_start = monthly_col_start.date_input(
-            "开始日期",
-            value=default_monthly_start,
-            key="zscore_monthly_export_start",
-        )
-        monthly_end = monthly_col_end.date_input(
-            "结束日期",
-            value=default_monthly_end,
-            key="zscore_monthly_export_end",
-        )
-
-        monthly_error = ""
-        day_span = (pd.Timestamp(monthly_end).date() - pd.Timestamp(monthly_start).date()).days + 1
-        if monthly_end < monthly_start:
-            monthly_error = "结束日期不能早于开始日期。"
-        elif day_span > 30:
-            monthly_error = "月度质控图导出范围最长为 30 天，请重新选择日期范围。"
-
-        if monthly_error:
-            st.warning(monthly_error)
-            st.session_state.pop(f"zscore_monthly_png_payload_{selected_batch_id}", None)
-        else:
-            monthly_plot_df = build_zscore_monthly_export_plot_dataframe(
-                plot_df=plot_df,
-                start_date=monthly_start,
-                end_date=monthly_end,
-            )
-            if monthly_plot_df.empty:
-                st.info("所选日期范围内没有正式质控数据，无法导出月度图。")
-                st.session_state.pop(f"zscore_monthly_png_payload_{selected_batch_id}", None)
-            else:
-                monthly_payload_key = f"zscore_monthly_png_payload_{selected_batch_id}"
-                monthly_signature = (
-                    "monthly_png",
-                    _dataframe_signature(monthly_plot_df),
-                    str(monthly_start),
-                    str(monthly_end),
-                    view_mode,
-                    selected_level,
-                    tuple(required_level_ids),
-                    y_axis_mode,
-                    float(standard_sd_limit),
-                )
-                monthly_payload = _clear_stale_download_payload(
-                    monthly_payload_key,
-                    monthly_signature,
-                )
-                monthly_file_name = (
-                    f"{project_name_fragment}_batch_{batch['id']}_{lot_no_fragment}_"
-                    f"zscore_monthly_formal_{current_view_fragment}_"
-                    f"{monthly_start.strftime('%Y-%m-%d')}_to_{monthly_end.strftime('%Y-%m-%d')}.png"
-                )
-                if st.button(
-                    "生成月度图 PNG",
-                    key=f"generate_zscore_monthly_png_{selected_batch_id}",
-                    width="stretch",
-                ):
-                    monthly_title = (
-                        f"月度质控图 - 质控批号 {batch['lot_no']} - {batch['instrument']} - {batch['reagent']} - "
-                        f"{batch['qc_material']} - {batch['concentration']}\n"
-                        f"正式期｜{current_view_label}｜{monthly_start.strftime('%Y-%m-%d')} 至 {monthly_end.strftime('%Y-%m-%d')}"
-                    )
-                    if view_mode == "单水平视图":
-                        monthly_figure = plot_zscore_single_level(
-                            plot_df=monthly_plot_df,
-                            level_id=selected_level,
-                            title=monthly_title,
-                            phase_scope="formal",
-                            y_axis_mode=y_axis_mode,
-                            standard_sd_limit=standard_sd_limit,
-                            y_axis_label=input_value_type_label,
-                        )
-                    else:
-                        monthly_figure = plot_zscore_overlay(
-                            plot_df=monthly_plot_df,
-                            title=monthly_title,
-                            active_levels=required_level_ids,
-                            phase_scope="formal",
-                            y_axis_mode=y_axis_mode,
-                            standard_sd_limit=standard_sd_limit,
-                            y_axis_label=input_value_type_label,
-                        )
-                    monthly_payload = {
-                        "data": figure_to_png_bytes(monthly_figure, close=True),
-                        "file_name": monthly_file_name,
-                        "signature": monthly_signature,
-                    }
-                    st.session_state[monthly_payload_key] = monthly_payload
-
-                st.download_button(
-                    label="导出月度图 PNG",
-                    data=monthly_payload["data"] if monthly_payload is not None else b"",
-                    file_name=(
-                        monthly_payload["file_name"]
-                        if monthly_payload is not None
-                        else monthly_file_name
-                    ),
-                    mime="image/png",
-                    width="stretch",
-                    disabled=monthly_payload is None,
-                )
-
-
-def render_zscore_export_import_section(
-    context: dict[str, object],
-    selected_batch_id: int,
-    chart_panel_state: dict[str, object],
-) -> None:
+def render_zscore_export_import_section(context, selected_batch_id, figure, chart_panel_state):
+    from ui.data_transfer import render_transfer_toolbar
     with profile_timer("render_zscore_export_import_section", batch_id=selected_batch_id):
-        _render_zscore_export_import_section_impl(context, selected_batch_id, chart_panel_state)
+        render_transfer_toolbar('zscore', context, selected_batch_id, chart_panel_state)

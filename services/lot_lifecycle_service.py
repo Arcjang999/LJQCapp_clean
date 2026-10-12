@@ -64,8 +64,8 @@ def source_context(connection, method, batch_id, *, read_only=False):
     return source, binding, batch
 
 
-def require_writable(connection, method, batch_id, test_time=None):
-    source,binding,batch = source_context(connection,method,batch_id)
+def require_writable(connection, method, batch_id, test_time=None, *, read_only=False):
+    source,binding,batch = source_context(connection,method,batch_id,read_only=read_only)
     if batch['is_disabled'] or (method=='instant' and batch['transfer_status']=='transferred'):
         raise ValueError('该批次已停用或已转入 LJ 法，当前为只读。')
     if binding is not None:
