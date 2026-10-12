@@ -266,6 +266,12 @@ def init_db() -> None:
         ensure_batch_monthly_reports_schema(connection)
         from migrations.record_maintenance import ensure_record_maintenance_schema
         ensure_record_maintenance_schema(connection)
+        from migrations.qc_product_recommendations import ensure_qc_product_recommendation_schema
+        ensure_qc_product_recommendation_schema(connection)
+        from migrations.quick_project_setup import ensure_quick_project_setup_schema
+        ensure_quick_project_setup_schema(connection)
+        from migrations.lab_preparation import ensure_lab_preparation_schema
+        ensure_lab_preparation_schema(connection)
         _rebind_legacy_batches_foreign_keys(connection)
         connection.execute(
             """

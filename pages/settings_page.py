@@ -78,6 +78,8 @@ def render_settings_page() -> None:
         caption="维护报告默认信息、更改数据保存位置，以及备份和恢复数据。",
         tone="settings",
     )
+    from ui.lab_preparation import render_lab_preparation_entry
+    render_lab_preparation_entry()
     render_workbench_context_bar(
         title="当前报告默认信息",
         caption="请核对实验室、科室和责任人；后续新生成的单水平（LJ）与多水平法月报会使用这些默认信息。",

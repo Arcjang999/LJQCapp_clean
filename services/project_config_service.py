@@ -256,6 +256,7 @@ def list_template_items(template_id: int, include_disabled: bool = False) -> pd.
             items.quality_target_source_text,
             items.quality_goal_json,
             items.quality_review_json,
+            items.product_choice_review_json,
             items.sort_order,
             items.notes,
             items.is_disabled
@@ -316,6 +317,7 @@ def _normalize_template_item(row: dict[str, object], sort_order: int) -> dict[st
         "quality_target_source_text": _clean_optional(row.get("quality_target_source_text")),
         "sort_order": int(row.get("sort_order") or sort_order),
         "notes": _clean_optional(row.get("notes")),
+        **{key: row[key] for key in ('product_choice_review', 'manual_product_review', 'product_recommendation_revision') if key in row},
     }
 
 
@@ -356,6 +358,10 @@ def preview_panel_items(template_id: int, candidate_rows: list[dict], *, expecte
                 elif key in seen:
                     entry.update(status='existing', message='已有相同设置，保留原配置' if key in existing else '本组重复，保留首次选择')
                 else:
+                    from services.qc_product_recommendation_service import product_scope_revision
+                    row['product_recommendation_revision'] = product_scope_revision(
+                        reagent_id=row['reagent_id'], lab_instrument_id=template['lab_instrument_id'],
+                        test_item_id=row['test_item_id'], method_id=row['method_id']) if row['reagent_id'] else None
                     row.update(row_key=str(candidate.get('row_key') or uuid4().hex), test_item_name=item['chinese_name'])
                     rows.append(row)
                     seen.add(key)
@@ -419,7 +425,7 @@ def save_template_items(template_id: int, rows: list[dict[str, object]], *, expe
 
     with atomic_write() as connection:
         template = connection.execute(
-            "SELECT id, revision_no FROM qc_project_templates WHERE id = ? AND is_disabled = 0",
+            "SELECT * FROM qc_project_templates WHERE id = ? AND is_disabled = 0",
             (int(template_id),),
         ).fetchone()
         if template is None:
@@ -450,6 +456,8 @@ def save_template_items(template_id: int, rows: list[dict[str, object]], *, expe
             old = connection.execute('''SELECT * FROM qc_project_template_items
                 WHERE template_id=? AND test_item_id=? AND qc_method=? AND input_value_type=?''',
                 (int(template_id), *template_item_key(row))).fetchone()
+            from services.qc_product_recommendation_service import resolve_item_choice_review, _json
+            product_choice = resolve_item_choice_review(template, row, existing=old)
             connection.execute(
                 """
                 INSERT INTO qc_project_template_items (
@@ -498,6 +506,9 @@ def save_template_items(template_id: int, rows: list[dict[str, object]], *, expe
                     row["notes"],
                 ),
             )
+            connection.execute('''UPDATE qc_project_template_items SET product_choice_review_json=?
+                WHERE template_id=? AND test_item_id=? AND qc_method=? AND input_value_type=?''',
+                (_json(product_choice), int(template_id), *template_item_key(row)))
             if old and any(old[field] != row[field] for field in (
                     'unit_id', 'method_id', 'reagent_id', 'level_count', 'cv_limit', 'quality_target_source_text')):
                 from services.quality_review_service import pending_review_copy
@@ -545,6 +556,8 @@ def validate_project_template(template_id: int) -> list[str]:
             errors.append(f"{item_name}：未配置试剂。")
         from services.quality_review_service import validate_project_quality
         errors.extend(f"{item_name}：{message}" for message in validate_project_quality(int(row['id'])))
+        from services.qc_product_recommendation_service import item_product_choice_errors
+        errors.extend(f"{item_name}：{message}" for message in item_product_choice_errors(template, dict(row)))
         with get_connection() as connection:
             for field, table, label in (('test_item_id', 'md_test_items', '检验项目'), ('unit_id', 'md_units', '单位'),
                                        ('method_id', 'md_methods', '方法学'), ('reagent_id', 'md_reagents', '试剂')):
@@ -726,6 +739,9 @@ def create_lot_config_from_template(
         for item in items:
             connection.execute('UPDATE qc_lot_config_items SET quality_goal_json=?,quality_review_json=? WHERE lot_config_id=? AND source_template_item_id=?',
                 (pending_copy(item['quality_goal_json']),pending_review_copy(item['quality_review_json']),lot_config_id,item['id']))
+            connection.execute('''UPDATE qc_lot_config_items SET product_choice_review_json=?
+                WHERE lot_config_id=? AND source_template_item_id=?''',
+                (item['product_choice_review_json'], lot_config_id, item['id']))
         _save_snapshot(connection, lot_config_id, action_type="create", change_summary="创建批次")
         return lot_config_id
 
@@ -845,6 +861,7 @@ def list_lot_config_items(lot_config_id: int) -> pd.DataFrame:
             items.quality_target_source_text,
             items.quality_goal_json,
             items.quality_review_json,
+            items.product_choice_review_json,
             items.sort_order,
             items.is_enabled,
             COUNT(
@@ -1077,6 +1094,12 @@ def validate_lot_config(lot_config_id: int) -> list[str]:
 
     for _, item in items.iterrows():
         item_name = str(item["test_item_name"])
+        from services.qc_product_recommendation_service import require_current_draft_choice
+        with get_connection() as connection:
+            try:
+                require_current_draft_choice('lot', int(item['id']), connection)
+            except (ValueError, TypeError) as exc:
+                errors.append(f"{item_name}：{exc}")
         from services.quality_target_service import validate_lot_goal
         errors.extend(f"{item_name}：{message}" for message in validate_lot_goal(int(item['id'])))
         expected_count = int(item["level_count"])
@@ -1103,10 +1126,10 @@ def validate_lot_config(lot_config_id: int) -> list[str]:
 
 
 def activate_lot_config(lot_config_id: int) -> None:
-    errors = validate_lot_config(lot_config_id)
-    if errors:
-        raise ValueError("批次暂不能启用：\n" + "\n".join(f"- {item}" for item in errors))
-    with get_connection() as connection:
+    with atomic_write() as connection:
+        errors = validate_lot_config(lot_config_id)
+        if errors:
+            raise ValueError("批次暂不能启用：\n" + "\n".join(f"- {item}" for item in errors))
         connection.execute(
             """
             UPDATE qc_lot_configs
@@ -1245,6 +1268,8 @@ def copy_lot_config(
             from services.quality_review_service import pending_review_copy
             connection.execute('UPDATE qc_lot_config_items SET quality_goal_json=?,quality_review_json=? WHERE id=?',
                 (pending_copy(source_item['quality_goal_json']),pending_review_copy(source_item['quality_review_json']),target_item_id))
+            connection.execute('UPDATE qc_lot_config_items SET product_choice_review_json=? WHERE id=?',
+                (source_item['product_choice_review_json'], target_item_id))
             source_levels = connection.execute(
                 """
                 SELECT *

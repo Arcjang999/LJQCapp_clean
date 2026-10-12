@@ -16,7 +16,7 @@ from services.quality_target_service import (adopt_requirement, clear_requiremen
     item_context, validate_lot_goal)
 from services.quality_review_service import (save_recorded_requirement, standard_candidates,
     validate_project_quality, runtime_review)
-from tests.quality_review_fixtures import fixture_conditions
+from tests.quality_review_fixtures import fixture_conditions, confirm_fixture_product_choice
 
 _adopt_requirement = adopt_requirement
 
@@ -35,6 +35,7 @@ def draft_fixture(mode='raw', candidate=False):
         connection.execute("UPDATE qc_project_templates SET status='draft' WHERE id=?", (fixture['template_id'],))
         connection.execute("""UPDATE qc_project_template_items SET quality_review_json='{}',
             quality_goal_json='{}' WHERE id=?""", (project_item,))
+    confirm_fixture_product_choice('project', project_item)
     return fixture, project_item
 
 
@@ -52,7 +53,9 @@ def copied_lot(fixture):
     lot = create_qc_lot(qc_material_id=fixture['material_id'], lot_no='QUALITY-REVIEW-NEW', expiry_date='2028-12-31')
     create_qc_level(qc_material_lot_id=lot, level_order=1, level_name='常规水平')
     config = copy_lot_config(source_lot_config_id=fixture['config_id'], target_qc_material_lot_id=lot)
-    return config, int(list_lot_config_items(config).iloc[0]['id'])
+    item = int(list_lot_config_items(config).iloc[0]['id'])
+    confirm_fixture_product_choice('lot', item)
+    return config, item
 
 
 def test_new_project_and_lot_require_sources_but_allow_drafts():

@@ -49,13 +49,27 @@ def save_project_details(values: dict, *, template_id=None, expected_revision=No
     if fields['lab_instrument_id'] is None or fields['qc_material_id'] is None or (template_id is None and fields['default_reagent_id'] is None):
         raise ValueError('请选择仪器、默认试剂和质控品。')
     with atomic_write() as connection:
-        if template_id is None:
-            return create_project_template(**fields)
-        current = _check_revision(connection, template_id, expected_revision)
-        if current['is_disabled']:
+        from services.qc_product_recommendation_service import validate_choice_review, _decode, _json
+        current = _check_revision(connection, template_id, expected_revision) if template_id is not None else None
+        if current is not None and current['is_disabled']:
             raise ValueError('请先恢复项目，再编辑资料。')
-        if project_identity_locked(template_id) and any(current[k] != fields[k] for k in ('lab_instrument_id', 'qc_material_id')):
+        if current is not None and project_identity_locked(template_id) and any(
+                current[key] != fields[key] for key in ('lab_instrument_id', 'qc_material_id')):
             raise ValueError('已添加检验项目或批次，不能更换仪器和质控品；如需更换，请新建项目。')
+        supplied_review = values.get('product_choice_review')
+        selection_changed = current is None or any(current[key] != fields[key] for key in
+            ('lab_instrument_id', 'qc_material_id', 'default_reagent_id', 'default_method_id'))
+        if supplied_review is not None or selection_changed:
+            review = validate_choice_review(supplied_review,
+                qc_material_id=fields['qc_material_id'], reagent_id=fields['default_reagent_id'],
+                lab_instrument_id=fields['lab_instrument_id'], test_item_id=values.get('test_item_id'),
+                method_id=fields['default_method_id'])
+        else:
+            review = _decode(current['product_choice_review_json'])
+        if template_id is None:
+            template_id = create_project_template(**fields)
+            connection.execute('UPDATE qc_project_templates SET product_choice_review_json=? WHERE id=?', (_json(review), template_id))
+            return template_id
         for field, table in [('lab_instrument_id', 'lab_instruments'), ('qc_material_id', 'md_qc_materials'),
                              ('default_reagent_id', 'md_reagents'), ('default_method_id', 'md_methods')]:
             value = fields[field]
@@ -74,6 +88,7 @@ def save_project_details(values: dict, *, template_id=None, expected_revision=No
             connection.execute('UPDATE qc_project_templates SET ' + ','.join(f'{k}=?' for k in fields) +
                 ', revision_no=revision_no+1, updated_at=CURRENT_TIMESTAMP WHERE id=?',
                 [*fields.values(), template_id])
+            connection.execute('UPDATE qc_project_templates SET product_choice_review_json=? WHERE id=?', (_json(review), template_id))
         except sqlite3.IntegrityError as exc:
             raise ValueError('存在同名项目或所选资料已失效，请核对。') from exc
         return int(template_id)

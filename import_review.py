@@ -132,6 +132,7 @@ def review_zscore_building_import_csv(
     level_count: int,
     target_n: int,
     input_value_type: str = DEFAULT_INPUT_VALUE_TYPE,
+    existing_effective_count: int | None = None,
 ) -> dict[str, Any]:
     return _review_zscore_import_csv(
         file_bytes=file_bytes,
@@ -139,7 +140,7 @@ def review_zscore_building_import_csv(
         level_count=level_count,
         phase_scope="building",
         target_ready=True,
-        existing_phase_count=len(existing_results_df),
+        existing_phase_count=len(existing_results_df) if existing_effective_count is None else int(existing_effective_count),
         target_n=target_n,
         input_value_type=input_value_type,
     )
@@ -378,7 +379,7 @@ def _review_zscore_import_csv(
                 _make_issue(
                     row_label=row_number,
                     field_name="检测时间",
-                    message="与当前批次已有 run 时间重复，导入时仍会按追加处理，请确认是否重复录入。",
+                    message="与当前批次已有检测时间重复，导入时仍会按追加处理，请确认是否重复录入。",
                     is_blocking=False,
                     summary_label="检测时间重复",
                 )
@@ -414,8 +415,8 @@ def _review_zscore_import_csv(
                     row_label=FILE_LEVEL_ROW_LABEL,
                     field_name="参数建立进度",
                     message=(
-                        f"导入后当前批次参数建立记录 将达到 {projected_total} 条，超过参数建立所需点数 {int(target_n or 0)} 条；"
-                        "继续导入会进入正式期，本次版本不支持正式期导入，请拆分文件后重试。"
+                        f"导入后当前批次有效建靶检测将达到 {projected_total} 次，超过建靶所需点数 {int(target_n or 0)} 次；"
+                        "建靶期文件不能混入正式期数据。请先导入建靶部分，完成建靶后选择“正式期”导入其余数据。"
                     ),
                     is_blocking=True,
                 )
@@ -427,7 +428,7 @@ def _review_zscore_import_csv(
                     field_name="参数建立期序列",
                     message=(
                         f"导入后将继续追加到现有参数建立期序列；"
-                        f"当前批次已有 {int(existing_phase_count)} 条参数建立期 run。"
+                        f"当前批次已有 {int(existing_phase_count)} 次有效建靶检测。"
                     ),
                     is_blocking=False,
                 )
@@ -439,7 +440,7 @@ def _review_zscore_import_csv(
                 field_name="正式期序列",
                 message=(
                     f"导入后将继续追加到现有正式期序列；"
-                    f"当前批次已有 {int(existing_phase_count)} 条正式期 run。"
+                    f"当前批次已有 {int(existing_phase_count)} 次正式期检测。"
                 ),
                 is_blocking=False,
             )
@@ -652,7 +653,8 @@ def _review_lj_import_csv(
                 field_name="参数建立进度",
                 message=(
                     f"导入后当前批次记录数将达到 {projected_total} 条，"
-                    f"超过参数建立所需点数 {int(target_n)} 条。"
+                    f"超过参数建立所需点数 {int(target_n)} 条；最终阶段按有效建靶点确定，"
+                    "有效点达到要求后的检测会进入正式期，请核对是否应拆分后选择正式期导入。"
                 ),
                 is_blocking=False,
             )

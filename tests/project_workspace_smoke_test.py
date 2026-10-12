@@ -14,6 +14,7 @@ from database import get_connection, read_snapshot
 from services.master_data_service import create_lab_instrument, create_method, create_qc_material, create_test_item
 from services.project_config_service import get_project_template, list_project_templates, list_template_items, save_template_items
 from services.project_workspace_service import save_project_details, matching_project_ids
+from services.qc_product_recommendation_service import validate_qc_product_choice
 from tests.project_management_v11_smoke_test import TemporaryDatabaseContext, _seed_v11_configuration_dependencies
 
 
@@ -27,10 +28,20 @@ def legacy_editor_page(template_id):
     _render_template_editor(template_id)
 
 
-def values(data, name):
-    return dict(template_name=name, lab_instrument_id=data['lab_instrument_id'], qc_material_id=data['qc_material_id'],
+def values(data, name, **updates):
+    result = dict(template_name=name, lab_instrument_id=data['lab_instrument_id'], qc_material_id=data['qc_material_id'],
         default_reagent_id=data['reagent_id'], default_method_id=data['method_id'], default_qc_method='lj',
         default_level_count=1, project_group='血筛', notes='')
+    result.update(updates)
+    return refresh_product_review(result)
+
+
+def refresh_product_review(result):
+    result['product_choice_review'] = validate_qc_product_choice(
+        qc_material_id=result['qc_material_id'], reagent_id=result['default_reagent_id'],
+        lab_instrument_id=result['lab_instrument_id'], method_id=result['default_method_id'],
+        manual_review={'confirmed_by': '项目回归核对人', 'evidence': '已核对本夹具仪器、试剂、方法与质控品适用性。'})
+    return result
 
 
 def assert_clean(app):
@@ -64,7 +75,8 @@ def test_defaults_do_not_rewrite_items_and_filters_share_item():
         other_method = create_method(method_name='第二种方法学')
         tid = save_project_details(values(data, '混合血筛项目'))
         second = save_project_details(values(data, '独立项目'))
-        common = dict(input_value_type='raw', unit_id=data['unit_id'], reagent_id=data['reagent_id'], target_n=20)
+        common = dict(input_value_type='raw', unit_id=data['unit_id'], reagent_id=data['reagent_id'], target_n=20,
+            manual_product_review={'confirmed_by': '检验项目核对人', 'evidence': '已核对当前检验项目和方法与质控品的适用性。'})
         save_template_items(tid, [dict(common, test_item_id=data['lj_item_id'], qc_method='lj', method_id=data['method_id'], level_count=1),
             dict(common, test_item_id=data['zscore_item_id'], qc_method='zscore', method_id=other_method, level_count=2)])
         save_template_items(second, [dict(common, test_item_id=data['lj_item_id'], qc_method='lj', method_id=other_method, level_count=1)])
@@ -72,13 +84,14 @@ def test_defaults_do_not_rewrite_items_and_filters_share_item():
         assert matching_project_ids(qc_method='zscore', method_name='第二种方法学') == {tid}
         before = list_template_items(tid).to_json(orient='records')
         current = dict(get_project_template(tid))
-        edit = values(data, '混合血筛项目更名')
-        edit.update(default_qc_method='instant', default_method_id=other_method, project_group='分子与免疫')
+        edit = values(data, '混合血筛项目更名', default_qc_method='instant',
+                      default_method_id=other_method, project_group='分子与免疫')
         save_project_details(edit, template_id=tid, expected_revision=current['revision_no'])
         assert list_template_items(tid).to_json(orient='records') == before
         assert get_project_template(tid)['default_qc_method'] == 'instant'
         different_product = create_qc_material(manufacturer_id=data['manufacturer_id'],generic_name='另一个产品')
         edit['qc_material_id'] = different_product
+        refresh_product_review(edit)
         try:
             save_project_details(edit, template_id=tid, expected_revision=get_project_template(tid)['revision_no'])
         except ValueError as exc:
@@ -94,13 +107,21 @@ def test_project_dialog_create_edit_cancel_disable_restore():
         app = AppTest.from_function(workspace_page, default_timeout=15).run()
         assert_clean(app)
         app.button(key='home_create_project').click().run()
+        assert app.session_state['project_workspace_dialog']['kind'] == 'quick'
+        app.button(key='quick_use_group').click().run()
         app.text_input(key=draft_key(app, 'template_name')).set_value('弹窗项目')
-        app.button(key='project_dialog_save').click().run()
+        app.run()
         assert_clean(app)
+        assert app.button(key='project_dialog_save').disabled
         assert list_project_templates().empty
         assert app.text_input(key=draft_key(app, 'template_name')).value == '弹窗项目'
-        for key, item in [('lab_instrument_id', 'lab_instrument_id'), ('qc_material_id', 'qc_material_id'), ('default_reagent_id', 'reagent_id')]:
-            app.selectbox(key=draft_key(app, key)).set_value(data[item])
+        for key, item in [('lab_instrument_id', 'lab_instrument_id'), ('default_reagent_id', 'reagent_id')]:
+            app.selectbox(key=draft_key(app, key)).set_value(data[item]).run()
+        prefix = 'project_product_' + app.session_state['project_workspace_dialog']['token']
+        app.selectbox(key=prefix + '_product').set_value(data['qc_material_id']).run()
+        app.text_input(key=prefix + '_person').set_value('选品核对人')
+        app.text_area(key=prefix + '_evidence').set_value('已核对本夹具仪器、试剂与质控品适用性。')
+        app.button(key=prefix + '_confirm').click().run()
         app.button(key='project_dialog_save').click().run()
         assert_clean(app)
         tid = int(list_project_templates().iloc[0]['id'])
@@ -159,7 +180,7 @@ def test_project_selection_uses_id_and_filter_clears_hidden_selection():
                 (data['lab_instrument_id'],)).fetchone()[0]
         other_instrument = create_lab_instrument(instrument_model_id=model, display_name='独立二号仪器')
         first = save_project_details(values(data, 'Alpha项目'))
-        second = save_project_details({**values(data, 'Beta项目'), 'lab_instrument_id': other_instrument})
+        second = save_project_details(values(data, 'Beta项目', lab_instrument_id=other_instrument))
         save_project_details({**values(data, 'Gamma项目'), 'project_group': '生化'})
         instant = create_test_item(chinese_name='复合项目即时法检测项', default_unit_id=data['unit_id'])
         common = dict(input_value_type='raw', unit_id=data['unit_id'], reagent_id=data['reagent_id'],

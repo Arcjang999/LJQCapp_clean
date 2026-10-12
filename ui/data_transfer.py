@@ -57,12 +57,13 @@ def _fresh_import_context(method, batch_id):
                         input_value_type=batch["input_value_type"])
         from zscore_logic import (
             determine_zscore_phase, get_zscore_level_targets, get_zscore_runs,
-            resolve_zscore_batch_context, should_enable_formal_rules,
+            get_effective_building_run_count, resolve_zscore_batch_context, should_enable_formal_rules,
         )
         resolved = resolve_zscore_batch_context(batch_id)
         targets = get_zscore_level_targets(batch_id, resolved["template_id"], required_n=resolved["required_n"])
         return dict(resolved, input_value_type=resolved["batch"]["input_value_type"],
                     history_runs=get_zscore_runs(batch_id, resolved["template_id"]),
+                    effective_building_count=get_effective_building_run_count(targets, resolved["required_level_ids"]),
                     overall_phase=determine_zscore_phase(targets, resolved["required_level_ids"]),
                     formal_rules_enabled=should_enable_formal_rules(targets, resolved["required_level_ids"]))
 
@@ -94,7 +95,8 @@ def review_data_import(method, context, batch_id, phase, data):
         existing = building if phase == "building" else runs
         args = dict(file_bytes=data, existing_results_df=pd.DataFrame({"test_time": [run.get("test_time") for run in existing]}),
                     level_count=int(context["level_count"]), input_value_type=context["input_value_type"])
-        review = (review_zscore_building_import_csv(**args, target_n=int(context["required_n"])) if phase == "building" else
+        review = (review_zscore_building_import_csv(**args, target_n=int(context["required_n"]),
+                    existing_effective_count=int(context["effective_building_count"])) if phase == "building" else
                   review_zscore_formal_import_csv(**args, target_ready=_ready(method, context),
                     existing_formal_count=sum(run.get("phase") == PHASE_FORMAL_QC for run in runs)))
     return review_import_lots(review, method, batch_id)
@@ -251,7 +253,10 @@ def _render_import_dialog(state):
         st.info("当前批次已完成建靶，请选择正式期导入。")
     elif phase == "formal" and not _ready(method, current):
         st.info("当前批次尚未完成建靶，可先审查文件，完成建靶后再确认导入正式期数据。")
-    st.caption("下载模板填写后上传CSV或单工作表Excel，审查通过并核对预览后再确认导入。未填试剂批号的行会保存为“未记录”。")
+    st.caption("按本次数据的用途选择导入阶段，下载当前模板填写后上传CSV或单工作表Excel。"
+               "审查通过并核对预览后再确认导入；切换阶段需重新上传。未填试剂批号的行会保存为“未记录”。")
+    st.caption("建靶数据与正式期数据分别导入。正式期数据请在完成建靶后选择“正式期”；"
+               "“全部”检测数据导出文件用于查询和留档，不能直接作为当前阶段的导入文件。")
     template = (build_lj_building_template_dataframe(current["input_value_type"]) if method == "lj" else
                 build_zscore_building_template_dataframe(current["level_count"], current["input_value_type"]))
     st.download_button("下载导入模板", dataframe_to_csv_bytes(template),
@@ -324,7 +329,9 @@ def _render_export_dialog(state, context):
                          format_func=lambda value: "全部" if value == "all" else PHASE_LABELS[value], key=f"qc_transfer_scope_{nonce}")
         export_format = st.radio("文件格式", ["Excel (.xlsx)", "CSV (.csv)"], horizontal=True, key=f"qc_transfer_format_{nonce}")
         frame = build_data_export(method, context, phase)
-        st.caption("文件保留检测阶段和实际试剂批号。" + ("每行是一整次检测，各水平完整列出。" if method == "zscore" else ""))
+        st.caption("导出文件用于查询和留档，保留检测阶段和实际试剂批号。"
+                   "重新导入时请按所需阶段下载导入模板并整理原始数据，不能直接上传全部阶段的导出文件。"
+                   + ("每行是一整次检测，各水平完整列出。" if method == "zscore" else ""))
         if frame.empty:
             st.info("所选范围内暂无检测记录。")
         else:

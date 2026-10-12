@@ -21,6 +21,21 @@ def fixture_conditions(item, *, clinical=False):
     return dict(context=context,search_record=search_record)
 
 
+def confirm_fixture_product_choice(scope, item_id):
+    """Explicitly prepare current applicability evidence for an isolated draft."""
+    from services.project_config_service import get_project_template, get_lot_config
+    from services.qc_product_recommendation_service import validate_qc_product_choice, save_draft_product_choice
+    item = item_context(scope, item_id)
+    owner = get_project_template(item['template_id']) if scope == 'project' else get_lot_config(item['lot_config_id'])
+    if owner['status'] == 'draft' and (scope == 'project' or not owner['activated_at']):
+        product_review = validate_qc_product_choice(qc_material_id=owner['qc_material_id'],
+            reagent_id=item['reagent_id'], lab_instrument_id=owner['lab_instrument_id'],
+            test_item_id=item['test_item_id'], method_id=item['method_id'],
+            manual_review={'confirmed_by': '隔离回归适用核对人',
+                'evidence': '已明确核对本合成测试检测系统与质控品的适用性，仅用于软件回归数据准备。'})
+        save_draft_product_choice(scope, item_id, product_review, expected_revision=owner['revision_no'])
+
+
 def confirm_fixture_quality(scope, item_id):
     """Use an exact applicable candidate or document a synthetic test SOP.
 
@@ -28,6 +43,11 @@ def confirm_fixture_quality(scope, item_id):
     this helper. This helper supplies only synthetic QC workflow fixture context.
     """
     item = item_context(scope, item_id)
+    # Low-level configuration fixtures still need an explicit product choice.
+    # Do not refresh an existing stale review: those tests must recheck it.
+    if not item.get('product_choice_review_json') or item['product_choice_review_json'] == '{}':
+        confirm_fixture_product_choice(scope, item_id)
+        item = item_context(scope, item_id)
     candidates = standard_candidates(item)
     applicable = []
     exclusions = {}

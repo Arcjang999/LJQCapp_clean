@@ -1968,16 +1968,23 @@ def _build_run_shell(
             current.get("target_mean"),
             current.get("target_sd"),
         )
-        current["status"] = "accept" if current["raw_value"] is not None else "pending"
+        usable = current["raw_value"] is not None and (
+            phase != PHASE_FORMAL_QC or current["zscore"] is not None
+        )
+        current["status"] = "accept" if usable else "pending"
         normalized_results.append(current)
 
     has_all_values = all(result["raw_value"] is not None for result in normalized_results)
-    run_status = "accept" if has_all_values else "pending"
-    analysis_prompt = (
-        "请完整录入当前批次要求的所有水平结果后再进行分析。"
-        if run_status == "pending"
-        else build_zscore_analysis_prompt(run_status, [], "unknown", phase=phase)
+    usable_parameters = phase != PHASE_FORMAL_QC or all(
+        result["zscore"] is not None for result in normalized_results
     )
+    run_status = "accept" if has_all_values and usable_parameters else "pending"
+    if not has_all_values:
+        analysis_prompt = "请完整录入当前批次要求的所有水平结果后再进行分析。"
+    elif not usable_parameters:
+        analysis_prompt = "当前水平的均值或标准差无法用于判读（标准差须大于0），本次结果待判读。请核对建靶数据或已确认参数。"
+    else:
+        analysis_prompt = build_zscore_analysis_prompt(run_status, [], "unknown", phase=phase)
     return {
         "run_id": len(history_runs) + 1,
         "test_time": None,

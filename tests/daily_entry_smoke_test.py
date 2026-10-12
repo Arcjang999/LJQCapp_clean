@@ -385,7 +385,7 @@ class DailyEntryTest(unittest.TestCase):
         from services.material_workflow_service import create_material_config
         from services.quality_target_service import get_requirement, adopt_requirement, item_context
         from services.quality_review_service import standard_candidates
-        from tests.quality_review_fixtures import fixture_conditions
+        from tests.quality_review_fixtures import fixture_conditions, confirm_fixture_product_choice
         from services.workbench_config_service import sync_lj_workbench_bindings
         from services.lot_lifecycle_service import workbench_systems, record_lot_verification, switch_reagent_lots
         spec = get_requirement('wst403-2024-082')
@@ -400,6 +400,7 @@ class DailyEntryTest(unittest.TestCase):
             unit_id=unit, method_id=method, reagent_id=d['reagent_id'], level_count=1, target_n=5)])
         project_item = int(list_template_items(tid).iloc[0]['id'])
         def adopt(scope, identifier):
+            confirm_fixture_product_choice(scope, identifier)
             item = item_context(scope, identifier)
             return adopt_requirement(scope, identifier, spec['id'], confirmed_by='工程验收',
                 evidence='工程场景明确为便携式血糖仪、全血及5 mmol/L原始检测值；不代表临床验证。',

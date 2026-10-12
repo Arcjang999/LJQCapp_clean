@@ -1,6 +1,7 @@
 """Project and test-item dialogs with isolated drafts and explicit save boundaries."""
 from __future__ import annotations
 
+from copy import deepcopy
 from uuid import uuid4
 import pandas as pd
 import streamlit as st
@@ -23,8 +24,13 @@ def open_project_dialog(kind, template_id=None, item_id=None):
     # Historical callers must also enter the editor; no single-step status path.
     if kind in ('disable', 'restore'):
         kind = 'project'
+    if kind == 'project' and template_id is None:
+        kind = 'quick'
     template = _plain(get_project_template(template_id)) if template_id is not None else {}
-    if kind == 'panel':
+    if kind == 'quick':
+        from ui.quick_project_setup import new_quick_setup_draft
+        draft = new_quick_setup_draft()
+    elif kind == 'panel':
         draft = {'rows': [], 'stage': 'source'}
     elif kind in ('item', 'remove_item', 'quality'):
         items = list_template_items(template_id)
@@ -40,7 +46,7 @@ def open_project_dialog(kind, template_id=None, item_id=None):
             'default_reagent_id': None, 'default_qc_method': 'lj', 'default_method_id': None,
             'default_level_count': 1, 'project_group': '', 'notes': ''}
     st.session_state[MODAL_KEY] = dict(kind=kind, template_id=template_id, item_id=item_id,
-        revision=template.get('revision_no'), draft=dict(draft), initial=dict(draft), token=uuid4().hex,
+        revision=template.get('revision_no'), draft=deepcopy(draft), initial=deepcopy(draft), token=uuid4().hex,
         discard=False, template_name=template.get('template_name', ''))
     st.rerun()
 
@@ -110,7 +116,9 @@ def _qc_choices(ctx, *, defaults=False):
 
 
 def _cancel(ctx):
-    if ctx['draft'] != ctx['initial']:
+    relation_dirty = any(isinstance(value, dict) and value.get('values') != value.get('initial')
+                         for key, value in ctx.items() if key.endswith('_editor'))
+    if ctx['draft'] != ctx['initial'] or relation_dirty:
         ctx['discard'] = True
         st.rerun()
     _finish()
@@ -162,6 +170,9 @@ def _render_project_form(ctx):
         _render_disabled_project(ctx)
         return
     locked = ctx['template_id'] is not None and project_identity_locked(ctx['template_id'])
+    if ctx['template_id'] is None and st.button('单检验项目快捷设置', key='group_use_quick'):
+        from ui.quick_project_setup import request_setup_mode
+        request_setup_mode(ctx, 'quick')
     _text(ctx, 'template_name', '项目名称 *')
     if not locked:
         _render_catalogue_picker(ctx)
@@ -170,8 +181,10 @@ def _render_project_form(ctx):
         _choice(ctx, 'lab_instrument_id', '仪器 *', list_lab_instruments(include_disabled=True), ['display_name'], disabled=locked)
         _choice(ctx, 'default_reagent_id', '默认试剂 *', list_reagents(include_disabled=True), ['generic_name', 'trade_name'])
     with right:
-        _choice(ctx, 'qc_material_id', '质控品 *', list_qc_materials(include_disabled=True), ['manufacturer_name', 'catalog_no', 'generic_name'], disabled=locked)
         _choice(ctx, 'default_method_id', '默认方法学', list_methods(include_disabled=True), ['method_name'], optional=True)
+    from ui.qc_product_choice import render_product_choice
+    reviewed = render_product_choice(ctx, reagent_id=ctx['draft']['default_reagent_id'],
+        lab_instrument_id=ctx['draft']['lab_instrument_id'], method_id=ctx['draft']['default_method_id'], locked=locked)
     if locked:
         st.caption('已添加检验项目或批次，不能更换仪器和质控品。如需更换，请新建项目。')
     _text(ctx, 'project_group', '分组', placeholder='例如：血筛、生化、分子')
@@ -181,7 +194,7 @@ def _render_project_form(ctx):
     cancel, save = st.columns(2)
     if cancel.button('取消', key='project_dialog_cancel'):
         _cancel(ctx)
-    if save.button('保存项目', type='primary', key='project_dialog_save'):
+    if save.button('保存项目', type='primary', key='project_dialog_save', disabled=ctx['template_id'] is None and not reviewed):
         try:
             tid = save_project_details(ctx['draft'], template_id=ctx['template_id'], expected_revision=ctx['revision'])
         except ValueError as exc:
@@ -289,6 +302,12 @@ def _render_item_form(ctx):
         ctx['draft']['input_value_type'] = st.selectbox('输入值类型', list(INPUT_VALUE_TYPE_LABELS),
             format_func=INPUT_VALUE_TYPE_LABELS.get, key=_key(ctx, 'input_value_type'))
     _qc_choices(ctx)
+    from ui.qc_product_choice import render_product_choice
+    template = dict(get_project_template(ctx['template_id']))
+    ctx['draft']['qc_material_id'] = template['qc_material_id']
+    render_product_choice(ctx, reagent_id=ctx['draft']['reagent_id'], lab_instrument_id=template['lab_instrument_id'],
+        test_item_id=ctx['draft']['test_item_id'], method_id=ctx['draft']['method_id'], locked=True,
+        prefix='item_product_' + ctx['token'])
     if ctx['draft']['qc_method'] == 'instant':
         ctx['draft']['target_n'] = 20
     else:
@@ -462,6 +481,8 @@ def _render_panel_form(ctx):
         disabled=['行标识', '检验项目', '质量要求'], column_config=columns,
         key='panel_rows_' + ctx['token'] + '_' + str(ctx['editor_version']))
     ctx['draft']['rows'] = _panel_edited_rows(edited, ctx['draft']['rows'], options)
+    from ui.qc_product_choice import render_panel_product_review
+    render_panel_product_review(ctx, template)
     with st.expander('为选中项目统一设置'):
         names = {row['row_key']: row.get('test_item_name', '') for row in ctx['draft']['rows']}
         selected = st.multiselect('选择项目', list(names), format_func=names.get, key='panel_bulk_rows_' + ctx['token'])
@@ -536,8 +557,14 @@ def render_project_dialog():
         return
     if ctx['discard']:
         _render_discard(ctx)
+    elif ctx.get('setup_mode_switch'):
+        from ui.quick_project_setup import render_setup_mode_switch
+        render_setup_mode_switch(ctx)
     elif ctx.get('status_confirmation'):
         _render_project_status_confirmation(ctx)
+    elif ctx['kind'] == 'quick':
+        from ui.quick_project_setup import render_quick_project_setup
+        render_quick_project_setup(ctx)
     elif ctx['kind'] == 'project':
         _render_project_form(ctx)
     elif ctx['kind'] == 'item':

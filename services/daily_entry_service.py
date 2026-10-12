@@ -163,7 +163,7 @@ def validate_submission(request):
 def _save_item(payload, prepared):
     item, levels = prepared['item'], prepared['values']
     method, batch_id = item['qc_method'], item['runtime_batch_id']
-    selection = dict(reagent_lot_id=prepared['reagent_lot_id'], expected_revision=item['usage_revision'])
+    selection = dict(reagent_lot_id=prepared['reagent_lot_id'], expected_revision=item.get('selection_revision', item['usage_revision']))
     common = dict(batch_id=batch_id, test_time=payload['test_time'], operator=payload['operator'], lot_selection=selection)
     if method == 'lj':
         result_id = database.add_result(**common, value=levels[0]['value'], log_value=levels[0]['log_value'], manual_note=prepared['manual_note'])

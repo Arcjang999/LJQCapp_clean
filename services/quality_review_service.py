@@ -191,6 +191,9 @@ def save_pending_review(scope, item_id, *, context, search_record=None, register
 
 
 def save_review(connection, scope, item_id, review):
+    if review.get('status') == 'confirmed':
+        from services.qc_product_recommendation_service import require_current_draft_choice
+        require_current_draft_choice(scope, item_id, connection)
     table = 'qc_project_template_items' if scope == 'project' else 'qc_lot_config_items'
     connection.execute(f'UPDATE {table} SET quality_review_json=? WHERE id=?',
                        (json.dumps(review, ensure_ascii=False, allow_nan=False), item_id))

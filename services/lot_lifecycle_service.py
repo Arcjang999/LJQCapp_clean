@@ -53,6 +53,10 @@ def source_context(connection, method, batch_id, *, read_only=False):
     if binding:
         source.setdefault('lot_config_item_id',binding['lot_config_item_id'])
         source.setdefault('project_template_item_id',binding['project_template_item_id'])
+        choice = connection.execute('SELECT product_choice_review_json FROM qc_lot_config_items WHERE id=?',
+                                    (binding['lot_config_item_id'],)).fetchone()
+        if choice:
+            source.setdefault('product_choice_review', json.loads(choice[0] or '{}'))
     identity = source.get('identity') or []
     if source.get('project_template_item_id') and len(identity) >= 8:
         system_identity = json.dumps([source['project_template_item_id'], *[identity[i] for i in (0,3,4,5,6,7)]])
@@ -174,6 +178,21 @@ def usage_revision(connection, system_id):
     return int(connection.execute('SELECT COALESCE(MAX(id),0) FROM qc_reagent_lot_usage WHERE system_id=?',(system_id,)).fetchone()[0])
 
 
+def result_selection_revision(connection, source):
+    """One token freezes actual reagent usage and advisory product applicability."""
+    from hashlib import sha256
+    from services.qc_product_recommendation_service import get_qc_product_recommendations
+    identity = source.get('identity') or []
+    if len(identity) < 8:
+        return usage_revision(connection, source.get('system_id')) if source.get('system_id') else 0
+    recommendation = get_qc_product_recommendations(reagent_id=identity[7], lab_instrument_id=identity[0],
+        test_item_id=identity[3], method_id=identity[6])
+    if not recommendation['relation_count']:
+        return usage_revision(connection, source['system_id'])
+    value = str(usage_revision(connection, source['system_id'])) + ':' + recommendation['revision']
+    return int(sha256(value.encode()).hexdigest()[:15], 16)
+
+
 def qc_lots_for_source(connection, source):
     """Resolve every actual lot in a combination, preserving the displayed level order."""
     lots={}
@@ -260,7 +279,7 @@ def result_lot_options(method,batch_id,test_time):
             WHERE r.is_disabled=0 AND v.system_id=? AND v.conclusion='pass' AND v.confirmed_at<=? AND l.is_disabled=0
             AND l.expiry_date>=? AND v.id=(SELECT v2.id FROM qc_lot_verifications v2 WHERE v2.system_id=v.system_id AND v2.reagent_lot_id=l.id AND v2.confirmed_at<=? ORDER BY v2.confirmed_at DESC,v2.id DESC LIMIT 1) GROUP BY l.id ORDER BY l.id''',(system_id,when,when[:10],when)).fetchall()
         default=c.execute('SELECT reagent_lot_id FROM qc_reagent_lot_usage WHERE system_id=? AND effective_at<=? ORDER BY effective_at DESC,id DESC LIMIT 1',(system_id,when)).fetchone()
-        return {'template_item_id':item,'system_id':system_id,'revision':usage_revision(c,system_id),'options':[dict(r) for r in choices],
+        return {'template_item_id':item,'system_id':system_id,'revision':result_selection_revision(c,source),'options':[dict(r) for r in choices],
                 'suggested_lot_id':default[0] if default else None}
 
 
@@ -270,10 +289,15 @@ def record_result_context(connection, method, result_id, batch_id, test_time, se
     selection=selection or {}
     if provenance=='recorded':
         require_writable(connection,method,batch_id,test_time)
+        identity = source.get('identity') or []
+        if len(identity) >= 8:
+            from services.qc_product_recommendation_service import product_scope_revision
+            source['product_recommendation_revision'] = product_scope_revision(reagent_id=identity[7],
+                lab_instrument_id=identity[0], test_item_id=identity[3], method_id=identity[6])
         revision=usage_revision(connection,system_id) if system_id else 0
         # Legacy imports without explicit lot must remain unknown, never inherit today's default.
-        if 'expected_revision' in selection and int(selection['expected_revision'])!=revision:
-            raise ValueError('试剂批号已切换，请刷新并重新确认本次实际使用批号。')
+        if 'expected_revision' in selection and int(selection['expected_revision'])!=result_selection_revision(connection,source):
+            raise ValueError('试剂使用或质控品适用资料已变化，请刷新并重新确认本次实际批号与材料。')
         if selection.get('reagent_lot_id'):
             choices=result_lot_options(method,batch_id,test_time)
             lot=next((r for r in choices['options'] if r['id']==int(selection['reagent_lot_id'])),None)

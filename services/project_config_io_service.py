@@ -702,13 +702,21 @@ def _material_context_sheets(material_id):
 
 
 def _resolve_material_context(connection, template, context, resolver, *, apply=False, expected_version=None):
+    from services.qc_product_recommendation_service import get_qc_product_relation_revision
+    recommendation_version = get_qc_product_relation_revision(dict(reagent_id=template['default_reagent_id'],
+        lab_instrument_id=template['lab_instrument_id'], qc_material_id=template['qc_material_id'],
+        method_id=template['default_method_id']))
     if context is None:
-        return None
+        version = dict(coverage=None, recommendation=recommendation_version)
+        if expected_version is not None and version != expected_version:
+            raise ValueError('试剂与质控品适用资料已变化，请重新预览后导入。')
+        return version
     from services.product_directory_service import (
         validate_material_catalog_context, apply_material_catalog_context, get_product_relationships)
     material_id = int(template['qc_material_id'])
     validate_material_catalog_context(connection, material_id, context)
-    version = get_product_relationships(material_id)['edit_version']
+    coverage_version = get_product_relationships(material_id)['edit_version']
+    version = dict(coverage=coverage_version, recommendation=recommendation_version)
     if expected_version is not None and version != expected_version:
         raise ValueError('此质控品的适用项目资料已变化，请重新预览后导入。')
     mapping, method_mapping = {}, {}
@@ -726,7 +734,7 @@ def _resolve_material_context(connection, template, context, resolver, *, apply=
             method_mapping[int(entry['method_id'])] = resolver.resolve('md_methods', entry.get('method_uid', ''),
                 dict(method_name=entry['method_name']), '方法学', lambda: create_method(method_name=entry['method_name']))
     if apply:
-        apply_material_catalog_context(material_id, context, mapping, expected_version=version, method_id_map=method_mapping)
+        apply_material_catalog_context(material_id, context, mapping, expected_version=coverage_version, method_id_map=method_mapping)
     return version
 
 
@@ -794,13 +802,15 @@ def import_project_template_xlsx(template_id: int, data: bytes, *, mode='merge',
             raise ValueError('目标项目已发生变化，请重新预览。文件与本次填写仍保留。')
         if prepared['errors']:
             raise ValueError('导入文件校验未通过：\n' + '\n'.join(prepared['errors']))
+        if product_version is not None and product_version != prepared['product_version']:
+            raise ValueError('产品来源或试剂与质控品适用资料已变化，请重新预览后导入。')
         template = get_project_template(template_id)
         resolver = _ImportResolver(connection, create=True)
         imported, errors = resolver.configuration_rows(_normalized_import_rows(data))
         if errors:
             raise ValueError('导入失败：\n' + '\n'.join(errors))
         _resolve_material_context(connection, template, _read_material_context(data), resolver,
-                                  apply=True, expected_version=product_version)
+                                  apply=True)
         merged = {template_item_key(row): row for row in template_item_rows(template_id)} if mode == 'merge' else {}
         merged.update({template_item_key(row): row for row in imported})
         rows = list(merged.values())

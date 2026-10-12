@@ -1,6 +1,7 @@
 """Separate dialogs for batch levels and quality requirements."""
 from __future__ import annotations
 
+from copy import deepcopy
 from uuid import uuid4
 
 import pandas as pd
@@ -27,6 +28,13 @@ def _assignment(row):
 
 def _quality_prefix(item_id):
     return f'quality_lot_{int(item_id)}_'
+
+
+def _restorable_quality_key(key):
+    # Button triggers and uploader values cannot be assigned on rerender.
+    return not key.endswith(('_adopt', '_save_pending', '_process_reset', '_confirm',
+        '_save', '_relation_add', '_relation_edit', '_relation_status', '_keep',
+        '_discard', '_cancel', '_file'))
 
 
 def _clear_prefix(prefix):
@@ -178,6 +186,50 @@ def _render_levels(state, current):
             _close('水平设置已保存，请核对质量目标并确认批次设置。')
 
 
+def _render_product_recheck(state, current):
+    if not current['editable']:
+        return
+    from database import get_connection
+    from services.qc_product_recommendation_service import (
+        require_current_draft_choice, save_draft_product_choice,
+    )
+    try:
+        with get_connection() as connection:
+            require_current_draft_choice('lot', state['item_id'], connection)
+    except (ValueError, TypeError) as error:
+        st.warning(str(error))
+    else:
+        return
+    st.markdown('**重新核对试剂与质控品**')
+    st.caption('本批次尚未启用。请核对当前适用依据并保存，再确认质量目标；实际批号和水平保持原设置。')
+    item, config = current['item'], current['config']
+    ctx = state.setdefault('product_recheck', dict(token=state['token'], draft={
+        'qc_material_id': int(config['qc_material_id']),
+        'product_choice_review': decode(item.get('product_choice_review_json')),
+    }))
+    from ui.qc_product_choice import render_product_choice
+    valid = render_product_choice(ctx, reagent_id=item.get('reagent_id'),
+        lab_instrument_id=config['lab_instrument_id'], test_item_id=item['test_item_id'],
+        method_id=item.get('method_id'), locked=True, prefix=_quality_prefix(state['item_id']) + 'product')
+    state.setdefault('product_recheck_initial', deepcopy(ctx['draft']))
+    state['product_recheck_dirty'] = ctx['draft'] != state['product_recheck_initial'] or any(
+        key.endswith('_editor') and value for key, value in ctx.items())
+    if st.button('保存本批次选品核对', key=_quality_prefix(state['item_id']) + 'product_save', disabled=not valid):
+        try:
+            revision = save_draft_product_choice('lot', state['item_id'],
+                ctx['draft']['product_choice_review'], expected_revision=state['revision'])
+        except (ValueError, TypeError) as error:
+            st.error(str(error))
+        else:
+            state['revision'] = revision
+            state['context'] = get_batch_item_context(state['item_id'])
+            state.pop('product_recheck', None)
+            state.pop('product_recheck_initial', None)
+            state['product_recheck_dirty'] = False
+            state['restore_quality_inputs'] = True
+            st.rerun(scope='app')
+
+
 def _render_quality(state, current):
     st.subheader('质量目标 · ' + state['context']['item']['test_item_name'])
     st.caption(state['context']['config']['config_name'])
@@ -193,10 +245,12 @@ def _render_quality(state, current):
         return
     if state.pop('restore_quality_inputs', False):
         for key, value in state.get('quality_values', {}).items():
-            st.session_state[key] = value
+            if _restorable_quality_key(key):
+                st.session_state[key] = value
     if int(current['revision']) != state['revision']:
         st.error('批次设置已修改，请关闭后重新打开质量目标，核对最新设置。')
     else:
+        _render_product_recheck(state, current)
         from ui.quality_targets import render_adoption
         try:
             render_adoption('lot', state['item_id'], embedded=True, expected_revision=state['revision'],
@@ -205,11 +259,10 @@ def _render_quality(state, current):
             st.error(str(error))
         prefix = _quality_prefix(state['item_id'])
         state['quality_values'] = {key: st.session_state[key] for key in st.session_state
-                                   if key.startswith(prefix) and key not in
-                                   (prefix + 'adopt', prefix + 'save_pending')}
+                                   if key.startswith(prefix) and _restorable_quality_key(key)}
         state.setdefault('quality_initial', dict(state['quality_values']))
     if st.button('取消' if current['editable'] else '关闭', key='batch_quality_close', width='stretch'):
-        if state.get('quality_values', {}) != state.get('quality_initial', {}):
+        if state.get('quality_values', {}) != state.get('quality_initial', {}) or state.get('product_recheck_dirty'):
             state['discard'] = True
             st.rerun(scope='app')
         _close()

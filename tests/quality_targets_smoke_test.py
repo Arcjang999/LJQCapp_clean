@@ -16,7 +16,7 @@ from services.zscore_workbench_service import sync_zscore_workbench_bindings
 from services.instant_workbench_service import sync_instant_workbench_bindings
 from services.report_service import build_lj_monthly_report_package,build_zscore_monthly_report_package
 from zscore_logic import create_zscore_run
-from tests.quality_review_fixtures import fixture_conditions
+from tests.quality_review_fixtures import fixture_conditions, confirm_fixture_product_choice
 from services.quality_review_service import runtime_review
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -33,6 +33,7 @@ def new_lot(method='lj',count=1,name='质量目标验收'):
     with get_connection() as c:
         row=item_context('lot',item,c)
         c.execute("UPDATE md_test_items SET chinese_name='CRP',abbreviation='' WHERE id=?",(row['test_item_id'],))
+    confirm_fixture_product_choice('lot', item)
     return item,config,binding
 
 
@@ -46,6 +47,7 @@ def apply(item,requirement='wst403-2024-047',count=1,**kw):
             c.execute("UPDATE md_methods SET method_name=?,method_code='',principle='' WHERE id=?",(method,row['method_id']))
         elif requirement == 'wst403-2024-082':
             c.execute("UPDATE md_methods SET method_name='便携式血糖仪法',method_code='',principle='' WHERE id=?",(row['method_id'],))
+    confirm_fixture_product_choice('lot', item)
     levels=kw.pop('levels',[dict(level_order=i+1,concentration=100*(i+1),category='') for i in range(count)])
     return adopt_requirement('lot',item,requirement,confirmed_by='测试确认人',evidence='已核对项目、单位、浓度与适用条件',levels=levels,**fixture_conditions(item_context('lot',item),clinical=True),**kw)
 
@@ -115,6 +117,7 @@ def test_adoption_freezes_batch_and_copied_goal_requires_confirmation():
         adopt_requirement('project',project_id,'wst403-2024-047',confirmed_by='更新人',evidence='后续项目采用更严要求',
                           supplemental_cv=3,**fixture_conditions(item_context('project',project_id),clinical=True))
         template_id=item_context('project',project_id)['template_id']
+        confirm_fixture_product_choice('project', project_id)
         activate_project_template(template_id)
         assert runtime_goal('lj',batch)==goal
         with get_connection() as c:

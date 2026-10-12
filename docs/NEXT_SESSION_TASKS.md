@@ -1,5 +1,7 @@
 # LJQC 下一阶段任务书
 
+**2026-10-12当前入口：[镇江反馈系统改造方案](execution/ZHENJIANG_SYSTEM_REFACTOR_PLAN_2026-10-12.md)。** 界面检查点 `d679bb3` 已推送；用户授权的[第一批资料准备与日常检测](execution/deliveries/ZHENJIANG_PHASE1_2026-10-12.md)已完成验收并在本地加载，新增改造尚未提交推送。下一步建议第二批自由时段报告与失控归档，但其余三批及原B4/B5尚未授权、未开始。不要重复领取已完成第一批，也不要从下文旧“下一轮B4”自动开发。完整范围及真实依赖按方案、STATUS和用户后续指令确定。
+
 **当前接手入口（2026-09-28）：[合并总表](execution/BATCHES.md) → [执行规则](execution/EXECUTION_RULES.md) → [进度表](execution/STATUS.md) → 本轮细卡。** 原讨论和任务书已[逐项复核](execution/REQUIREMENTS_RECHECK_2026-09-28.md)，原业务范围保留；轮内连续做完，阶段实际验收后回填。
 
 更新：2026-09-22。开发前检查点 `54eaa44` 已推送到 `origin/codex/project-workflow-alignment`；任务 0 已按用户反馈重新核查并修正，全软件模糊搜索保留，见 [本轮复核记录](task_00_reaudit_2026_09_22.md)。提交与工作区状态以 Git 为准。完整现场和保护规则见 [开发交接](DEVELOPMENT_HANDOFF.md)。

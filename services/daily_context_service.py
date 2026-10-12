@@ -5,7 +5,7 @@ from hashlib import sha256
 import json
 
 import database
-from services.lot_lifecycle_service import effective_qc_state, timestamp, usage_revision
+from services.lot_lifecycle_service import effective_qc_state, timestamp, usage_revision, result_selection_revision
 
 
 def _json(value):
@@ -92,7 +92,8 @@ def _reagents(c, source, when):
         ORDER BY v2.confirmed_at DESC,v2.id DESC LIMIT 1) ORDER BY l.id''', (when[:10], system_id, when, when))
     current = c.execute('''SELECT reagent_lot_id FROM qc_reagent_lot_usage WHERE system_id=? AND effective_at<=?
         ORDER BY effective_at DESC,id DESC LIMIT 1''', (system_id, when)).fetchone()
-    return dict(system_id=system_id, usage_revision=usage_revision(c, system_id), reagent_options=options,
+    return dict(system_id=system_id, usage_revision=usage_revision(c, system_id),
+                selection_revision=result_selection_revision(c, {**source, 'system_id': system_id}), reagent_options=options,
                 suggested_reagent_lot_id=current[0] if current else None)
 
 
@@ -199,10 +200,17 @@ def _item(c, item, config, when):
         JOIN {result_table} r ON r.id=x.{result_column} WHERE r.batch_id=?''', (binding.get('runtime_batch_id'),)).fetchone()[0]
     level_history = _rows(c, '''SELECT l.* FROM zscore_level_results l JOIN zscore_runs r ON r.id=l.run_id
         WHERE r.batch_id=? ORDER BY l.id''', (binding.get('runtime_batch_id'),)) if method == 'zscore' else []
+    from services.qc_product_recommendation_service import get_qc_product_recommendations
+    try:
+        product_recommendation = get_qc_product_recommendations(reagent_id=item['reagent_id'],
+            lab_instrument_id=config['lab_instrument_id'], test_item_id=item['test_item_id'], method_id=item['method_id'])
+    except ValueError as exc:
+        product_recommendation = {'revision': None, 'candidates': []}
+        problem(str(exc), 'product_choice')
     # Complete row hashes also notice supported maintenance and changes without a revision counter.
     revision = _digest(dict(config=config, item=item, levels=levels, binding=binding, batch=batch,
         profiles=profiles, history=history, level_history=level_history, latest_evaluation_id=latest_eval,
-        reagent=reagent, state=state, issues=issues))
+        reagent=reagent, state=state, product_recommendation=product_recommendation, issues=issues))
     return dict(row_key=row_key, lot_config_item_id=item['id'], template_item_id=item['source_template_item_id'],
         template_id=config['template_id'], lot_config_id=config['id'], qc_method=method,
         runtime_project_id=binding.get('runtime_project_id'), runtime_batch_id=binding.get('runtime_batch_id'),
@@ -212,6 +220,8 @@ def _item(c, item, config, when):
         target_n=item['target_n'], level_count=item['level_count'], levels=levels, phase='formal' if profile else 'building',
         usage_state=state, target_profile=profile, quality_goal=_decode(source.get('quality_goal_json')),
         quality_review=_decode(source.get('quality_review_json')), source_snapshot=source,
+        product_choice_review=_decode(item.get('product_choice_review_json')),
+        product_recommendation=product_recommendation,
         revision=revision, config_revision=config['revision_no'], template_revision=config['template_revision'],
         **reagent, writable=not issues, issues=issues)
 
