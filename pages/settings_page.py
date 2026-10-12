@@ -82,12 +82,12 @@ def render_settings_page() -> None:
     render_lab_preparation_entry()
     render_workbench_context_bar(
         title="当前报告默认信息",
-        caption="请核对实验室、科室和责任人；后续新生成的单水平（LJ）与多水平法月报会使用这些默认信息。",
+        caption="请核对实验室、科室和责任人；后续新生成的单水平（LJ）与多水平法质控报告会使用这些默认信息。",
         items=[
             ("实验室名称", current_settings.lab_name or "未填写"),
             ("科室名称", current_settings.department_name or "未填写"),
-            ("质控负责人", current_settings.qc_owner_name or "未填写"),
-            ("审核人", current_settings.reviewer_name or "未填写"),
+            ("检验员", current_settings.qc_owner_name or "未填写"),
+            ("复核员", current_settings.reviewer_name or "未填写"),
             ("报告声明", "已填写" if current_settings.report_statement else "使用默认声明"),
         ],
     )
@@ -95,16 +95,16 @@ def render_settings_page() -> None:
     with st.container():
         render_section_intro(
             title="报告默认信息",
-            caption="填写实验室、科室、报告责任人和声明，供后续月报使用。",
+            caption="填写实验室、科室、报告责任人和声明，供后续质控报告使用。",
             tone="accent",
         )
         info_left, info_right = st.columns(2, gap="medium")
         with info_left:
             st.text_input("实验室名称", key=SETTINGS_FORM_FIELD_MAP["lab_name"])
-            st.text_input("质控负责人", key=SETTINGS_FORM_FIELD_MAP["qc_owner_name"])
+            st.text_input("检验员", key=SETTINGS_FORM_FIELD_MAP["qc_owner_name"])
         with info_right:
             st.text_input("科室名称", key=SETTINGS_FORM_FIELD_MAP["department_name"])
-            st.text_input("审核人", key=SETTINGS_FORM_FIELD_MAP["reviewer_name"])
+            st.text_input("复核员", key=SETTINGS_FORM_FIELD_MAP["reviewer_name"])
 
         st.markdown("**报告固定声明**")
         st.text_area(
@@ -121,7 +121,7 @@ def render_settings_page() -> None:
             )
             st.session_state["refresh_settings_form"] = True
             st.session_state["settings_saved_notice"] = (
-                "报告默认信息已保存，后续新生成的单水平（LJ）与多水平法月报会使用这些信息。"
+                "报告默认信息已保存，后续新生成的单水平（LJ）与多水平法质控报告会使用这些信息。"
             )
             st.rerun()
 
@@ -130,14 +130,14 @@ def render_settings_page() -> None:
             st.success(saved_notice)
 
         st.caption(
-            "未填写时：实验室名称、科室名称、质控负责人、审核人为空时，报告会显示“未填写”；"
+            "未填写时：实验室名称、科室名称、检验员、复核员为空时，报告会显示“未填写”；"
             "报告声明为空时，报告会使用默认声明。"
         )
         with st.expander("查看未填写时的报告内容", expanded=False):
             st.write(f"实验室名称：{REPORT_SETTINGS_FALLBACKS['lab_name']}")
             st.write(f"科室名称：{REPORT_SETTINGS_FALLBACKS['department_name']}")
-            st.write(f"质控负责人：{REPORT_SETTINGS_FALLBACKS['qc_owner_name']}")
-            st.write(f"审核人：{REPORT_SETTINGS_FALLBACKS['reviewer_name']}")
+            st.write(f"检验员：{REPORT_SETTINGS_FALLBACKS['qc_owner_name']}")
+            st.write(f"复核员：{REPORT_SETTINGS_FALLBACKS['reviewer_name']}")
             st.write(f"报告声明：{REPORT_SETTINGS_FALLBACKS['report_statement']}")
 
     with st.container():

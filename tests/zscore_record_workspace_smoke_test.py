@@ -70,7 +70,7 @@ class ZscoreRecordWorkspaceTests(unittest.TestCase):
             app.session_state['zscore_selected_batch_id'] = batch
             app.run()
             self.assert_clean(app)
-            self.assertEqual(['当前批次', '月度报告'], [tab.label for tab in app.tabs])
+            self.assertEqual(['当前批次', '质控报告'], [tab.label for tab in app.tabs])
             self.assertFalse(any(widget.label in ('项目', '批次', '选择需要处理的参数建立期记录') for widget in app.selectbox))
             self.assertFalse(app.get('file_uploader'))
             self.assertEqual(1, sum(button.label == '导入数据' for button in app.button))

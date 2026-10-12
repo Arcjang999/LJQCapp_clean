@@ -116,7 +116,7 @@ class DataTransferTests(unittest.TestCase):
                 commit_data_import("lj", batch, "building", review, signature)
             self.assertEqual(1, len(get_results(batch)))
 
-    def test_png_is_redrawn_and_keeps_date_limit(self):
+    def test_png_is_redrawn_and_date_selection_requires_formal_data(self):
         with IsolatedDatabase():
             batch = batch_for("lj")
             context = _fresh_import_context("lj", batch)
@@ -126,7 +126,7 @@ class DataTransferTests(unittest.TestCase):
             context["input_value_type_label"] = "真实检测值"
             png = build_chart_png("lj", context, {"view_mode": "全图", "y_axis_mode": "标准视图"})
             self.assertTrue(png.startswith(b"\x89PNG"))
-            with self.assertRaisesRegex(ValueError, "30天"):
+            with self.assertRaisesRegex(ValueError, "没有可导出的质控数据"):
                 build_chart_png("lj", context, {}, start_date=date(2026, 9, 1), end_date=date(2026, 10, 1))
 
     def test_three_level_ct_and_log_exports_and_zscore_png(self):

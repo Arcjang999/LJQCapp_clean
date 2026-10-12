@@ -1,4 +1,4 @@
-"""Read-only monthly selection and separately committed, retryable PDF archives."""
+"""Read-only period selection and separately committed, retryable archives."""
 from datetime import datetime
 from io import BytesIO, StringIO
 import csv
@@ -10,12 +10,10 @@ from functools import wraps
 from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
 
 from database import atomic_write, get_connection, read_snapshot
-from services.monthly_report_source_service import digest, encode, monthly_source_version
+from services.monthly_report_source_service import digest, encode
+from services.report_period_service import resolve_report_period, ReportPeriod
 from services.report_service import (
-    build_lj_monthly_report_package, build_zscore_monthly_report_package,
-    build_lj_monthly_report_pdf, build_zscore_monthly_report_pdf,
-    save_lj_monthly_report_snapshot, save_zscore_monthly_report_snapshot,
-    get_report_history_record, read_report_history_pdf, _normalize_report_month,
+    get_report_history_record, read_report_history_pdf,
 )
 
 logger = logging.getLogger(__name__)
@@ -74,47 +72,93 @@ def list_monthly_report_choices():
         return dict(instruments=instruments, templates=templates, months=sorted(months, reverse=True))
 
 
-def _build(method, batch_id, month):
-    return (build_lj_monthly_report_package if method == 'lj' else build_zscore_monthly_report_package)(batch_id, month)
+def _build(method, batch_id, month=None, *, period=None, handling_versions=None):
+    from services import report_service
+    period = period or resolve_report_period(month)
+    build = getattr(report_service, f'build_{method}_period_report_package')
+    return build(batch_id, period.start_date, period.end_date,
+        report_month=period.report_month or None, handling_versions=handling_versions)
 
 
-def _preview_item(row, month):
-    item = dict(row, report_month=month, unit_key=f"{row['qc_method']}:{row['batch_id']}:{month}",
+def build_lj_monthly_report_pdf(package):
+    from services.report_service import build_lj_period_report_pdf
+    return build_lj_period_report_pdf(package)
+
+
+def build_zscore_monthly_report_pdf(package):
+    from services.report_service import build_zscore_period_report_pdf
+    return build_zscore_period_report_pdf(package)
+
+
+def _source(method, batch_id, period, handling_versions):
+    from services.monthly_report_source_service import range_source_version
+    return range_source_version(method, batch_id, period.start_date, period.end_date,
+                                handling_versions=handling_versions)
+
+
+def _period(row):
+    if row.get('period_start') and row.get('period_end'):
+        return resolve_report_period(row.get('report_month') or None,
+            start_date=row['period_start'], end_date=row['period_end'])
+    return resolve_report_period(row['report_month'])
+
+
+def _preview_item(row, period, handling_versions=None):
+    item = dict(row, report_month=period.report_month, period_start=period.start_date,
+                period_end=period.end_date, period_label=period.label,
+                unit_key=f"{row['qc_method']}:{row['batch_id']}:{period.key}",
                 method_label=METHOD_LABELS.get(row['qc_method'], '未知方法'))
     if row['batch_id'] is None:
-        return dict(item, eligible=False, unit_key=f"config:{row['lot_config_item_id']}:{month}", reason='批次配置尚未确认并开始使用，不能生成正式期月报。')
+        return dict(item, eligible=False, unit_key=f"config:{row['lot_config_item_id']}:{period.key}", reason='批次配置尚未确认并开始使用，不能生成正式期报告。')
     if row['qc_method'] not in ('lj', 'zscore'):
-        return dict(item, eligible=False, reason='即时法不直接生成月报；转入 LJ 后，在对应 LJ 批次生成月报。')
+        return dict(item, eligible=False, reason='即时法不直接生成正式期报告；转入 LJ 后，在对应 LJ 批次生成报告。')
     try:
-        package = _build(row['qc_method'], row['batch_id'], month)
+        from services.report_archive_service import list_report_handling_versions
+        package = _build(row['qc_method'], row['batch_id'], period=period)
+        options = list_report_handling_versions(package, method=row['qc_method'])
+        chosen = {int(option['event_id']): int(option['selected_revision_no']) for option in options}
+        overrides = {int(key): int(value) for key, value in (handling_versions or {}).items()}
+        chosen.update({key: overrides[key] for key in chosen if key in overrides})
+        package = _build(row['qc_method'], row['batch_id'], period=period, handling_versions=chosen)
+        options = list_report_handling_versions(package, method=row['qc_method'])
         report = package.report
         if row['qc_method'] == 'zscore':
             grouped = package.monthly_plot_df.groupby('run_id') if 'run_id' in package.monthly_plot_df else []
             if any(len(set(group.level_id)) != len(package.active_levels) for _, group in grouped):
-                raise ValueError('本月存在水平不完整的检测，请先核对原始记录。')
+                raise ValueError('所选期间存在水平不完整的检测，请先核对原始记录。')
         item.update(eligible=True, reason='', formal_count=report.statistics.formal_count,
             source_fingerprint=report.source_version['fingerprint'], source_version=report.source_version,
+            handling_versions=chosen, handling_choices=options,
             parameter_versions=report.source_version['parameter_versions'],
             quality_note=report.quality_summary.get('evaluation_reason') or '按每个参数版本及水平核对质量要求')
     except ValueError as exc:
         item.update(eligible=False, reason=str(exc))
     except Exception:
         logger.exception('Monthly preview failed for %s', item['unit_key'])
-        item.update(eligible=False, reason='该批次资料暂不能用于月报，请核对参数、水平和质量要求后重试。')
+        item.update(eligible=False, reason='该批次资料暂不能用于报告，请核对参数、水平和质量要求后重试。')
     return item
 
 
 def preview_monthly_reports(report_month, lab_instrument_id=None, template_id=None, methods=None):
-    month = _normalize_report_month(report_month)
+    period = resolve_report_period(report_month)
+    return preview_period_reports(period.start_date, period.end_date, report_month=period.report_month,
+        lab_instrument_id=lab_instrument_id, template_id=template_id, methods=methods)
+
+
+def preview_period_reports(start_date, end_date, *, report_month=None, lab_instrument_id=None,
+                           template_id=None, methods=None, handling_versions=None):
+    period = resolve_report_period(report_month, start_date=start_date, end_date=end_date)
     methods = sorted(set(methods if methods is not None else METHOD_LABELS))
     if set(methods) - set(METHOD_LABELS):
         raise ValueError('请选择支持的质控方法。')
-    scope = dict(report_month=month, lab_instrument_id=lab_instrument_id, template_id=template_id, methods=methods)
+    scope = dict(report_month=period.report_month, period_start=period.start_date, period_end=period.end_date,
+                 lab_instrument_id=lab_instrument_id, template_id=template_id, methods=methods)
     with read_snapshot() as c:
         selected = [row for row in _candidates(c) if row['qc_method'] in methods
             and (lab_instrument_id is None or row['lab_instrument_id'] == int(lab_instrument_id))
             and (template_id is None or row['template_id'] == int(template_id))]
-        items = [_preview_item(row, month) for row in selected]
+        items = [_preview_item(row, period, handling_versions) for row in selected]
+        scope['handling_versions'] = {str(key): value for item in items for key, value in item.get('handling_versions', {}).items()}
         return dict(scope=scope, items=[r for r in items if r['eligible']],
                     exclusions=[r for r in items if not r['eligible']], preview_fingerprint=digest(dict(scope=scope, items=items)))
 
@@ -133,9 +177,9 @@ def _database_busy_as_business_error(function):
 @_database_busy_as_business_error
 def create_monthly_report_job(preview, selected_keys, request_id):
     if not str(request_id or '').strip():
-        raise ValueError('请重新核对月报清单后生成。')
+        raise ValueError('请重新核对报告清单后生成。')
     if not isinstance(selected_keys, (list, tuple)) or not selected_keys or len(set(selected_keys)) != len(selected_keys):
-        raise ValueError('请至少选择一份不重复的月报。')
+        raise ValueError('请至少选择一份不重复的报告。')
     selected = {row['unit_key']: row for row in preview.get('items', [])}
     if any(key not in selected for key in selected_keys):
         raise ValueError('所选报告不在可生成清单中，请重新预览。')
@@ -149,17 +193,19 @@ def create_monthly_report_job(preview, selected_keys, request_id):
             return int(prior['id'])
         for key in selected_keys:
             item = selected[key]
-            fresh = monthly_source_version(item['qc_method'], item['batch_id'], item['report_month'])
+            fresh = _source(item['qc_method'], item['batch_id'], _period(item), item.get('handling_versions'))
             if fresh['fingerprint'] != item['source_fingerprint']:
                 raise ValueError(item['project_name'] + '的数据或设置已变化，请重新预览。')
-        job = c.execute('''INSERT INTO qc_monthly_report_jobs(request_id,request_digest,report_month,scope_json,exclusions_json)
-            VALUES(?,?,?,?,?)''', (request_id, request_digest, preview['scope']['report_month'], encode(preview['scope']),
+        period = _period(preview['scope'])
+        job = c.execute('''INSERT INTO qc_monthly_report_jobs(request_id,request_digest,report_month,period_start,period_end,scope_json,exclusions_json)
+            VALUES(?,?,?,?,?,?,?)''', (request_id, request_digest, period.report_month, period.start_date, period.end_date, encode(preview['scope']),
                                   encode(preview.get('exclusions', [])))).lastrowid
         for key in selected_keys:
             item = selected[key]
-            c.execute('''INSERT INTO qc_monthly_report_job_items(job_id,unit_key,qc_method,batch_id,report_month,
-                source_fingerprint,selection_json) VALUES(?,?,?,?,?,?,?)''',
-                (job, key, item['qc_method'], item['batch_id'], item['report_month'], item['source_fingerprint'], encode(item)))
+            c.execute('''INSERT INTO qc_monthly_report_job_items(job_id,unit_key,qc_method,batch_id,report_month,period_start,period_end,
+                source_fingerprint,selection_json) VALUES(?,?,?,?,?,?,?,?,?)''',
+                (job, key, item['qc_method'], item['batch_id'], item['report_month'], item['period_start'], item['period_end'],
+                 item['source_fingerprint'], encode(item)))
         return int(job)
 
 
@@ -167,10 +213,11 @@ def get_monthly_report_job(job_id):
     with read_snapshot() as c:
         job = c.execute('SELECT * FROM qc_monthly_report_jobs WHERE id=?', (int(job_id),)).fetchone()
         if job is None:
-            raise ValueError('未找到所选月报任务。')
+            raise ValueError('未找到所选报告任务。')
         job = dict(job)
         job['scope'] = json.loads(job.pop('scope_json'))
         job['exclusions'] = json.loads(job.pop('exclusions_json'))
+        job['period_label'] = _period(job).label
         job['items'] = _rows(c, 'SELECT * FROM qc_monthly_report_job_items WHERE job_id=? ORDER BY id', (job_id,))
         for item in job['items']:
             item['selection'] = json.loads(item.pop('selection_json'))
@@ -180,7 +227,7 @@ def get_monthly_report_job(job_id):
 
 def list_monthly_report_jobs():
     with read_snapshot() as c:
-        return _rows(c, '''SELECT j.id,j.report_month,j.created_at,COUNT(i.id) AS item_count,
+        return _rows(c, '''SELECT j.id,j.report_month,j.period_start,j.period_end,j.created_at,COUNT(i.id) AS item_count,
             SUM(CASE WHEN i.status='succeeded' THEN 1 ELSE 0 END) AS succeeded_count
             FROM qc_monthly_report_jobs j LEFT JOIN qc_monthly_report_job_items i ON i.job_id=j.id
             GROUP BY j.id ORDER BY j.id DESC''')
@@ -194,7 +241,7 @@ def run_monthly_report_item(job_id, item_id):
     with atomic_write() as c:
         row = c.execute('SELECT * FROM qc_monthly_report_job_items WHERE id=? AND job_id=?', (item_id, job_id)).fetchone()
         if row is None:
-            raise ValueError('未找到本次选择的月报。')
+            raise ValueError('未找到本次选择的报告。')
         if row['status'] == 'succeeded':
             return dict(row)
         c.execute("UPDATE qc_monthly_report_job_items SET status='generating',error_message='',updated_at=CURRENT_TIMESTAMP WHERE id=?", (item_id,))
@@ -203,16 +250,20 @@ def run_monthly_report_item(job_id, item_id):
             row = dict(c.execute('SELECT * FROM qc_monthly_report_job_items WHERE id=?', (item_id,)).fetchone())
             if row['status'] == 'succeeded':
                 return row
-            current = monthly_source_version(row['qc_method'], row['batch_id'], row['report_month'])
+            selection = json.loads(row['selection_json'])
+            period = _period(row)
+            handling = selection.get('handling_versions')
+            current = _source(row['qc_method'], row['batch_id'], period, handling)
             if current['fingerprint'] != row['source_fingerprint']:
                 raise ValueError('源数据、参数或处理资料已变化，请重新预览后另存新报告。')
-            package = _build(row['qc_method'], row['batch_id'], row['report_month'])
-            renderer, saver = ((build_lj_monthly_report_pdf, save_lj_monthly_report_snapshot) if row['qc_method'] == 'lj'
-                               else (build_zscore_monthly_report_pdf, save_zscore_monthly_report_snapshot))
+            package = _build(row['qc_method'], row['batch_id'], period=period, handling_versions=handling)
+            from services import report_service
+            renderer = build_lj_monthly_report_pdf if row['qc_method'] == 'lj' else build_zscore_monthly_report_pdf
+            saver = getattr(report_service, f"save_{row['qc_method']}_period_report_snapshot")
             pdf = renderer(package)
-            if monthly_source_version(row['qc_method'], row['batch_id'], row['report_month'])['fingerprint'] != row['source_fingerprint']:
+            if _source(row['qc_method'], row['batch_id'], period, handling)['fingerprint'] != row['source_fingerprint']:
                 raise ValueError('生成期间数据发生变化，请重新预览后生成。')
-            export_id = saver(package, pdf)
+            export_id = saver(package, pdf, request_key=f"batch:{job_id}:{item_id}")
             c.execute("""UPDATE qc_monthly_report_job_items SET status='succeeded',export_id=?,error_message='',
                 attempts=attempts+1,updated_at=CURRENT_TIMESTAMP WHERE id=?""", (export_id, item_id))
     except Exception as exc:
@@ -227,14 +278,19 @@ def run_monthly_report_item(job_id, item_id):
 def read_monthly_report_item(job_id, item_id):
     item = next((row for row in get_monthly_report_job(job_id)['items'] if row['id'] == int(item_id)), None)
     if not item or item['status'] != 'succeeded':
-        raise ValueError('此份月报尚未成功生成。')
+        raise ValueError('此份报告尚未成功生成。')
     record = get_report_history_record(item['export_id'])
-    return dict(export_id=item['export_id'], file_name=record.file_name, pdf_bytes=read_report_history_pdf(record))
+    from services.report_archive_service import get_report_archive_metadata, read_report_archive
+    metadata = get_report_archive_metadata(item['export_id'])
+    return dict(export_id=item['export_id'], file_name=record.file_name, pdf_bytes=read_report_history_pdf(record),
+                archive_name=metadata['archive_name'] if metadata else '',
+                archive_bytes=read_report_archive(item['export_id']) if metadata else None)
 
 
 def _zip_name(item):
     row = item['selection']
-    value = '_'.join(str(row.get(key) or '未记录') for key in ('project_name', 'instrument_name', 'lot_no', 'report_month'))
+    period = _period(row)
+    value = '_'.join(str(row.get(key) or '未记录') for key in ('project_name', 'instrument_name', 'lot_no')) + '_' + period.key
     safe = re.sub(r'[\\/:*?"<>|\x00-\x1f]', '_', value).strip(' .')
     safe = safe.encode('utf-8')[:220].decode('utf-8', errors='ignore').rstrip(' .')
     return f"{safe}_{item['id']:04d}.pdf"
@@ -244,7 +300,7 @@ def build_monthly_report_zip(job_id):
     job = get_monthly_report_job(job_id)
     buffer, manifest = BytesIO(), StringIO()
     writer = csv.writer(manifest)
-    writer.writerow(['项目', '仪器', '质控批号', '月份', '质控方法', '状态', '文件', '报告编号', '说明'])
+    writer.writerow(['项目', '仪器', '质控批号', '月份', '开始日期', '结束日期', '质控方法', '状态', '文件', '完整归档', '报告编号', '说明'])
     created = datetime.fromisoformat(job['created_at'])
     def write_member(archive, name, data):
         entry = ZipInfo(name, date_time=created.timetuple()[:6])
@@ -254,16 +310,22 @@ def build_monthly_report_zip(job_id):
         for item in job['items']:
             row = item['selection']
             name = ''
+            archive_name = ''
             if item['status'] == 'succeeded':
                 result = read_monthly_report_item(job_id, item['id'])
                 name = _zip_name(item)
                 write_member(archive, name, result['pdf_bytes'])
-            writer.writerow([row['project_name'], row['instrument_name'], row['lot_no'], row['report_month'],
-                METHOD_LABELS[item['qc_method']], STATUS_LABELS[item['status']], name, item['export_id'] or '', item['error_message']])
+                if result['archive_bytes']:
+                    archive_name = name[:-4] + '_完整归档.zip'
+                    write_member(archive, archive_name, result['archive_bytes'])
+            period = _period(row)
+            writer.writerow([row['project_name'], row['instrument_name'], row['lot_no'], row['report_month'], period.start_date, period.end_date,
+                METHOD_LABELS[item['qc_method']], STATUS_LABELS[item['status']], name, archive_name, item['export_id'] or '', item['error_message']])
         for row in job['exclusions']:
-            writer.writerow([row['project_name'], row['instrument_name'], row['lot_no'], row['report_month'],
-                row['method_label'], '不生成', '', '', row['reason']])
-        write_member(archive, '月报清单.csv', manifest.getvalue().encode('utf-8-sig'))
+            period = _period(row)
+            writer.writerow([row['project_name'], row['instrument_name'], row['lot_no'], row['report_month'], period.start_date, period.end_date,
+                row['method_label'], '不生成', '', '', '', row['reason']])
+        write_member(archive, '月报清单.csv' if job['report_month'] else '质控报告清单.csv', manifest.getvalue().encode('utf-8-sig'))
     return buffer.getvalue()
 
 
@@ -277,6 +339,7 @@ def monthly_job_summary(job_id):
         summary = record.summary_json
         base = dict(export_id=item['export_id'], item_id=item['id'], project_name=record.project_name,
             batch_label=record.batch_label, report_month=record.report_month, method_label=METHOD_LABELS[item['qc_method']],
+            period_label=record.period_label,
             instrument_name=item['selection']['instrument_name'])
         handling = summary.get('processing_candidates', [])
         reports.append(dict(base, **{key: summary['statistics'].get(key, 0) for key in (
@@ -285,6 +348,7 @@ def monthly_job_summary(job_id):
             unopened_count=sum(row['event_id'] is None for row in handling),
             registered_pending_count=sum(row['event_id'] is not None and row['status'] != 'completed' for row in handling),
             counting_unit='完整检测次数' if item['qc_method'] == 'zscore' else '单水平检测记录数'))
+        reports[-1]['undetermined_count'] = summary['statistics'].get('undetermined_count', summary['statistics'].get('pending_count', 0))
         quality = summary.get('quality_summary') or {}
         if quality.get('rows'):
             cv_rows.extend(dict(base, **row) for row in quality['rows'])

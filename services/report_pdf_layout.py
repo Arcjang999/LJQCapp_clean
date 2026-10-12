@@ -93,7 +93,9 @@ def render_lj_monthly_report_pdf(package: Any, font_name: str) -> bytes:
             pages: list[tuple[Any, str]] = [
                 (figure, "摘要页") for figure in _build_lj_summary_pages(report)
             ]
-            pages.append((_build_lj_chart_page(package), "图表页"))
+            frames = split_report_chart_frames('lj', package.formal_df)
+            for index, frame in enumerate(frames, 1):
+                pages.append((_build_lj_chart_page(package, frame=frame, page_label=f'{index}/{len(frames)}'), f"图表页 {index}"))
             if report.abnormal_records:
                 for abnormal_index, figure in enumerate(_build_lj_abnormal_pages(report), start=1):
                     pages.append((figure, f"异常记录页 {abnormal_index}"))
@@ -122,8 +124,11 @@ def render_zscore_monthly_report_pdf(package: Any, font_name: str) -> bytes:
             pages: list[tuple[Any, str]] = [
                 (figure, "摘要页") for figure in _build_zscore_summary_pages(report)
             ]
-            for level_index, level_id in enumerate(package.active_levels, start=1):
-                pages.append((_build_zscore_level_chart_page(package, level_id), f"水平图页 {level_index}"))
+            frames = split_report_chart_frames('zscore', package.monthly_plot_df)
+            for index, frame in enumerate(frames, 1):
+                for level_id in package.active_levels:
+                    pages.append((_build_zscore_level_chart_page(package, level_id, frame=frame,
+                        page_label=f'{index}/{len(frames)}'), f"{format_level_id_display(level_id)} 图页 {index}"))
             pages.append((_build_zscore_level_summary_page(report), "各水平统计页"))
             if report.abnormal_records:
                 for abnormal_index, figure in enumerate(_build_zscore_abnormal_pages(report), start=1):
@@ -151,6 +156,59 @@ def _write_pages(pdf, pages: list[tuple[Any, str]], report: Any) -> None:
         )
         pdf.savefig(figure)
         plt.close(figure)
+
+
+def split_report_chart_frames(method, frame, *, max_detections=60):
+    """Split displays by complete saved detection IDs, never by level rows."""
+    if max_detections < 1:
+        raise ValueError('每幅图的检测数须大于零。')
+    if frame.empty:
+        return [frame.copy()]
+    column = 'id' if method == 'lj' else 'run_id'
+    if column not in frame or 'test_time' not in frame:
+        raise ValueError('质控图缺少检测身份或时间，请重新核对。')
+    ordered = frame.sort_values(['test_time', column], kind='stable')
+    detections = ordered.drop_duplicates(column)
+    groups, current, previous = [], [], object()
+    for row in detections.to_dict('records'):
+        value = row.get('target_profile_id')
+        profile = None if value is None or pd.isna(value) else int(value)
+        if current and (len(current) >= max_detections or profile != previous):
+            groups.append(current); current = []
+        current.append(row[column]); previous = profile
+    if current:
+        groups.append(current)
+    return [ordered[ordered[column].isin(ids)].copy() for ids in groups]
+
+
+def tidy_report_chart_ticks(figure):
+    """Keep the first/last labels and remove labels whose actual bounds overlap."""
+    if not figure.axes:
+        return
+    figure.canvas.draw()
+    axis = figure.axes[0]
+    ticks, labels = list(axis.get_xticks()), list(axis.get_xticklabels())
+    if len(ticks) != len(labels) or len(labels) < 3:
+        return
+    kept = [0]
+    for index in range(1, len(labels)):
+        left = labels[index].get_window_extent().x0
+        if index == len(labels)-1:
+            while len(kept)>1 and left < labels[kept[-1]].get_window_extent().x1+5:
+                kept.pop()
+            kept.append(index)
+        elif left >= labels[kept[-1]].get_window_extent().x1+5:
+            kept.append(index)
+    axis.set_xticks([ticks[index] for index in kept])
+    axis.set_xticklabels([labels[index].get_text() for index in kept])
+
+
+def _scope_heading(report):
+    return '报告月份' if 'monthly' in report.report_type else '报告期间'
+
+
+def _scope_metric(report, text):
+    return text if 'monthly' in report.report_type else text.replace('月度', '报告期').replace('本月', '报告期')
 
 
 def _build_pdf_rc_params(font_name: str) -> dict[str, object]:
@@ -206,9 +264,9 @@ def _build_summary_pages(
 ) -> list[Any]:
     subtitle_lines = [
         f"实验室名称：{report.basic_info.lab_name}    科室名称：{report.basic_info.department_name}",
-        f"项目名称：{report.basic_info.project_name}    报告月份：{report.report_month_label}",
+        f"项目名称：{report.basic_info.project_name}    {_scope_heading(report)}：{report.report_month_label}",
         f"报告期间：{report.report_period_label}    生成时间：{report.generated_at}",
-        f"方法标识：{report.method_label}    质控负责人：{report.basic_info.qc_owner_name}    审核人：{report.basic_info.reviewer_name}",
+        f"方法标识：{report.method_label}    检验员：{report.basic_info.qc_owner_name}    复核员：{report.basic_info.reviewer_name}",
     ]
     pages: list[Any] = []
 
@@ -254,9 +312,10 @@ def _build_summary_pages(
                 advance_page()
 
     draw_table("基本信息", basic_rows, [0.18, 0.32, 0.18, 0.32], basic_font_size)
-    draw_text("本月质控概况", report.overview_text)
+    draw_text(_scope_metric(report,"本月质控概况"), report.overview_text)
     draw_table(statistics_title, statistics_rows, statistics_widths, 9.0)
-    draw_text("月度结论", report.conclusion)
+    draw_text(_scope_metric(report,"月度结论"), report.conclusion)
+    draw_text('纸质签署', '检验员（签名）：________________    日期：____________\n复核员（签名）：________________    日期：____________')
     pages.append(canvas.figure)
     return pages
 
@@ -272,16 +331,16 @@ def _build_lj_summary_pages(report: Any) -> list[Any]:
     ]
 
     summary_rows = [
-        ["月度正式期总记录数", str(report.statistics.formal_count), "在控记录数", str(report.statistics.in_control_count)],
+        [_scope_metric(report,"月度正式期总记录数"), str(report.statistics.formal_count), "在控记录数", str(report.statistics.in_control_count)],
         ["警告记录数", str(report.statistics.warning_count), "失控记录数", str(report.statistics.out_of_control_count)],
-        ["月度均值", _format_float(report.statistics.monthly_mean), "月度 SD", _format_lj_metric(report.statistics, "sd")],
-        ["实测变异系数（%）", _format_lj_metric(report.statistics, "cv"), "当前设定均值", _format_float(report.statistics.target_mean)],
-        ["当前设定 SD", _format_float(report.statistics.target_sd), "批次允许不精密度（CV）", _format_float(report.statistics.cv_limit, digits=2, suffix="%")],
+        [_scope_metric(report,"月度均值"), _format_float(report.statistics.monthly_mean), _scope_metric(report,"月度 SD"), _format_lj_metric(report.statistics, "sd")],
+        ["实测变异系数（%）", _format_lj_metric(report.statistics, "cv"), "适用设定均值", _format_float(report.statistics.target_mean)],
+        ["适用设定 SD", _format_float(report.statistics.target_sd), "批次允许不精密度（CV）", _format_float(report.statistics.cv_limit, digits=2, suffix="%")],
     ]
 
     return _build_summary_pages(
         report, basic_rows=basic_rows, basic_font_size=8.8,
-        statistics_title="月度统计摘要", statistics_rows=summary_rows,
+        statistics_title=_scope_metric(report,"月度统计摘要"), statistics_rows=summary_rows,
         statistics_widths=[0.23, 0.27, 0.23, 0.27],
     )
 
@@ -293,11 +352,11 @@ def _build_lj_summary_page(report: Any):
         plt.close(figure)
     return pages[0]
 
-def _build_lj_chart_page(package: Any):
+def _build_lj_chart_page(package: Any, *, frame=None, page_label=''):
     figure = plot_lj_chart(
-        qc_df=package.formal_df.copy(),
+        qc_df=package.formal_df.copy() if frame is None else frame.copy(),
         stats=package.stats,
-        title="正式期月度质控图",
+        title=_scope_metric(package.report,"正式期月度质控图") + (f'（{page_label}）' if page_label else ''),
         view_mode="正式质控图",
         y_axis_mode="标准视图",
         standard_sd_limit=4.0,
@@ -306,12 +365,13 @@ def _build_lj_chart_page(package: Any):
     _decorate_chart_page(
         figure=figure,
         report_title=package.report.title,
-        page_title="月度质控图",
+        page_title=_scope_metric(package.report,"月度质控图") + (f'（{page_label}）' if page_label else ''),
         subtitle_lines=[
-            f"项目名称：{package.report.basic_info.project_name}    报告月份：{package.report.report_month_label}",
+            f"项目名称：{package.report.basic_info.project_name}    {_scope_heading(package.report)}：{package.report.report_month_label}",
             f"报告期间：{package.report.report_period_label}    质控品批号：{package.report.basic_info.lot_no}",
         ],
     )
+    tidy_report_chart_ticks(figure)
     return figure
 
 
@@ -334,7 +394,7 @@ def _build_lj_abnormal_pages(report: Any) -> list[Any]:
             report_title=report.title,
             page_title="异常/失控记录表",
             subtitle_lines=[
-                f"项目名称：{report.basic_info.project_name}    报告月份：{report.report_month_label}",
+                f"项目名称：{report.basic_info.project_name}    {_scope_heading(report)}：{report.report_month_label}",
                 f"报告期间：{report.report_period_label}    生成时间：{report.generated_at}",
             ],
         )
@@ -362,11 +422,13 @@ def _build_zscore_summary_pages(report: Any) -> list[Any]:
     ]
 
     run_summary_rows = [
-        ["本月正式期检测记录数", str(report.statistics.formal_count), "在控检测记录数", str(report.statistics.in_control_count)],
+        [_scope_metric(report,"本月正式期检测记录数"), str(report.statistics.formal_count), "在控检测记录数", str(report.statistics.in_control_count)],
         ["警告检测记录数", str(report.statistics.warning_count), "失控检测记录数", str(report.statistics.out_of_control_count)],
         ["当前规则组合", report.statistics.template_label, "当前阶段", report.statistics.current_phase_label],
         ["全部水平已完成\n均值和标准差建立", "是" if report.statistics.all_levels_ready else "否", "", ""],
     ]
+    if report.statistics.pending_count:
+        run_summary_rows.append(['待判读检测记录数', str(report.statistics.pending_count), '', ''])
 
     return _build_summary_pages(
         report, basic_rows=basic_rows, basic_font_size=8.6,
@@ -382,15 +444,15 @@ def _build_zscore_summary_page(report: Any):
         plt.close(figure)
     return pages[0]
 
-def _build_zscore_level_chart_page(package: Any, level_id: str):
+def _build_zscore_level_chart_page(package: Any, level_id: str, *, frame=None, page_label=''):
     level_label = next(
         (item.level_label for item in package.report.level_statistics if item.level_id == level_id),
         format_level_id_display(level_id),
     )
     figure = plot_zscore_single_level(
-        plot_df=package.monthly_plot_df.copy(),
+        plot_df=package.monthly_plot_df.copy() if frame is None else frame.copy(),
         level_id=level_id,
-        title=f"{level_label} 月度图",
+        title=_scope_metric(package.report,f"{level_label} 月度图") + (f'（{page_label}）' if page_label else ''),
         phase_scope="formal",
         y_axis_mode="标准视图",
         standard_sd_limit=4.0,
@@ -399,9 +461,9 @@ def _build_zscore_level_chart_page(package: Any, level_id: str):
     _decorate_chart_page(
         figure=figure,
         report_title=package.report.title,
-        page_title=f"{level_label} 月度图",
+        page_title=_scope_metric(package.report,f"{level_label} 月度图") + (f'（{page_label}）' if page_label else ''),
         subtitle_lines=[
-            f"项目名称：{package.report.basic_info.project_name}    报告月份：{package.report.report_month_label}",
+            f"项目名称：{package.report.basic_info.project_name}    {_scope_heading(package.report)}：{package.report.report_month_label}",
             f"报告期间：{package.report.report_period_label}    当前规则组合：{package.report.statistics.template_label}",
         ],
     )
@@ -410,12 +472,17 @@ def _build_zscore_level_chart_page(package: Any, level_id: str):
     if figure.axes:
         axis = figure.axes[0]
         axis.set_position([0.10, 0.30, 0.80, 0.46])
-        legends = [artist for artist in axis.get_children() if isinstance(artist, Legend)]
+        legends = list(dict.fromkeys(artist for artist in axis.get_children() if isinstance(artist, Legend)))
+        # The plotting helper retains its last legend as both a manual artist
+        # and the current axes legend. Render that same object only once.
+        if axis.get_legend() in legends:
+            axis.legend_ = None
         for index, legend in enumerate(legends):
             right = index > 0
             legend.set_loc("upper right" if right else "upper left")
             legend.set_bbox_to_anchor((PAGE_RIGHT if right else PAGE_LEFT, 0.218), transform=figure.transFigure)
             legend.set_in_layout(False)
+    tidy_report_chart_ticks(figure)
     return figure
 
 
@@ -424,7 +491,7 @@ def _build_zscore_level_summary_page(report: Any):
         report_title=report.title,
         page_title="各水平统计摘要",
         subtitle_lines=[
-            f"项目名称：{report.basic_info.project_name}    报告月份：{report.report_month_label}",
+            f"项目名称：{report.basic_info.project_name}    {_scope_heading(report)}：{report.report_month_label}",
             f"报告期间：{report.report_period_label}    水平数：{report.basic_info.level_count_label}",
         ],
     )
@@ -445,14 +512,14 @@ def _build_zscore_level_summary_page(report: Any):
         canvas,
         title="各水平统计摘要",
         cell_text=cell_text,
-        col_labels=["水平", "记录数", "月度均值", "月度 SD", "实测变异\n系数（%）", "设定均值", "设定 SD", "允许不精密度\n（CV%）"],
+        col_labels=["水平", "记录数", _scope_metric(report,"月度均值"), _scope_metric(report,"月度 SD"), "实测变异\n系数（%）", "设定均值", "设定 SD", "允许不精密度\n（CV%）"],
         col_widths=[0.16, 0.07, 0.12, 0.12, 0.14, 0.11, 0.11, 0.17],
         font_size=8.4,
     )
     _draw_text_section(
         canvas,
         "统计说明",
-        "各水平月度均值、SD、CV%按所选月份内正式期数据计算；设定均值与 SD 取当前批次已生效参数。",
+        "各水平均值、SD、CV%按报告期间正式期数据计算；设定均值与 SD 采用每次检测保存的参数版本。跨版本分别统计及列明依据，见追溯附页。",
         width=44,
     )
     return canvas.figure
@@ -500,7 +567,7 @@ def _build_zscore_abnormal_pages(report: Any) -> list[Any]:
             report_title=report.title,
             page_title="异常/失控汇总表",
             subtitle_lines=[
-                f"项目名称：{report.basic_info.project_name}    报告月份：{report.report_month_label}",
+                f"项目名称：{report.basic_info.project_name}    {_scope_heading(report)}：{report.report_month_label}",
                 f"报告期间：{report.report_period_label}    当前规则组合：{report.statistics.template_label}",
                 "本次检测结论为最终判定，各水平触发证据用于说明规则触发情况。",
             ],
@@ -532,7 +599,7 @@ def _build_action_pages(report: Any) -> list[Any]:
         report_title=report.title,
         page_title="原因与声明",
         subtitle_lines=[
-            f"项目名称：{report.basic_info.project_name}    报告月份：{report.report_month_label}",
+            f"项目名称：{report.basic_info.project_name}    {_scope_heading(report)}：{report.report_month_label}",
             f"报告期间：{report.report_period_label}    生成时间：{report.generated_at}",
         ],
         sections=sections,
@@ -842,7 +909,7 @@ def _apply_page_footer(
             linewidth=0.9,
         )
     )
-    left_text = f"{method_label} | 报告月份：{report_month_label} | 生成时间：{generated_at}"
+    left_text = f"{method_label} | 报告范围：{report_month_label}"
     right_text = f"{page_label} | 第 {page_index}/{total_pages} 页"
     figure.text(PAGE_LEFT, FOOTER_TEXT_Y, left_text, ha="left", va="center", fontsize=8.4, color=FOOTER_COLOR)
     figure.text(PAGE_RIGHT, FOOTER_TEXT_Y, right_text, ha="right", va="center", fontsize=8.4, color=FOOTER_COLOR)
@@ -938,7 +1005,7 @@ def _build_lot_trace_pages(report):
     def number(value):return '未记录' if value is None else f'{value:.4f}'
     source_labels={'manual':'实验室确认','manufacturer':'厂家赋值经确认','revision':'参数修订','building':'本批次均值和标准差建立','legacy':'旧序列'}
     event_labels={'reagent':'试剂换批','qc':'质控换批','target':'均值和标准差确认/修订','correction':'更正','active':'正式使用','ended':'停止使用','parallel':'新旧批同时使用观察'}
-    parameters=[f"V{r['version']} / {format_level_id_display(r['level'])}：{r['count']} 点；月均值 {number(r['monthly_mean'])}，月 SD {number(r['monthly_sd'])}；设定均值 {number(r['target_mean'])}，设定 SD {number(r['target_sd'])}。来源 {source_labels.get(r['source'],r['source'])}；确认人 {r['confirmed_by'] or '未记录'}；生效 {r['effective_at'] or '未记录'}。依据：{r['evidence']}" for r in groups]
+    parameters=[f"V{r['version']} / {format_level_id_display(r['level'])}：{r['count']} 点；期间均值 {number(r['monthly_mean'])}，期间 SD {number(r['monthly_sd'])}；设定均值 {number(r['target_mean'])}，设定 SD {number(r['target_sd'])}。来源 {source_labels.get(r['source'],r['source'])}；确认人 {r['confirmed_by'] or '未记录'}；生效 {r['effective_at'] or '未记录'}。依据：{r['evidence']}" for r in groups]
     usage=[]
     for lot in dict.fromkeys(r['reagent_lot_no'] for r in rows):
         points=[r for r in rows if r['reagent_lot_no']==lot]

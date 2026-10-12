@@ -272,12 +272,19 @@ def test_report_history_page_renders_from_global_entry() -> None:
         assert any("body::before" in str(item.value) for item in app.markdown)
         assert any(text_input.key == "report_history_project_query" for text_input in app.text_input)
         assert any(selectbox.key == "report_history_method_filter" for selectbox in app.selectbox)
-        assert any(selectbox.key == "report_history_month_filter" for selectbox in app.selectbox)
+        assert any(checkbox.key == "report_history_use_period" for checkbox in app.checkbox)
 
         app.text_input(key="report_history_project_query").set_value("Hist LJ").run()
         assert not list(app.exception)
-        assert any("Hist LJ Project" in str(item.value) for item in app.markdown)
-        assert not any("Hist Zscore Project" in str(item.value) for item in app.markdown)
+        rows = app.dataframe[0].value
+        assert rows['项目'].tolist() == ['Hist LJ Project']
+        from tests.project_workspace_smoke_test import select_table_row
+        select_table_row(app, 0)
+        app.button(key='report_history_view').click().run()
+        assert not app.exception
+        assert any(item.label == '下载已保存的原 PDF' for item in app.get('download_button'))
+        assert any('Hist LJ Project' in str(item.value) for item in app.markdown)
+        assert not any('Hist Zscore Project' in str(item.value) for item in app.markdown)
 
 
 def test_report_history_handles_missing_batch_gracefully() -> None:

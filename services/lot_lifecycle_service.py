@@ -725,11 +725,13 @@ def validate_result_edit(connection,method,result_id,new_time=None):
     return row
 
 
-def report_lot_trace(method,batch_id,month,frame):
+def report_lot_trace(method,batch_id,month,frame,*,start_date=None,end_date=None):
     """Capture a self-contained report snapshot; no later lookup on history read."""
     df=context_dataframe(method,batch_id)
     if df.empty:return {}
-    df=df[df.test_time.astype(str).str.startswith(month)]
+    from services.report_period_service import resolve_report_period, filter_frame_to_period
+    period=resolve_report_period(start_date=start_date,end_date=end_date) if start_date is not None else resolve_report_period(month)
+    df=filter_frame_to_period(df,period)
     if df.empty:return {}
     groups=[]
     value_col='value' if method=='lj' else 'raw_value'
@@ -748,7 +750,8 @@ def report_lot_trace(method,batch_id,month,frame):
                 'confirmed_by':profile['confirmed_by'] if profile else '', 'effective_at':profile['effective_at'] if profile else ''})
     with get_connection() as c:
         source,_,_=source_context(c,method,batch_id,read_only=True)
-        events=[dict(r) for r in c.execute('SELECT * FROM qc_lot_change_events WHERE system_id=? AND substr(effective_at,1,7)=? ORDER BY effective_at,id',(source.get('system_id'),month))]
+        events=[dict(r) for r in c.execute('SELECT * FROM qc_lot_change_events WHERE system_id=? AND effective_at>=? AND effective_at<? ORDER BY effective_at,id',
+            (source.get('system_id'),str(period.start_time),str(period.end_exclusive)))]
     return _json_safe({'actual_lots':df.to_dict('records'),'statistics_by_target_version':groups,'events':events,
         'basis':'按本次结果保存的批号及参数版本回顾；累计判定按各版本自己的窗口，缺失历史批号显示未记录。'})
 

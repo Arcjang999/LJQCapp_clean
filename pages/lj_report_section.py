@@ -11,98 +11,22 @@ from plotting import plot_lj_chart
 from services.report_service import (
     LjMonthlyReportPackage,
     build_lj_monthly_preview_summary,
-    build_lj_monthly_report_package,
-    build_lj_monthly_report_pdf,
     list_lj_report_month_options,
-    save_lj_monthly_report_snapshot,
 )
 from ui.common import render_compact_stat_metrics, render_section_intro
 
 
 def render_lj_monthly_report_section(selected_batch_id: int) -> None:
+    from ui.report_period import render_single_report
     batch = get_batch(selected_batch_id)
-    report_scope = f"lj_monthly_report_{selected_batch_id}"
-    preview_key = f"{report_scope}_preview"
-    available_months = list_lj_report_month_options(selected_batch_id)
-
+    months = list_lj_report_month_options(selected_batch_id)
     with st.container(border=True):
-        render_section_intro(
-            title="单水平（LJ）月度质控报告",
-            caption="选择报告月份，核对当前项目和质控批号后生成 PDF。",
-            tone="accent",
-        )
-        st.caption(f"{batch['project_name']} · {_build_batch_display(batch)} · 正式期月报")
-
-        if not available_months:
-            st.info("当前批次暂无正式期检测记录，暂不能生成月报。进入正式期并录入检测结果后，再选择报告月份。")
-            st.session_state.pop(preview_key, None)
+        render_section_intro(title="单水平（LJ）质控报告", caption="选择月份或起止日期，核对后生成并保存 PDF 和完整归档。", tone="accent")
+        st.caption(f"{batch['project_name']} · {_build_batch_display(batch)} · 正式期")
+        if not months:
+            st.info("当前批次暂无正式期检测记录。进入正式期并录入结果后，可生成质控报告。")
             return
-
-        month_key = f"{report_scope}_month"
-        selected_month = st.selectbox(
-            "报告月份",
-            options=available_months,
-            index=0,
-            key=month_key,
-            format_func=_format_report_month_option,
-        )
-
-        generate_clicked = st.button(
-            "生成月度报告",
-            key=f"{report_scope}_generate",
-            width="stretch",
-        )
-        if generate_clicked:
-            try:
-                package = build_lj_monthly_report_package(selected_batch_id, selected_month)
-                pdf_bytes = build_lj_monthly_report_pdf(package)
-                snapshot_id = save_lj_monthly_report_snapshot(package, pdf_bytes)
-            except ValueError as exc:
-                st.session_state.pop(preview_key, None)
-                st.warning(str(exc))
-            else:
-                st.session_state[preview_key] = {
-                    "batch_id": selected_batch_id,
-                    "report_month": selected_month,
-                    "package": package,
-                    "pdf_bytes": pdf_bytes,
-                    "file_name": package.report.file_name,
-                    "snapshot_id": snapshot_id,
-                }
-                st.success("已生成单水平（LJ）月度质控报告，可预览并下载 PDF。")
-
-        preview_state = st.session_state.get(preview_key)
-        if not _preview_matches(preview_state, selected_batch_id, selected_month):
-            return
-
-        package = preview_state["package"]
-        if not isinstance(package, LjMonthlyReportPackage):
-            return
-
-        st.download_button(
-            label="下载 PDF",
-            data=preview_state["pdf_bytes"],
-            file_name=preview_state["file_name"],
-            mime="application/pdf",
-            key=f"{report_scope}_download",
-            width="stretch",
-        )
-        st.caption(f"报告已保存，编号：{preview_state['snapshot_id']}。以后可在“报告历史”中查找和下载。")
-        with st.expander("报告预览", expanded=False):
-            _render_report_preview(package)
-
-
-def _preview_matches(
-    preview_state: dict[str, object] | None,
-    selected_batch_id: int,
-    selected_month: str,
-) -> bool:
-    if not isinstance(preview_state, dict):
-        return False
-    return (
-        int(preview_state.get("batch_id", -1)) == int(selected_batch_id)
-        and str(preview_state.get("report_month", "")) == str(selected_month)
-    )
+        render_single_report('lj', selected_batch_id, months=months, preview_renderer=_render_report_preview)
 
 
 def _build_batch_display(batch) -> str:
@@ -115,32 +39,29 @@ def _build_batch_display(batch) -> str:
     return "当前批次"
 
 
-def _format_report_month_option(value: str) -> str:
-    period = pd.Period(str(value), freq="M")
-    return f"{period.year}年{period.month:02d}月"
-
-
 def _render_report_preview(package: LjMonthlyReportPackage) -> None:
     report = package.report
     st.markdown("**报告预览**")
     st.caption(
-        f"报告月份：{report.report_month_label}｜报告期间：{report.report_period_label}｜生成时间：{report.generated_at}"
+        f"报告期间：{report.report_period_label}｜生成时间：{report.generated_at}"
     )
-    render_compact_stat_metrics(build_lj_monthly_preview_summary(report))
+    render_compact_stat_metrics([(label.replace('月度', '期间'), value) for label, value in build_lj_monthly_preview_summary(report)])
+    pending = getattr(report.statistics, 'pending_count', getattr(report.statistics, 'undetermined_count', 0))
+    if pending:
+        st.info(f'所选期间有 {pending} 次检测待判读，请核对适用均值和标准差。')
 
-    st.markdown("**本月质控概况**")
+    st.markdown("**期间质控概况**")
     st.write(report.overview_text)
 
     basic_info_df = pd.DataFrame(
         [
             ("实验室名称", report.basic_info.lab_name),
             ("科室名称", report.basic_info.department_name),
-            ("质控负责人", report.basic_info.qc_owner_name),
-            ("审核人", report.basic_info.reviewer_name),
+            ("检验员", report.basic_info.qc_owner_name),
+            ("复核员", report.basic_info.reviewer_name),
             ("方法", report.basic_info.method_label),
             ("检测方法", report.basic_info.detection_method),
             ("单位", report.basic_info.unit_symbol),
-            ("报告月份", report.report_month_label),
             ("报告期间", report.report_period_label),
             ("输入值类型", report.basic_info.input_value_type_label),
             ("质控品批号", report.basic_info.lot_no),
@@ -170,7 +91,7 @@ def _render_report_preview(package: LjMonthlyReportPackage) -> None:
     st.markdown("**异常/失控记录表**")
     abnormal_rows = [asdict(record) for record in report.abnormal_records]
     if not abnormal_rows:
-        st.info("本月未发现警告或失控记录。")
+        st.info("所选期间未发现警告或失控记录。")
     else:
         abnormal_df = pd.DataFrame(abnormal_rows).rename(
             columns={
@@ -202,7 +123,7 @@ def _render_report_preview(package: LjMonthlyReportPackage) -> None:
     st.markdown("**异常说明**")
     st.write(report.abnormal_summary_text)
 
-    st.markdown("**月度结论**")
+    st.markdown("**期间结论**")
     st.write(report.conclusion)
 
     st.markdown("**报告声明**")

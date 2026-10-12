@@ -21,7 +21,7 @@ from services.settings_service import get_report_settings, save_report_settings_
 
 UNIT_FIELDS = OrderedDict((
     ('实验室名称', 'lab_name'), ('科室名称', 'department_name'),
-    ('质控负责人', 'qc_owner_name'), ('审核人', 'reviewer_name'),
+    ('检验员', 'qc_owner_name'), ('复核员', 'reviewer_name'),
 ))
 FORMAT_VERSION = 1
 PREPARATION_SHEETS = OrderedDict((

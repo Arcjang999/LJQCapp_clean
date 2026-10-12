@@ -123,20 +123,29 @@ def build_event_report_package(event_id: int, revision_no: int | None = None) ->
     from services.out_of_control_service import get_event
     from services.out_of_control_attachment_service import list_attachments
     event = deepcopy(get_event(int(event_id), revision_no=revision_no))
-    revision = int(event["revision_no"])
+    return build_event_report_package_from_snapshot(event,
+        list_attachments(int(event_id), revision_no=int(event['revision_no'])))
+
+
+def build_event_report_package_from_snapshot(event: dict, attachments: list[dict], *,
+                                            lab_info=None, generated_at=None) -> dict:
+    """Render an already frozen revision without querying a different live state."""
+    event = deepcopy(event)
+    event_id, revision = int(event['event_id']), int(event['revision_no'])
     uid = uuid4().hex
-    settings = get_report_settings_with_fallbacks()
+    info = deepcopy(lab_info) if lab_info is not None else asdict(get_report_settings_with_fallbacks())
+    statement = info.get('report_statement', DEFAULT_REPORT_STATEMENT)
     return {
         "report_type": REPORT_TYPE_EVENT, "report_uid": uid,
         "report_no": f"OOC-{int(event_id):06d}-V{revision}-{uid[:8].upper()}",
         "event_id": int(event_id), "revision_no": revision,
-        "generated_at": datetime.now().isoformat(sep=" ", timespec="seconds"),
+        "generated_at": generated_at or datetime.now().isoformat(sep=" ", timespec="seconds"),
         "file_name": f"失控处理报告_{int(event_id)}_V{revision}_{uid[:8]}.pdf",
         "event": event,
-        "lab_info": asdict(settings),
+        "lab_info": info,
         "declaration": ("本报告用于室内质控事件处理的归档与复核，应结合原检测记录、复测证据及实验室调查综合评估。"
-                        if settings.report_statement == DEFAULT_REPORT_STATEMENT else settings.report_statement),
-        "attachments": deepcopy(list_attachments(int(event_id), revision_no=revision)),
+                        if statement == DEFAULT_REPORT_STATEMENT else statement),
+        "attachments": deepcopy(attachments),
     }
 
 
@@ -155,6 +164,7 @@ def render_event_report_pdf(package: dict) -> bytes:
         _section("报告与原检测", [
             f"报告编号：{package['report_no']}；处理版本：{package['revision_no']}；处理状态：{status}{draft}。",
             f"实验室：{_text(lab.get('lab_name'))}；科室：{_text(lab.get('department_name'))}。",
+            f"检验员（报告默认）：{_text(lab.get('qc_owner_name'))}；复核员（报告默认）：{_text(lab.get('reviewer_name'))}。",
             f"项目：{_text(origin.get('project_name'))}；检验项目：{_text(origin.get('test_item_name'))}；仪器：{_text(origin.get('instrument_name'))}。",
             f"检测时间：{_text(origin.get('test_time'))}；质控方法：{METHOD_LABELS.get(origin.get('qc_method'), MISSING)}；方法学：{_text(origin.get('method_name'))}。",
             f"输入值类型：{get_input_value_type_label(origin['input_value_type']) if origin.get('input_value_type') else MISSING}；计量单位：{_text(origin.get('unit_symbol'))}。",
@@ -199,6 +209,7 @@ def render_event_report_pdf(package: dict) -> bytes:
         ] or ["未记录附件。"]),
         _section("报告声明", [
             _text(package.get("declaration")),
+            "检验员签名：____________  日期：____________；复核员签名：____________  日期：____________。",
             "报告按所列处理版本及原检测证据保存；以后补充或修订另存报告，原文件不覆盖。缺失历史资料以未记录表示。",
         ]),
     ])
@@ -282,14 +293,38 @@ def read_event_report(report_id: int) -> bytes:
     return data
 
 
-def build_monthly_handling_summaries(source_type: str, source_ids: list[int]) -> list[dict]:
-    from services.out_of_control_service import lookup_events_for_sources
-    events = lookup_events_for_sources(source_type, source_ids)
+def build_monthly_handling_summaries(source_type: str, source_ids: list[int], *,
+                                   handling_versions=None, connection=None) -> list[dict]:
+    from services.out_of_control_service import _get_event
+    from database import read_snapshot
+    if source_type not in ('lj_result', 'zscore_run'):
+        raise ValueError('不支持的检测来源。')
+    if connection is None:
+        with read_snapshot() as current:
+            return build_monthly_handling_summaries(source_type, source_ids,
+                handling_versions=handling_versions, connection=current)
+    if handling_versions is not None and not isinstance(handling_versions, dict):
+        raise ValueError('处理版本选择无效，请重新核对。')
+    try:
+        chosen = {int(key): int(value) for key, value in (handling_versions or {}).items()}
+        if any(key < 1 or value < 1 for key, value in chosen.items()):
+            raise ValueError
+    except (ValueError, TypeError):
+        raise ValueError('处理版本选择无效，请重新核对。') from None
+    ids = sorted({int(value) for value in source_ids})
+    events = []
+    for start in range(0, len(ids), 500):
+        chunk = ids[start:start + 500]
+        rows = connection.execute('SELECT id FROM qc_ooc_events WHERE source_type=? AND source_id IN (' +
+            ','.join('?' for _ in chunk) + ') ORDER BY id', [source_type, *chunk])
+        events.extend(_get_event(connection, row['id'], chosen.get(row['id'])) for row in rows)
     summaries = []
     for event in events:
         origin = event["origin_snapshot"]
         content = event.get("content") or {}
-        reports = [r for r in list_event_reports(event["event_id"]) if r["revision_no"] == event["revision_no"]]
+        reports = [dict(row) for row in connection.execute(
+            'SELECT id,report_no,generated_at,revision_no FROM qc_event_reports WHERE event_id=? AND revision_no=?',
+            (event['event_id'], event['revision_no']))]
         summaries.append({
             "event_id": event["event_id"], "revision_no": event["revision_no"],
             "source_type": source_type, "source_id": event["source_id"],

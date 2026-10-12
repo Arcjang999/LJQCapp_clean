@@ -923,11 +923,9 @@ def build_zscore_monthly_export_plot_dataframe(
     if formal_df.empty:
         return formal_df
 
-    start_timestamp = pd.Timestamp(start_date)
-    end_timestamp = pd.Timestamp(end_date) + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
-    filtered_df = formal_df[
-        (formal_df["test_time"] >= start_timestamp) & (formal_df["test_time"] <= end_timestamp)
-    ].copy()
+    from services.report_period_service import resolve_report_period, filter_frame_to_period
+    period = resolve_report_period(start_date=start_date, end_date=end_date)
+    filtered_df = filter_frame_to_period(formal_df, period)
     if filtered_df.empty:
         return filtered_df
 

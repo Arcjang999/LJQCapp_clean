@@ -58,7 +58,7 @@ def render_daily_overview():
         from ui.daily_navigation import open_project_daily_entry
         open_project_daily_entry(template)
     if template is None:st.caption('需要录入时，先选择具体项目。')
-    if report_action.button('批量月报',key='overview_batch_monthly'):
+    if report_action.button('批量质控报告',key='overview_batch_monthly'):
         open_global_page('show_batch_monthly_reports_page')
     try:
         result=get_daily_overview(day,lab_instrument_id=instrument,template_id=template,qc_material_id=product,qc_method=method,search=search)
@@ -87,7 +87,7 @@ def render_daily_overview():
     if selected is not None:
         item=choices[selected]
         buttons=st.columns(3)
-        if buttons[0].button('查看质控图与单份月报',disabled=item['runtime_batch_id'] is None):
+        if buttons[0].button('查看质控图与单份报告',disabled=item['runtime_batch_id'] is None):
             from ui.daily_navigation import remember_daily_return
             from ui.project_navigation import open_configured_batch
             remember_daily_return();open_configured_batch(item)

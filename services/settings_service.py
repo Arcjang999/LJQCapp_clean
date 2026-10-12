@@ -6,7 +6,7 @@ from database import get_app_settings, save_app_settings
 
 
 DEFAULT_REPORT_STATEMENT = (
-    "本报告由软件根据所选月份内的质控数据自动生成，仅作为室内质控归档与复核参考。"
+    "本报告由软件根据所选期间内的质控数据自动生成，仅作为室内质控归档与复核参考。"
     "报告结果应结合原始记录、异常备注和实验室实际处理情况共同判读。"
 )
 REPORT_SETTINGS_KEYS = (

@@ -1,7 +1,6 @@
 """One operation at a time for workbench imports and data/chart downloads."""
 from __future__ import annotations
 
-from datetime import timedelta
 from hashlib import sha256
 import json
 import logging
@@ -121,7 +120,7 @@ def commit_data_import(method, batch_id, phase, review, source_signature):
         return import_reviewed_results(method, batch_id, review["normalized_rows"], **kwargs)
 
 
-def build_data_export(method, context, phase):
+def build_data_export(method, context, phase, *, start_date=None, end_date=None):
     """Reuse phase exports; the all-data file keeps explicit phases and whole runs."""
     if phase not in ("all", "building", "formal"):
         raise ValueError("请选择要导出的检测阶段。")
@@ -139,6 +138,10 @@ def build_data_export(method, context, phase):
         raise ValueError("检测阶段信息缺失，暂不能导出，请重新打开当前批次。")
     if not result.empty:
         result = result.sort_values(["检测时间", "检测序号"], kind="stable").reset_index(drop=True)
+    if start_date is not None or end_date is not None:
+        from services.report_period_service import resolve_report_period, filter_frame_to_period
+        period = resolve_report_period(start_date=start_date, end_date=end_date)
+        result = filter_frame_to_period(result, period, time_column='检测时间').reset_index(drop=True)
     return result
 
 
@@ -152,12 +155,11 @@ def _file_prefix(context, batch_id):
 def build_chart_png(method, context, chart_state, *, start_date=None, end_date=None):
     """Always draw a new figure: the workbench closes its own figure after rendering."""
     from plotting import figure_to_png_bytes, plot_lj_chart
-    selected_dates = start_date is not None and end_date is not None
+    selected_dates = start_date is not None or end_date is not None
     if selected_dates:
-        if end_date < start_date:
-            raise ValueError("结束日期不能早于开始日期。")
-        if (end_date - start_date).days + 1 > 30:
-            raise ValueError("按日期导出质控图最长为30天，请重新选择日期范围。")
+        from services.report_period_service import resolve_report_period
+        period = resolve_report_period(start_date=start_date, end_date=end_date)
+        start_date, end_date = period.start_date, period.end_date
     if method == "lj":
         from pages.lj_sections import _build_lj_chart_title, build_monthly_chart_title, build_monthly_export_dataframe
         frame = (build_monthly_export_dataframe(context["qc_df"], start_date, end_date)
@@ -184,7 +186,50 @@ def build_chart_png(method, context, chart_state, *, start_date=None, end_date=N
         figure = (plot_zscore_single_level(**args, level_id=chart_state["selected_level"])
                   if chart_state.get("view_mode") == "单水平视图" else
                   plot_zscore_overlay(**args, active_levels=context["required_level_ids"]))
+    if selected_dates:
+        from services.report_pdf_layout import tidy_report_chart_ticks
+        tidy_report_chart_ticks(figure)
     return figure_to_png_bytes(figure, close=True)
+
+
+def build_chart_export(method, context, chart_state, *, start_date=None, end_date=None):
+    """Keep an entire trend and add readable segments when the range is dense."""
+    png = build_chart_png(method, context, chart_state, start_date=start_date, end_date=end_date)
+    result = dict(data=png, mime='image/png', extension='png', detail_count=0)
+    if start_date is None and end_date is None:
+        return result
+    from services.report_period_service import resolve_report_period, filter_frame_to_period
+    from services.report_pdf_layout import split_report_chart_frames
+    from zscore_logic import PHASE_FORMAL_QC
+    period = resolve_report_period(start_date=start_date, end_date=end_date)
+    field = 'qc_df' if method == 'lj' else 'plot_df'
+    phase = '正式数据' if method == 'lj' else PHASE_FORMAL_QC
+    frame = filter_frame_to_period(context[field], period)
+    frame = frame[frame['phase'] == phase]
+    count = len(frame) if method == 'lj' else frame['run_id'].nunique()
+    result['detection_count'] = int(count)
+    segments = split_report_chart_frames(method, frame)
+    if len(segments) <= 1:
+        return result
+    from io import BytesIO, StringIO
+    from zipfile import ZipFile, ZIP_DEFLATED
+    import csv
+    output, listing = BytesIO(), StringIO()
+    writer = csv.writer(listing)
+    writer.writerow(['文件', '检测次数', '开始检测时间', '结束检测时间'])
+    with ZipFile(output, 'w', ZIP_DEFLATED) as archive:
+        archive.writestr('质控图_总览.png', png)
+        for number, segment in enumerate(segments, 1):
+            subcontext = dict(context)
+            subcontext[field] = segment
+            part = build_chart_png(method, subcontext, chart_state, start_date=start_date, end_date=end_date)
+            name = f'质控图_分图_{number:03d}.png'
+            archive.writestr(name, part)
+            count = len(segment) if method == 'lj' else segment['run_id'].nunique()
+            writer.writerow([name, count, str(segment['test_time'].min()), str(segment['test_time'].max())])
+        archive.writestr('图表清单.csv', listing.getvalue().encode('utf-8-sig'))
+    return dict(data=output.getvalue(), mime='application/zip', extension='zip', detail_count=len(segments),
+                detection_count=int(len(frame) if method == 'lj' else frame['run_id'].nunique()))
 
 
 def _reset_upload(state, phase=None):
@@ -323,12 +368,20 @@ def _render_export_dialog(state, context):
     method, batch_id, nonce = state["method"], state["batch_id"], state["nonce"]
     kind = st.radio("导出内容", ["检测数据", "质控图"], horizontal=True, key=f"qc_transfer_kind_{nonce}")
     prefix = _file_prefix(context, batch_id)
-    data, name, mime = b"", prefix, "text/csv"
+    data, name, mime, download_label = b"", prefix, "text/csv", '下载检测数据'
     if kind == "检测数据":
         phase = st.radio("检测范围", ["all", "building", "formal"], horizontal=True,
                          format_func=lambda value: "全部" if value == "all" else PHASE_LABELS[value], key=f"qc_transfer_scope_{nonce}")
         export_format = st.radio("文件格式", ["Excel (.xlsx)", "CSV (.csv)"], horizontal=True, key=f"qc_transfer_format_{nonce}")
         frame = build_data_export(method, context, phase)
+        dates = st.radio('数据日期', ['全部日期', '按月或自选日期'], horizontal=True, key=f'qc_transfer_dates_{nonce}')
+        period = None
+        if dates == '按月或自选日期':
+            from ui.report_period import render_report_period
+            times = pd.to_datetime(frame['检测时间'], errors='coerce', format='mixed').dropna()
+            period = render_report_period(f'qc_transfer_data_period_{nonce}',
+                months=times.dt.to_period('M').astype(str).unique().tolist())
+            frame = build_data_export(method, context, phase, start_date=period.start_date, end_date=period.end_date) if period else frame.iloc[:0]
         st.caption("导出文件用于查询和留档，保留检测阶段和实际试剂批号。"
                    "重新导入时请按所需阶段下载导入模板并整理原始数据，不能直接上传全部阶段的导出文件。"
                    + ("每行是一整次检测，各水平完整列出。" if method == "zscore" else ""))
@@ -338,9 +391,11 @@ def _render_export_dialog(state, context):
             st.caption(f"共{len(frame)}次检测。")
             excel = export_format == "Excel (.xlsx)"
             data = dataframe_to_xlsx_bytes(frame) if excel else dataframe_to_csv_bytes(frame)
-            name = f"{prefix}_{'全部' if phase == 'all' else PHASE_LABELS[phase]}检测数据.{'xlsx' if excel else 'csv'}"
+            date_label = f'_{period.key}' if period else ''
+            name = f"{prefix}_{'全部' if phase == 'all' else PHASE_LABELS[phase]}检测数据{date_label}.{'xlsx' if excel else 'csv'}"
             mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if excel else "text/csv"
     else:
+        download_label = '下载质控图（PNG）'
         scope = st.radio("图表范围", ["当前图", "按日期选择正式期"], horizontal=True, key=f"qc_transfer_chart_scope_{nonce}")
         start_date = end_date = None
         ready = True
@@ -348,32 +403,41 @@ def _render_export_dialog(state, context):
             from zscore_logic import PHASE_FORMAL_QC
             frame = context["qc_df"] if method == "lj" else context["plot_df"]
             formal = frame[frame["phase"] == ("正式数据" if method == "lj" else PHASE_FORMAL_QC)] if not frame.empty else frame
-            st.caption("按日期只导出正式期质控图，起止日期均包含当日，范围最长30天。")
+            st.caption("按日期导出正式期质控图，包含起止日期当日及所选期间的全部检测。")
             if formal.empty:
                 st.info("当前批次暂无正式期质控数据。")
                 ready = False
             else:
                 latest = pd.Timestamp(formal["test_time"].max()).date()
-                earliest = max(pd.Timestamp(formal["test_time"].min()).date(), latest - timedelta(days=29))
-                left, right = st.columns(2)
-                start_date = left.date_input("开始日期", value=earliest, key=f"qc_transfer_start_{nonce}")
-                end_date = right.date_input("结束日期", value=latest, key=f"qc_transfer_end_{nonce}")
+                earliest = pd.Timestamp(formal["test_time"].min()).date()
+                from ui.report_period import render_report_period
+                times = pd.to_datetime(formal['test_time'], errors='coerce', format='mixed')
+                period = render_report_period(f'qc_transfer_chart_period_{nonce}',
+                    months=times.dt.to_period('M').astype(str).dropna().unique().tolist(),
+                    default_start=earliest, default_end=latest)
+                ready = period is not None
+                if period:
+                    start_date, end_date = period.start_date, period.end_date
         else:
             st.caption("导出当前工作台所选视图的质控图。")
         if ready:
             try:
                 chart_key = (scope, str(start_date), str(end_date))
-                if state.get("png_key") != chart_key:
-                    state["png"] = build_chart_png(method, context, state["chart_state"], start_date=start_date, end_date=end_date)
+                if state.get("png_key") != chart_key or not isinstance(state.get('png'), dict):
+                    state["png"] = build_chart_export(method, context, state["chart_state"], start_date=start_date, end_date=end_date)
                     state["png_key"] = chart_key
-                data = state["png"]
+                chart_export = state['png']
+                data = chart_export['data']
                 date_part = f"{start_date}_至_{end_date}" if start_date is not None else "当前图"
-                name, mime = f"{prefix}_{date_part}.png", "image/png"
+                name, mime = f"{prefix}_{date_part}.{chart_export['extension']}", chart_export['mime']
+                download_label = '下载总览和分图（ZIP）' if chart_export['detail_count'] else '下载质控图（PNG）'
+                if chart_export['detail_count']:
+                    st.caption(f"所选期间共 {chart_export['detection_count']} 次检测，分为 {chart_export['detail_count']} 张明细图。下载文件包含完整总览和全部明细图。")
             except ValueError as exc:
                 state.pop("png_key", None)
                 state.pop("png", None)
                 st.info(str(exc))
-    st.download_button("下载", data, file_name=name, mime=mime, disabled=not data,
+    st.download_button(download_label, data, file_name=name, mime=mime, disabled=not data,
                        key=f"qc_transfer_download_{nonce}", width="stretch")
     if st.button("关闭", key=f"qc_transfer_close_{nonce}", width="stretch"):
         _close_transfer()

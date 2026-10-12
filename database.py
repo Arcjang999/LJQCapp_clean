@@ -245,6 +245,8 @@ def init_db() -> None:
         _ensure_zscore_level_results_table(connection)
         _ensure_zscore_level_targets_table(connection)
         _ensure_report_exports_table(connection)
+        from migrations.report_periods import ensure_report_periods_schema
+        ensure_report_periods_schema(connection)
         _ensure_app_settings_table(connection)
         ensure_v11_schema(connection)
         ensure_template_reagent_schema(connection)
@@ -264,6 +266,8 @@ def init_db() -> None:
         ensure_daily_entry_schema(connection)
         from migrations.batch_monthly_reports import ensure_batch_monthly_reports_schema
         ensure_batch_monthly_reports_schema(connection)
+        from migrations.report_archives import ensure_report_archives_schema
+        ensure_report_archives_schema(connection)
         from migrations.record_maintenance import ensure_record_maintenance_schema
         ensure_record_maintenance_schema(connection)
         from migrations.qc_product_recommendations import ensure_qc_product_recommendation_schema
@@ -1805,6 +1809,8 @@ def create_report_export_snapshot(
     method_label: str,
     summary: dict[str, object],
     file_name: str,
+    period_start: str = '',
+    period_end: str = '',
 ) -> int:
     summary_payload = dict(summary or {})
     statistics = summary_payload.get("statistics")
@@ -1831,9 +1837,11 @@ def create_report_export_snapshot(
                 in_control_count,
                 warning_count,
                 out_of_control_count,
-                file_name
+                file_name,
+                period_start,
+                period_end
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(report_type or "").strip(),
@@ -1854,6 +1862,8 @@ def create_report_export_snapshot(
                 int(statistics.get("warning_count", 0) or 0),
                 int(statistics.get("out_of_control_count", 0) or 0),
                 str(file_name or "").strip(),
+                str(period_start or summary_payload.get('period_start') or '').strip(),
+                str(period_end or summary_payload.get('period_end') or '').strip(),
             ),
         )
         return int(cursor.lastrowid)
@@ -1896,6 +1906,8 @@ def list_report_exports(
                 warning_count,
                 out_of_control_count,
                 file_name,
+                period_start,
+                period_end,
                 created_at
             FROM report_exports
             {where_clause}
@@ -2473,7 +2485,7 @@ def get_results(batch_id: int, include_manual_note: bool = False) -> pd.DataFram
         )
 
     if not dataframe.empty:
-        dataframe["test_time"] = pd.to_datetime(dataframe["test_time"])
+        dataframe["test_time"] = pd.to_datetime(dataframe["test_time"], format="mixed")
         dataframe["created_at"] = pd.to_datetime(dataframe["created_at"])
         dataframe["reagent_lot_changed"] = dataframe["reagent_lot_changed"].fillna(0).astype(int)
         dataframe["is_building_included"] = dataframe["is_building_included"].fillna(1).astype(int)
@@ -2901,7 +2913,7 @@ def get_instant_results(batch_id: int, include_manual_note: bool = True) -> pd.D
             params=(batch_id,),
         )
     if not dataframe.empty:
-        dataframe["test_time"] = pd.to_datetime(dataframe["test_time"])
+        dataframe["test_time"] = pd.to_datetime(dataframe["test_time"], format="mixed")
         dataframe["created_at"] = pd.to_datetime(dataframe["created_at"])
         dataframe["is_effective"] = dataframe["is_effective"].fillna(1).astype(int)
         dataframe["is_outlier_suspect"] = dataframe["is_outlier_suspect"].fillna(0).astype(int)
@@ -3612,7 +3624,7 @@ def get_zscore_runs_df(
             )
 
     if not dataframe.empty:
-        dataframe["test_time"] = pd.to_datetime(dataframe["test_time"])
+        dataframe["test_time"] = pd.to_datetime(dataframe["test_time"], format="mixed")
         dataframe["created_at"] = pd.to_datetime(dataframe["created_at"])
         if include_manual_note:
             dataframe["manual_note"] = dataframe["manual_note"].fillna("")
@@ -3687,7 +3699,7 @@ def get_zscore_level_results_df(
             )
 
     if not dataframe.empty:
-        dataframe["test_time"] = pd.to_datetime(dataframe["test_time"])
+        dataframe["test_time"] = pd.to_datetime(dataframe["test_time"], format="mixed")
         dataframe["created_at"] = pd.to_datetime(dataframe["created_at"])
         dataframe["is_in_control_for_realtime_stats"] = (
             dataframe["is_in_control_for_realtime_stats"].fillna(0).astype(int)

@@ -65,11 +65,11 @@ def render_lj_page() -> None:
         else:
             render_pending_transfer_dialog('lj')
         return
-    if st.session_state.get('lj_workbench_tabs') == 'LJ 月报':
-        st.session_state['lj_workbench_tabs'] = '月度报告'
-    if st.session_state.get('lj_workbench_tabs') not in (TEXT["current_batch"], "月度报告"):
+    if st.session_state.get('lj_workbench_tabs') in ('LJ 月报', '月度报告'):
+        st.session_state['lj_workbench_tabs'] = '质控报告'
+    if st.session_state.get('lj_workbench_tabs') not in (TEXT["current_batch"], "质控报告"):
         st.session_state['lj_workbench_tabs'] = TEXT["current_batch"]
-    work_tab, report_tab = st.tabs([TEXT["current_batch"], "月度报告"], key='lj_workbench_tabs', on_change='rerun')
+    work_tab, report_tab = st.tabs([TEXT["current_batch"], "质控报告"], key='lj_workbench_tabs', on_change='rerun')
     guard_work_tab_selection(work_tab, selected_project_id, selected_batch_id)
     guard_work_tab_selection(report_tab, selected_project_id, selected_batch_id)
     render_lj_work_tab(work_tab, selected_batch_id)

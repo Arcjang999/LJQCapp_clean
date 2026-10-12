@@ -307,8 +307,14 @@ def _get_y_limits(plot_df: pd.DataFrame, stats: dict, y_axis_mode: str, standard
 
     if "target_mean_used" in plot_df and plot_df["target_mean_used"].dropna().nunique()>1:
         return None
-    mean = float(stats["mean"])
-    sd = float(stats["sd"])
+    means = plot_df['target_mean_used'].dropna() if 'target_mean_used' in plot_df else pd.Series(dtype=float)
+    deviations = plot_df['target_sd_used'].dropna() if 'target_sd_used' in plot_df else pd.Series(dtype=float)
+    # A historical slice must use its own recorded parameter, even when the
+    # complete batch has a newer current profile.
+    if deviations.nunique()>1:
+        return None
+    mean = float(means.iloc[0]) if not means.empty else float(stats["mean"])
+    sd = float(deviations.iloc[0]) if not deviations.empty else float(stats["sd"])
     if math.isclose(sd, 0.0, abs_tol=1e-12):
         return None
 

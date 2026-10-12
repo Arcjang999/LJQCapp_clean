@@ -183,7 +183,9 @@ def test_lj_monthly_report_builds_pdf_and_snapshot() -> None:
         assert pdf_bytes.startswith(b"%PDF")
 
         reader = assert_uniform_a4_pages_without_watermark(pdf_bytes)
-        assert len(reader.pages) == 6
+        assert len(reader.pages) >= 6
+        pdf_text = '\n'.join(page.extract_text() or '' for page in reader.pages)
+        assert '纸质签署' in pdf_text and '失控处理归档清单' in pdf_text
         assert "报告摘要（续）" in reader.pages[1].extract_text()
         assert str(reader.metadata.get("/Subject", "")) == REPORT_TYPE_LJ_MONTHLY
 
@@ -235,7 +237,8 @@ def test_lj_monthly_report_uses_business_text_for_single_record_and_no_abnormal(
 
         pdf_bytes = build_lj_monthly_report_pdf(package)
         reader = assert_uniform_a4_pages_without_watermark(pdf_bytes)
-        assert len(reader.pages) == 5
+        assert len(reader.pages) >= 5
+        assert '纸质签署' in '\n'.join(page.extract_text() or '' for page in reader.pages)
         assert "报告摘要（续）" in reader.pages[1].extract_text()
 
 
@@ -252,6 +255,7 @@ def test_lj_monthly_report_page_exposes_generate_and_download_flow() -> None:
 
         at.selectbox(key=f"{report_scope}_month").set_value("2026-04").run()
         at.button(key=f"{report_scope}_generate").click().run()
+        at.button(key=f"{report_scope}_archive").click().run()
 
         assert not list(at.exception)
         download_elements = at.get("download_button")

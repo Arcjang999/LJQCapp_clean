@@ -35,6 +35,7 @@ from services.settings_service import (
     DEFAULT_REPORT_STATEMENT,
     get_report_settings_with_fallbacks,
 )
+from services.report_period_service import resolve_report_period, filter_frame_to_period
 from services.value_type_service import get_input_value_type_label, normalize_input_value_type
 from zscore_logic import (
     PHASE_FORMAL_QC,
@@ -70,6 +71,8 @@ ABNORMAL_TABLE_COLUMNS = ["检测时间", "检测序号", "结果值", "状态",
 ABNORMAL_TABLE_WIDTHS = [0.19, 0.10, 0.12, 0.10, 0.14, 0.35]
 ABNORMAL_RECORDS_PER_PAGE = 12
 REPORT_TYPE_ZSCORE_MONTHLY = "zscore_monthly_report"
+REPORT_TYPE_LJ_PERIOD = "lj_period_report"
+REPORT_TYPE_ZSCORE_PERIOD = "zscore_period_report"
 REPORT_TYPE_EVENT = "out_of_control_report"
 ZSCORE_METHOD_LABEL = "多水平（Z-score法）"
 ZSCORE_REPORT_TITLE = "多水平（Z-score法）月度质控报告"
@@ -207,6 +210,9 @@ class LjMonthlyReportData:
     handling_summaries: list[dict] = field(default_factory=list)
     source_version: dict = field(default_factory=dict)
     processing_candidates: list[dict] = field(default_factory=list)
+    period_start: str = ""
+    period_end: str = ""
+    handling_versions: Any = None
 
     def to_snapshot_summary(self) -> dict[str, Any]:
         return {
@@ -238,6 +244,9 @@ class LjMonthlyReportData:
             "handling_summaries": self.handling_summaries,
             "source_version": self.source_version,
             "processing_candidates": self.processing_candidates,
+            "period_start": self.period_start,
+            "period_end": self.period_end,
+            "handling_versions": self.handling_versions,
         }
 
 
@@ -246,6 +255,7 @@ class LjMonthlyReportPackage:
     report: LjMonthlyReportData
     formal_df: pd.DataFrame
     stats: dict[str, Any]
+    complete_archive: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -282,6 +292,7 @@ class ZScoreMonthlyReportStatistics:
     template_label: str
     current_phase_label: str
     all_levels_ready: bool
+    pending_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -339,6 +350,9 @@ class ZScoreMonthlyReportData:
     handling_summaries: list[dict] = field(default_factory=list)
     source_version: dict = field(default_factory=dict)
     processing_candidates: list[dict] = field(default_factory=list)
+    period_start: str = ""
+    period_end: str = ""
+    handling_versions: Any = None
 
     def to_snapshot_summary(self) -> dict[str, Any]:
         return {
@@ -371,6 +385,9 @@ class ZScoreMonthlyReportData:
             "handling_summaries": self.handling_summaries,
             "source_version": self.source_version,
             "processing_candidates": self.processing_candidates,
+            "period_start": self.period_start,
+            "period_end": self.period_end,
+            "handling_versions": self.handling_versions,
         }
 
 
@@ -379,6 +396,8 @@ class ZScoreMonthlyReportPackage:
     report: ZScoreMonthlyReportData
     monthly_plot_df: pd.DataFrame
     active_levels: list[str]
+    formal_runs: list[dict] = field(default_factory=list)
+    complete_archive: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -403,6 +422,10 @@ class ReportHistoryRecord:
     file_name: str
     statistics: dict[str, Any]
     summary_json: dict[str, Any]
+    period_start: str = ""
+    period_end: str = ""
+    period_label: str = ""
+    archive_available: bool = False
 
 
 @dataclass(frozen=True)
@@ -452,21 +475,31 @@ def build_lj_monthly_report_package(batch_id: int, report_month: str) -> LjMonth
 
 
 def _build_lj_monthly_report_package(batch_id: int, report_month: str) -> LjMonthlyReportPackage:
-    normalized_month = _normalize_report_month(report_month)
+    return _build_lj_report_package(batch_id, resolve_report_period(report_month), monthly=True)
+
+
+def build_lj_period_report_package(batch_id, start_date, end_date, *, report_month=None, handling_versions=None):
+    period = resolve_report_period(report_month, start_date=start_date, end_date=end_date)
+    with read_snapshot():
+        return _build_lj_report_package(batch_id, period, handling_versions=handling_versions)
+
+
+def _build_lj_report_package(batch_id, period, *, monthly=False, handling_versions=None):
+    normalized_month = period.report_month
     batch = get_batch(batch_id)
     report_settings = get_report_settings_with_fallbacks()
     qc_df, stats = calculate_qc_results(get_results(batch_id, include_manual_note=True), int(batch['target_n']))
-    formal_df = _filter_monthly_formal_df(qc_df, normalized_month)
+    formal_df = filter_frame_to_period(qc_df[qc_df['phase'] == LJ_FORMAL_PHASE_LABEL], period)
     if formal_df.empty:
-        raise ValueError("所选月份无正式期数据，无法生成单水平（LJ法）月报。")
+        raise ValueError("所选月份无正式期数据，无法生成单水平（LJ法）月报。" if monthly else "所选报告期间无正式期数据，无法生成单水平（LJ法）质控报告。")
 
     input_value_type = normalize_input_value_type(batch["input_value_type"])
     input_value_type_label = get_input_value_type_label(input_value_type)
     statistics = _build_statistics(formal_df, stats, batch)
     abnormal_records = _build_abnormal_records(formal_df)
     corrective_actions = _build_corrective_actions(abnormal_records)
-    report_month_label = _format_report_month_label(normalized_month)
-    report_period_label = _format_report_period_label(normalized_month)
+    report_month_label = _format_report_month_label(normalized_month) if normalized_month else period.label
+    report_period_label = period.label
     target_source_label, target_source_detail = _resolve_target_source(batch)
     overview_text = _build_monthly_overview(statistics, batch)
     corrective_actions_empty_text = _build_corrective_actions_empty_text(abnormal_records)
@@ -479,10 +512,10 @@ def _build_lj_monthly_report_package(batch_id: int, report_month: str) -> LjMont
         project_name=str(batch["project_name"]),
         lot_no=str(batch["lot_no"]),
         report_month=normalized_month,
-    )
+    ) if monthly else _build_period_file_name(str(batch['project_name']), str(batch['lot_no']), period, '单水平')
     report = LjMonthlyReportData(
-        report_type=REPORT_TYPE_LJ_MONTHLY,
-        title=LJ_REPORT_TITLE,
+        report_type=REPORT_TYPE_LJ_MONTHLY if monthly else REPORT_TYPE_LJ_PERIOD,
+        title=LJ_REPORT_TITLE if monthly else '单水平（LJ法）质控报告',
         method_label=LJ_METHOD_LABEL,
         report_month=normalized_month,
         report_month_label=report_month_label,
@@ -528,9 +561,10 @@ def _build_lj_monthly_report_package(batch_id: int, report_month: str) -> LjMont
         chart_axis_label=input_value_type_label,
     )
     from services.lot_lifecycle_service import report_lot_trace
-    trace=report_lot_trace('lj',batch_id,normalized_month,formal_df)
+    trace=report_lot_trace('lj',batch_id,normalized_month,formal_df,start_date=period.start_date,end_date=period.end_date)
     from services.quality_target_service import batch_quality_summary
-    report=replace(report,lot_trace=trace,quality_summary=batch_quality_summary('lj',batch_id,normalized_month))
+    report=replace(report,lot_trace=trace,quality_summary=batch_quality_summary('lj',batch_id,normalized_month or None),
+        period_start=period.start_date,period_end=period.end_date,handling_versions=handling_versions)
     version_ids={item['profile_id'] for item in trace.get('statistics_by_target_version',[])}
     if len(version_ids)>1:
         report=replace(report,statistics=replace(report.statistics,monthly_mean=None,monthly_sd=None,monthly_cv=None,target_mean=None,target_sd=None),
@@ -542,11 +576,19 @@ def _build_lj_monthly_report_package(batch_id: int, report_month: str) -> LjMont
     from services.out_of_control_report_service import build_monthly_handling_summaries
     report = replace(report, handling_summaries=build_monthly_handling_summaries(
         "lj_result", [int(value) for value in formal_df["id"].tolist()],
+        handling_versions=handling_versions,
     ))
-    from services.monthly_report_source_service import monthly_source_version, versioned_quality_summary, monthly_processing_candidates
+    from services.monthly_report_source_service import monthly_source_version, range_source_version, versioned_quality_summary, monthly_processing_candidates
     report = replace(report, processing_candidates=monthly_processing_candidates('lj', formal_df.to_dict('records'), report.handling_summaries),
-        source_version=monthly_source_version('lj', batch_id, normalized_month),
+        source_version=monthly_source_version('lj', batch_id, normalized_month) if monthly and handling_versions is None else range_source_version(
+            'lj',batch_id,period.start_date,period.end_date,handling_versions=handling_versions),
         quality_summary=versioned_quality_summary('lj', batch_id, normalized_month, formal_df.to_dict('records'), existing=report.quality_summary))
+    report=replace(report,handling_versions=report.source_version['handling_versions'])
+    if not monthly:
+        report=replace(report,overview_text=_periodize_text(report.overview_text),conclusion=_periodize_text(report.conclusion),
+            corrective_actions_empty_text=_periodize_text(report.corrective_actions_empty_text),
+            abnormal_summary_text=_periodize_text(report.abnormal_summary_text),
+            chart_title=f'{LJ_METHOD_LABEL}质控图\n项目：{batch["project_name"]}｜报告期间：{period.label}')
     return LjMonthlyReportPackage(
         report=report,
         formal_df=formal_df.copy(),
@@ -555,21 +597,55 @@ def _build_lj_monthly_report_package(batch_id: int, report_month: str) -> LjMont
 
 
 def build_lj_monthly_report_pdf(package: LjMonthlyReportPackage) -> bytes:
-    from services.out_of_control_report_service import render_monthly_with_handling
-    return render_monthly_with_handling(package, _resolve_pdf_font_name(), method="lj")
+    return build_lj_period_report_pdf(package)
 
 
-def _save_monthly_report_archive(report: Any, pdf_bytes: bytes) -> int:
+def build_lj_period_report_pdf(package):
+    return _build_complete_report_pdf(package, 'lj')
+
+
+def build_zscore_period_report_pdf(package):
+    return _build_complete_report_pdf(package, 'zscore')
+
+
+def _build_complete_report_pdf(package, method):
+    from services.monthly_report_source_service import digest
+    summary_digest = digest(package.report.to_snapshot_summary())
+    if package.complete_archive is not None and package.complete_archive.get('report_summary_digest') != summary_digest:
+        raise ValueError('报告预览内容已变化，请重新核对并生成。')
+    if package.complete_archive is None:
+        from services.report_archive_service import prepare_complete_report_archive
+        renderer = render_lj_monthly_report_pdf if method == 'lj' else render_zscore_monthly_report_pdf
+        core_pdf = renderer(package, _resolve_pdf_font_name())
+        package.complete_archive = prepare_complete_report_archive(package, core_pdf, method=method,
+            handling_versions=package.report.handling_versions)
+        package.complete_archive['report_summary_digest'] = summary_digest
+    return package.complete_archive['pdf_bytes']
+
+
+def _save_period_report_archive(package, pdf_bytes, *, request_key=None):
+    report = package.report
     if not pdf_bytes.startswith(b"%PDF-"):
         raise ValueError("报告生成失败，未保存报告历史。")
     with atomic_write() as connection:
-        from services.monthly_report_source_service import monthly_source_version
-        method = 'lj' if report.report_type == REPORT_TYPE_LJ_MONTHLY else 'zscore'
+        from services.monthly_report_source_service import range_source_version
+        from services.report_archive_service import find_existing_archive, persist_complete_report_archive
+        from uuid import uuid4
+        archive = package.complete_archive
+        if archive is None or archive['pdf_bytes'] != pdf_bytes:
+            raise ValueError('报告文件与本次预览的完整归档不一致，请重新生成。')
+        request_key = str(request_key or uuid4())
+        prior = find_existing_archive(request_key, archive['request_digest'], connection)
+        if prior is not None:
+            return int(prior)
+        method = 'lj' if report.report_type in (REPORT_TYPE_LJ_MONTHLY, REPORT_TYPE_LJ_PERIOD) else 'zscore'
         version = report.source_version
         if (version.get('qc_method') != method or version.get('batch_id') != report.batch_id
-                or version.get('report_month') != report.report_month or not version.get('fingerprint')):
+                or version.get('period_start') != report.period_start or version.get('period_end') != report.period_end
+                or not version.get('fingerprint') or archive['source_version'].get('fingerprint') != version['fingerprint']):
             raise ValueError("本次报告缺少生成时的完整资料，请重新核对并生成报告。")
-        current = monthly_source_version(method, report.batch_id, report.report_month)
+        current = range_source_version(method, report.batch_id, report.period_start, report.period_end,
+            handling_versions=version.get('handling_versions'))
         if current['fingerprint'] != version['fingerprint']:
             raise ValueError("报告生成期间资料或设置已变化，请重新核对并生成报告；本次未保存报告历史。")
         export_id = create_report_export_snapshot(
@@ -580,16 +656,28 @@ def _save_monthly_report_archive(report: Any, pdf_bytes: bytes) -> int:
         generated_at=report.generated_at,
         input_value_type=report.input_value_type,
         method_label=report.method_label,
-        summary=report.to_snapshot_summary(),
+        summary=dict(report.to_snapshot_summary(), archive_manifest=archive['manifest']),
         file_name=report.file_name,
+        period_start=report.period_start,period_end=report.period_end,
         )
         connection.execute("INSERT INTO report_export_files(export_id,pdf_bytes,sha256) VALUES(?,?,?)",
                            (export_id, pdf_bytes, sha256(pdf_bytes).hexdigest()))
+        persist_complete_report_archive(export_id, archive, request_key=request_key, connection=connection)
     return export_id
 
 
 def save_lj_monthly_report_snapshot(package: LjMonthlyReportPackage, pdf_bytes: bytes | None = None) -> int:
-    return _save_monthly_report_archive(package.report, pdf_bytes if pdf_bytes is not None else build_lj_monthly_report_pdf(package))
+    return save_lj_period_report_snapshot(package, pdf_bytes)
+
+
+def save_lj_period_report_snapshot(package, pdf_bytes=None, *, request_key=None):
+    generated = build_lj_period_report_pdf(package)
+    return _save_period_report_archive(package, generated if pdf_bytes is None else pdf_bytes, request_key=request_key)
+
+
+def save_zscore_period_report_snapshot(package, pdf_bytes=None, *, request_key=None):
+    generated = build_zscore_period_report_pdf(package)
+    return _save_period_report_archive(package, generated if pdf_bytes is None else pdf_bytes, request_key=request_key)
 
 
 def build_lj_monthly_preview_summary(report: LjMonthlyReportData) -> list[tuple[str, str]]:
@@ -633,7 +721,17 @@ def build_zscore_monthly_report_package(
 
 
 def _build_zscore_monthly_report_package(batch_id: int, report_month: str) -> ZScoreMonthlyReportPackage:
-    normalized_month = _normalize_report_month(report_month)
+    return _build_zscore_report_package(batch_id, resolve_report_period(report_month), monthly=True)
+
+
+def build_zscore_period_report_package(batch_id, start_date, end_date, *, report_month=None, handling_versions=None):
+    period = resolve_report_period(report_month, start_date=start_date, end_date=end_date)
+    with read_snapshot():
+        return _build_zscore_report_package(batch_id, period, handling_versions=handling_versions)
+
+
+def _build_zscore_report_package(batch_id, period, *, monthly=False, handling_versions=None):
+    normalized_month = period.report_month
     batch_context = resolve_zscore_batch_context(batch_id)
     batch = batch_context["batch"]
     report_settings = get_report_settings_with_fallbacks()
@@ -642,9 +740,9 @@ def _build_zscore_monthly_report_package(batch_id: int, report_month: str) -> ZS
     required_level_ids = list(batch_context["required_level_ids"])
     level_label_map = dict(batch_context["level_label_map"])
     history_runs = get_zscore_runs(batch_id, template_id)
-    monthly_formal_runs = _filter_zscore_monthly_formal_runs(history_runs, normalized_month)
+    monthly_formal_runs = _filter_zscore_period_formal_runs(history_runs, period)
     if not monthly_formal_runs:
-        raise ValueError("所选月份无正式期数据，无法生成多水平（Z-score法）月报。")
+        raise ValueError("所选月份无正式期数据，无法生成多水平（Z-score法）月报。" if monthly else "所选报告期间无正式期数据，无法生成多水平（Z-score法）质控报告。")
 
     input_value_type = normalize_input_value_type(batch["input_value_type"])
     input_value_type_label = get_input_value_type_label(input_value_type)
@@ -672,8 +770,8 @@ def _build_zscore_monthly_report_package(batch_id: int, report_month: str) -> ZS
         level_label_map=level_label_map,
     )
     corrective_actions = _build_zscore_corrective_actions(abnormal_records)
-    report_month_label = _format_report_month_label(normalized_month)
-    report_period_label = _format_report_period_label(normalized_month)
+    report_month_label = _format_report_month_label(normalized_month) if normalized_month else period.label
+    report_period_label = period.label
     target_source_label, target_source_detail = _resolve_zscore_target_source()
     if dict(batch).get("v11_target_source") == "building":
         target_source_label = "新版配置：本批次数据计算"
@@ -689,10 +787,10 @@ def _build_zscore_monthly_report_package(batch_id: int, report_month: str) -> ZS
         project_name=str(batch["project_name"]),
         lot_no=str(batch["lot_no"]),
         report_month=normalized_month,
-    )
+    ) if monthly else _build_period_file_name(str(batch['project_name']), str(batch['lot_no']), period, '多水平')
     report = ZScoreMonthlyReportData(
-        report_type=REPORT_TYPE_ZSCORE_MONTHLY,
-        title=ZSCORE_REPORT_TITLE,
+        report_type=REPORT_TYPE_ZSCORE_MONTHLY if monthly else REPORT_TYPE_ZSCORE_PERIOD,
+        title=ZSCORE_REPORT_TITLE if monthly else '多水平（Z-score法）质控报告',
         method_label=ZSCORE_METHOD_LABEL,
         report_month=normalized_month,
         report_month_label=report_month_label,
@@ -743,12 +841,13 @@ def _build_zscore_monthly_report_package(batch_id: int, report_month: str) -> ZS
         chart_axis_label=input_value_type_label,
     )
     full_plot_df = build_zscore_plot_dataframe_logic(history_runs, draft_run=None, display_phase=None)
-    monthly_plot_df = _filter_zscore_monthly_plot_df(full_plot_df, normalized_month)
+    monthly_plot_df = filter_frame_to_period(full_plot_df[full_plot_df.phase == PHASE_FORMAL_QC], period)
     from services.lot_lifecycle_service import report_lot_trace
     formal_plot=monthly_plot_df[monthly_plot_df.phase==PHASE_FORMAL_QC]
-    trace=report_lot_trace('zscore',batch_id,normalized_month,formal_plot)
+    trace=report_lot_trace('zscore',batch_id,normalized_month,formal_plot,start_date=period.start_date,end_date=period.end_date)
     from services.quality_target_service import batch_quality_summary
-    report=replace(report,lot_trace=trace,quality_summary=batch_quality_summary('zscore',batch_id,normalized_month))
+    report=replace(report,lot_trace=trace,quality_summary=batch_quality_summary('zscore',batch_id,normalized_month or None),
+        period_start=period.start_date,period_end=period.end_date,handling_versions=handling_versions)
     version_ids={item['profile_id'] for item in trace.get('statistics_by_target_version',[])}
     if len(version_ids)>1:
         report=replace(report,level_statistics=[replace(item,monthly_mean=None,monthly_sd=None,monthly_cv=None,target_mean=None,target_sd=None) for item in report.level_statistics],
@@ -760,25 +859,33 @@ def _build_zscore_monthly_report_package(batch_id: int, report_month: str) -> ZS
     from services.out_of_control_report_service import build_monthly_handling_summaries
     report = replace(report, handling_summaries=build_monthly_handling_summaries(
         "zscore_run", [int(run.get("run_id") or run["id"]) for run in monthly_formal_runs],
+        handling_versions=handling_versions,
     ))
-    from services.monthly_report_source_service import monthly_source_version, versioned_quality_summary, monthly_processing_candidates
+    from services.monthly_report_source_service import monthly_source_version, range_source_version, versioned_quality_summary, monthly_processing_candidates
     report = replace(report, processing_candidates=monthly_processing_candidates('zscore', monthly_formal_runs, report.handling_summaries),
-        source_version=monthly_source_version('zscore', batch_id, normalized_month),
+        source_version=monthly_source_version('zscore', batch_id, normalized_month) if monthly and handling_versions is None else range_source_version(
+            'zscore',batch_id,period.start_date,period.end_date,handling_versions=handling_versions),
         quality_summary=versioned_quality_summary('zscore', batch_id, normalized_month, monthly_formal_runs, existing=report.quality_summary))
+    report=replace(report,handling_versions=report.source_version['handling_versions'])
+    if not monthly:
+        report=replace(report,overview_text=_periodize_text(report.overview_text),conclusion=_periodize_text(report.conclusion),
+            corrective_actions_empty_text=_periodize_text(report.corrective_actions_empty_text),
+            abnormal_summary_text=_periodize_text(report.abnormal_summary_text),
+            chart_title=f'{ZSCORE_METHOD_LABEL}质控图\n项目：{batch["project_name"]}｜报告期间：{period.label}')
     return ZScoreMonthlyReportPackage(
         report=report,
         monthly_plot_df=monthly_plot_df,
         active_levels=required_level_ids,
+        formal_runs=monthly_formal_runs,
     )
 
 
 def build_zscore_monthly_report_pdf(package: ZScoreMonthlyReportPackage) -> bytes:
-    from services.out_of_control_report_service import render_monthly_with_handling
-    return render_monthly_with_handling(package, _resolve_pdf_font_name(), method="zscore")
+    return build_zscore_period_report_pdf(package)
 
 
 def save_zscore_monthly_report_snapshot(package: ZScoreMonthlyReportPackage, pdf_bytes: bytes | None = None) -> int:
-    return _save_monthly_report_archive(package.report, pdf_bytes if pdf_bytes is not None else build_zscore_monthly_report_pdf(package))
+    return save_zscore_period_report_snapshot(package, pdf_bytes)
 
 
 def build_zscore_monthly_preview_summary(report: ZScoreMonthlyReportData) -> list[tuple[str, str]]:
@@ -788,6 +895,7 @@ def build_zscore_monthly_preview_summary(report: ZScoreMonthlyReportData) -> lis
         ("在控检测记录数", str(statistics.in_control_count)),
         ("警告检测记录数", str(statistics.warning_count)),
         ("失控检测记录数", str(statistics.out_of_control_count)),
+        ("待判读检测记录数", str(statistics.pending_count)),
         ("当前规则组合", statistics.template_label),
         ("当前阶段", statistics.current_phase_label),
         ("全部水平已完成均值和标准差建立", "是" if statistics.all_levels_ready else "否"),
@@ -796,6 +904,8 @@ def build_zscore_monthly_preview_summary(report: ZScoreMonthlyReportData) -> lis
 
 def list_report_history_records() -> list[ReportHistoryRecord]:
     exports_df = list_report_exports()
+    with read_snapshot() as connection:
+        archived_ids = {int(row[0]) for row in connection.execute('SELECT export_id FROM qc_report_archive_files')}
     records: list[ReportHistoryRecord] = []
     for row in exports_df.to_dict(orient="records"):
         summary_json = row.get("summary_json")
@@ -813,6 +923,11 @@ def list_report_history_records() -> list[ReportHistoryRecord]:
         input_value_type = normalize_input_value_type(
             row.get("input_value_type") or summary_json.get("input_value_type")
         )
+        period_start = str(row.get('period_start') or summary_json.get('period_start') or '')
+        period_end = str(row.get('period_end') or summary_json.get('period_end') or '')
+        if not period_start and report_month:
+            prior_period = resolve_report_period(report_month)
+            period_start, period_end = prior_period.start_date, prior_period.end_date
 
         records.append(
             ReportHistoryRecord(
@@ -865,6 +980,10 @@ def list_report_history_records() -> list[ReportHistoryRecord]:
                 file_name=str(row.get("file_name") or summary_json.get("file_name") or "").strip(),
                 statistics=statistics,
                 summary_json=summary_json,
+                period_start=period_start,period_end=period_end,
+                period_label=str(summary_json.get('report_period_label') or (
+                    f'{period_start} 至 {period_end}' if period_start and period_end else '-')),
+                archive_available=int(row['id']) in archived_ids,
             )
         )
     from services.out_of_control_report_service import list_event_reports, STATUS_LABELS, CLASSIFICATION_LABELS, METHOD_LABELS
@@ -892,6 +1011,8 @@ def list_report_history_records() -> list[ReportHistoryRecord]:
             summary_text=f"原检测：{CLASSIFICATION_LABELS.get(event.get('original_classification'), '未记录')}；处理：{summary['event_status_label']}；处理版本 {archived['revision_no']}。",
             overview_text="", conclusion_text=str((event.get("content") or {}).get("effect_description") or ""),
             file_name=archived["file_name"], statistics={}, summary_json=summary,
+            period_start=str(origin.get('test_time') or '')[:10],period_end=str(origin.get('test_time') or '')[:10],
+            period_label=str(origin.get('test_time') or '未记录'),archive_available=False,
         ))
     records.sort(key=lambda item: (item.generated_at or pd.Timestamp.min, abs(item.export_id)), reverse=True)
     return records
@@ -914,12 +1035,15 @@ def filter_report_history_records(
     report_month: str = "",
     report_type: str = "",
     instrument_query: str = "",
+    start_date=None,
+    end_date=None,
 ) -> list[ReportHistoryRecord]:
     from services.search_service import fuzzy_match
     normalized_project_query = str(project_query or "").strip()
     normalized_method_label = str(method_label or "").strip()
     normalized_batch_query = str(batch_query or "").strip().casefold()
     normalized_report_month = str(report_month or "").strip()
+    period = resolve_report_period(start_date=start_date,end_date=end_date) if start_date is not None or end_date is not None else None
 
     filtered_records: list[ReportHistoryRecord] = []
     for record in records:
@@ -942,6 +1066,8 @@ def filter_report_history_records(
                 continue
         if normalized_report_month and record.report_month != normalized_report_month:
             continue
+        if period and (not record.period_start or not record.period_end or record.period_end < period.start_date or record.period_start > period.end_date):
+            continue
         filtered_records.append(record)
     return filtered_records
 
@@ -952,7 +1078,7 @@ def build_report_history_statistics_summary(record: ReportHistoryRecord) -> list
         return [("处理版本", str(record.summary_json["revision_no"])),
                 ("处理状态", record.summary_json["event_status_label"]),
                 ("原检测时间", record.report_period_label)]
-    if record.report_type == REPORT_TYPE_ZSCORE_MONTHLY:
+    if record.report_type in (REPORT_TYPE_ZSCORE_MONTHLY, REPORT_TYPE_ZSCORE_PERIOD):
         return [
             ("正式期检测记录数", str(_coerce_report_history_int(statistics.get("formal_count")))),
             ("在控检测记录数", str(_coerce_report_history_int(statistics.get("in_control_count")))),
@@ -977,6 +1103,7 @@ def build_report_history_statistics_summary(record: ReportHistoryRecord) -> list
 
 def regenerate_report_from_history(
     record_or_export_id: ReportHistoryRecord | int,
+    *, request_key=None,
 ) -> ReportRegenerationResult:
     record = (
         record_or_export_id
@@ -984,11 +1111,14 @@ def regenerate_report_from_history(
         else get_report_history_record(int(record_or_export_id))
     )
 
-    if record.report_type == REPORT_TYPE_LJ_MONTHLY:
+    if record.report_type in (REPORT_TYPE_LJ_MONTHLY, REPORT_TYPE_LJ_PERIOD):
         _validate_lj_report_history_source(record)
-        package = build_lj_monthly_report_package(record.batch_id, record.report_month)
+        with read_snapshot():
+            package = _build_lj_report_package(record.batch_id,
+                resolve_report_period(record.report_month or None,start_date=record.period_start,end_date=record.period_end),
+                monthly=record.report_type == REPORT_TYPE_LJ_MONTHLY,handling_versions=_history_handling_versions(record))
         pdf_bytes = build_lj_monthly_report_pdf(package)
-        snapshot_id = save_lj_monthly_report_snapshot(package, pdf_bytes)
+        snapshot_id = save_lj_period_report_snapshot(package, pdf_bytes, request_key=request_key)
         return ReportRegenerationResult(
             export_id=record.export_id,
             snapshot_id=snapshot_id,
@@ -1000,11 +1130,14 @@ def regenerate_report_from_history(
             pdf_bytes=pdf_bytes,
         )
 
-    if record.report_type == REPORT_TYPE_ZSCORE_MONTHLY:
+    if record.report_type in (REPORT_TYPE_ZSCORE_MONTHLY, REPORT_TYPE_ZSCORE_PERIOD):
         _validate_zscore_report_history_source(record)
-        package = build_zscore_monthly_report_package(record.batch_id, record.report_month)
+        with read_snapshot():
+            package = _build_zscore_report_package(record.batch_id,
+                resolve_report_period(record.report_month or None,start_date=record.period_start,end_date=record.period_end),
+                monthly=record.report_type == REPORT_TYPE_ZSCORE_MONTHLY,handling_versions=_history_handling_versions(record))
         pdf_bytes = build_zscore_monthly_report_pdf(package)
-        snapshot_id = save_zscore_monthly_report_snapshot(package, pdf_bytes)
+        snapshot_id = save_zscore_period_report_snapshot(package, pdf_bytes, request_key=request_key)
         return ReportRegenerationResult(
             export_id=record.export_id,
             snapshot_id=snapshot_id,
@@ -1069,6 +1202,13 @@ def _merge_report_history_statistics(
     return resolved_statistics
 
 
+def _history_handling_versions(record):
+    manifest = record.summary_json.get('archive_manifest') or {}
+    if 'handling_versions' in manifest:
+        return manifest['handling_versions']
+    return record.summary_json.get('handling_versions')
+
+
 def _resolve_report_history_project_name(
     *,
     row: dict[str, Any],
@@ -1126,7 +1266,7 @@ def _resolve_report_history_method_label(
     ).strip()
     if candidate:
         return candidate
-    if report_type == REPORT_TYPE_ZSCORE_MONTHLY:
+    if report_type in (REPORT_TYPE_ZSCORE_MONTHLY, REPORT_TYPE_ZSCORE_PERIOD):
         return ZSCORE_METHOD_LABEL
     return LJ_METHOD_LABEL
 
@@ -1147,7 +1287,7 @@ def _build_report_history_summary_text(
     warning_count = _coerce_report_history_int(statistics.get("warning_count"))
     out_of_control_count = _coerce_report_history_int(statistics.get("out_of_control_count"))
 
-    count_label = "本月正式期检测记录数" if report_type == REPORT_TYPE_ZSCORE_MONTHLY else "本月正式期总记录数"
+    count_label = "报告期正式期检测记录数" if report_type in (REPORT_TYPE_ZSCORE_MONTHLY,REPORT_TYPE_ZSCORE_PERIOD) else "报告期正式期总记录数"
     fragments = [
         f"{count_label} {formal_count}",
         f"在控 {in_control_count}，警告 {warning_count}，失控 {out_of_control_count}",
@@ -1417,6 +1557,16 @@ def _build_report_file_name(project_name: str, lot_no: str, report_month: str) -
     return f"{project_fragment}_{lot_fragment}_单水平月度质控报告_{month_fragment}.pdf"
 
 
+def _periodize_text(text):
+    return str(text or '').replace('月度', '报告期').replace('本月', '报告期')
+
+
+def _build_period_file_name(project_name, lot_no, period, method):
+    project = _build_safe_name(project_name, '项目')
+    lot = _build_safe_name(lot_no, '批次')
+    return f'{project}_{lot}_{method}质控报告_{period.start_date.replace("-", "")}_{period.end_date.replace("-", "")}.pdf'
+
+
 def _build_safe_name(text: str, fallback: str) -> str:
     characters: list[str] = []
     for character in str(text or "").strip():
@@ -1513,14 +1663,16 @@ def _filter_zscore_monthly_formal_runs(
     history_runs: list[dict[str, Any]],
     report_month: str,
 ) -> list[dict[str, Any]]:
-    month_start = pd.Period(report_month, freq="M").start_time
-    month_end = pd.Period(report_month, freq="M").end_time
+    return _filter_zscore_period_formal_runs(history_runs, resolve_report_period(report_month))
+
+
+def _filter_zscore_period_formal_runs(history_runs, period):
     filtered_runs = [
         run
         for run in history_runs
         if str(run.get("phase") or "") == PHASE_FORMAL_QC
         and run.get("test_time") is not None
-        and month_start <= pd.Timestamp(run["test_time"]) <= month_end
+        and period.start_time <= pd.Timestamp(run["test_time"]) < period.end_exclusive
     ]
     return sorted(
         filtered_runs,
@@ -1543,6 +1695,7 @@ def _build_zscore_monthly_statistics(
         in_control_count=sum(1 for run in monthly_formal_runs if str(run.get("run_status") or "") == "accept"),
         warning_count=sum(1 for run in monthly_formal_runs if str(run.get("run_status") or "") == "warning"),
         out_of_control_count=sum(1 for run in monthly_formal_runs if str(run.get("run_status") or "") == "reject"),
+        pending_count=sum(1 for run in monthly_formal_runs if str(run.get('run_status') or '') not in ('accept','warning','reject')),
         template_label=template_label,
         current_phase_label=current_phase_label,
         all_levels_ready=all_levels_ready,
@@ -1678,18 +1831,22 @@ def _build_zscore_monthly_overview(
     summary = (
         f"本月该 Z-score 批次正式期共纳入 {statistics.formal_count} 次检测记录，"
         f"其中在控 {statistics.in_control_count} 次、警告 {statistics.warning_count} 次、"
-        f"失控 {statistics.out_of_control_count} 次，当前规则组合为{template_label}。"
+        f"失控 {statistics.out_of_control_count} 次、待判读 {statistics.pending_count} 次，当前规则组合为{template_label}。"
     )
     if statistics.out_of_control_count > 0:
         summary += " 本月存在失控检测记录，详见后续异常与纠正措施说明。"
     elif statistics.warning_count > 0:
         summary += " 本月存在警告检测记录，建议持续观察。"
+    elif statistics.pending_count > 0:
+        summary += f" 本月有 {statistics.pending_count} 次检测待判读，尚不能确认全部检测在控。"
     else:
         summary += " 本月未发现异常检测记录，整体运行稳定。"
     return summary
 
 
 def _build_zscore_monthly_conclusion(statistics: ZScoreMonthlyReportStatistics) -> str:
+    if statistics.pending_count:
+        return f'本月有 {statistics.pending_count} 次检测待判读，需核对适用控制参数和原检测结论；尚不能确认全部检测在控。'
     if statistics.out_of_control_count > 0:
         return "本月存在失控检测记录，需结合原因与纠正措施复核。"
     if statistics.warning_count > 0:

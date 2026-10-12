@@ -140,11 +140,12 @@ def test_stale_data_and_failed_archive_rollback_and_lock_message():
         preview=svc.preview_monthly_reports('2026-04')
         job=job_for(preview)
         item=svc.get_monthly_report_job(job)['items'][0]
-        original_saver = svc.save_lj_monthly_report_snapshot
-        def fail_after_insert(package, pdf):
-            original_saver(package, pdf)
+        from services import report_service as report
+        original_saver = report.save_lj_period_report_snapshot
+        def fail_after_insert(package, pdf, *, request_key=None):
+            original_saver(package, pdf, request_key=request_key)
             raise RuntimeError('Injected failure after archive insertion')
-        with patch.object(svc,'save_lj_monthly_report_snapshot',side_effect=fail_after_insert):
+        with patch.object(report,'save_lj_period_report_snapshot',side_effect=fail_after_insert):
             assert svc.run_monthly_report_item(job,item['id'])['status']=='failed'
         with get_connection() as c:
             assert c.execute('SELECT count(*) FROM report_exports').fetchone()[0]==0
@@ -224,7 +225,7 @@ def test_page_preview_and_archive_ui():
         seed_lj_batch_with_formal_monthly_data()
         app=AppTest.from_string("from ui.batch_monthly_reports import render_batch_monthly_reports_page\nrender_batch_monthly_reports_page()",default_timeout=120).run()
         assert not app.exception
-        app.date_input(key='monthly_month').set_value(date(2026,4,1))
+        app.selectbox(key='monthly_month').set_value('2026-04')
         before=db_dump()
         app.button(key='monthly_preview').click().run()
         assert not app.exception and app.multiselect(key='monthly_selection_'+app.session_state['monthly_request_id']).value
@@ -232,7 +233,7 @@ def test_page_preview_and_archive_ui():
         app.button(key='monthly_generate').click().run()
         assert not app.exception
         assert len(svc.list_monthly_report_jobs())==1
-        assert any('月度回顾' in s.value for s in app.subheader)
+        assert any('期间回顾' in s.value for s in app.subheader)
 
 
 def test_concurrent_same_item_saves_once_and_long_names_unpack():
@@ -322,7 +323,7 @@ def test_single_archive_rejects_changed_source_for_both_methods():
         with TemporaryDatabaseContext():
             _,batch=seed()
             package=svc._build(method,batch,'2026-04')
-            renderer=getattr(report,f'build_{method}_monthly_report_pdf')
+            renderer=getattr(report,f'build_{method}_period_report_pdf')
             saver=getattr(report,f'save_{method}_monthly_report_snapshot')
             pdf=renderer(package)
             save_report_settings_form({'lab_name':'生成后修改的实验室'})
@@ -344,14 +345,14 @@ def test_history_regeneration_change_preserves_original_for_both_methods():
         with TemporaryDatabaseContext():
             _,batch=seed()
             package=svc._build(method,batch,'2026-04')
-            renderer=getattr(report,f'build_{method}_monthly_report_pdf')
+            renderer=getattr(report,f'build_{method}_period_report_pdf')
             pdf=renderer(package)
             export=getattr(report,f'save_{method}_monthly_report_snapshot')(package,pdf)
             def change_after_pdf(current):
                 data=renderer(current)
                 save_report_settings_form({'lab_name':'重新生成期间修改的实验室'})
                 return data
-            with patch.object(report,f'build_{method}_monthly_report_pdf',side_effect=change_after_pdf):
+            with patch.object(report,f'build_{method}_period_report_pdf',side_effect=change_after_pdf):
                 rejects(lambda:report.regenerate_report_from_history(export),'资料或设置已变化')
             assert report.read_report_history_pdf(export)==pdf
             with get_connection() as c:
@@ -366,17 +367,18 @@ def test_single_report_ui_shows_changed_source_without_exception():
     for method,seed in [('lj',seed_lj_batch_with_formal_monthly_data),('zscore',seed_zscore_batch_with_formal_monthly_data)]:
         with TemporaryDatabaseContext():
             _,batch=seed()
-            section=importlib.import_module(f'pages.{method}_report_section')
-            original=getattr(section,f'build_{method}_monthly_report_pdf')
+            from services import report_service as report
+            original=getattr(report,f'build_{method}_period_report_pdf')
             def change_after_pdf(package):
                 data=original(package)
                 save_report_settings_form({'lab_name':'界面生成期间修改的实验室'})
                 return data
             app=AppTest.from_string(f'from pages.{method}_report_section import render_{method}_monthly_report_section\nrender_{method}_monthly_report_section({batch})',default_timeout=120).run()
-            with patch.object(section,f'build_{method}_monthly_report_pdf',side_effect=change_after_pdf):
-                app.button(key=f'{method}_monthly_report_{batch}_generate').click().run()
+            app.button(key=f'{method}_monthly_report_{batch}_generate').click().run()
+            with patch.object(report,f'build_{method}_period_report_pdf',side_effect=change_after_pdf):
+                app.button(key=f'{method}_monthly_report_{batch}_archive').click().run()
             assert not app.exception
-            assert any('资料或设置已变化' in warning.value for warning in app.warning)
+            assert any('资料或设置已变化' in warning.value for warning in app.error)
             assert not app.get('download_button')
             with get_connection() as c:assert c.execute('SELECT count(*) FROM report_exports').fetchone()[0]==0
 

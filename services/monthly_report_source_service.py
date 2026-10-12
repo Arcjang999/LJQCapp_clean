@@ -31,6 +31,15 @@ def digest(value):
 
 
 def monthly_source_version(method, batch_id, month):
+    from services.report_period_service import resolve_report_period
+    period = resolve_report_period(month)
+    result = range_source_version(method, batch_id, period.start_date, period.end_date)
+    return dict(result, report_month=period.report_month)
+
+
+def range_source_version(method, batch_id, start_date, end_date, *, handling_versions=None):
+    from services.report_period_service import resolve_report_period
+    period = resolve_report_period(start_date=start_date, end_date=end_date)
     if method not in ('lj', 'zscore'):
         raise ValueError('此质控方法不支持常规月报。')
     from database import get_batch, get_zscore_batch
@@ -54,21 +63,48 @@ def monthly_source_version(method, batch_id, month):
         events = rows(c, f'''SELECT e.*,v.content_json,v.status FROM qc_ooc_events e JOIN {table} r ON r.id=e.source_id
             JOIN qc_ooc_revisions v ON v.event_id=e.id AND v.revision_no=e.current_revision_no
             WHERE e.source_type=? AND r.batch_id=? ORDER BY e.id''', (source_type, batch_id))
+        from services.report_period_service import filter_frame_to_period
+        if method == 'lj':
+            from database import get_results
+            from qc_logic import calculate_qc_results, LJ_FORMAL_PHASE_LABEL
+            evaluated, _ = calculate_qc_results(get_results(batch_id), int(batch['target_n']))
+            selected = filter_frame_to_period(evaluated[evaluated.phase == LJ_FORMAL_PHASE_LABEL], period) if not evaluated.empty else evaluated
+        else:
+            selected = filter_frame_to_period(pd.DataFrame([row for row in results if row['phase'] == 'formal_qc']), period)
+        selected_ids = set(selected['id'].tolist()) if not selected.empty else set()
+        relevant = {str(row['id']): int(row['current_revision_no']) for row in events if row['source_id'] in selected_ids}
+        if handling_versions is None:
+            handling_versions = relevant
+        elif not isinstance(handling_versions, dict):
+            raise ValueError('处理版本选择无效，请重新核对。')
+        else:
+            try:
+                normalized = {str(int(key)): int(value) for key, value in handling_versions.items()}
+            except (ValueError, TypeError):
+                raise ValueError('处理版本选择无效，请重新核对。') from None
+            if set(normalized) != set(relevant) or any(value < 1 for value in normalized.values()):
+                raise ValueError('处理清单或所选版本已变化，请重新核对报告。')
+            handling_versions = normalized
         event_reports = rows(c, f'''SELECT p.id,p.event_id,p.revision_no,p.report_no,p.generated_at FROM qc_event_reports p
             JOIN qc_ooc_events e ON e.id=p.event_id JOIN {table} r ON r.id=e.source_id
             WHERE e.source_type=? AND r.batch_id=? ORDER BY p.id''', (source_type, batch_id))
         binding = rows(c, 'SELECT * FROM qc_workbench_bindings WHERE qc_method=? AND runtime_batch_id=? ORDER BY id', (method, batch_id))
         source_identity, _, _ = source_context(c, method, batch_id, read_only=True)
-        usage_events = rows(c, 'SELECT * FROM qc_lot_change_events WHERE system_id=? AND substr(effective_at,1,7)=? ORDER BY effective_at,id',
-                            (source_identity.get('system_id'), month))
-        raw = dict(source_identity=source_identity, usage_events=usage_events, method=method, batch=batch, report_month=month, results=results, contexts=contexts,
+        usage_events = rows(c, 'SELECT * FROM qc_lot_change_events WHERE system_id=? AND effective_at>=? AND effective_at<? ORDER BY effective_at,id',
+                            (source_identity.get('system_id'), str(period.start_time), str(period.end_exclusive)))
+        revisions = rows(c, f'''SELECT v.* FROM qc_ooc_revisions v JOIN qc_ooc_events e ON e.id=v.event_id
+            JOIN {table} r ON r.id=e.source_id WHERE e.source_type=? AND r.batch_id=? ORDER BY v.event_id,v.revision_no''', (source_type, batch_id))
+        raw = dict(source_identity=source_identity, usage_events=usage_events, method=method, batch=batch,
+            period=period.to_payload(), handling_versions=handling_versions, results=results, contexts=contexts,
             context_levels=levels, evaluations=evaluations, profiles=profiles, events=events,
-            event_reports=event_reports, binding=binding, settings=get_report_settings_with_fallbacks().to_payload())
+            event_reports=event_reports, event_revisions=revisions, binding=binding, settings=get_report_settings_with_fallbacks().to_payload())
         if method == 'zscore':
             raw['level_results'] = rows(c, '''SELECT l.* FROM zscore_level_results l JOIN zscore_runs r ON r.id=l.run_id
                 WHERE r.batch_id=? ORDER BY l.id''', (batch_id,))
         evaluation_by_context = {row['context_id']: row['id'] for row in evaluations}
-        return dict(format_version=1, qc_method=method, batch_id=int(batch_id), report_month=month,
+        return dict(format_version=2, qc_method=method, batch_id=int(batch_id), report_month='',
+            period_start=period.start_date, period_end=period.end_date, period_key=period.key,
+            handling_versions=json_safe(handling_versions),
             fingerprint=digest(raw), result_ids=[r['id'] for r in results],
             contexts=[dict(context_id=r['id'], source_id=r[field], target_profile_id=r['target_profile_id'],
                            evaluation_id=evaluation_by_context.get(r['id'])) for r in contexts],

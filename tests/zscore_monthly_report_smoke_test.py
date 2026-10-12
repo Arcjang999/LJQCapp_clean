@@ -250,7 +250,8 @@ def test_zscore_monthly_report_builds_pdf_and_snapshot() -> None:
         pdf_text = "\n".join(page.extract_text() or "" for page in reader.pages).lower()
         assert len(reader.pages) >= 7
         assert "追溯" in pdf_text
-        assert "质量目标采用依据" in reader.pages[-1].extract_text()
+        assert "质量目标采用依据" in pdf_text
+        assert "失控处理归档清单" in pdf_text
         assert "尚无自动评价" in ''.join(pdf_text.split())
         assert str(reader.metadata.get("/Subject", "")) == REPORT_TYPE_ZSCORE_MONTHLY
         assert "run级" not in pdf_text
@@ -326,6 +327,7 @@ def test_zscore_monthly_report_page_exposes_generate_and_download_flow() -> None
 
         at.selectbox(key=f"{report_scope}_month").set_value("2026-04").run()
         at.button(key=f"{report_scope}_generate").click().run(timeout=10)
+        at.button(key=f"{report_scope}_archive").click().run(timeout=10)
 
         assert not list(at.exception)
         download_elements = at.get("download_button")

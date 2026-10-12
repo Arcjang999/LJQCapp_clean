@@ -84,7 +84,7 @@ class LjRecordWorkspaceTests(unittest.TestCase):
         with TemporaryDatabaseContext():
             project, batch = seed_lj_batch_with_formal_monthly_data()
             app = full_page(project, batch)
-            self.assertEqual(['当前批次', '月度报告'], [tab.label for tab in app.tabs])
+            self.assertEqual(['当前批次', '质控报告'], [tab.label for tab in app.tabs])
             labels = [button.label for button in app.button]
             self.assertEqual(1, labels.count('导入数据'))
             self.assertEqual(1, labels.count('导出'))

@@ -202,9 +202,9 @@ def render_zscore_page() -> None:
         else:
             render_pending_zscore_reference_dialog()
         return
-    tab_names = [TEXT["current_batch"], "月度报告"]
-    if st.session_state.get('zscore_workbench_tabs') == 'Z-score 月报':
-        st.session_state['zscore_workbench_tabs'] = '月度报告'
+    tab_names = [TEXT["current_batch"], "质控报告"]
+    if st.session_state.get('zscore_workbench_tabs') in ('Z-score 月报', '月度报告'):
+        st.session_state['zscore_workbench_tabs'] = '质控报告'
     if st.session_state.get('zscore_workbench_tabs') not in tab_names:
         st.session_state['zscore_workbench_tabs'] = TEXT['current_batch']
     work_tab, report_tab = st.tabs(tab_names, key='zscore_workbench_tabs', on_change='rerun')
