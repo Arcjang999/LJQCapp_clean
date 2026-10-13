@@ -86,7 +86,7 @@ def save_record_action(method, batch_id, record_id, action, *, reason, expected_
         if previous:
             if (previous['qc_method'], previous['batch_id'], previous['record_id'], previous['action']) != (
                 method, int(batch_id), int(record_id), action):
-                raise ValueError('维护对象已变化，请重新打开窗口。')
+                raise ValueError('当前选择的检测记录已改变，请返回记录列表重新选择。')
             return int(previous['id'])
         before = _raw_record(connection, method, record_id)
         if int(before['batch_id']) != int(batch_id):

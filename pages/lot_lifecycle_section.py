@@ -18,13 +18,13 @@ def render_result_lot_choice(method,batch_id,test_time,key):
     previous=st.session_state.get(revision_key)
     if previous is not None and previous!=options['revision']:
         st.session_state[choice_key]=None
-        st.warning('试剂默认批号已变化，请重新确认本次实际使用批号。')
+        st.warning('试剂资料或使用安排已更新，请重新选择本次批号。')
     st.session_state[revision_key]=options['revision']
     choices={row['id']:row for row in options['options']}
     if not choices and not options['revision']:
-        st.caption('尚未登记可用试剂批号；本次批号将标记为“未记录”。可在项目/批次的“批号使用与追溯”登记。')
+        st.caption('本次试剂批号保存为“未记录”。补登记请到“试剂管理 → 管理批号”完成验证和使用安排。')
         return {'expected_revision':options['revision']}
-    lot_id=st.selectbox('本次实际试剂批号',list(choices),index=None,key=choice_key,
+    lot_id=st.selectbox('本次试剂批号',list(choices),index=None,key=choice_key,
         format_func=lambda i:f"{choices[i]['lot_no']}｜效期 {choices[i]['expiry_date']}",placeholder='请按本次检测实际使用批号选择')
     suggestion=choices.get(options['suggested_lot_id'])
     if suggestion:
@@ -43,7 +43,7 @@ def is_batch_writable(method,batch_id):
 
 
 def render_result_provenance(method,batch_id):
-    with st.expander('实际批号与历史判定追溯'):
+    with st.expander('检测批号与判读记录'):
         df=context_dataframe(method,batch_id)
         if df.empty:
             st.caption('暂无可查看的检测记录。缺失的历史批号会显示为“未记录”。')
@@ -59,7 +59,7 @@ def render_result_provenance(method,batch_id):
         display['资料来源']=display['资料来源'].map({'recorded':'检测时保存','migration_snapshot':'历史配置资料',
             'migration_available':'历史保留资料','instant_transfer':'即时法转入'}).fillna('历史保留资料')
         st.dataframe(display.drop(columns=['追溯编号','转入来源编号']),hide_index=True,width='stretch')
-        st.download_button('导出逐条批号与版本',display.to_csv(index=False).encode('utf-8-sig'),
+        st.download_button('导出检测批号清单',display.to_csv(index=False).encode('utf-8-sig'),
                            file_name=f'{method}-{batch_id}-批号追溯.csv',mime='text/csv',key=f'{method}_context_export_{batch_id}')
         record_labels={row['context_id']:f"记录 {row['result_id']}｜{row['test_time']}" for row in df.to_dict('records')}
         selected=st.selectbox('查看检测记录',df.context_id.tolist(),format_func=record_labels.get,key=f'{method}_context_audit_{batch_id}')
@@ -67,7 +67,7 @@ def render_result_provenance(method,batch_id):
             evaluations=pd.read_sql_query('SELECT id,reason,created_at,evaluation_json FROM qc_result_evaluations WHERE context_id=? ORDER BY id',c,params=(selected,))
             saved_source=json.loads(c.execute('SELECT config_snapshot_json FROM qc_result_contexts WHERE id=?',(selected,)).fetchone()[0])
         if not evaluations.empty:
-            st.caption('可查看首次判定及后续复核记录。历史资料未保存当时判定时，仅展示已有的复核结果。')
+            st.caption('选择判读记录，查看检测时及之后的复核结果；历史记录按已保存的资料显示。')
             reasons={'recorded':'首次判定','current_review':'数据复核','maintenance_review':'维护后复核','migration_review':'历史数据复核','instant_transfer_review':'转入 LJ 后复核'}
             labels={r['id']:f"{reasons.get(r['reason'],'复核记录')}｜{r['created_at']}｜编号 {r['id']}" for r in evaluations.to_dict('records')}
             which=st.selectbox('判定记录',evaluations.id.tolist(),format_func=labels.get,key=f'{method}_evaluation_{batch_id}')
@@ -85,7 +85,7 @@ def render_lot_management(*, render_dialogs=True):
     from services.instant_workbench_service import sync_instant_workbench_bindings
     sync_lj_workbench_bindings();sync_zscore_workbench_bindings();sync_instant_workbench_bindings()
     workbench_systems()
-    st.caption('请在对应页面核对批次设置、均值和标准差，以及质控品是否已启用。试剂和质控品换批时，请按实验室 SOP 填写验证依据。')
+    st.caption('选择下方页签，登记批号验证、换批或均值和标准差；验证依据按实验室记录填写。')
     labels = ['试剂批号与换批','新旧批号比对','均值和标准差管理','历史记录']
     if 'lot_management_tabs' not in st.session_state and st.session_state.get('lot_management_active_tab') in labels:
         st.session_state['lot_management_tabs'] = st.session_state['lot_management_active_tab']
@@ -98,7 +98,7 @@ def render_lot_management(*, render_dialogs=True):
         from ui.qc_lifecycle_workspace import render_qc_lifecycle_workspace
         render_qc_lifecycle_workspace()
     with target_tab:
-        st.caption('均值和标准差按设定的有效检测点数计算。请另行核对数据是否来自规定数量的独立分析批，并按实验室规程确认暂定或常用参数。')
+        st.caption('核对有效检测次数和独立分析批数，按实验室规程确认均值和标准差。')
         _render_target_versions()
     with history_tab:
         _render_history()

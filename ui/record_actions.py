@@ -132,7 +132,7 @@ def _history(context):
         else:
             labels = {row['id']: ('首次判读' if index == 0 else '复核判读') + ' · ' + row['created_at']
                       for index, row in enumerate(evaluations)}
-            selected = st.radio('判读版本', list(labels), format_func=labels.get,
+            selected = st.radio('选择判读记录', list(labels), format_func=labels.get,
                 key=f"record_evaluation_{context['method']}_{context['record']['id']}")
             row = next(row for row in evaluations if row['id'] == selected)
             summary, levels = evaluation_tables(json.loads(row['evaluation_json']), context['input_value_type'],
@@ -187,11 +187,11 @@ def _render_record_dialog():
         draft['manual_note'] = st.text_area('备注（可选）', key=_widget_key(state, 'note', draft['manual_note']))
         st.caption('保存后重新计算本批次，原内容和维护原因会留在维护记录中。')
     elif action == 'disable':
-        st.info('禁用后保留原始值，该记录不再参与建靶统计及默认图表。')
+        st.info('禁用后仍可在“已禁用”列表查看原始值；建靶统计和默认质控图将跳过这条记录。')
     elif action == 'restore':
         st.info('恢复后重新纳入统计，并重新计算本批次及离群提示。')
     else:
-        st.info('保留后该记录继续参与统计，本次人工判断及原因会保存。')
+        st.info('保留后这条记录继续参与统计。请填写保留原因，供以后核对。')
     if context['method'] == 'zscore' and action != 'edit':
         st.caption('本次操作同时应用于这次检测的全部水平。')
     draft['reason'] = st.text_area('维护原因', key=_widget_key(state, 'reason', draft['reason']))

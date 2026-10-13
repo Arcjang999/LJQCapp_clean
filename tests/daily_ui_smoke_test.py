@@ -143,7 +143,7 @@ class DailyUITest(unittest.TestCase):
         self.click(app,'清空本组输入');self.click(app,'取消清空')
         self.assertEqual(expected['values'],app.session_state['daily_draft']['values'])
         self.assertEqual(expected['notes'],app.session_state['daily_draft']['notes'])
-        self.click(app,'核对并保存')
+        self.click(app,'检查本组结果')
         self.assertTrue(list(app.error));self.assertEqual(before,self.dump())
         self.assertTrue(any('检测时间无效' in e.value for e in app.error))
         self.assertFalse(any('datetime' in e.value or 'Timestamp' in e.value for e in app.error))
@@ -166,7 +166,7 @@ class DailyUITest(unittest.TestCase):
         for group in range(3):
             draft=app.session_state['daily_draft'];submission_ids.add(draft['submission_id']);token=draft['draft_id']
             app.text_input(key=f'daily_test_time_{token}').set_value(f'2026-09-28 {8+group:02d}:00:00').run()
-            self.paste_values(app);before=self.dump();self.click(app,'核对并保存')
+            self.paste_values(app);before=self.dump();self.click(app,'检查本组结果')
             self.assertEqual(before,self.dump());self.assertIn('frozen',app.session_state['daily_draft'])
             self.click(app,'确认保存整组');receipt=app.session_state['daily_draft']['receipt']
             self.assertEqual(receipt['count'],20)
@@ -194,7 +194,7 @@ class DailyUITest(unittest.TestCase):
         self.assertEqual(set(list_template_items(template)['qc_method']),{'lj','zscore','instant'})
         app=self.app(True);draft=app.session_state['daily_draft'];selected=draft['selected'][:18]
         app.multiselect(key='entry_selected_'+draft['draft_id']).set_value(selected).run();self.healthy(app)
-        self.click(app,'核对并保存');self.click(app,'确认保存整组')
+        self.click(app,'检查本组结果');self.click(app,'确认保存整组')
         receipt=app.session_state['daily_draft']['receipt'];self.assertEqual(receipt['count'],18)
         self.assertEqual({str(r['row_key']) for r in receipt['items']},set(selected))
         with db.read_snapshot() as c:
@@ -317,7 +317,7 @@ class DailyUITest(unittest.TestCase):
         before=self.dump();self.click(app,'保留输入并重新核对资料')
         self.assertEqual(expected,app.session_state['daily_draft']['values'])
         self.assertEqual(before,self.dump())
-        save=[b for b in app.button if b.label=='核对并保存']
+        save=[b for b in app.button if b.label=='检查本组结果']
         self.assertTrue(not save or save[0].disabled)
 
     def test_instant_overview_keeps_saved_early_record_stage(self):

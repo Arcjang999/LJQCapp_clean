@@ -38,7 +38,7 @@ def _render_published_directory():
     if releases.empty:
         return
     by_id = {int(row['id']): row for row in releases.to_dict('records')}
-    chosen = st.selectbox('已发布目录版本', list(by_id),
+    chosen = st.selectbox('已保存目录版本', list(by_id),
         format_func=lambda value: by_id[value]['publisher'] + '｜' + by_id[value]['version_label'],
         key='directory_release')
     query = st.text_input('搜索目录产品', key='directory_search')
@@ -137,7 +137,7 @@ def render_product_catalogue():
 
 def render_directory_import(*, show_published=True, expander_label='产品目录与来源'):
     with st.expander(expander_label):
-        st.caption('请核对产品编号、产品名称、浓度和浓度编号；浓度与浓度编号任一项有明确内容即可，阴性、分型或位点按原文保留。选择产品后，再登记实际批号，并逐项选择质控方法；多个水平不自动决定方法。')
+        st.caption('核对产品编号、名称和浓度资料。阴性、分型、位点照原文填写；选好产品后，在“管理批次”登记批号和水平，在项目中选择质控方法。')
         manufacturers = list_manufacturers(category='qc_material')
         rows = {int(row['id']):row['display_name'] for row in manufacturers.to_dict('records')}
         if '邦德盛' not in rows.values() and st.button('登记邦德盛厂家', key='directory_register_bondson'):
@@ -147,7 +147,7 @@ def render_directory_import(*, show_published=True, expander_label='产品目录
             except ValueError as exc:
                 st.error(str(exc))
         manufacturer_id = st.selectbox('目录所属质控品厂家',[None,*rows],format_func=lambda value:'请选择厂家' if value is None else rows[value],key='directory_manufacturer')
-        uploaded = st.file_uploader('更新目录资料包（可选）',type=['json'],key='directory_upload')
+        uploaded = st.file_uploader('上传厂家目录文件（JSON，可选）',type=['json'],key='directory_upload')
         st.caption('请选择质控品厂家，再点击“预览目录”。未上传更新文件时，预览现有邦德盛目录的1054项产品和252项排除记录。')
         source_content, source_identity = _directory_source(uploaded, manufacturer_id)
         draft = st.session_state.get('directory_preview_draft')
@@ -167,26 +167,26 @@ def render_directory_import(*, show_published=True, expander_label='产品目录
         if draft:
             package,preview = draft['package'],draft['preview']
             if draft.get('source_changed'):
-                st.warning('目录厂家或来源资料已改变，请重新预览后再发布。以下仍为上次预览内容。')
+                st.warning('厂家或目录文件已更换。请再点“预览目录”，核对本次内容后保存。')
             st.write(f"来源：{package['source_file']}｜版本：{package['version_label']}｜取得日期：{package['obtained_at']}")
             st.caption('所属厂家：' + rows.get(draft['manufacturer_id'], '厂家已不可选'))
             st.caption(f"核查人：{package['verified_by']}｜保留{preview['included_count']}项，排除{preview['excluded_count']}项")
             if preview['is_test']:
-                st.warning('这是供试用的目录资料。确认后可查看来源和发布记录，其中产品不能用于新建项目或批次。')
+                st.warning('此目录的产品仅供查看。建立检测项目时，请换用可用于检测的产品目录。')
             display = pd.DataFrame(preview['records'])
             st.dataframe(display[['action',*PRODUCT_LABELS,'excluded_reason']].rename(columns={**PRODUCT_LABELS,'action':'本次处理','excluded_reason':'排除原因'}),hide_index=True,width='stretch')
             if preview['issues']:
-                st.error('目录有需要核对的资料，尚不能发布。')
+                st.error('请按下表修正目录资料，再预览保存。')
                 st.dataframe(pd.DataFrame(preview['issues']).rename(columns={'row':'原行号','product_code':'产品编号','field':'资料','message':'需要核对'}),hide_index=True,width='stretch')
             if preview['retired_codes']:
                 st.caption(f"本次目录不再收录{len(preview['retired_codes'])}个既有编号，将停止未来选择，已有批号和历史保留。")
             actor = st.text_input('本次目录核对人',key='directory_publish_actor')
             save,cancel = st.columns(2)
-            if save.button('确认发布目录',key='directory_publish',type='primary',disabled=bool(preview['issues']) or bool(draft.get('source_changed'))):
+            if save.button('保存产品目录',key='directory_publish',type='primary',disabled=bool(preview['issues']) or bool(draft.get('source_changed'))):
                 try:
                     result=publish_product_directory(package,draft['manufacturer_id'],expected_preview_hash=preview['preview_hash'],published_by=actor)
                     st.session_state.pop('directory_preview_draft',None)
-                    st.session_state['material_catalog_notice']='此来源版本已发布，产品没有重复添加。' if result['reused'] else '产品目录已发布，实际批号和检测方法请分别登记与配置。'
+                    st.session_state['material_catalog_notice']='此版本目录已保存。' if result['reused'] else '产品目录已保存。接着登记质控品批号，并在项目中选择检测方法。'
                     st.rerun()
                 except ValueError as exc:
                     st.error(str(exc))
@@ -280,7 +280,7 @@ def render_product_relationships(product_id):
         st.dataframe(pd.DataFrame([{PRODUCT_LABELS[key]:catalogue['product'][key] for key in PRODUCT_LABELS}]),hide_index=True,width='stretch')
     with st.expander('适用检验项目', expanded=True):
         active=[row for row in relationship['coverage'] if not row['is_disabled']]
-        st.caption('按产品说明书选择这款质控品可用于哪些检验项目。保存后，配置项目时可以直接带入。')
+        st.caption('点击“选择检验项目”，按产品说明书勾选适用项目，再填写核对人和参考资料，点击“保存适用项目”。')
         drafts=st.session_state.setdefault('product_coverage_drafts',{})
         key=str(product_id)
         if key not in drafts:

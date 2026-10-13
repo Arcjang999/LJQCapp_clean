@@ -208,7 +208,7 @@ class PeriodReportWorkspaceTests(unittest.TestCase):
                 clean(app)
                 self.assertEqual(before, contents())
                 if batch == pending['batch_id'] and method == 'zscore':
-                    self.assertTrue(any('1 次检测待判读' in item.value for item in app.info))
+                    self.assertTrue(any('1 次检测尚无有效质控结论' in item.value for item in app.info))
                 app.button(key=prefix + '_cancel').click().run()
                 clean(app)
                 self.assertNotIn(prefix + '_preview', app.session_state)
@@ -223,7 +223,7 @@ class PeriodReportWorkspaceTests(unittest.TestCase):
                 self.assertTrue(record.archive_available)
                 labels = {item.label for item in app.get('download_button')}
                 self.assertIn('下载 PDF', labels)
-                self.assertIn('下载完整归档', labels)
+                self.assertIn('下载报告和附件（ZIP）', labels)
                 with ZipFile(BytesIO(read_report_archive(export_id))) as archive:
                     manifest = get_report_archive_metadata(export_id)['manifest']
                     self.assertEqual('2026-04-01', manifest['period']['start_date'])
@@ -318,7 +318,7 @@ class PeriodReportWorkspaceTests(unittest.TestCase):
             job = batch_reports.get_monthly_report_job(app.session_state['monthly_current_job'])
             self.assertEqual('2026-12-31', job['period_end'])
             self.assertEqual(1, job['counts']['succeeded'])
-            self.assertTrue(any(item.label == '下载此份完整归档' for item in app.get('download_button')))
+            self.assertTrue(any(item.label == '下载这份报告和附件（ZIP）' for item in app.get('download_button')))
 
     def test_history_period_selection_regeneration_preserves_original_and_clears_hidden_id(self):
         with TemporaryDatabaseContext():
@@ -338,7 +338,7 @@ class PeriodReportWorkspaceTests(unittest.TestCase):
             select_table_row(app, 0)
             app.button(key='report_history_view').click().run()
             clean(app)
-            self.assertTrue(any(item.label == '下载已保存的完整归档' for item in app.get('download_button')))
+            self.assertTrue(any(item.label == '下载原报告和附件（ZIP）' for item in app.get('download_button')))
             db.add_result(batch, '2026-04-10 10:00:00', 100.0, operator='历史追加')
             before = contents()
             with patch('pages.report_history_page.regenerate_report_from_history', side_effect=OSError('isolated history file unavailable')):

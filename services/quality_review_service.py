@@ -101,21 +101,22 @@ def build_review(connection, item, *, source_spec=None, confirmed_by, evidence,
     selected_standard = source_spec if source_spec and source_spec['origin'] == 'builtin' else None
     numerical = [r for r in candidates if r['kind'] == 'numeric' and r['status'] == 'applicable']
     if numerical and (not selected_standard or any(r['id'] != selected_standard['id'] for r in numerical)):
-        raise ValueError('已有明确适用标准，必须采用，不能用排除理由或实验室自定要求替代；多个数值依据须先核对冲突及适用条件。')
+        raise ValueError('本项目已有适用标准，请引用该标准。显示多个数值标准时，先检查各标准要求的方法、单位和检测条件。')
     if selected_standard and selected_standard['id'] not in {r['id'] for r in numerical}:
         raise ValueError('所选标准与当前检验项目或适用条件不符，不能采用。')
     nonnumeric = [r for r in candidates if r['kind'] != 'numeric' and r['status'] == 'applicable']
     mandatory = {r['id'] for r in nonnumeric if r['kind'] != 'process'}
     selected = {r['id'] for r in nonnumeric} if adopted_standard_ids is None else set(adopted_standard_ids)
     if not mandatory.issubset(selected) or not selected.issubset({r['id'] for r in nonnumeric}):
-        raise ValueError('请采用全部适用的定性或信号精密度要求，不能关联不适用条款。')
+        raise ValueError('请确认本项目适用的全部定性或信号精密度要求，并取消不适用的条款。')
     local_process = normalize_process_requirements(
         default_process_requirements(candidates, selected) if process_requirements is None else process_requirements,
         candidates)
     registered = validate_registered_sources(registered_standards, context)
     search = {}
     if not numerical:
-        search = validate_search_record(search_record, confirmed_by=confirmed_by, has_process=bool(nonnumeric))
+        search = validate_search_record(search_record, confirmed_by=confirmed_by, has_process=bool(nonnumeric),
+                                        item=item, context=context)
         if search['conclusion'] == 'registered' and not registered:
             raise ValueError('已找到未收录标准时，请补充标准全文及核查记录后再确认。')
         if registered and search['conclusion'] != 'registered':
@@ -144,10 +145,15 @@ def build_review(connection, item, *, source_spec=None, confirmed_by, evidence,
     if 'lot_config_id' in item and len(levels) != int(item['level_count']):
         raise ValueError('请先保存全部质控水平，再确认质量目标。')
     if recorded:
+        setup_mode = recorded.get('setup_mode')
+        if setup_mode is not None and setup_mode != 'sd_cv':
+            raise ValueError('质量要求设置方式无效，请重新打开设置。')
         recorded = {key: _text(recorded.get(key), label) for key, label in (
             ('source_name', '依据名称'), ('source_version', '依据版本或编号'),
             ('requirement_text', '实验室自定要求'),
         )}
+        if setup_mode is not None:
+            recorded['setup_mode'] = setup_mode
     if not source_spec and not recorded:
         raise ValueError('请选择分析质量要求，或填写实验室自定要求及依据。')
     return dict(version=2, status='confirmed', identity=_identity(item), context=context,
@@ -180,6 +186,12 @@ def save_pending_review(scope, item_id, *, context, search_record=None, register
         if draft_recorded is not None:
             review['draft_recorded'] = {k: str(draft_recorded.get(k) or '')[:2000]
                 for k in ('source_name', 'source_version', 'requirement_text')}
+            if draft_recorded.get('mode') == 'sd_cv':
+                from services.quality_target_service import finite_number
+                limit = finite_number(draft_recorded.get('cv_limit'), '实验室CV上限', optional=True)
+                if limit is not None and limit <= 0:
+                    raise ValueError('实验室CV上限须大于0。')
+                review['draft_recorded'].update(mode='sd_cv', cv_limit=limit)
         save_review(connection, scope, item_id, review)
         if scope == 'project':
             connection.execute("UPDATE qc_project_templates SET status='draft', revision_no=revision_no+1 WHERE id=?", (item['template_id'],))
@@ -209,7 +221,7 @@ def pending_review_copy(value):
 def save_recorded_requirement(scope, item_id, *, source_name, source_version,
                               requirement_text, confirmed_by, evidence, exclusions=None,
                               context=None, search_record=None, adopted_standard_ids=None,
-                              registered_standards=None, process_requirements=None):
+                              registered_standards=None, process_requirements=None, setup_mode=None):
     """Record unsupported/no-applicable-source requirements; adds no new evaluator."""
     from services.quality_target_service import item_context, _require_draft
     if scope not in ('project', 'lot'):
@@ -220,6 +232,8 @@ def save_recorded_requirement(scope, item_id, *, source_name, source_version,
             _require_draft(connection, item)
         recorded = dict(source_name=source_name, source_version=source_version,
                         requirement_text=requirement_text)
+        if setup_mode is not None:
+            recorded['setup_mode'] = setup_mode
         # Preserve concentration CV compatibility; other scales cannot inherit it.
         table = 'qc_project_template_items' if scope == 'project' else 'qc_lot_config_items'
         connection.execute(f"UPDATE {table} SET quality_goal_json='{{}}' WHERE id=?", (item_id,))

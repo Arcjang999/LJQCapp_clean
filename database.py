@@ -2752,7 +2752,7 @@ def add_instant_result(
         if batch_row is None:
             raise ValueError(f"未找到即时法批次 {batch_id}")
         if str(batch_row["transfer_status"] or "not_transferred").strip().lower() == "transferred":
-            raise ValueError("该即时法批次已转入 LJ 法，当前批次已冻结为只读。")
+            raise ValueError("该批次已转入 LJ 法，原即时法记录可查看。请到对应 LJ 批次录入新结果。")
         if log_value is _UNSET:
             log_value = _safe_log10(value)
         cursor = connection.execute(
@@ -2817,7 +2817,7 @@ def set_instant_result_effective_state(
         from services.lot_lifecycle_service import require_writable
         require_writable(connection,"instant",int(result_row["batch_id"]))
         if str(result_row["transfer_status"] or "not_transferred").strip().lower() == "transferred":
-            raise ValueError("该即时法批次已转入 LJ 法，当前批次已冻结为只读。")
+            raise ValueError("该批次已转入 LJ 法，原即时法记录可查看。请到对应 LJ 批次录入新结果。")
         cursor = connection.execute(
             """
             UPDATE instant_results

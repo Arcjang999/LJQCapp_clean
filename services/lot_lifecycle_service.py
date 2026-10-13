@@ -90,7 +90,7 @@ def require_writable(connection, method, batch_id, test_time=None, *, read_only=
         # A material combination's header lot is an internal anchor, not every assay's actual lot.
         identity_indices = (0, 1, 3, 4, 5, 6, 7) if material_mode else range(8)
         if source.get('identity') and any(current[index] != source['identity'][index] for index in identity_indices):
-            raise ValueError('检测系统配置已变更，请刷新并重新建立适用配置；旧结果保持原上下文。')
+            raise ValueError('项目、仪器或方法设置已修改。请重新打开批次设置并确认，已有检测保留当时的设置。')
         if material_mode:
             actual_levels = connection.execute('''SELECT a.qc_level_id,l.qc_material_lot_id
                 FROM qc_lot_config_item_levels a JOIN md_qc_levels l ON l.id=a.qc_level_id
@@ -100,7 +100,7 @@ def require_writable(connection, method, batch_id, test_time=None, *, read_only=
             if ([row['qc_level_id'] for row in actual_levels] != [row['qc_level_id'] for row in frozen_levels]
                 or any(frozen.get('qc_material_lot_id') != current_level['qc_material_lot_id']
                        for frozen, current_level in zip(frozen_levels, actual_levels))):
-                raise ValueError('实际质控材料或水平顺序已变更，请建立新批次；旧结果保持原上下文。')
+                raise ValueError('质控品或浓度水平顺序已修改，请新建批次；已有检测保留当时使用的质控品和水平。')
         if source.get('identity'):
             for table,index in [('lab_instruments',0),('md_qc_materials',1),('md_qc_material_lots',2),('md_test_items',3),('md_units',5),('md_methods',6),('md_reagents',7)]:
                 if material_mode and index == 2:
@@ -515,7 +515,7 @@ def create_target_profile(*, method,batch_id,levels,source,evidence,confirmed_by
         if latest and when<timestamp(latest):
             raise ValueError('不能追溯修改已有检测的参数；请选择不早于最后一条检测的生效时间。')
         if source=='building' and not source_result_ids:
-            raise ValueError('本批次均值和标准差建立版本必须关联实际有效参数建立记录。')
+            raise ValueError('请选出本批次用于计算均值和标准差的有效检测记录。')
         for result_id in source_result_ids or []:
             if not c.execute(f'SELECT 1 FROM {RESULT_TABLES[method]} WHERE id=? AND batch_id=?',(result_id,batch_id)).fetchone():
                 raise ValueError('均值和标准差来源记录必须属于当前方法和质控批次。')

@@ -276,14 +276,14 @@ def prepare_project_batch_context() -> tuple[pd.DataFrame, int | None, pd.DataFr
 def ensure_selected_zscore_project(projects_df: pd.DataFrame) -> int | None:
     if projects_df.empty:
         st.session_state["zscore_selected_project_id"] = None
-        st.session_state["zscore_project_selector"] = "请选择 Z-score 项目"
+        st.session_state["zscore_project_selector"] = "请选择 多水平 项目"
         return None
 
     valid_ids = set(projects_df["id"].astype(int).tolist())
     current_id = st.session_state.get("zscore_selected_project_id")
     if current_id is not None and current_id not in valid_ids:
         st.session_state["zscore_selected_project_id"] = None
-        st.session_state["zscore_project_selector"] = "请选择 Z-score 项目"
+        st.session_state["zscore_project_selector"] = "请选择 多水平 项目"
         return None
     return None if current_id is None else int(current_id)
 
@@ -291,14 +291,14 @@ def ensure_selected_zscore_project(projects_df: pd.DataFrame) -> int | None:
 def ensure_selected_zscore_batch(batches_df: pd.DataFrame) -> int | None:
     if batches_df.empty:
         st.session_state["zscore_selected_batch_id"] = None
-        st.session_state["zscore_batch_selector"] = "请选择 Z-score 批次"
+        st.session_state["zscore_batch_selector"] = "请选择 多水平 批次"
         return None
 
     valid_ids = set(batches_df["id"].astype(int).tolist())
     current_id = st.session_state.get("zscore_selected_batch_id")
     if current_id is not None and current_id not in valid_ids:
         st.session_state["zscore_selected_batch_id"] = None
-        st.session_state["zscore_batch_selector"] = "请选择 Z-score 批次"
+        st.session_state["zscore_batch_selector"] = "请选择 多水平 批次"
         return None
     return None if current_id is None else int(current_id)
 
@@ -349,7 +349,7 @@ def render_project_batch_management(
                             st.success(f"项目“{project_name.strip()}”已创建。")
                             st.rerun()
 
-            st.subheader("项目列表与选择")
+            st.subheader("项目列表")
             if projects_df.empty:
                 st.info(TEXT["no_project"])
             else:
@@ -397,7 +397,7 @@ def render_project_batch_management(
                             )
                             if has_existing_batches:
                                 st.info(
-                                    "当前项目下已存在批次，输入值类型已锁定，不能修改。"
+                                    "该检测值类型已用于现有批次。需要使用新类型时，请另建项目。"
                                 )
                             edit_project_submitted = st.form_submit_button(
                                 "保存项目修改",
@@ -430,7 +430,7 @@ def render_project_batch_management(
                     current_project["input_value_type"]
                 )
                 st.caption(
-                    f"当前批次将归属于项目：{current_project['name']}｜输入值类型固定为 {current_input_value_type_label}。"
+                    f"项目：{current_project['name']}｜检测值类型： {current_input_value_type_label}。"
                 )
                 with st.form("create_batch_form", clear_on_submit=True):
                     instrument = st.text_input("仪器")
@@ -439,7 +439,7 @@ def render_project_batch_management(
                     concentration = st.text_input("浓度")
                     lot_no = st.text_input("质控品批号")
                     target_n = st.selectbox(
-                        "均值和标准差建立所需次数",
+                        "建立均值和标准差所需次数",
                         options=list(range(5, 21)),
                         index=15,
                     )
@@ -478,7 +478,7 @@ def render_project_batch_management(
                                 st.success(f"批次“{lot_no.strip()}”已创建。")
                                 st.rerun()
 
-            st.subheader("批次列表与选择")
+            st.subheader("批次列表")
             if selected_project_id is None:
                 st.info(TEXT["choose_project"])
             elif batches_df.empty:
@@ -507,17 +507,17 @@ def render_project_batch_management(
                 if selected_batch_id is not None:
                     current_batch = get_batch(selected_batch_id)
                     with st.expander("编辑当前批次"):
-                        st.markdown("**批次固定信息**")
+                        st.markdown("**本批次资料**")
                         st.text(f"仪器：{current_batch['instrument']}")
                         st.text(f"试剂：{current_batch['reagent']}")
                         st.text(f"质控品：{current_batch['qc_material']}")
                         st.text(f"浓度：{current_batch['concentration']}")
                         st.text(f"输入值类型：{get_input_value_type_label(current_batch['input_value_type'])}")
-                        st.text(f"均值和标准差建立所需次数：{current_batch['target_n']}")
+                        st.text(f"建立均值和标准差所需次数：{current_batch['target_n']}")
                         st.text(
                             f"允许不精密度（CV）：{format_optional_float(get_saved_batch_cv_limit(current_batch), digits=2, suffix='%')}"
                         )
-                        st.markdown("**可编辑信息**")
+                        st.markdown("**本次可修改的内容**")
                         with st.form("edit_batch_form"):
                             edit_lot_no = st.text_input(
                                 "质控品批号",
@@ -564,7 +564,7 @@ def render_zscore_project_batch_management(
         top_left, top_right = st.columns([1, 1.4])
 
         with top_left:
-            st.subheader("新建 Z-score 项目")
+            st.subheader("新建 多水平 项目")
             with st.form("create_zscore_project_form", clear_on_submit=True):
                 project_name = st.text_input("项目名称")
                 input_value_type = st.radio(
@@ -578,7 +578,7 @@ def render_zscore_project_batch_management(
                     options=[2, 3],
                     horizontal=True,
                 )
-                project_submitted = st.form_submit_button("创建 Z-score 项目", width="stretch")
+                project_submitted = st.form_submit_button("创建 多水平 项目", width="stretch")
 
                 if project_submitted:
                     if not project_name.strip():
@@ -595,12 +595,12 @@ def render_zscore_project_batch_management(
                         else:
                             st.session_state["zscore_selected_project_id"] = project_id
                             st.session_state["zscore_selected_batch_id"] = None
-                            st.success(f"Z-score 项目“{project_name.strip()}”已创建。")
+                            st.success(f"多水平 项目“{project_name.strip()}”已创建。")
                             st.rerun()
 
-            st.subheader("Z-score 项目列表与选择")
+            st.subheader("多水平 项目列表")
             if projects_df.empty:
-                st.info("当前还没有 Z-score 项目，请先创建项目并确定双水平或三水平流程。")
+                st.info("点击“创建多水平项目”，选择两个或三个水平。")
             else:
                 project_labels, project_options = build_zscore_project_select_options(projects_df)
                 sync_selector_state(
@@ -610,7 +610,7 @@ def render_zscore_project_batch_management(
                     placeholder=project_labels[0],
                 )
                 selected_project_label = st.selectbox(
-                    "选择 Z-score 项目",
+                    "选择 多水平 项目",
                     options=project_labels,
                     key="zscore_project_selector",
                 )
@@ -618,7 +618,7 @@ def render_zscore_project_batch_management(
                 if new_project_id != selected_project_id:
                     st.session_state["zscore_selected_project_id"] = new_project_id
                     st.session_state["zscore_selected_batch_id"] = None
-                    st.session_state["zscore_batch_selector"] = "请选择 Z-score 批次"
+                    st.session_state["zscore_batch_selector"] = "请选择 多水平 批次"
                     st.rerun()
 
                 project_table = _build_zscore_project_table(projects_df)
@@ -630,7 +630,7 @@ def render_zscore_project_batch_management(
                         current_project["input_value_type"]
                     )
                     has_existing_batches = count_project_batches(selected_project_id) > 0
-                    with st.expander("当前 Z-score 项目配置"):
+                    with st.expander("当前多水平项目设置"):
                         st.text(f"项目名称：{current_project['name']}")
                         st.text(f"水平数：{int(current_project['level_count'])} 水平")
                         st.text(f"输入值类型：{get_input_value_type_label(current_project['input_value_type'])}")
@@ -649,7 +649,7 @@ def render_zscore_project_batch_management(
                             )
                             if has_existing_batches:
                                 st.info(
-                                    "当前项目下已存在批次，输入值类型已锁定，不能修改。"
+                                    "该检测值类型已用于现有批次。需要使用新类型时，请另建项目。"
                                 )
                             edit_project_submitted = st.form_submit_button("保存项目修改", width="stretch")
                             if edit_project_submitted:
@@ -670,9 +670,9 @@ def render_zscore_project_batch_management(
                                         st.rerun()
 
         with top_right:
-            st.subheader("新建 Z-score 批次")
+            st.subheader("新建 多水平 批次")
             if selected_project_id is None:
-                st.info("请先选择 Z-score 项目。")
+                st.info("请先选择 多水平 项目。")
             else:
                 current_project = get_zscore_project(selected_project_id)
                 project_level_count = int(current_project["level_count"])
@@ -680,7 +680,7 @@ def render_zscore_project_batch_management(
                     current_project["input_value_type"]
                 )
                 st.caption(
-                    f"当前批次将归属于项目：{current_project['name']}｜固定为 {project_level_count} 水平｜输入值类型为 {current_input_value_type_label}。"
+                    f"项目：{current_project['name']}｜固定为 {project_level_count} 水平｜输入值类型为 {current_input_value_type_label}。"
                 )
                 with st.form("create_zscore_batch_form", clear_on_submit=True):
                     instrument = st.text_input("仪器")
@@ -695,7 +695,7 @@ def render_zscore_project_batch_management(
                     if project_level_count == 3:
                         level_3_label = st.text_input("水平 3 说明", placeholder="例如：高值质控")
                     target_n = st.selectbox(
-                        "均值和标准差建立所需次数",
+                        "建立均值和标准差所需次数",
                         options=list(range(5, 21)),
                         index=15,
                     )
@@ -703,7 +703,7 @@ def render_zscore_project_batch_management(
                         "允许不精密度（CV%）（可选）",
                         placeholder="例如：5.00",
                     )
-                    create_submitted = st.form_submit_button("创建 Z-score 批次", width="stretch")
+                    create_submitted = st.form_submit_button("创建 多水平 批次", width="stretch")
 
                     if create_submitted:
                         fields = [instrument, reagent, qc_material, concentration, lot_no]
@@ -734,14 +734,14 @@ def render_zscore_project_batch_management(
                                 st.error(str(exc))
                             else:
                                 st.session_state["zscore_selected_batch_id"] = batch_id
-                                st.success(f"Z-score 批次“{lot_no.strip()}”已创建。")
+                                st.success(f"多水平 批次“{lot_no.strip()}”已创建。")
                                 st.rerun()
 
-            st.subheader("Z-score 批次列表与选择")
+            st.subheader("多水平 批次列表")
             if selected_project_id is None:
-                st.info("请先选择 Z-score 项目。")
+                st.info("请先选择 多水平 项目。")
             elif batches_df.empty:
-                st.info("当前项目下还没有 Z-score 批次，请先创建批次。")
+                st.info("点击“创建多水平批次”，填写本次质控品资料。")
             else:
                 batch_labels, batch_options = build_zscore_batch_select_options(batches_df)
                 sync_selector_state(
@@ -751,7 +751,7 @@ def render_zscore_project_batch_management(
                     placeholder=batch_labels[0],
                 )
                 selected_batch_label = st.selectbox(
-                    "选择 Z-score 批次",
+                    "选择 多水平 批次",
                     options=batch_labels,
                     key="zscore_batch_selector",
                 )
@@ -765,14 +765,14 @@ def render_zscore_project_batch_management(
 
                 if selected_batch_id is not None:
                     current_batch = get_zscore_batch(selected_batch_id)
-                    with st.expander("当前 Z-score 批次配置"):
+                    with st.expander("当前多水平批次设置"):
                         current_level_ids = list(resolve_zscore_batch_context(selected_batch_id)["required_level_ids"])
                         st.text(f"项目：{current_batch['project_name']}")
                         st.text(f"质控品批号：{current_batch['lot_no']}")
                         st.text(f"水平数：{int(current_batch['level_count'])} 水平")
                         st.text(f"输入值类型：{get_input_value_type_label(current_batch['input_value_type'])}")
                         st.text(f"水平说明：{format_zscore_level_label_summary(current_batch, current_level_ids)}")
-                        st.text(f"均值和标准差建立所需次数：{current_batch['target_n']}")
+                        st.text(f"建立均值和标准差所需次数：{current_batch['target_n']}")
                         st.text(
                             f"允许不精密度（CV）：{format_optional_float(get_saved_batch_cv_limit(current_batch), digits=2, suffix='%')}"
                         )
@@ -823,14 +823,14 @@ def build_batch_select_options(batches_df: pd.DataFrame) -> tuple[list[str], dic
 
 
 def build_zscore_project_select_options(projects_df: pd.DataFrame) -> tuple[list[str], dict[str, int | None]]:
-    option_map = {"请选择 Z-score 项目": None}
+    option_map = {"请选择 多水平 项目": None}
     for _, row in projects_df.iterrows():
         option_map[build_zscore_project_label(row)] = int(row["id"])
     return list(option_map.keys()), option_map
 
 
 def build_zscore_batch_select_options(batches_df: pd.DataFrame) -> tuple[list[str], dict[str, int | None]]:
-    option_map = {"请选择 Z-score 批次": None}
+    option_map = {"请选择 多水平 批次": None}
     for _, row in batches_df.iterrows():
         option_map[build_zscore_batch_label(row)] = int(row["id"])
     return list(option_map.keys()), option_map

@@ -8,8 +8,8 @@ from ui.quality_targets import render_spec
 
 
 def render_quality_catalog():
-    st.caption('按检验项目查找现行质量要求，核对检测方法和适用条件后采用。')
-    st.caption('对照与质控要求作为参考，在“质量目标设置”中自动带入后，可按当地或本实验室要求修改。')
+    st.caption('搜索检验项目，查看标准规定的质量要求。在“质量目标设置”中填写检测方法和单位后即可采用。')
+    st.caption('“对照与质控要求”的参考文字会带入质量目标设置，可改成本实验室实际执行的要求。')
     section = st.radio('查看内容', ['projects', 'general'],
         format_func=lambda v: {'projects':'检验项目要求', 'general':'通用质控要求'}[v],
         horizontal=True, key='quality_catalog_section')
@@ -26,7 +26,7 @@ def render_quality_catalog():
     else:
         st.caption(f'找到 {len(records)} 条要求')
     if not records:
-        st.info('未找到匹配的现行要求。请调整关键词或检验类别；仍未找到时，可在质量目标设置中补充依据。')
+        st.info('没有找到此项目的质量要求。请换关键词或检验类别搜索；也可在“质量目标设置”中填写实验室要求。')
         return
     frame = pd.DataFrame(catalog_display_rows(records))
     st.dataframe(frame, hide_index=True, width='stretch', height=min(360, 36 * (len(frame) + 1) + 4))
@@ -45,13 +45,13 @@ def render_quality_catalog():
             render_spec(row['spec'])
         else:
             st.caption(row['source']['standard']+'｜'+row['source']['name'])
-            st.write('适用条件：'+row['scope'])
+            st.write('标准规定的检测条件：'+row['scope'])
             for requirement in row['spec']['requirements']:
                 st.write(requirement)
-            st.caption('以上为标准参考内容，可在质量目标设置中按当地或本实验室要求调整。'
-                       if row['kind'] == 'process' else '请按以上要求人工核对，并记录对照结果和处理情况。')
+            st.caption('以上是标准参考内容。可在“质量目标设置”中改成本实验室实际执行的要求。'
+                       if row['kind'] == 'process' else '请按以上要求检查对照结果，并记录结果和异常处理情况。')
             st.caption('条款：'+row['spec']['source_clause']+'｜原文第 '+str(row['spec']['source_page'])+' 页（含封面）')
-            st.link_button('查看依据原文', row['source']['source_url'])
+            st.link_button('查看标准原文', row['source']['source_url'])
             for related in row.get('related_sources', []):
                 st.markdown('**'+related['name']+'**')
                 st.caption(related['source_type'])

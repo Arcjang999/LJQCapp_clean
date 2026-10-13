@@ -60,10 +60,10 @@ def _render_job(job_id):
         return
     try:
         archive = build_monthly_report_zip(job_id)
-        st.download_button('下载已生成报告、完整归档及清单', archive, file_name=f"{job['period_start']}_{job['period_end']}_质控报告汇集_{job_id}.zip",
+        st.download_button('下载全部报告和附件（ZIP）', archive, file_name=f"{job['period_start']}_{job['period_end']}_质控报告汇集_{job_id}.zip",
                            mime='application/zip', key='monthly_zip_download')
     except Exception:
-        st.error('下载文件暂未准备好，已保存报告仍保留。可重新打开或逐份下载。')
+        st.error('报告和附件的ZIP生成失败。请重新打开此页面，或从报告历史逐份下载已保存的报告。')
     selected = st.selectbox('查看单份报告', list(succeeded),
         format_func=lambda value: succeeded[value]['selection']['project_name'] + '｜' + succeeded[value]['selection']['lot_no'] +
             '｜' + succeeded[value]['selection']['instrument_name'], key='monthly_individual_' + str(job_id))
@@ -72,7 +72,7 @@ def _render_job(job_id):
         report = read_monthly_report_item(job_id, selected)
         st.download_button('下载此份原报告', report['pdf_bytes'], file_name=report['file_name'], mime='application/pdf', key='monthly_single_download')
         if report['archive_bytes']:
-            st.download_button('下载此份完整归档', report['archive_bytes'], file_name=report['archive_name'],
+            st.download_button('下载这份报告和附件（ZIP）', report['archive_bytes'], file_name=report['archive_name'],
                                mime='application/zip', key='monthly_single_archive')
     except ValueError as exc:
         st.error(str(exc))
@@ -89,8 +89,8 @@ def _render_job(job_id):
         '计数依据': row['counting_unit'], '正式期检测次数': row['formal_count'], '在控': row['in_control_count'],
         '警告': row['warning_count'], '失控': row['out_of_control_count'], '待判读': row['undetermined_count'],
         '待处理检测': row['pending_event_count'], '尚未登记处理': row['unopened_count'], '已登记待完成': row['registered_pending_count']} for row in summary['reports']]), hide_index=True, width='stretch')
-    st.markdown('**各参数版本的 CV 评价**')
-    st.dataframe(pd.DataFrame([{'项目': row['project_name'], '批次': row['batch_label'], '水平及参数版本': row['level'],
+    st.markdown('**按不同均值和SD分开的CV评价**')
+    st.dataframe(pd.DataFrame([{'项目': row['project_name'], '批次': row['batch_label'], '水平 / 均值和SD版本': row['level'],
         '在控结果数': row['count'], '检测日数': row['days'], 'CV（%）': row['cv'], '采用要求': row['requirement'],
         '评价': row['decision']} for row in summary['cv_rows']]), hide_index=True, width='stretch')
     if summary['events']:
@@ -111,7 +111,7 @@ def render_batch_monthly_reports_page():
         st.rerun()
     from ui.common import render_module_header
     render_module_header('批量质控报告',
-        '选择月份或起止日期、仪器和项目，核对后分别保存质控报告及完整归档。未完成项可单独重试。',
+        '选择日期、仪器和项目，核对清单后生成报告。报告和附件一同保存；失败的报告可单独重试。',
         tone='reports',eyebrow='报告管理')
     choices = list_monthly_report_choices()
     from ui.report_period import render_report_period, render_handling_versions
@@ -145,7 +145,7 @@ def render_batch_monthly_reports_page():
             report_month=period.report_month, period_start=period.start_date, period_end=period.end_date,
             lab_instrument_id=instrument, template_id=template, methods=sorted(methods)).items())
         if not valid_scope:
-            st.info('日期或项目范围已变化，请重新核对清单。')
+            st.info('日期、仪器或项目已换，请重新点“核对待生成清单”。')
         else:
             st.subheader('待生成清单')
             if preview['items']:
@@ -157,11 +157,11 @@ def render_batch_monthly_reports_page():
                 frozen_handling = {int(key): int(value) for key, value in preview['scope'].get('handling_versions', {}).items()}
                 handling_changed = chosen_handling != frozen_handling
                 if handling_changed:
-                    st.info('处理版本已变化，请再次核对待生成清单。')
+                    st.info('您选了另一版处理记录，请重新点“核对待生成清单”。')
                 chosen = st.multiselect('选择本次生成的报告', list(candidates), default=list(candidates),
                     format_func=lambda key: candidates[key]['project_name'] + '｜' + candidates[key]['lot_no'],
                     key='monthly_selection_' + st.session_state['monthly_request_id'])
-                if st.button('生成所选报告并分别归档', type='primary', disabled=not chosen or handling_changed, key='monthly_generate'):
+                if st.button('生成并保存所选报告', type='primary', disabled=not chosen or handling_changed, key='monthly_generate'):
                     try:
                         job_id = create_monthly_report_job(preview, chosen, st.session_state['monthly_request_id'])
                         st.session_state['monthly_current_job'] = job_id

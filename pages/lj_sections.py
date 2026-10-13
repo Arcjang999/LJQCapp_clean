@@ -109,8 +109,8 @@ def render_lj_building_outlier_panel(
             ("当前阶段", str(panel_data["phase_label"])),
             ("当前有效建立点数", str(panel_data["effective_building_count"])),
             ("当前已禁用点数", str(panel_data["disabled_building_count"])),
-            ("当前建设定均值", _format_lj_stat_text(panel_data["mean"])),
-            ("当前建设定 SD", _format_lj_stat_text(panel_data["sd"])),
+            ("当前建靶均值", _format_lj_stat_text(panel_data["mean"])),
+            ("当前建靶SD", _format_lj_stat_text(panel_data["sd"])),
             ("实测变异系数（%）", _format_lj_stat_text(panel_data["cv"], digits=2, suffix="%")),
         ]
     )
@@ -441,7 +441,7 @@ def render_lj_entry_and_stats_section(
             ]
         )
         st.caption(
-            "已使用确认的控制参数，后续结果按适用版本判读。" if confirmed_target else "参数建立进度："
+            "后续检测使用已确认的均值和SD进行判读。" if confirmed_target else "参数建立进度："
             + (
                 "已完成，后续结果自动进行 Westgard 判定。"
                 if stats.get("target_ready")

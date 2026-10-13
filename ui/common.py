@@ -1317,7 +1317,7 @@ def render_zscore_batch_header(
     )
     detail_items = [
         ("项目名称", project_name),
-        ("批次标识", batch_display),
+        ("批次", batch_display),
         ("当前阶段", phase_label),
         ("水平数", f"{int(level_count)} 水平"),
         ("参数建立所需点数", f"{int(required_n)} 次"),
@@ -1331,7 +1331,7 @@ def render_zscore_batch_header(
         ("质控品批号", lot_no),
         ("单位", unit_symbol),
         ("检测方法", method_name),
-        ("配置名称", config_name),
+        ("批次名称", config_name),
         ("批号效期", expiry_date),
         ("允许不精密度（CV）", "-" if cv_limit is None else f"≤ {float(cv_limit):.2f}%"),
     ]
@@ -1737,7 +1737,7 @@ def prepare_display_records(
         "is_building_included": "参与参数建立统计",
         "is_outlier_suspect": "疑似离群",
         "outlier_status": "离群状态",
-        "manual_status": "手工处理状态",
+        "manual_status": "人工处理状态",
         "outlier_method": "离群方法",
         "grubbs_statistic": "Grubbs G",
         "grubbs_threshold": "G临界值",
@@ -1913,8 +1913,8 @@ def render_status_panel(
 def render_standard_view_help(standard_sd_limit: float) -> None:
     st.caption(
         (
-            f"标准视图按均值 ± {standard_sd_limit:g}SD 聚焦主要波动区间，超界点会用边界标记和原始值提示；"
-            "切换到全范围视图可查看真实完整范围。"
+            f"标准视图显示均值 ± {standard_sd_limit:g}SD。超出图面范围的点在边缘标出原始值；"
+            "切换“全范围视图”查看全部数值。"
         )
     )
 

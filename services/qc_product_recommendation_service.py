@@ -102,7 +102,7 @@ def validate_qc_product_choice(*, qc_material_id, reagent_id, lab_instrument_id,
         _active(connection, {**identity, 'qc_material_id': qc_material_id})
         context = _context(connection, identity)
         if expected_revision is not None and expected_revision != context['revision']:
-            raise ValueError('试剂与质控品适用资料已变化，请保留输入并重新核对候选及选品依据。')
+            raise ValueError('该试剂可用的质控品资料已修改。填写内容仍保留，请重新选择质控品并确认选择理由。')
         candidate = next((row for row in context['candidates'] if row['qc_material_id'] == int(qc_material_id)), None)
         manual = _decode(manual_review)
         if manual:
@@ -112,7 +112,7 @@ def validate_qc_product_choice(*, qc_material_id, reagent_id, lab_instrument_id,
             return dict(version=1, context=identity, qc_material_id=int(qc_material_id), revision=context['revision'],
                         basis='manual', relation_ids=[], confirmed_by=actor, evidence=evidence)
         if candidate is None:
-            raise ValueError('暂无匹配的已核对适用关系。可以人工选择，但须填写核对人及适用依据。')
+            raise ValueError('尚未登记该试剂可用的质控品。请人工选择质控品，并填写核对人和选择理由。')
         return dict(version=1, context=identity, qc_material_id=int(qc_material_id), revision=context['revision'],
                     basis='recommendation', relation_ids=candidate['relation_ids'],
                     confirmed_by='；'.join(candidate['confirmed_by']), evidence='；'.join(candidate['evidence']))
@@ -236,7 +236,8 @@ def save_draft_product_choice(scope, item_id, review, *, expected_revision):
     with atomic_write() as connection:
         item, identity, frozen = _draft_choice_context(connection, scope, item_id)
         if frozen or item['owner_disabled']:
-            raise ValueError('仅待确认草稿可以更新适用核对；已确认批次的依据保持不变。')
+            raise ValueError('项目或批次已停用，请先恢复后重新打开。' if item['owner_disabled'] else
+                             '本批次已确认，选择质控品的依据已保存。如需更换，请新建批次并重新确认。')
         if int(expected_revision) != int(item['owner_revision']):
             raise ValueError('项目或批次草稿已变化，请重新打开核对。')
         confirmed = validate_choice_review(review, qc_material_id=item['qc_material_id'], **identity)

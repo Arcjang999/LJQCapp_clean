@@ -21,7 +21,7 @@ def render_lj_monthly_report_section(selected_batch_id: int) -> None:
     batch = get_batch(selected_batch_id)
     months = list_lj_report_month_options(selected_batch_id)
     with st.container(border=True):
-        render_section_intro(title="单水平（LJ）质控报告", caption="选择月份或起止日期，核对后生成并保存 PDF 和完整归档。", tone="accent")
+        render_section_intro(title="单水平（LJ）质控报告", caption="选择日期，核对报告后生成PDF。报告、处理记录和附件一同保存，可分别下载。", tone="accent")
         st.caption(f"{batch['project_name']} · {_build_batch_display(batch)} · 正式期")
         if not months:
             st.info("当前批次暂无正式期检测记录。进入正式期并录入结果后，可生成质控报告。")
@@ -48,7 +48,7 @@ def _render_report_preview(package: LjMonthlyReportPackage) -> None:
     render_compact_stat_metrics([(label.replace('月度', '期间'), value) for label, value in build_lj_monthly_preview_summary(report)])
     pending = getattr(report.statistics, 'pending_count', getattr(report.statistics, 'undetermined_count', 0))
     if pending:
-        st.info(f'所选期间有 {pending} 次检测待判读，请核对适用均值和标准差。')
+        st.info(f'所选期间有 {pending} 次检测尚无有效质控结论，请到批次设置核对这些检测使用的均值和SD。')
 
     st.markdown("**期间质控概况**")
     st.write(report.overview_text)
@@ -59,7 +59,7 @@ def _render_report_preview(package: LjMonthlyReportPackage) -> None:
             ("科室名称", report.basic_info.department_name),
             ("检验员", report.basic_info.qc_owner_name),
             ("复核员", report.basic_info.reviewer_name),
-            ("方法", report.basic_info.method_label),
+            ("质控方法", report.basic_info.method_label),
             ("检测方法", report.basic_info.detection_method),
             ("单位", report.basic_info.unit_symbol),
             ("报告期间", report.report_period_label),

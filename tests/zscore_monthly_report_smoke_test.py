@@ -339,7 +339,7 @@ def test_zscore_monthly_report_page_exposes_generate_and_download_flow() -> None
                 "检测时间",
                 "检测序号",
                 "本次检测结论",
-                "各水平触发证据",
+                "各水平触发规则及检测值",
                 "手动备注",
             }.issubset(set(dataframe.value.columns))
         ]
@@ -350,7 +350,7 @@ def test_zscore_monthly_report_page_exposes_generate_and_download_flow() -> None
         abnormal_df = abnormal_tables[0]
         assert len(abnormal_df) == 2
         assert set(abnormal_df["本次检测结论"].tolist()) == {"警告", "失控"}
-        assert all("水平" in str(value) for value in abnormal_df["各水平触发证据"].tolist())
+        assert all("水平" in str(value) for value in abnormal_df["各水平触发规则及检测值"].tolist())
         assert not any("run" in str(column).lower() or "level" in str(column).lower() for column in abnormal_df.columns)
         assert "建议查看本次检测规则触发证据" in abnormal_df["手动备注"].tolist()
         assert not any("run" in str(value).lower() for value in abnormal_df["手动备注"].tolist())

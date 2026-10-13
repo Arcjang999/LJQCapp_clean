@@ -297,9 +297,9 @@ def _render_import_dialog(state):
     if locked:
         st.info("当前批次已完成建靶，请选择正式期导入。")
     elif phase == "formal" and not _ready(method, current):
-        st.info("当前批次尚未完成建靶，可先审查文件，完成建靶后再确认导入正式期数据。")
+        st.info("当前批次尚未完成建靶。可以先检查文件，完成建靶后再点“确认导入”。")
     st.caption("按本次数据的用途选择导入阶段，下载当前模板填写后上传CSV或单工作表Excel。"
-               "审查通过并核对预览后再确认导入；切换阶段需重新上传。未填试剂批号的行会保存为“未记录”。")
+               "点击“检查文件并预览”，核对后再点“确认导入”。切换阶段后请重新上传；未填试剂批号的行会保存为“未记录”。")
     st.caption("建靶数据与正式期数据分别导入。正式期数据请在完成建靶后选择“正式期”；"
                "“全部”检测数据导出文件用于查询和留档，不能直接作为当前阶段的导入文件。")
     template = (build_lj_building_template_dataframe(current["input_value_type"]) if method == "lj" else
@@ -324,8 +324,8 @@ def _render_import_dialog(state):
     signature = _import_source_signature(method, current)
     if state.get("review") and state.get("source_signature") != signature:
         state.update(review=None, source_signature=None)
-        st.info("当前批次数据或设置已变化，请重新审查文件。")
-    if st.button("审查并预览", disabled=locked or not data, key=f"qc_transfer_review_{nonce}", width="stretch"):
+        st.info("此批次的检测数据或设置已更新，请重新点“检查文件并预览”。")
+    if st.button("检查文件并预览", disabled=locked or not data, key=f"qc_transfer_review_{nonce}", width="stretch"):
         try:
             state["review"] = review_data_import(method, current, batch_id, phase, data)
             state["source_signature"] = signature
@@ -336,9 +336,9 @@ def _render_import_dialog(state):
     if review:
         render_import_review_summary(review["summary"])
         if review["summary"]["has_blocking_errors"]:
-            st.error("审查未通过，请修正问题后重新上传，本次数据尚未导入。")
+            st.error("文件有下列问题。请修正后重新上传，再检查一次；本次数据尚未导入。")
         else:
-            st.success("审查通过，请核对检测时间、结果和实际试剂批号。")
+            st.success("文件检查通过。请核对下方检测时间、结果和实际试剂批号，再点“确认导入”。")
         issues = build_review_issues_dataframe(review["issues"])
         if not issues.empty:
             st.dataframe(issues, hide_index=True, width="stretch")

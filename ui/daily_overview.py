@@ -72,7 +72,7 @@ def render_daily_overview():
     items=result['items']; metrics=st.columns(3)
     metrics[0].metric('当日检测次数',result['count']);metrics[1].metric('当日曾失控项目',sum(i['ever_reject'] for i in items))
     metrics[2].metric('未完成处理',len(result['pending']['items'])+len(result['pending']['cross_day']))
-    st.caption('多水平的全部水平合计为一次检测。“今日无记录”表示所选日期没有保存结果，请结合实验室检测安排核对；本页不计算漏做率。')
+    st.caption('多水平同一次检测按1次统计。“今日无记录”表示所选日期没有已保存的结果，请结合当日检测安排核对。')
     frame=pd.DataFrame([{'项目':i['template_name'],'检验项目':i['test_item_name'],'仪器':i['instrument_name'],
         '质控品':i['material_name'],'批次':i['config_name'],'质控方法':METHOD_LABELS[i['qc_method']],
         '阶段':i['phase'],'当日次数':i['count'],'最新结论':(i['latest'] or {}).get('conclusion','今日无记录'),

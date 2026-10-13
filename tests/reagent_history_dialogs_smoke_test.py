@@ -91,7 +91,7 @@ def test_all_event_types_are_read_only_and_original_result_provenance_remains_av
         assert {'试剂换批', '均值和标准差确认'} <= set(app.dataframe[0].value['操作'])
         app.selectbox(key='reagent_history_result_binding').set_value(fixture['binding']).run()
         assert not app.exception
-        assert any(expander.label == '实际批号与历史判定追溯' for expander in app.expander)
+        assert any(expander.label == '检测批号与判读记录' for expander in app.expander)
         assert any('历史试剂-A' in str(table.value) for table in app.dataframe)
         assert database_state() == before
 
@@ -151,7 +151,7 @@ def test_cancel_discard_and_reopen_use_independent_drafts_and_require_explicit_c
         assert app.text_input(key=key(app, 'operator')).value == ''
         assert app.text_area(key=key(app, 'reason')).value == ''
         app.button(key='reagent_history_save').click().run()
-        assert any('明确确认' in error.value for error in app.error)
+        assert any('勾选核对确认' in error.value for error in app.error)
         assert database_state() == before
 
 
@@ -195,7 +195,7 @@ def test_filters_selection_and_provenance_survive_page_return_and_save_selects_n
         assert app.session_state['reagent_history_selected_event'] == new_id
         assert app.text_input(key='reagent_history_search').value == ''
         assert app.selectbox(key='reagent_history_system').value == fixture['source']['system_id']
-        assert any(f'事件 {new_id}｜' in caption.value for caption in app.caption)
+        assert any(f'记录 {new_id}｜' in caption.value for caption in app.caption)
 
 
 def test_stopped_historical_system_keeps_details_and_correction_targets_use_actual_ids():
@@ -234,7 +234,7 @@ def test_future_event_and_actual_level_lots_display_without_changing_time_semant
         app = make_app(future_id)
         assert not app.exception
         frame = app.dataframe[0].value
-        assert frame.loc[frame['事件编号'] == future_id, '时间状态'].iloc[0] == '尚未生效'
+        assert frame.loc[frame['记录编号'] == future_id, '时间状态'].iloc[0] == '尚未生效'
         assert any('尚未生效' in caption.value for caption in app.caption)
         labels = app.selectbox(key='reagent_history_result_binding').options
         assert any('实际浓度批号-1；实际浓度批号-2' in label for label in labels)

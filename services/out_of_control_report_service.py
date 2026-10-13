@@ -143,7 +143,7 @@ def build_event_report_package_from_snapshot(event: dict, attachments: list[dict
         "file_name": f"失控处理报告_{int(event_id)}_V{revision}_{uid[:8]}.pdf",
         "event": event,
         "lab_info": info,
-        "declaration": ("本报告用于室内质控事件处理的归档与复核，应结合原检测记录、复测证据及实验室调查综合评估。"
+        "declaration": ("本报告保存本次室内质控异常的调查和处理记录，供实验室结合原始检测和复测结果核对。"
                         if statement == DEFAULT_REPORT_STATEMENT else statement),
         "attachments": deepcopy(attachments),
     }
@@ -172,7 +172,7 @@ def render_event_report_pdf(package: dict) -> bytes:
             f"实际试剂批号：{_text(context.get('reagent_lot_no') or context.get('actual_reagent_lot_no'))}；参数版本：{_text(target.get('version_no', target.get('version')))}；参数依据：{_text(target.get('evidence'))}。",
             f"原手动备注（已有资料）：{_text(origin.get('manual_note'))}。",
         ]),
-        _section("各水平检测证据", _level_paragraphs(origin)),
+        _section("各水平检测结果", _level_paragraphs(origin)),
         _section("原检测采用的质量要求", _quality_paragraphs(origin)),
         _section("原因分析与纠正措施", [
             f"原因分类：{_text(content.get('cause_category'))}",
@@ -187,19 +187,19 @@ def render_event_report_pdf(package: dict) -> bytes:
         retests.append(f"复测{index}：{_text(snapshot.get('test_time'))}；结论 {CLASSIFICATION_LABELS.get(snapshot.get('classification'), _text(snapshot.get('classification')))}；触发规则 {_text(snapshot.get('rule_names'))}；差异说明 {_text(ref.get('difference_reason'))}。")
         retests.extend(_level_paragraphs(snapshot))
     sections.extend([
-        _section("关联复测", retests or ["未记录关联复测；不代表已复测或复测合格。"]),
+        _section("关联复测", retests or ["尚未填写复测记录，请结合实验室实际复测情况核对。"]),
         _section("处理效果与人员记录", [
             f"效果说明：{_text(content.get('effect_description'))}",
             f"效果依据：{_text(content.get('effect_evidence'))}",
             f"处理人：{_text(content.get('handler_text'))}；处理时间：{_text(content.get('handled_at'))}。",
-            f"确认人：{_text(content.get('confirmer_text'))}；确认时间：{_text(content.get('confirmed_at'))}。人员文字为业务记录，不代表电子签名。",
+            f"确认人：{_text(content.get('confirmer_text'))}；确认时间：{_text(content.get('confirmed_at'))}。姓名和时间作为处理记录保存，报告打印后由检验员、复核员签名。",
         ]),
         _section("患者结果影响评估", [
             f"评估情况：{_text(content.get('patient_impact_assessment'))}；影响范围：{_text(content.get('patient_impact_scope'))}。",
             f"影响期间：{_text(content.get('patient_impact_start'))} 至 {_text(content.get('patient_impact_end'))}。",
             f"处理措施：{_text(content.get('patient_impact_actions'))}",
             f"评估依据：{_text(content.get('patient_impact_basis'))}",
-            "本报告记录质控事件处理，不自动确认患者结果可放行。",
+            "患者结果是否可放行，由实验室结合调查确认。",
         ]),
         _section("附件清单", [
             f"附件{index}：{_text(item.get('original_name'))}；说明：{_text(item.get('description'))}；"
@@ -210,7 +210,7 @@ def render_event_report_pdf(package: dict) -> bytes:
         _section("报告声明", [
             _text(package.get("declaration")),
             "检验员签名：____________  日期：____________；复核员签名：____________  日期：____________。",
-            "报告按所列处理版本及原检测证据保存；以后补充或修订另存报告，原文件不覆盖。缺失历史资料以未记录表示。",
+            "本报告保存所列处理记录和原检测结果。后续补充或更正会另存新报告，这份原报告保留。历史资料缺项显示“未记录”。",
         ]),
     ])
     buffer = BytesIO()

@@ -84,7 +84,7 @@ def _validate(c, payload):
         errors.extend(item['issues'])
         for field in ('lot_config_item_id', 'runtime_project_id', 'runtime_batch_id', 'unit_id', 'input_value_type', 'qc_method'):
             if field in requested and requested[field] != item[field]:
-                problem('检测项身份、单位或输入尺度已变化，请重新核对。', field)
+                problem('检验项目、单位或输入值类型已修改，请重新核对本次录入。', field)
         values = requested.get('levels')
         if not isinstance(values, list):
             problem('请填写该检测项的全部水平。', 'levels')
@@ -248,7 +248,7 @@ def submit_daily(request):
             previous = c.execute('SELECT payload_hash,receipt_json FROM qc_daily_submissions WHERE submission_id=?', (payload['submission_id'],)).fetchone()
             if previous:
                 if previous['payload_hash'] != digest:
-                    raise DailyEntryError([issue('本次提交标识已用于不同内容，请核对原回执或建立新一轮检测。', field='submission_id')])
+                    raise DailyEntryError([issue('本组已经保存，但当前填写内容与已保存结果不同。请查看保存结果；录入下一次检测时开始新一组。', field='submission_id')])
                 return json.loads(previous['receipt_json'])
             validation, prepared = _validate(c, payload)
             if not validation['valid']:

@@ -166,7 +166,7 @@ def split_report_chart_frames(method, frame, *, max_detections=60):
         return [frame.copy()]
     column = 'id' if method == 'lj' else 'run_id'
     if column not in frame or 'test_time' not in frame:
-        raise ValueError('质控图缺少检测身份或时间，请重新核对。')
+        raise ValueError('质控图缺少检测编号或检测时间，请重新打开报告预览。')
     ordered = frame.sort_values(['test_time', column], kind='stable')
     detections = ordered.drop_duplicates(column)
     groups, current, previous = [], [], object()
@@ -1034,7 +1034,7 @@ def _process_requirement_report_sections(review):
     requirement = str(process.get('requirement_text') or '').strip()
     title = ('本实验室对照与质控要求（待确认）' if review.get('status') == 'pending'
              else '本实验室实际对照与质控要求')
-    sections = [(title, [requirement or '未填写；参考条款不作为本实验室实际要求。'])]
+    sections = [(title, [requirement or '本实验室实际要求尚未填写。下方条款为参考，请按实验室实际情况核对。'])]
     selected_ids = set(process.get('source_ids') or [])
     references = []
     for source in review.get('candidates', []):
@@ -1064,7 +1064,10 @@ def _build_quality_pages(report):
         evidence.append(f"{source['standard']} / {source['version']}；{source['source_clause']}；PDF {source['source_page']}。{source['requirement_text']}；仅登记依据，尚无自动评价。")
     recorded=review.get('recorded',{})
     if recorded:
-        evidence.append(f"{recorded['source_name']} / {recorded['source_version']}：{recorded['requirement_text']}；仅登记依据，尚无自动评价。")
+        comparison = ('未设置CV上限，未进行CV目标比较；单次质控仍使用所选方法的现有规则。'
+                      if review.get('search_record', {}).get('scope') == 'local_catalog'
+                      else '仅登记依据，尚无自动评价。')
+        evidence.append(f"{recorded['source_name']} / {recorded['source_version']}：{recorded['requirement_text']}；{comparison}")
     if review:
         evidence.append(f"确认人 {review.get('confirmed_by','')}；确认时间 {review.get('reviewed_at','')}；适用依据：{review.get('evidence','')}")
         from services.quality_applicability_service import CONTEXT_OPTIONS, CONTEXT_LABELS
@@ -1073,7 +1076,8 @@ def _build_quality_pages(report):
                             for k,v in review['context'].items()))
         search=review.get('search_record',{})
         if search:
-            evidence.append('标准查找复核：'+search.get('checked_on','')+'；'+search.get('query','')+'；'+search.get('rationale',''))
+            label = '已收录标准核对：' if search.get('scope') == 'local_catalog' else '标准查找复核：'
+            evidence.append(label+search.get('checked_on','')+'；'+search.get('query','')+'；'+search.get('rationale',''))
     extra=[_quality_section('适用标准及补充依据',evidence)] if evidence else []
     extra.extend(_quality_section(title, paragraphs)
                  for title, paragraphs in _process_requirement_report_sections(review))
@@ -1091,7 +1095,11 @@ def _build_quality_pages(report):
     return _build_text_pages(report_title=report.title,page_title='分析质量要求与实测 CV',
         subtitle_lines=[f"项目：{report.basic_info.project_name} / {report.report_month_label}"],
         sections=[
-            _quality_section('采用来源与依据',[f"{spec['name']}；{spec['standard']} / {spec['version']}；实施 {spec['effective_date']}；{spec['source_clause']}；PDF页码 {spec.get('source_page') or '未提供'}。",
+            _quality_section('采用来源与依据',[f"{spec['name']}；{spec['standard']} / {spec['version']}；实施 {spec['effective_date']}；{spec['source_clause']}"+
+                (f"；PDF页码 {spec.get('source_page') or '未提供'}。" if spec['origin']=='builtin' else '；实验室自定义要求。'),
+                *([f"实验室依据：{spec['laboratory_basis']['source_name']} / {spec['laboratory_basis']['source_version']}。"]
+                    if spec.get('laboratory_basis') else []),
                 f"确认人 {goal['confirmed_by']}；采用时间 {goal['adopted_at']}；依据：{goal['evidence']}"]),
-            _quality_section('不精密度比较',rows+[summary['statistics_scope']+'。仅比较统计值与所选限值，不代表完成标准规定的全部验证。']),
-            _quality_section('其他要求（未自动评价）',[f"允许偏倚：{spec['bias_text'] or '原条款未规定'}",f"允许总误差/可比性偏差：{spec['tea_text'] or '原条款未规定'}",spec['notes'] or '无补充说明']),*extra])
+            _quality_section('不精密度比较',rows+[summary['statistics_scope']+'。此处列出实测CV与所选上限的比较。标准要求的完整验证，请结合实验室验证记录核对。']),
+            _quality_section('其他要求（未自动评价）',[f"允许偏倚：{spec['bias_text'] or ('原条款未规定' if spec['origin']=='builtin' else '未设置')}",
+                f"允许总误差/可比性偏差：{spec['tea_text'] or ('原条款未规定' if spec['origin']=='builtin' else '未设置')}",spec['notes'] or '无补充说明']),*extra])

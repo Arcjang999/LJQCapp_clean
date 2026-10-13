@@ -27,8 +27,8 @@ def render_quick_project_setup(ctx):
     from ui.project_dialogs import _cancel
     step = ctx.get('quick_step', 'details')
     st.subheader('新建项目')
-    st.caption({'details': '1 检测设置与实际质控品', 'quality': '2 核对质量要求',
-                'preview': '3 核对后保存并进入录入'}[step])
+    st.caption({'details': '1 选择检验项目、仪器、试剂和质控品', 'quality': '2 设置质量要求',
+                'preview': '3 查看设置，保存后开始录入'}[step])
     if step == 'details':
         _render_details(ctx)
     elif step == 'quality':
@@ -39,7 +39,7 @@ def render_quick_project_setup(ctx):
 
 def request_setup_mode(ctx, target):
     if any(key.endswith('_editor') and value for key, value in ctx.items()):
-        st.warning('请先保存或取消正在填写的适用关系，再切换项目设置方式。')
+        st.warning('下方还有未完成的试剂与质控品配套记录。请先保存或取消，再切换设置方式。')
         return
     if ctx['draft'] != ctx['initial']:
         ctx['setup_mode_switch'] = target
@@ -50,7 +50,7 @@ def request_setup_mode(ctx, target):
 
 def render_setup_mode_switch(ctx):
     target = ctx['setup_mode_switch']
-    st.warning('切换后保留项目名称、仪器、试剂、质控品和默认方法；检验项目、实际水平及质量要求需要重新核对。')
+    st.warning('切换后保留项目名称、仪器、试剂、质控品和默认方法。请重新选择检验项目和各水平，并填写质量要求。')
     keep, change = st.columns(2)
     if keep.button('继续当前设置', key='setup_mode_keep', type='primary'):
         ctx.pop('setup_mode_switch', None)
@@ -134,7 +134,7 @@ def _render_details(ctx):
         materials = available_materials(draft['qc_material_id'])
         options = {int(row['id']): row for row in materials.to_dict('records')}
         if not options:
-            st.info('此质控品尚无实际批号，请在质控品管理或单位资料准备中登记后再选择。')
+            st.info('此质控品还没有批号。请在“质控品管理”的“管理批次”中登记本次批号和各水平，再回到这里选择；也可使用“单位资料准备”登记。')
         level_ids = []
         prior_levels = list(draft.get('level_ids', []))
         for order in range(1, draft['level_count'] + 1):
@@ -149,7 +149,7 @@ def _render_details(ctx):
             if selected is not None:
                 level_ids.append(selected)
         draft['level_ids'] = level_ids
-        st.caption('各水平分别核对，不能重复选择同一条材料。实际试剂批号在每次检测时选择。')
+        st.caption('为每个水平选择质控品批号和效期，各水平须使用不同的质控品记录。试剂批号在录入检测结果时选择。')
     _text(ctx, 'config_name', '批次名称（留空自动生成）')
     with st.expander('分组与项目备注'):
         _text(ctx, 'project_group', '分组')
@@ -157,7 +157,7 @@ def _render_details(ctx):
     cancel, forward = st.columns(2)
     if cancel.button('取消', key='project_dialog_cancel'):
         _cancel(ctx)
-    if forward.button('下一步：核对质量要求', type='primary', key='quick_details_next', disabled=not reviewed):
+    if forward.button('下一步：设置质量要求', type='primary', key='quick_details_next', disabled=not reviewed):
         try:
             get_quick_setup_context(draft)
         except (ValueError, TypeError) as error:
@@ -192,8 +192,8 @@ def _render_quality(ctx):
         st.rerun()
     if cancel.button('取消', key='project_dialog_cancel'):
         _cancel(ctx)
-    if forward.button('核对保存预览', key='quick_quality_next', type='primary',
-                      disabled=not ctx['draft']['quality'].get('checked')):
+    if forward.button('下一步：查看设置', key='quick_quality_next', type='primary',
+                      disabled=not ctx['draft']['quality'].get('checked') or ctx['draft']['quality'].get('blocked', False)):
         try:
             ctx['quick_preview'] = prepare_quick_project_setup(ctx['draft'])
         except (ValueError, TypeError) as error:
@@ -204,77 +204,24 @@ def _render_quality(ctx):
 
 
 def _quality_form(context, ctx):
-    from ui.quality_applicability import render_conditions
-    from ui.quality_targets import render_spec
-    from services.quality_review_service import standard_candidates
-    from services.quality_catalog_service import browse_quality_catalog
+    from ui.quality_targets import render_quality_setup
     item = context['item']
     prior = ctx['draft'].get('quality') or {}
     prefix = 'quick_quality_' + ctx['token'] + '_' + ctx['quick_quality_identity']
     st.caption(f"{item['test_item_name']}｜{item['method_name']}｜{item['unit_symbol']}｜{item['level_count']} 水平")
-    condition_args, assessments = render_conditions(item, prior, prefix)
-    numerical = [row['id'] for row in assessments if row['kind'] == 'numeric' and row['status'] == 'applicable']
-    source_mode = item['input_value_type'] == 'raw' and condition_args['context'].get('result_scale') == 'concentration'
-    if source_mode:
-        mode_key = prefix + '_mode'
-        if mode_key not in st.session_state:
-            st.session_state[mode_key] = prior.get('mode', 'source')
-        mode = st.radio('质量要求来源', ['source', 'recorded'], horizontal=True, key=prefix + '_mode',
-            format_func=lambda value: '选择分析质量要求' if value == 'source' else '填写实验室自定要求')
-    else:
-        mode = 'recorded'
-        st.caption('Ct、log及信号尺度按实际说明书、SOP或实验室要求核对，不套用浓度CV限值。')
-    result = dict(condition_args, mode=mode, levels=[])
-    if mode == 'source':
-        candidates = {row['id'] for row in standard_candidates(item)}
-        sources = {row['id']: row['spec'] for row in browse_quality_catalog() if row['kind'] in ('numeric', 'custom')
-                   and (row['spec']['origin'] != 'builtin' or row['id'] in candidates)}
-        key = prefix + '_requirement'
-        if key not in st.session_state or st.session_state.get(key) not in [None, *sources]:
-            st.session_state[key] = (prior['requirement_id'] if prior.get('requirement_id') in sources else
-                                     numerical[0] if len(numerical) == 1 else None)
-        selected = st.selectbox('选择分析质量要求', [None, *sources], key=key,
-            format_func=lambda value: '请选择' if value is None else sources[value]['name'] + '｜' + sources[value]['standard'])
-        result['requirement_id'] = selected
-        if selected:
-            spec = sources[selected]
-            render_spec(spec)
-            categories = list(dict.fromkeys(row['category'] for row in spec['imprecision'] if row.get('category')))
-            for order, level in enumerate(context['levels'], 1):
-                from services.material_workflow_service import material_label
-                st.markdown(f'**水平 {order}：{material_label(level)}**')
-                prior_level = next((row for row in prior.get('levels', []) if row['level_order'] == order), {})
-                concentration = st.number_input('质控品浓度（选填，用于核对适用范围）', min_value=0.0, value=prior_level.get('concentration'),
-                    format='%.4f', key=f'{prefix}_{selected}_{order}_concentration')
-                category = st.selectbox('水平类别', ['', *categories],
-                    index=categories.index(prior_level['category']) + 1 if prior_level.get('category') in categories else 0,
-                    key=f'{prefix}_{selected}_{order}_category',
-                    format_func=lambda value: value or '请选择') if categories else ''
-                result['levels'].append(dict(level_order=order, concentration=concentration, category=category))
-            if spec['origin'] == 'builtin':
-                result['supplemental_cv'] = st.number_input('实验室更严CV要求（选填，%）', min_value=0.0,
-                    value=prior.get('supplemental_cv'), key=prefix + '_supplemental_cv')
-    else:
-        for field, label in [('source_name', '依据名称（说明书、SOP等）'), ('source_version', '依据版本或编号')]:
-            result[field] = st.text_input(label, value=prior.get(field, ''), key=prefix + '_' + field)
-        result['requirement_text'] = st.text_area('实验室自定要求', value=prior.get('requirement_text', ''), key=prefix + '_recorded')
-    seed = (ctx['draft'].get('product_choice_review') or {}).get('confirmed_by', '')
-    result['confirmed_by'] = st.text_input('质量要求确认人', value=prior.get('confirmed_by', seed), key=prefix + '_person')
-    result['evidence'] = st.text_area('质量要求适用依据', value=prior.get('evidence', ''), key=prefix + '_evidence')
-    result['checked'] = st.checkbox('已核对检测条件、质量要求和全部水平的适用性',
-        value=bool(prior.get('checked')), key=prefix + '_checked')
-    return result
+    actor = (ctx['draft'].get('product_choice_review') or {}).get('confirmed_by', '')
+    return render_quality_setup(item, prior, prefix, levels=context['levels'], quick=True, actor=actor)
 
 
 def _render_preview(ctx):
     from ui.project_dialogs import MODAL_KEY, _cancel
     preview = ctx['quick_preview']
-    st.table(pd.DataFrame(preview['summary'], columns=['核对内容', '本次设置']))
+    st.table(pd.DataFrame(preview['summary'], columns=['设置内容', '本次填写']))
     for order, label in enumerate(preview['material_labels'], 1):
         st.caption(f'水平 {order}：{label}')
     quality = ctx['draft']['quality']
     st.caption('质量要求确认人：' + quality['confirmed_by'])
-    st.caption('确认保存后会同时建立项目、检验项目和批次，并进入检测录入。')
+    st.caption('请查看以上检验项目、仪器、试剂、质控品和质量要求。点击“确认保存并进入录入”后，即可开始输入检测结果。')
     back, cancel, save = st.columns(3)
     if back.button('返回质量要求', key='quick_preview_back'):
         ctx['quick_step'] = 'quality'

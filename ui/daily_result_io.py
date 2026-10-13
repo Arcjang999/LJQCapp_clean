@@ -5,7 +5,7 @@ from services.daily_result_io_service import export_daily_workbook,preview_daily
 
 
 def render_daily_result_files(draft):
-    with st.expander('常规结果文件：模板、预览与导出'):
+    with st.expander('从文件填写本组结果，或下载已填内容'):
         st.download_button('下载本组结果模板',export_daily_workbook(draft,template=True),'常规质控结果模板.xlsx',
             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',key='daily_template')
         st.download_button('导出本组已填内容',export_daily_workbook(draft),'常规质控本组结果.xlsx',

@@ -11,10 +11,10 @@ from services.quality_applicability_service import (
 
 def _applicability_label(row):
     if row['kind'] == 'process':
-        return {'applicable': '可参考，可按当地要求修改', 'pending': '参考条件待核对',
-                'not_applicable': '当前条件不适用'}[row['status']]
-    return {'applicable': '适用，须采用', 'pending': '待核查',
-            'not_applicable': '当前条件不适用'}[row['status']]
+        return {'applicable': '可参考并按实验室要求修改', 'pending': '请补充检测条件',
+                'not_applicable': '本次检测不采用'}[row['status']]
+    return {'applicable': '本次检测须采用', 'pending': '请检查方法和单位',
+            'not_applicable': '本次检测不采用'}[row['status']]
 
 
 def render_draft_standard_preview(draft):
@@ -40,48 +40,50 @@ def render_draft_standard_preview(draft):
             (test_item_id,))]
     context = default_context(item)
     candidates = assess(item, context)
-    with st.expander('质量标准与待核对条件', expanded=True):
+    with st.expander('查看质量标准，补充检测条件', expanded=True):
         if not item.get('method_name'):
-            st.info('请先选择方法学，随后按检测技术、结果性质和用途核对适用标准。')
+            st.info('请先选择方法学。保存后，在质量目标中填写检测技术、结果性质和用途。')
         for row in candidates:
             if source_status(row['source']) != 'current':
                 continue
             state = _applicability_label(row)
             st.caption(row['source']['standard']+' · '+row['spec']['name']+'｜'+KIND_LABELS[row['kind']]+'｜'+state)
         if not candidates:
-            st.info('目录尚未收录此检测条件的质量要求，保存后请登记官方查找结果或补充来源。')
+            st.info('本软件已收录的标准中，没有此项目的数值要求。保存后可设置SD控制；原始定量结果可另填CV上限。')
         missing = context_errors(item, context)
         if missing:
-            st.caption('保存后在质量目标中完成核对：'+' '.join(missing))
-        st.caption('保存检验项目后会进入质量目标设置；完成适用依据确认后才能启用项目。')
+            st.caption('保存后还需填写：'+' '.join(missing))
+        st.caption('点击“保存”后进入质量目标设置。设置完成后，再确认项目设置。')
 
 
 def render_conditions(item, review, prefix):
     saved = review.get('context') or default_context(item)
     context = {}
-    st.markdown('**标准适用条件**')
-    st.caption('方法学：' + (item.get('method_name') or '未设置'))
-    for key, options in CONTEXT_OPTIONS.items():
-        values = list(options)
-        prior = saved.get(key, '')
-        if key == 'technique' and infer_technique(item):
-            prior = infer_technique(item)
-            widget_key = prefix + '_context_' + key
-            if widget_key in st.session_state and st.session_state[widget_key] != prior:
-                st.session_state[widget_key] = prior
-        context[key] = st.selectbox(CONTEXT_LABELS[key], values,
-            index=values.index(prior) if prior in values else 0,
-            format_func=options.get, key=prefix+'_context_'+key,
-            disabled=key == 'technique' and bool(infer_technique(item)))
-    context['specimen'] = st.text_input('标本或基质', value=saved.get('specimen', ''),
-        key=prefix+'_context_specimen', max_chars=200)
+    with st.expander('检测条件', expanded=bool(context_errors(item, saved))):
+        st.caption('请检查已填选项，并填写空白项和本次标本。方法学：' + (item.get('method_name') or '未设置'))
+        columns = st.columns(2)
+        for index, (key, options) in enumerate(CONTEXT_OPTIONS.items()):
+            values = list(options)
+            prior = saved.get(key, '')
+            if key == 'technique' and infer_technique(item):
+                prior = infer_technique(item)
+                widget_key = prefix + '_context_' + key
+                if widget_key in st.session_state and st.session_state[widget_key] != prior:
+                    st.session_state[widget_key] = prior
+            context[key] = columns[index % 2].selectbox(CONTEXT_LABELS[key], values,
+                index=values.index(prior) if prior in values else 0,
+                format_func=options.get, key=prefix+'_context_'+key,
+                disabled=key == 'technique' and bool(infer_technique(item)))
+        context['specimen'] = st.text_input('标本或基质', value=saved.get('specimen', ''),
+            key=prefix+'_context_specimen', max_chars=200)
     rows = assess(item, context)
-    for row in rows:
-        if source_status(row['source']) != 'current':
-            continue
-        name = row['spec']['name']
-        st.caption(f"{row['source']['standard']} · {name}｜{_applicability_label(row)}：{row['reason']}")
-    local_process = render_process_requirements(rows, review, prefix)
+    with st.expander('查看标准及填写对照要求', expanded=False):
+        for row in rows:
+            if source_status(row['source']) != 'current':
+                continue
+            name = row['spec']['name']
+            st.caption(f"{row['source']['standard']} · {name}｜{_applicability_label(row)}：{row['reason']}")
+        local_process = render_process_requirements(rows, review, prefix)
     process = [r for r in rows if r['kind'] not in ('numeric', 'process') and r['status'] == 'applicable']
     process_ids = [r['id'] for r in process]
     if process:
@@ -91,29 +93,32 @@ def render_conditions(item, review, prefix):
         for row in process:
             st.caption('；'.join(row['spec']['requirements']))
             st.link_button('查看 '+row['source']['standard']+' 原文', row['source']['source_url'])
-        st.info('请按条款人工核对对照设置和相关要求。阴性对照不参与浓度 CV 计算。')
+        st.info('请按以上条款检查对照设置和结果。浓度CV统计使用质控品检测值，阴性对照按条款单独检查。')
     else:
         adopted = []
     search = None
     registered = []
     if not any(r['kind'] == 'numeric' and r['status'] == 'applicable' for r in rows):
         if any(r['kind'] == 'numeric' and r['status'] == 'pending' for r in rows):
-            st.warning('已有候选数值标准，适用条件尚待核查。请先补齐条件或核对单位；填写其他依据不能代替这一步。')
-        else:
-            st.info('当前目录没有匹配的适用数值条目。请查找官方标准并记录复核结论；资料不全时可保存待确认。')
+            st.warning('找到了此项目的数值标准，请先检查检测方法、结果尺度和单位。具体缺项见上方提示。')
         prior = review.get('search_record') or {}
-        search = {}
-        with st.expander('标准查找与复核', expanded=True):
-            search['query'] = st.text_input('查找词（检测项、方法及用途）',value=prior.get('query',''),key=prefix+'_search_query',max_chars=500)
-            search['official_url'] = st.text_input('官方查询结果或标准链接',value=prior.get('official_url',''),key=prefix+'_search_url',max_chars=2000)
-            search['checked_on'] = str(st.date_input('核查日期',value=date.fromisoformat(prior['checked_on']) if prior.get('checked_on') else date.today(),max_value=date.today(),key=prefix+'_search_date'))
-            choices = {'': '待核查', 'no_applicable': '已核查，无适用分析质量标准',
-                       'no_numeric': '已核对参考标准，无对应尺度的数值限值', 'registered': '找到未收录标准，已补充登记'}
+        candidate_search = {}
+        with st.expander('高级：查找或补充标准', expanded=False):
+            active = st.checkbox('记录官方查找或补充标准', value=bool(prior and prior.get('scope') != 'local_catalog'),
+                                 key=prefix+'_advanced_search')
+            st.caption('需要保存官方查询结果或新增标准时，勾选上方选项，再填写下列资料。')
+            candidate_search['query'] = st.text_input('查找词（检测项、方法及用途）',value=prior.get('query',''),key=prefix+'_search_query',max_chars=500)
+            candidate_search['official_url'] = st.text_input('官方查询结果或标准链接',value=prior.get('official_url',''),key=prefix+'_search_url',max_chars=2000)
+            candidate_search['checked_on'] = str(st.date_input('核查日期',value=date.fromisoformat(prior['checked_on']) if prior.get('checked_on') else date.today(),max_value=date.today(),key=prefix+'_search_date'))
+            choices = {'': '请选择查询结果', 'no_applicable': '已查询，没有本次检测的分析质量标准',
+                       'no_numeric': '已找到参考标准，但未规定本次结果尺度的数值限值', 'registered': '已找到新标准，并在下方登记'}
             keys=list(choices)
-            search['conclusion'] = st.selectbox('复核结论',keys,index=keys.index(prior.get('conclusion','')) if prior.get('conclusion','') in keys else 0,format_func=choices.get,key=prefix+'_search_conclusion')
-            search['rationale'] = st.text_area('查找结果及适用依据',value=prior.get('rationale',''),key=prefix+'_search_rationale',max_chars=2000)
-        if search['conclusion'] == 'registered':
-            registered = render_registered_sources(review.get('registered_standards', []), prefix)
+            candidate_search['conclusion'] = st.selectbox('查询结果',keys,index=keys.index(prior.get('conclusion','')) if prior.get('conclusion','') in keys else 0,format_func=choices.get,key=prefix+'_search_conclusion')
+            candidate_search['rationale'] = st.text_area('查到了什么，哪些条款用于本次检测',value=prior.get('rationale',''),key=prefix+'_search_rationale',max_chars=2000)
+            if active:
+                search = candidate_search
+                if search['conclusion'] == 'registered':
+                    registered = render_registered_sources(review.get('registered_standards', []), prefix)
     return dict(context=context, search_record=search, adopted_standard_ids=adopted,
                 registered_standards=registered, process_requirements=local_process), rows
 
@@ -139,7 +144,7 @@ def render_process_requirements(rows, review, prefix):
     st.session_state[source_key] = list(dict.fromkeys(st.session_state[source_key] + newly_available))
     st.session_state[seen_key] = list(dict.fromkeys(st.session_state[seen_key] + list(names)))
     st.markdown('**对照与质控要求**')
-    st.caption('首次设置自动带入匹配的标准参考内容，可按当地或本实验室要求修改、删减，也可留空。参考来源与本实验室实际要求分别保存。')
+    st.caption('下方已填入标准的参考内容。请改成本实验室实际执行的对照和质控要求，也可留空；标准原文可在下方查看。')
     selected = st.multiselect('参考标准（可调整）', list(names), key=source_key, format_func=names.get)
     seed = default_process_requirements(rows, selected)['requirement_text']
     if text_key not in st.session_state:
@@ -169,12 +174,12 @@ def render_registered_sources(prior, prefix):
     for i in range(count):
         old=prior[i] if i<len(prior) else {}
         row={}
-        with st.expander(f'补充标准 {i+1} 的全文核查记录',expanded=True):
+        with st.expander(f'补充标准 {i+1} 的名称、条款和全文',expanded=True):
             labels={'standard':'标准编号','name':'标准名称','version':'版本',
                     'effective_date':'实施日期（YYYY-MM-DD）','withdrawn_on':'废止日期（如有）',
                     'source_url':'官方全文链接',
-                    'source_clause':'适用条款','source_page':'PDF 页码','verified_by':'全文核查人',
-                    'checked_on':'全文核查日期（YYYY-MM-DD）'}
+                    'source_clause':'本次使用的条款','source_page':'PDF 页码','verified_by':'阅读并确认此标准的人员',
+                    'checked_on':'确认日期（YYYY-MM-DD）'}
             for key,label in labels.items():
                 row[key]=st.text_input(label,value=old.get(key,''),key=f'{prefix}_registered_{i}_{key}',max_chars=2000)
             uploaded = st.file_uploader('标准全文文件（PDF）', type=['pdf'], key=f'{prefix}_registered_{i}_file')
@@ -187,11 +192,11 @@ def render_registered_sources(prior, prefix):
                 else:
                     row['sha256'] = hashlib.sha256(contents).hexdigest()
             elif row['sha256']:
-                st.caption('已保留上次核对的全文记录。更换版本时，请重新上传全文。')
-            kinds={'process':'过程 / 对照要求','qualitative':'定性要求','numeric_record':'数值指标（人工核对）'}
+                st.caption('已保留上次上传的标准全文。更换标准版本时，请上传新全文。')
+            kinds={'process':'对照与质控要求','qualitative':'定性要求','numeric_record':'数值指标（人工检查）'}
             keys=list(kinds)
             row['kind']=st.selectbox('条款类型',keys,index=keys.index(old.get('kind','process')),format_func=kinds.get,key=f'{prefix}_registered_{i}_kind')
-            row['requirement_text']=st.text_area('完整适用要求及附加条件',value=old.get('requirement_text',''),key=f'{prefix}_registered_{i}_requirement',max_chars=2000)
-            row['applicability_evidence']=st.text_area('方法、标本、尺度、单位及用途的核对依据',value=old.get('applicability_evidence',''),key=f'{prefix}_registered_{i}_evidence',max_chars=2000)
+            row['requirement_text']=st.text_area('本次检测需执行的条款及附加条件',value=old.get('requirement_text',''),key=f'{prefix}_registered_{i}_requirement',max_chars=2000)
+            row['applicability_evidence']=st.text_area('说明条款要求的方法、标本、结果类型、单位和用途与本次检测是否一致',value=old.get('applicability_evidence',''),key=f'{prefix}_registered_{i}_evidence',max_chars=2000)
         result.append(row)
     return result

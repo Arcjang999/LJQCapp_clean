@@ -23,7 +23,7 @@ export default function(component){
  if(table.dataset.signature!==signature){
   table.dataset.signature=signature;body.replaceChildren();
   const head=table.querySelector('thead');head.replaceChildren();const tr=document.createElement('tr');
-  for(const label of ['检验项目','质控方法','水平','实际批号','尺度 / 单位','检测值']){const th=document.createElement('th');th.textContent=label;tr.append(th);}head.append(tr);
+  for(const label of ['检验项目','质控方法','水平','实际批号','结果类型 / 单位','检测值']){const th=document.createElement('th');th.textContent=label;tr.append(th);}head.append(tr);
   for(const row of data.rows){
    const tr=document.createElement('tr');tr.dataset.key=row.key;
    for(const text of [row.name,row.method,row.level,row.lot,row.scale+' / '+row.unit]){const td=document.createElement('td');td.textContent=text;tr.append(td);}

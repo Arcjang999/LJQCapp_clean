@@ -30,8 +30,8 @@ def _render_dialog():
         if discard.button('放弃本次准备', key='lab_prep_discard', width='stretch'):
             _close()
         return
-    st.caption('下载清单后填写已核实的单位信息、仪器、检验项目、单位、方法、产品及实际批号。先审查，核对后一起保存。')
-    st.info('这里只登记资料。保存后仍需在项目和批次设置中核对质量要求、实际材料及参数，再按现有流程确认使用。')
+    st.caption('下载清单，填写实验室、人员、仪器、检验项目、计量单位、方法学、试剂和质控品批号，再上传检查。')
+    st.info('保存资料后，点击“新建项目”，设置质量目标、质控品批号、各水平及均值和标准差，再登记试剂批号验证。')
     template, reference = st.columns(2)
     template.download_button('下载空白单位资料清单', build_lab_preparation_template(),
         file_name='单位资料准备清单.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -39,7 +39,7 @@ def _render_dialog():
     reference.download_button('下载已登记资料清单', build_lab_preparation_reference_xlsx(),
         file_name='已登记资料清单.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         key='lab_prep_reference', width='stretch')
-    st.caption('引用已有资料时复制清单中的对应标识；空白单位信息保留原设置。已有资料有差异时，先到其管理入口核对。')
+    st.caption('引用已有资料时，把“已登记资料清单”中的“已登记标识”复制到填写清单的同名列。关联本清单新增资料时，填写其“清单编号”。')
     uploaded = st.file_uploader('上传填写后的单位资料清单', type=['xlsx'], max_upload_size=10,
         key='lab_prep_upload_' + state['token'])
     if uploaded is not None:
@@ -65,9 +65,9 @@ def _render_dialog():
         summary = review['summary']
         st.caption(f"资料 {summary['rows']} 行 · 新增 {summary['create']} 行 · 引用已有 {summary['reuse']} 行 · 单位设置变更 {summary['settings']} 项")
         if summary['has_blocking_errors']:
-            st.error('资料审查未通过。按下表提示修正后重新上传，本次尚未登记任何资料。')
+            st.error('请按下表提示修改文件，再上传检查。修改前的文件仍保留。')
         else:
-            st.success('资料审查通过，请核对新增、引用及单位设置变化后确认。')
+            st.success('文件检查完成，核对下方资料后点击“确认保存单位资料”。')
         if review['issues']:
             st.dataframe(pd.DataFrame([{'工作表': item['sheet'], '行': item['row'] or '-',
                 '需修正': '是' if item['blocking'] else '可后续补充', '提示': item['message']}
@@ -80,7 +80,7 @@ def _render_dialog():
                                        '本次内容': value} for key, value in review['settings'].items()]),
                          hide_index=True, width='stretch')
         if review['preview']:
-            st.markdown('**资料登记预览**')
+            st.markdown('**本次要保存的资料**')
             st.dataframe(pd.DataFrame(review['preview'])[['工作表', '清单编号', '处理', '内容']],
                          hide_index=True, width='stretch')
     cancel, save = st.columns(2)
@@ -107,8 +107,8 @@ def _render_dialog():
 def render_lab_preparation_entry():
     receipt = st.session_state.get('lab_preparation_receipt')
     if receipt:
-        verb = '此文件已保存，无需重复登记' if receipt['reused'] else '单位资料已保存'
-        st.success(f"{verb}，保存编号：{receipt['receipt_id']}。可在基础资料中查找，再准备项目和批次。")
+        verb = '此文件已保存' if receipt['reused'] else '单位资料已保存'
+        st.success(f"{verb}，记录编号：{receipt['receipt_id']}。可在基础资料中查看，接着新建项目和批次。")
         with st.expander('查看本次保存资料'):
             rows = receipt['saved_rows']
             if rows:

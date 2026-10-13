@@ -21,7 +21,7 @@ def render_zscore_monthly_report_section(selected_batch_id: int) -> None:
     batch = get_zscore_batch(selected_batch_id)
     months = list_zscore_report_month_options(selected_batch_id)
     with st.container(border=True):
-        render_section_intro(title="多水平法质控报告", caption="选择月份或起止日期，核对后生成并保存 PDF 和完整归档。", tone="accent")
+        render_section_intro(title="多水平法质控报告", caption="选择日期，核对报告后生成PDF。报告、处理记录和附件一同保存，可分别下载。", tone="accent")
         st.caption(f"{batch['project_name']} · {_build_batch_display(batch)} · 正式期")
         if not months:
             st.info("当前批次暂无正式期检测记录。进入正式期并录入结果后，可生成质控报告。")
@@ -48,7 +48,7 @@ def _render_report_preview(package: ZScoreMonthlyReportPackage) -> None:
     render_compact_stat_metrics([(label.replace('月度', '期间'), value) for label, value in build_zscore_monthly_preview_summary(report)])
     pending = getattr(report.statistics, 'pending_count', getattr(report.statistics, 'undetermined_count', 0))
     if pending:
-        st.info(f'所选期间有 {pending} 次检测待判读，请核对适用均值和标准差。')
+        st.info(f'所选期间有 {pending} 次检测尚无有效质控结论，请到批次设置核对这些检测使用的均值和SD。')
 
     st.markdown("**期间质控概况**")
     st.write(report.overview_text)
@@ -59,7 +59,7 @@ def _render_report_preview(package: ZScoreMonthlyReportPackage) -> None:
             ("科室名称", report.basic_info.department_name),
             ("检验员", report.basic_info.qc_owner_name),
             ("复核员", report.basic_info.reviewer_name),
-            ("方法", report.basic_info.method_label),
+            ("质控方法", report.basic_info.method_label),
             ("报告期间", report.report_period_label),
             ("输入值类型", report.basic_info.input_value_type_label),
             ("单位", report.basic_info.unit_symbol),
@@ -124,7 +124,7 @@ def _render_report_preview(package: ZScoreMonthlyReportPackage) -> None:
                 "run_sequence": "检测序号",
                 "run_conclusion": "本次检测结论",
                 "rule_hits": "触发规则",
-                "level_evidence": "各水平触发证据",
+                "level_evidence": "各水平触发规则及检测值",
                 "error_type": "误差类型",
                 "manual_note": "手动备注",
             }

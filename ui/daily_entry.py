@@ -169,7 +169,7 @@ def _render_selector():
 def _receipt(draft):
     receipt=draft.get('receipt')
     if not receipt:return False
-    st.success('本组已全部保存。重复确认不会新增记录。')
+    st.success('本组已全部保存。可查看保存明细，或开始下一组检测。')
     source={str(i['lot_config_item_id']):i for i in draft['context']['items']}
     st.dataframe(pd.DataFrame([{'检验项目':source[str(r['row_key'])]['test_item_name'],
         '质控方法':METHOD_LABELS[source[str(r['row_key'])]['qc_method']], '检测时间':receipt['test_time'],
@@ -225,7 +225,7 @@ def render_daily_entry():
         from ui.daily_navigation import return_to_project_workspace
         return_to_project_workspace(template_id)
     if overview.button('返回今日总览',key='entry_overview'):open_global_page('show_daily_overview_page')
-    st.caption('Enter / Tab 只移动输入格；整组核对并确认后才保存。')
+    st.caption('按 Enter 或 Tab 换到下一格。填完后点“检查本组结果”，核对后再点“确认保存整组”。')
     try:_render_selector()
     except Exception as exc:
         logging.exception('Daily context read failed');st.error(str(exc) if isinstance(exc,ValueError) else '资料读取失败，请重试。')
@@ -305,7 +305,7 @@ def render_daily_entry():
     st.checkbox('已核对：相同检测时间的记录属于另一次检测',key=sk,on_change=_field,args=('allow_same_time',sk))
     _errors(draft.get('errors',[]))
     left,right=st.columns(2)
-    if left.button('核对并保存',key='entry_validate',type='primary',disabled=not rows):
+    if left.button('检查本组结果',key='entry_validate',type='primary',disabled=not rows):
         from services.daily_entry_service import validate_submission
         try:
             if draft['test_time']!=draft['context'].get('test_time'):

@@ -191,7 +191,7 @@ class DailyEntryTest(unittest.TestCase):
                     self.assertEqual(row['level_count'], c.execute('SELECT COUNT(*) FROM zscore_level_results WHERE run_id=?', (row['source_id'],)).fetchone()[0])
         changed = deepcopy(frozen); changed['items'][0]['levels'][0]['value'] = '999'
         changed['validation_hash'] = contexts._digest({k:v for k,v in changed.items() if k != 'validation_hash'})
-        self.denied(lambda: entry.submit_daily(changed), '不同内容')
+        self.denied(lambda: entry.submit_daily(changed), '与已保存结果不同')
         same = self.request('same-time')
         self.assertFalse(entry.validate_submission(same)['valid'])
         for row in same['items']: row['allow_same_time'] = True

@@ -209,7 +209,7 @@ class ReportArchiveTests(unittest.TestCase):
             self.assertEqual(export_id, save(fixture, rebuilt))
             self.assertEqual(after, database_contents())
             chosen = package(fixture, {row['event_id']: 1 for row in fixture['events']})
-            with self.assertRaisesRegex(ValueError, '不同报告'):
+            with self.assertRaisesRegex(ValueError, '另一份报告'):
                 save(fixture, chosen)
             self.assertEqual(after, database_contents())
 

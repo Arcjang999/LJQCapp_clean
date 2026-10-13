@@ -38,7 +38,7 @@ def _render_batch_status(config_id: int, *, disabled: bool, expected_revision: i
             with atomic_write():
                 current = get_lot_config(config_id)
                 if int(current['revision_no']) != expected_revision:
-                    raise ValueError('批次设置已修改，请取消后重新打开，核对最新内容。')
+                    raise ValueError('这个批次已在别处修改。请取消此次操作，重新打开批次后再停用或恢复。')
                 set_lot_config_disabled(config_id, is_disabled=disabled, reason=reason)
         except ValueError as exc:
             st.error(str(exc))

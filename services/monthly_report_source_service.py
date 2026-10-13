@@ -151,7 +151,7 @@ def versioned_quality_summary(method, batch_id, month, formal_records, *, existi
                 parameter_version=label, requirement=requirement_text(entry['rule']), category=entry['category'],
                 concentration=entry['concentration'], count=len(data), days=days, cv=cv, decision=decision))
     return json_safe(dict(existing, rows=rows,
-        statistics_scope='分批次、参数版本及水平；仅正式期在控结果，多水平法按整次在控筛选；SD、偏倚和总误差不自动评价'))
+        statistics_scope='分批次、参数版本及水平；仅正式期在控结果，多水平法按整次在控筛选；标准SD上限、偏倚和总误差不自动比较，质控图仍按所选规则判读'))
 
 
 def monthly_processing_candidates(method, formal_records, handling_summaries):

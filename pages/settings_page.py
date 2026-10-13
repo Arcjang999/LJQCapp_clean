@@ -75,14 +75,14 @@ def render_settings_page() -> None:
     from ui.common import render_module_header
     render_module_header(
         title="系统设置",
-        caption="维护报告默认信息、更改数据保存位置，以及备份和恢复数据。",
+        caption="填写报告上的单位和人员，保存设置；数据备份和恢复在下方操作。",
         tone="settings",
     )
     from ui.lab_preparation import render_lab_preparation_entry
     render_lab_preparation_entry()
     render_workbench_context_bar(
         title="当前报告默认信息",
-        caption="请核对实验室、科室和责任人；后续新生成的单水平（LJ）与多水平法质控报告会使用这些默认信息。",
+        caption="下方填写单位、检验员和复核员，点“保存设置”。之后生成的报告使用这些信息。",
         items=[
             ("实验室名称", current_settings.lab_name or "未填写"),
             ("科室名称", current_settings.department_name or "未填写"),
@@ -95,7 +95,7 @@ def render_settings_page() -> None:
     with st.container():
         render_section_intro(
             title="报告默认信息",
-            caption="填写实验室、科室、报告责任人和声明，供后续质控报告使用。",
+            caption="填写实验室、科室、检验员、复核员和报告声明，点“保存设置”。",
             tone="accent",
         )
         info_left, info_right = st.columns(2, gap="medium")
@@ -121,7 +121,7 @@ def render_settings_page() -> None:
             )
             st.session_state["refresh_settings_form"] = True
             st.session_state["settings_saved_notice"] = (
-                "报告默认信息已保存，后续新生成的单水平（LJ）与多水平法质控报告会使用这些信息。"
+                "设置已保存，下次生成报告时使用这些单位和人员信息。"
             )
             st.rerun()
 
@@ -142,7 +142,7 @@ def render_settings_page() -> None:
 
     with st.container():
         render_section_intro(
-            title="数据存储与备份",
+            title="数据保存与备份",
             caption="查看或更改数据保存位置，以及备份和恢复数据。",
             badges=["更改数据保存位置", "备份恢复", "重启后生效"],
             tone="muted",
@@ -177,7 +177,7 @@ def _render_storage_section() -> None:
         render_compact_stat_metrics(
             [
                 ("数据文件", str(status.db_path.name)),
-                ("目录可见性", "可读取" if status.is_readable or not status.exists else "需检查"),
+                ("文件读取", "可读取" if status.is_readable or not status.exists else "需检查"),
                 ("数据文件状态", "有效" if status.is_valid_sqlite or not status.exists else "异常"),
                 ("文件大小", f"{status.size_bytes} 字节" if status.exists else "-"),
             ]
@@ -208,9 +208,9 @@ def _render_storage_section() -> None:
                 st.success("已打开备份文件夹。")
 
     if not status.exists:
-        st.warning("当前尚无数据文件；更改保存位置、备份或恢复时会自动建立。")
+        st.warning("首次保存、更改位置或备份时会建立数据文件。")
     elif not status.is_readable:
-        st.warning("当前数据文件存在但无法读取，请先检查文件权限或目录可用性。")
+        st.warning("请检查数据文件夹是否可访问，或请电脑管理员协助开放读取权限。")
     elif not status.is_valid_sqlite:
         st.warning(storage_message(status.status_text))
 
@@ -218,7 +218,7 @@ def _render_storage_section() -> None:
     st.caption("选择新的数据保存文件夹，完成更改后请重新打开软件。")
     migration_left, migration_right = st.columns([1.1, 0.9], gap="medium")
     with migration_left:
-        if st.button("选择新目录", key="pick_storage_migration_dir", use_container_width=True):
+        if st.button("选择新文件夹", key="pick_storage_migration_dir", use_container_width=True):
             try:
                 selected_dir = choose_directory_via_dialog(
                     initial_dir=status.db_dir,
@@ -233,7 +233,7 @@ def _render_storage_section() -> None:
         selected_migration_dir = _read_optional_path(STORAGE_SESSION_KEYS["migration_dir"])
         migration_ready = False
         if selected_migration_dir is not None:
-            st.write("已选择的新目录：")
+            st.write("新的数据文件夹：")
             st.text(str(selected_migration_dir))
             migration_validation = validate_directory_writable(selected_migration_dir, create_if_missing=False)
             if migration_validation[0]:
@@ -281,7 +281,7 @@ def _render_storage_section() -> None:
                 st.error(storage_message(exc))
             else:
                 if selected_backup_dir is None:
-                    st.info("已取消备份目录选择。")
+                    st.info("已取消文件夹选择。")
                 else:
                     try:
                         result = create_database_backup(selected_backup_dir)

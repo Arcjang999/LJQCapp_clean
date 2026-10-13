@@ -70,7 +70,7 @@ def _render_reference_dialog():
         if discard.button('放弃修改', key='zscore_reference_discard'):
             _close()
         return
-    st.caption('厂家参考值仅供核对，不改变本批次已确认的均值、标准差和判读。各项可留空。')
+    st.caption('在这里登记厂家提供的参考均值和标准差，供日后核对；各项可留空。实际判读仍使用本批次已确认的均值和SD。')
     for level_id in state['level_ids']:
         st.markdown('**' + state['labels'].get(level_id, level_id) + '**')
         left, right = st.columns(2)

@@ -114,7 +114,8 @@ def _verify_fields(state):
         placeholder='请选择检验项目及仪器', format_func=lambda value: '请选择检验项目及仪器' if value is None else systems[value]['label'])
     conclusion = _field(state, 'conclusion', '验证结论 *', 'selectbox', options=[None, 'pass', 'fail'],
         placeholder='请选择验证结论', format_func=lambda value: {None:'请选择验证结论','pass':'通过','fail':'未通过'}[value])
-    evidence = _field(state, 'evidence', '验证方案、对照批号、接受标准及结果／资料位置 *', 'text_area')
+    st.caption('填写验证方法、对照批号、合格标准和结果，或说明验证记录的存放位置。')
+    evidence = _field(state, 'evidence', '验证依据 *', 'text_area')
     when = _field(state, 'when', '验证完成时间 *', 'datetime_input', value=None)
     person = _field(state, 'person', '确认人 *')
     if not systems:
@@ -127,10 +128,10 @@ def _switch_fields(state):
     systems = {row['id']: row for row in _systems(state['context'], state['lot_id']) if row['available']}
     selected = _field(state, 'systems', '本次切换的检验项目 *', 'multiselect', options=list(systems),
         format_func=lambda value: systems[value]['label'], placeholder='请选择本次需要切换的检验项目')
-    when = _field(state, 'when', '实际启用时间 *', 'datetime_input', value=None)
+    when = _field(state, 'when', '启用时间 *', 'datetime_input', value=None)
     preview = []
     if when is None:
-        st.info('请填写实际启用时间，以核对对应的验证记录。')
+        st.info('填写启用时间，下面会显示可用的验证记录。')
     else:
         preview = build_reagent_switch_preview(state['context'], reagent_lot_id=state['lot_id'], system_ids=selected, effective_at=when)
     if preview:
@@ -141,10 +142,11 @@ def _switch_fields(state):
             hide_index=True, width='stretch')
     elif when is not None:
         st.info('请选择本次切换的检验项目，查看新旧批号及验证记录。')
-    st.caption('请核对所选检验项目、新旧批号、实际启用时间和对应验证，并说明原均值和标准差仍适用的依据。确认后只切换所选项目，既往检测保留原实际批号。')
+    st.caption('核对所选项目、新旧批号和验证，填写启用时间及换批依据。保存后，所选项目按这个时间使用新批号；历史记录保留原批号。')
     person = _field(state, 'person', '操作者 *')
-    reason = _field(state, 'reason', '换批原因与原均值和标准差仍适用的依据 *', 'text_area')
-    confirmed = _field(state, 'confirmed', '已核对所选检验项目、验证结论和启用时间，并确认原均值和标准差仍适用', 'checkbox')
+    st.caption('换批依据中说明原因，以及原均值和标准差仍适用的依据。')
+    reason = _field(state, 'reason', '换批原因及参数沿用依据 *', 'text_area')
+    confirmed = _field(state, 'confirmed', '已核对项目、验证结论和启用时间，确认沿用原均值和标准差', 'checkbox')
     return dict(selections=preview, effective_at=when, operator=person, reason=reason, confirmed=confirmed)
 
 
@@ -186,7 +188,7 @@ def _render_dialog():
                 st.session_state['reagent_pending_registered'] = (saved, values['reagent_id'])
             st.session_state['reagent_table_version'] = st.session_state.get('reagent_table_version', 0) + 1
             st.session_state['reagent_notice'] = {'register':'试剂批号已登记，请选择检验项目登记验证。',
-                'verify':'验证记录已保存。', 'switch':'已保存试剂批号使用安排，请核对实际启用时间。既往检测记录保留。'}[state['kind']]
+                'verify':'验证记录已保存。', 'switch':'试剂批号使用安排已保存，请在下方核对启用时间。'}[state['kind']]
             _close()
 
 
@@ -269,7 +271,7 @@ def render_reagent_lifecycle_workspace(*, product_id=None):
     notice = st.session_state.pop('reagent_notice', '')
     if notice and receipt_matches:
         st.success(notice)
-    st.caption('先登记试剂批号，再选择检验项目登记验证，最后确认切换批号及启用时间。切换时请核对原均值和标准差是否仍适用；既往检测记录保留。')
+    st.caption('先“登记试剂批号”，再“登记批号验证”，最后“切换到此试剂批号”。换批时填写原均值和标准差仍适用的依据。')
     products = {row['id']:row for row in context['all_products']}
     for key, value in [('reagent_search',''), ('reagent_product_filter',None), ('reagent_show_disabled',False)]:
         if key not in st.session_state:

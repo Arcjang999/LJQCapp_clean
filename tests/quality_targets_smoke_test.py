@@ -104,7 +104,7 @@ def test_sd_adoption_does_not_claim_automatic_cv_evaluation():
             selected=next(r for r in reviewed['candidates'] if r['id']=='wst403-2024-082')
             assert selected['automatic_evaluation'] is expected
             if not expected:
-                assert '暂不自动评价' in evaluate_cv(goal,1,3,count=20)
+                assert evaluate_cv(goal,1,3,count=20)=='标准SD上限仅展示，暂不自动比较'
 
 
 def test_adoption_freezes_batch_and_copied_goal_requires_confirmation():
@@ -188,7 +188,7 @@ def test_three_method_snapshots_and_report_do_not_modify_records():
                     (method,batch))]
             assert len(profiles)==1,profiles
             profile=profiles[0]
-            expected=dict(summary, statistics_scope='分批次、参数版本及水平；仅正式期在控结果，多水平法按整次在控筛选；SD、偏倚和总误差不自动评价',
+            expected=dict(summary, statistics_scope='分批次、参数版本及水平；仅正式期在控结果，多水平法按整次在控筛选；标准SD上限、偏倚和总误差不自动比较，质控图仍按所选规则判读',
                 rows=[dict(row, level=f"{row['level']} / 参数版本 {profile['version_no']}",
                            level_order=order, profile_id=profile['id'], parameter_version=str(profile['version_no']))
                       for order,row in enumerate(summary['rows'],1)])
@@ -252,7 +252,7 @@ def test_page_catalog_and_adoption_existing_batch_readonly():
         item,config,old=new_lot()
         at=AppTest.from_file(str(ROOT/'app.py'),default_timeout=30);at.session_state['show_quality_targets_page']=True;at.run()
         assert not at.exception
-        assert [tab.label for tab in at.tabs]==['质量目标设置','分析质量要求','实验室自定要求']
+        assert [tab.label for tab in at.tabs]==['质量目标设置','标准参考（高级）','自定要求目录（高级）']
         assert at.selectbox(key='quality_project_selector').label=='选择检验项目'
         at.session_state['v11_selected_lot_config_id']=config
         at.button(key='quality_open_lot_management').click().run()
@@ -263,13 +263,15 @@ def test_page_catalog_and_adoption_existing_batch_readonly():
         at.button(key=f'batch_edit_quality_{item}').click().run()
         assert not at.exception
         at.selectbox(key=f'quality_lot_{item}_context_purpose').set_value('clinical').run()
-        at.radio(key=f'quality_lot_{item}_mode').set_value('选择标准或自定义目录').run()
-        at.selectbox(key=f'quality_lot_{item}_requirement').set_value('wst403-2024-047').run()
+        assert not any(r.key==f'quality_lot_{item}_mode' for r in at.radio)
+        assert not any(s.key==f'quality_lot_{item}_requirement' for s in at.selectbox)
+        assert any('WS/T 403—2024' in m.value for m in at.markdown)
         at.text_input(key=f'quality_lot_{item}_person').set_value('页面验收')
         at.text_area(key=f'quality_lot_{item}_evidence').set_value('已核对项目、单位、浓度和来源')
         at.checkbox(key=f'quality_lot_{item}_confirmed').check().run()
         at.button(key=f'quality_lot_{item}_adopt').click().run();assert not at.exception
         assert decode(item_context('lot',item)['quality_goal_json'])['confirmed_by']=='页面验收'
+        assert decode(item_context('lot',item)['quality_goal_json'])['spec']['id']=='wst403-2024-047'
         assert any(m.value=='**本批次质量目标**' for m in at.markdown)
         activate(item,config,'lj');at.run();assert not at.exception
         assert not any(b.key==f'quality_lot_{item}_adopt' for b in at.button)

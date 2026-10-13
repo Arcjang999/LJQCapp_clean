@@ -189,9 +189,9 @@ def render_lj_v12_configuration_selection(
         render_workbench_context_bar(
             title="当前即时法转入批次" if is_from_instant else "当前项目与批次",
             caption=(
-                "该批次由即时法确认转入，来源与转入记录保持可追溯。"
+                "这是从即时法转入的LJ批次。可在批次资料中查看原即时法项目、批号和转入时间。"
                 if is_from_instant
-                else "以下信息来自启用时的项目与批次，工作台内只读。"
+                else "以下是确认使用本批次时保存的资料，供查看；需要调整设置时，请到“项目与批次”。"
             ),
             items=[
                 ("检验项目", selected["project_name"]),

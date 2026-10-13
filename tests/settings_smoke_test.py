@@ -106,7 +106,7 @@ def test_global_settings_entry_save_and_reopen() -> None:
         at.button(key="save_system_settings").click().run()
 
         assert not list(at.exception)
-        assert any("报告默认信息已保存" in str(item.value) for item in at.success)
+        assert any("设置已保存" in str(item.value) for item in at.success)
 
         saved = get_report_settings()
         assert saved.lab_name == "星城医学实验室"

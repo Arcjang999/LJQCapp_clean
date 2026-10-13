@@ -86,14 +86,14 @@ def open_project_setup(template_id, *, config_id=None, lot_config_item_id=None,
             found=connection.execute('''SELECT i.*,c.template_id FROM qc_lot_config_items i
                 JOIN qc_lot_configs c ON c.id=i.lot_config_id WHERE i.id=?''',(int(lot_config_item_id),)).fetchone()
             if found is None or found['template_id']!=int(template_id) or found['lot_config_id']!=int(config_id):
-                raise ValueError('检验项目与所选批次不一致，请返回重新核对。')
+                raise ValueError('请返回项目工作台，重新选择该检验项目的批次。')
             item=dict(found)
             found=connection.execute('SELECT id FROM qc_workbench_bindings WHERE lot_config_item_id=?',(int(lot_config_item_id),)).fetchone()
             binding=found['id'] if found else None
             if system_id is not None:
                 valid=connection.execute('SELECT 1 FROM qc_detection_systems WHERE id=? AND template_item_id=?',
                     (system_id,item['source_template_item_id'])).fetchone()
-                if not valid:raise ValueError('试剂检测系统已变化，请返回重新核对。')
+                if not valid:raise ValueError('检测设置已更新，请返回项目工作台重新选择当前批次。')
     st.session_state['v11_selected_template_id'] = int(template_id)
     st.session_state.pop('v11_template_selector', None)
     if config_id is not None:
@@ -165,7 +165,14 @@ def _render_project_list():
     if tools[1].button('编辑项目', key='home_edit_project', width='stretch', disabled=not row):
         open_project_dialog('project', selected)
     if projects.empty:
-        st.info('尚无符合条件的项目。可以新建项目，或调整筛选条件。')
+        if all_projects.empty:
+            st.info('第一次使用，先登记仪器、试剂和质控品批号，再点“新建项目”。已有资料可直接选择。')
+            if st.button('查看首次使用步骤', key='home_first_use_guide'):
+                from ui.common import open_global_page
+                st.session_state['user_guide_practical'] = False
+                open_global_page('show_user_guide_page')
+        else:
+            st.info('尚无符合条件的项目。可以新建项目，或调整筛选条件。')
         return
     display = projects[['template_name','project_group','instrument_name','item_count','status','is_disabled']].copy()
     display['status'] = ['已停用' if r['is_disabled'] else ('设置已确认' if r['status']=='active' else '待完善') for r in projects.to_dict('records')]
@@ -350,7 +357,7 @@ def render_project_defaults(template):
         method=st.selectbox('默认方法学',options,index=options.index(template['default_method_id']) if template['default_method_id'] in options else 0,
             format_func=lambda k:'逐项选择' if k is None else names[k],key=f'default_method_{tid}')
         count=st.selectbox('质控水平数',[2,3],index=1 if template['default_level_count']==3 else 0,key=f'default_count_{tid}',disabled=way!='zscore')
-        st.caption('新增检验项目时会带入这些设置，各项仍可单独修改。已添加的检验项目和批次不变。')
+        st.caption('新添加的检验项目会带入这些默认值，再逐项核对方法、单位和质量目标。')
         if st.button('保存默认设置',key=f'save_project_defaults_{tid}'):
             try:save_project_defaults(tid,qc_method=way,method_id=method,level_count=count,project_group=group)
             except ValueError as exc:st.error(str(exc))

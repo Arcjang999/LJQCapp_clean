@@ -77,7 +77,7 @@ def render_out_of_control_page():
         st.markdown('**其他日期尚未完成**')
         _rows(result['cross_day'], 'cross_day')
     if result.get('verification_gaps'):
-        st.info(f"另有 {len(result['verification_gaps'])} 条检测缺少可核对的正式判读依据，请查阅原始资料。")
+        st.info(f"另有 {len(result['verification_gaps'])} 条检测未保存完整的正式质控判读资料，请查阅原始检测记录并核对。")
 
 
 def _select_row(table_key, identities, prefix):

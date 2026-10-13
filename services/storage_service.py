@@ -189,7 +189,7 @@ def _friendly_storage_errors(operation):
         try:
             return operation(*args, **kwargs)
         except (OSError, sqlite3.Error) as exc:
-            raise RuntimeError("数据操作未完成，请检查文件夹读写权限和可用空间后重试；如已生成保护性备份，请妥善保留。") from exc
+            raise RuntimeError("保存失败，请检查文件夹是否可读写、磁盘空间是否足够，再重试。已生成的备份请保留。") from exc
     return run
 
 

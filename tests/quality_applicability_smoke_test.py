@@ -19,6 +19,7 @@ from services.quality_review_service import (save_recorded_requirement, save_pen
     standard_candidates, validate_project_quality, runtime_review)
 from services.quality_applicability_service import (assess, catalog_index, source_status,
     validate_registered_sources)
+from tests.quality_review_fixtures import confirm_fixture_product_choice
 
 
 def draft(name='CRP', mode='raw', unit='mg/L', method='免疫比浊法'):
@@ -32,6 +33,7 @@ def draft(name='CRP', mode='raw', unit='mg/L', method='免疫比浊法'):
         c.execute('UPDATE md_methods SET method_name=?,method_code=?,principle=? WHERE id=?',(method+'（隔离案例）','','',f['method_id']))
         c.execute("UPDATE qc_project_template_items SET unit_id=?,quality_goal_json='{}',quality_review_json='{}' WHERE id=?",(uid,iid))
         c.execute("UPDATE qc_project_templates SET status='draft' WHERE id=?",(f['template_id'],))
+    confirm_fixture_product_choice('project', iid)
     return f,iid
 
 
@@ -128,6 +130,7 @@ def test_hcv_specialized_reference_matches_only_reviewed_identity_and_method():
         with get_connection() as connection:
             official_id = connection.execute("SELECT id FROM md_test_items WHERE standard_code='2600204A'").fetchone()[0]
             connection.execute('UPDATE qc_project_template_items SET test_item_id=? WHERE id=?', (official_id, iid))
+        confirm_fixture_product_choice('project', iid)
         ctx = context(technique='realtime_pcr')
         item = item_context('project', iid)
         rows = assess(item, ctx)

@@ -235,7 +235,7 @@ def _preview(connection, package, manufacturer_id):
             if old:
                 owned = connection.execute('SELECT manufacturer_id FROM md_qc_materials WHERE id=?', (old['product_id'],)).fetchone()
                 if owned['manufacturer_id'] != manufacturer_id:
-                    problem('厂家', '此来源的产品已属于另一厂家，不能更换身份。')
+                    problem('厂家', '厂家目录已将此产品登记在另一厂家名下，请检查产品编号和厂家名称。')
             if not old and not excluded and not package['is_test']:
                 collision = connection.execute('SELECT generic_name FROM md_qc_materials WHERE manufacturer_id=? AND LOWER(TRIM(catalog_no))=LOWER(TRIM(?))',
                                                (manufacturer_id, code)).fetchone()
@@ -439,7 +439,7 @@ def validate_material_catalog_context(connection,material_id,payload):
     expected = _export_context(connection,int(material_id))
     for field,value in expected['product'].items():
         if payload['product'].get(field) != value:
-            raise ValueError('配置中的质控品编号、来源版本或原始资料与当前选择不一致，请重新核对；不会自动替换产品。')
+            raise ValueError('文件中的质控品编号或厂家资料与当前所选产品不同，请检查后重新选择质控品。')
     incoming_manufacturer = payload.get('manufacturer')
     target_manufacturer = expected['manufacturer']
     if not isinstance(incoming_manufacturer,dict) or incoming_manufacturer.get('display_name') != target_manufacturer.get('display_name') or sorted(incoming_manufacturer.get('categories',[])) != sorted(target_manufacturer.get('categories',[])):

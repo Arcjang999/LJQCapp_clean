@@ -38,8 +38,8 @@ def render_report_period(prefix, *, months=None, default_start=None, default_end
 def render_handling_versions(options, *, prefix):
     selected = {}
     if options:
-        with st.expander('报告采用的失控处理版本', expanded=False):
-            st.caption('按原检测日期纳入处理事项；后续复测和附件随所选处理版本保留。')
+        with st.expander('选择报告要使用的处理记录', expanded=False):
+            st.caption('原检测日期在所选期间内的处理记录会列入报告；所选记录中的复测和附件也会一并保存。')
             for item in options:
                 versions = {int(row['revision_no']): row for row in item['versions']}
                 keys = sorted(versions, reverse=True)
@@ -68,7 +68,7 @@ def render_saved_report_downloads(export_id, *, prefix, include_pdf=True):
             st.download_button('下载 PDF', pdf, file_name=record.file_name, mime='application/pdf', key=prefix + '_download')
         metadata = get_report_archive_metadata(export_id)
         if metadata:
-            st.download_button('下载完整归档', read_report_archive(export_id), file_name=metadata['archive_name'],
+            st.download_button('下载报告和附件（ZIP）', read_report_archive(export_id), file_name=metadata['archive_name'],
                                mime='application/zip', key=prefix + '_archive_download')
     except (ValueError, sqlite3.Error, OSError) as error:
         st.error(str(error) if isinstance(error, ValueError) else '已保存报告暂时无法读取，请稍后重试。')
@@ -109,7 +109,7 @@ def render_single_report(method, batch_id, *, months, preview_renderer):
     frozen = {int(row['event_id']): int(row['selected_revision_no']) for row in state['options']}
     changed = chosen != frozen
     if changed:
-        st.info('处理版本已变化，请更新报告预览后保存。')
+        st.info('您选了另一版处理记录，请先点“更新报告预览”，再生成报告。')
         if st.button('更新报告预览', key=prefix + '_refresh'):
             try:
                 package = build(batch_id, period.start_date, period.end_date,

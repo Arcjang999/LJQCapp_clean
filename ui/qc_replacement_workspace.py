@@ -120,7 +120,7 @@ def _render_material_choice(state):
     if preview:
         st.dataframe(pd.DataFrame(preview), hide_index=True, width='stretch')
     if not active:
-        st.info('此质控品没有可选批号，请先到基础资料登记浓度水平、浓度编号、批号和效期。')
+        st.info('先到“质控品管理 → 管理批次”登记批号、效期和浓度水平，再回来选择。')
     st.caption('未换批的水平可保留原批号；已有均值和标准差作为参考，保存后仍需核对。')
     return selections, None
 
@@ -147,7 +147,7 @@ def _render_lot_choice(state):
             '水平数': item['level_count'], '新批次参数': '参考值待核对' if any(level['target_source'] != 'building' for level in context['levels'][int(item['id'])])
                 else '重新收集数据建立均值和标准差'} for item in context['items']]), hide_index=True, width='stretch')
     if not lots:
-        st.info('请先在基础资料登记新批号及其浓度水平。')
+        st.info('先到“质控品管理 → 管理批次”登记新批号和浓度水平。')
     return None, existing
 
 
@@ -182,14 +182,14 @@ def _render_dialog():
                                 horizontal=True, key=_key(state, 'mode', draft['mode']))
     selections, existing = _render_material_choice(state) if draft['mode'] == 'materials' else _render_lot_choice(state)
     draft['name'] = st.text_input('新批次名称（选填）', key=_key(state, 'name', draft['name']))
-    st.caption('沿用单位、方法学、试剂和参数建立点数。新批次不带入旧检测记录；保存后核对各水平的均值和标准差、质量目标，再确认批次设置。')
+    st.caption('单位、方法和试剂沿用原项目。保存新批次后，核对各水平的均值、标准差和质量目标，再点“确认批次设置”。新批次从首次检测开始记录。')
     left, right = st.columns(2)
     if left.button('取消', key='qc_replace_cancel', width='stretch'):
         if draft != state['initial']:
             state['discard'] = True
             st.rerun(scope='app')
         _close()
-    if right.button('建立待确认新批次', key='qc_replace_save', disabled=bool(existing), type='primary', width='stretch'):
+    if right.button('保存新批次，继续设置', key='qc_replace_save', disabled=bool(existing), type='primary', width='stretch'):
         try:
             new_id = save_qc_replacement(source_config_id=state['config_id'], expected_fingerprint=state['fingerprint'],
                 mode=draft['mode'], selections=selections, target_lot_id=draft['target_lot'], config_name=draft['name'])

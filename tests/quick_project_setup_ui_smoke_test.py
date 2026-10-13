@@ -78,12 +78,17 @@ def fill_quality(app, values):
     app.text_input(key=prefix + '_context_specimen').set_value(quality['context']['specimen'])
     app.run()
     assert_clean(app)
-    app.radio(key=prefix + '_mode').set_value(quality['mode']).run()
+    mode_widgets = [widget for widget in app.radio if widget.key == prefix + '_mode']
+    if mode_widgets:
+        mode_widgets[0].set_value(quality['mode']).run()
     if quality['mode'] == 'source':
         identifier = quality['requirement_id']
-        app.selectbox(key=prefix + '_requirement').set_value(identifier).run()
+        assert app.session_state[prefix + '_requirement'] == identifier
         for level in quality['levels']:
-            app.number_input(key=f"{prefix}_{identifier}_{level['level_order']}_concentration").set_value(level['concentration'])
+            fields = [widget for widget in app.number_input
+                      if widget.key == f"{prefix}_{identifier}_{level['level_order']}_concentration"]
+            if fields:
+                fields[0].set_value(level['concentration'])
         if quality.get('supplemental_cv') is not None:
             app.number_input(key=prefix + '_supplemental_cv').set_value(quality['supplemental_cv'])
     else:
@@ -94,6 +99,7 @@ def fill_quality(app, values):
     app.text_area(key=prefix + '_evidence').set_value(quality['evidence'])
     if quality['mode'] == 'recorded':
         search = quality['search_record']
+        app.checkbox(key=prefix + '_advanced_search').check()
         app.text_input(key=prefix + '_search_query').set_value(search['query'])
         app.text_input(key=prefix + '_search_url').set_value(search['official_url'])
         app.text_area(key=prefix + '_search_rationale').set_value(search['rationale'])
@@ -248,9 +254,11 @@ class QuickProjectSetupUiTests(unittest.TestCase):
                 self.assertEqual('preview', app.session_state['project_workspace_dialog']['quick_step'])
                 self.assertEqual(draft, app.session_state['project_workspace_dialog']['draft'])
                 self.assertEqual(before, database_contents())
-                self.assertTrue(any('变化' in str(item.value) for item in app.error))
+                expected = ('项目资料或可用质控品已修改', '返回上一步') if change == 'lot' else (
+                    '该试剂可用的质控品资料已修改', '重新选择质控品')
+                self.assertTrue(any(all(text in str(item.value) for text in expected) for item in app.error))
 
-    def test_numeric_quality_back_step_retains_standard_concentrations_and_stricter_cv(self):
+    def test_numeric_quality_back_step_retains_automatic_uniform_standard_and_stricter_cv(self):
         with IsolatedDatabase():
             values = metadata_values('zscore', 3, numeric=True)
             values['quality']['supplemental_cv'] = 2.0
@@ -261,9 +269,13 @@ class QuickProjectSetupUiTests(unittest.TestCase):
             assert_clean(app)
             prefix = quality_prefix(app)
             identifier = values['quality']['requirement_id']
-            self.assertEqual(identifier, app.selectbox(key=prefix + '_requirement').value)
+            self.assertEqual(identifier, app.session_state[prefix + '_requirement'])
+            self.assertFalse(any(widget.key == prefix + '_requirement' for widget in app.selectbox))
             for level in values['quality']['levels']:
-                self.assertEqual(level['concentration'], app.number_input(key=f"{prefix}_{identifier}_{level['level_order']}_concentration").value)
+                self.assertFalse(any(widget.key == f"{prefix}_{identifier}_{level['level_order']}_concentration"
+                                     for widget in app.number_input))
+            self.assertEqual([1, 2, 3], [row['level_order'] for row in
+                             app.session_state['project_workspace_dialog']['draft']['quality']['levels']])
             self.assertEqual(2.0, app.number_input(key=prefix + '_supplemental_cv').value)
             self.assertEqual(before, database_contents())
 
@@ -295,7 +307,7 @@ class QuickProjectSetupUiTests(unittest.TestCase):
             values = metadata_values()
             app = open_details(values)
             prefix = product_prefix(app)
-            self.assertEqual(['人工选品'], app.radio(key=prefix + '_mode').options)
+            self.assertEqual(['全部质控品'], app.radio(key=prefix + '_mode').options)
             app.button(key=prefix + '_relation_add').click().run()
             assert_clean(app)
             editor = app.session_state['project_workspace_dialog'][prefix + '_editor']
@@ -304,7 +316,7 @@ class QuickProjectSetupUiTests(unittest.TestCase):
                 app.text_input(key=ep + '_' + field).set_value(value)
             app.button(key=ep + '_save').click().run()
             assert_clean(app)
-            self.assertIn('已核对的候选', app.radio(key=prefix + '_mode').options)
+            self.assertIn('已登记的配套质控品', app.radio(key=prefix + '_mode').options)
             self.assertTrue(any('已核对说明书及实验室适用依据' in str(item.value) for item in app.caption))
             self.assertTrue(app.button(key='quick_details_next').disabled)
             app.radio(key=prefix + '_mode').set_value('已核对的候选').run()

@@ -83,7 +83,7 @@ def _product_review(values):
     from services.qc_product_recommendation_service import validate_choice_review
     prior = values.get('product_choice_review') or {}
     if not prior:
-        raise ValueError('请先核对试剂与质控品的适用关系。')
+        raise ValueError('请先选择质控品，并确认它可用于所选仪器和试剂。')
     return validate_choice_review(prior, qc_material_id=int(values['qc_material_id']),
         reagent_id=int(values['reagent_id']), lab_instrument_id=int(values['lab_instrument_id']),
         test_item_id=int(values['test_item_id']), method_id=int(values['method_id']))
@@ -128,10 +128,28 @@ def _prepare(connection, values):
     elif mode == 'recorded':
         recorded = {key: quality.get(key) for key in ('source_name', 'source_version', 'requirement_text')}
         build_review(connection, context['item'], recorded=recorded, **args)
+    elif mode == 'sd_cv':
+        from services.quality_setup_service import simple_quality_payload, simple_cv_spec
+        payload = simple_quality_payload(context['item'], args, cv_limit=quality.get('cv_limit'),
+            confirmed_by=quality.get('confirmed_by', ''), evidence=quality.get('evidence', ''),
+            levels=quality.get('levels'), requirement_text=quality.get('requirement_text'),
+            source_name=quality.get('source_name'), source_version=quality.get('source_version'))
+        args = {key: payload[key] for key in _QUALITY_ARGS}
+        spec = simple_cv_spec(context['item'], payload)
+        if spec is not None:
+            proposed = [dict(level_order=order, qc_level_id=int(row['id']), concentration=None,
+                             category='', rule=spec['imprecision'][0])
+                        for order, row in enumerate(context['levels'], 1)]
+            preview_item = {**context['item'], 'quality_goal_json': _json(dict(levels=proposed))}
+            build_review(connection, preview_item, source_spec=spec, **args)
+        else:
+            build_review(connection, context['item'], recorded={**{key: payload[key]
+                for key in ('source_name', 'source_version', 'requirement_text')}, 'setup_mode': 'sd_cv'}, **args)
     else:
         raise ValueError('请选择质量要求来源。')
     source_fingerprint = _hash(dict(references=context['references'], levels=context['levels'],
-                                    product_choice=choice, spec=spec))
+                                    product_choice=choice, spec=spec,
+                                    catalog_review=payload['search_record'] if mode == 'sd_cv' else None))
     summary = [
         ('项目', name), ('仪器', context['references']['lab_instrument_id']['display_name']),
         ('检验项目', context['item']['test_item_name']), ('方法学', context['item']['method_name']),
@@ -142,6 +160,10 @@ def _prepare(connection, values):
     summary.extend([('质控方法', QC_METHOD_LABELS[context['item']['qc_method']]),
                     ('输入值', INPUT_VALUE_TYPE_LABELS[context['item']['input_value_type']]),
                     ('建靶有效点数', str(context['item']['target_n']))])
+    if mode == 'sd_cv':
+        summary.append(('质量要求', '本批次SD控制' + (f"；实验室CV≤{payload['cv_limit']:g}%" if payload['cv_limit'] is not None else '；未设置CV上限')))
+    elif spec:
+        summary.append(('质量要求', spec['standard'] + ' / ' + spec['version'] + '；' + spec['imprecision_text']))
     return dict(summary=summary, material_labels=[material_label(row) for row in context['levels']],
                 source_fingerprint=source_fingerprint,
                 preview_hash=_hash(dict(values=values, source_fingerprint=source_fingerprint)))
@@ -166,7 +188,7 @@ def save_quick_project_setup(values, *, expected_preview_hash, request_key):
             return json.loads(old['receipt_json'])
         preview = _prepare(connection, values)
         if preview['preview_hash'] != expected_preview_hash:
-            raise ValueError('所选资料或适用关系已变化，请重新核对预览；本次填写仍保留。')
+            raise ValueError('项目资料或可用质控品已修改。填写内容仍保留，请返回上一步检查，再查看保存预览。')
         item_values = {key: values.get(key) for key in _FIELDS}
         item_values.update(product_choice_review=_product_review(values), notes=str(values.get('item_notes') or ''))
         project_values = dict(template_name=values['template_name'], lab_instrument_id=values['lab_instrument_id'],
@@ -199,6 +221,11 @@ def _confirm_quality(scope, item_id, quality):
     from services.quality_target_service import adopt_requirement
     from services.quality_review_service import save_recorded_requirement
     args = {key: quality.get(key) for key in _QUALITY_ARGS}
+    if quality['mode'] == 'sd_cv':
+        from services.quality_setup_service import save_simple_quality
+        return save_simple_quality(scope, item_id, **args, cv_limit=quality.get('cv_limit'),
+            levels=quality.get('levels'), requirement_text=quality.get('requirement_text'),
+            source_name=quality.get('source_name'), source_version=quality.get('source_version'))
     if quality['mode'] == 'source':
         return adopt_requirement(scope, item_id, quality['requirement_id'], **args,
             levels=quality.get('levels', []) if scope == 'lot' else [],

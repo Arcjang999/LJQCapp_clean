@@ -18,7 +18,7 @@ STATUS_LABELS = {
     'target_building': '参数建立期', 'formal_qc': '正式质控',
     'manual': '实验室确认', 'manufacturer': '厂家赋值（已确认）',
     'building': '本批次均值和标准差建立', 'revision': '均值和标准差修订',
-    'copied_pending': '复制参数（待确认）',
+    'copied_pending': '沿用原均值和SD（待确认）',
 }
 EVENT_LABELS = {'reagent': '试剂换批', 'correction': '试剂换批更正',
                 'qc': '质控品换批', 'target': '控制参数确认',
@@ -58,7 +58,7 @@ def evaluation_tables(payload, input_value_type='raw', level_names=None):
         return _display(value)
     summary=[{'项目':label,'记录内容':saved_value(key,result[key])} for key,label in fields
              if key in result and not (formal and key == 'is_building_included')]
-    for key,label in [('target_mean','判读设定均值'),('target_sd','判读 SD')]:
+    for key,label in [('target_mean','判读所用均值'),('target_sd','判读所用SD')]:
         if key in payload:summary.append({'项目':label,'记录内容':_display(payload[key])})
     levels=[]
     for level in result.get('level_results',[]):
@@ -80,7 +80,7 @@ def target_history_table(versions, level_names=None):
     for version in versions.to_dict('records'):
         for level in json.loads(version['levels_json']):
             lid=level['level_id']
-            rows.append({'参数版本':f"V{version['version_no']}",
+            rows.append({'均值和SD版本':f"V{version['version_no']}",
                 '质控水平':(level_names or {}).get(lid,lid.replace('Level ','水平 ')),
                 '设定均值':level['mean'],'SD':level['sd'],
                 '设定变异系数（%）':calculate_cv_percent(level['mean'],level['sd']),
@@ -119,8 +119,8 @@ def event_history_table(connection, events):
         evidence='；'.join(f"{name('md_qc_material_lots',lot,'lot_no')}：验证 {vid}" for lot,vid in confirmations.items())
         if not evidence and pd.notna(event.get('verification_id')):
             evidence=f"验证 {int(event['verification_id'])}"
-        rows.append({'事件编号':event['id'],'操作':EVENT_LABELS.get(kind,'批次调整'),
+        rows.append({'调整记录编号':event['id'],'操作':EVENT_LABELS.get(kind,'批次调整'),
             '调整前':before,'调整后':after,'生效时间':event['effective_at'],
-            '调整依据':event['reason'],'确认人':event['operator'],'关联验证':evidence or '—',
-            '更正原事件':str(int(event['corrects_event_id'])) if pd.notna(event.get('corrects_event_id')) else '—'})
+            '调整依据':event['reason'],'确认人':event['operator'],'批号验证记录':evidence or '—',
+            '更正前记录编号':str(int(event['corrects_event_id'])) if pd.notna(event.get('corrects_event_id')) else '—'})
     return pd.DataFrame(rows)

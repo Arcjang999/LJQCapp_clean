@@ -80,7 +80,7 @@ def _material_editor(state: dict) -> None:
     product = get_material_product(product_id)
     st.caption(f'质控品：{product["generic_name"]}')
     if locked:
-        st.info('此批号已用于批次、验证或检测，当前只能补充备注。需要更换浓度水平、浓度编号、批号或效期时，请新增质控品批号，并核对新批次设置。')
+        st.info('此批号已使用，可在这里补充备注。更改批号、效期或浓度水平时，点“新增质控品批号”登记，再设置项目批次。')
     spec_id = None
     defaults = dict(level_name=record.get('level_name', ''), level_code=record.get('level_code', ''),
         catalog_no=record.get('specification_catalog_no', ''), lot_no=record.get('lot_no', ''),
@@ -139,7 +139,7 @@ def _product_editor(state: dict) -> None:
         format_func=lambda value: '请选择厂家' if value is None else manufacturers[value],
         disabled=edit, key=f'{prefix}_manufacturer')
     if locked:
-        st.info('此质控品已登记批号或用于项目，名称、货号等资料不能直接修改，可补充备注。')
+        st.info('此质控品已登记批号或用于项目，可在这里补充备注。新的名称或货号请通过“新增质控品”登记。')
     labels = {'generic_name': '质控品名称 *', 'trade_name': '商品名称', 'matrix': '基质',
               'physical_form': '物理形态', 'catalog_no': '产品货号', 'registration_no': '注册证 / 备案编号'}
     values = {}
@@ -158,7 +158,7 @@ def _product_editor(state: dict) -> None:
                 product_id = state['product_id']
             else:
                 if manufacturer is None:
-                    raise ValueError('请选择厂家；未登记的厂家可先在基础资料中新增。')
+                    raise ValueError('请选择厂家；列表中没有时，先到“资料与批次 → 厂家管理”登记质控品厂家。')
                 product_id = create_qc_material(manufacturer_id=manufacturer, **values)
         except ValueError as exc:
             st.error(str(exc))
@@ -176,9 +176,9 @@ def _status_confirmation(state: dict) -> None:
     label = record['generic_name'] if product_mode else material_label(record)
     st.markdown(f'**{label}**')
     if disabled:
-        st.warning('停用后不能再选择使用，已保存的检测记录、均值和标准差及报告保留。')
+        st.warning('停用后移入已停用列表，已保存的检测记录、均值、标准差及报告保留。')
     else:
-        st.info('恢复后可重新选择使用，已有检测记录不变。')
+        st.info('恢复后可重新选择此产品或批号，原检测记录保留。')
     if lot_mode:
         st.caption('恢复批号后，可以重新选择该批号下未单独停用的浓度水平。')
     if not product_mode:
@@ -232,7 +232,7 @@ def _render_usage_navigation(product_id: int, *, include_batches: bool = True) -
     usage = get_product_relationships(product_id)['usage']
     st.subheader('关联项目与批次' if include_batches else '使用此质控品的项目')
     if not usage:
-        st.info('尚无项目使用此质控品。建立项目时选择此产品，再添加检验项目和实际批次。')
+        st.info('在“新建项目”中选择这款质控品，再添加检验项目和批次。')
         return
     projects = {int(row['template_id']): row for row in usage}
     project_key = f'material_usage_project_{product_id}'
@@ -249,13 +249,13 @@ def _render_usage_navigation(product_id: int, *, include_batches: bool = True) -
         return
     configs = {int(row['id']): row for row in list_lot_configs(template_id, include_disabled=True).to_dict('records')}
     if not configs:
-        st.caption('此项目尚未建立实际批次。可打开项目，进入批次管理登记。')
+        st.caption('点击“打开关联项目”，在“批次管理”中新增批次。')
         return
     config_key = f'material_usage_config_{product_id}_{template_id}'
     if st.session_state.get(config_key) not in configs:
         st.session_state[config_key] = next(iter(configs))
     summaries = {identifier: config_material_summary(identifier) for identifier in configs}
-    config_id = st.selectbox('项目中的实际批次', list(configs), key=config_key,
+    config_id = st.selectbox('项目批次', list(configs), key=config_key,
         format_func=lambda value: configs[value]['config_name'] + '｜' + summaries[value] +
             ('（已停用）' if configs[value]['is_disabled'] else ''))
     view, replace = st.columns(2)
@@ -312,7 +312,7 @@ def render_material_catalog(*, render_dialog: bool = True, include_directory: bo
     if add.button('新增质控品', key='material_catalog_add_product', width='stretch'):
         _open_dialog('product_new')
     if product_id is None:
-        st.info('请先选择或新增质控品，再登记本次使用的浓度水平、实际批号和效期。')
+        st.info('先选择或新增质控品，再在下方登记批号、效期和浓度水平。')
     else:
         product = get_material_product(product_id)
         product_info, product_edit, product_status = st.columns([0.5, 0.25, 0.25], vertical_alignment='bottom')
@@ -339,8 +339,8 @@ def render_pending_material_dialog() -> None:
 
 
 def _render_product_batches(product_id, product, show_disabled):
-    st.subheader('实际批号与浓度水平')
-    st.caption('产品名录中的浓度文字供核对；请按本次采购资料登记实际批号、效期及各水平，不作为均值或标准差。')
+    st.subheader('批号与浓度水平')
+    st.caption('按包装登记批号、效期和浓度水平；均值和标准差在项目批次中确认。')
     manager = st.session_state.get('material_dialog', {})
     if manager.get('kind') == 'batches' and 'material_catalog_search' not in st.session_state:
         st.session_state['material_catalog_search'] = manager.get('search', '')
@@ -398,7 +398,7 @@ def _render_product_batches(product_id, product, show_disabled):
                 st.warning('此批号已停用。请先恢复批号，再选择需要使用的浓度水平。')
                 if st.button('恢复批号', key='material_catalog_restore_lot'):
                     _open_dialog('lot_status', product_id=product_id, level_id=selected_id)
-    st.caption('浓度编号按厂家标识填写，没有编号时可留空；不同浓度水平可使用各自的实际批号。')
+    st.caption('浓度编号照包装填写，可留空；每个浓度水平可选择自己的批号。')
 
 
 

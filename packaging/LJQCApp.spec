@@ -31,6 +31,13 @@ PROJECT_PACKAGES = [
     "ui",
 ]
 PROJECT_DATA_DIRS = ["data/dictionaries", "data/catalogs", "resources"]
+PROJECT_HELP_FILES = [
+    "docs/OPERATION_GUIDE.md",
+    "docs/current_user_guide.md",
+    "docs/images/first-use/01-navigation.png",
+    "docs/images/first-use/02-new-project.png",
+    "docs/images/first-use/03-quality-standard.png",
+]
 
 
 def collect_project_source_datas() -> list[tuple[str, str]]:
@@ -52,6 +59,11 @@ def collect_project_source_datas() -> list[tuple[str, str]]:
                 continue
             relative_parent = file_path.parent.relative_to(PROJECT_ROOT)
             datas.append((str(file_path), str(relative_parent)))
+    for help_file_name in PROJECT_HELP_FILES:
+        help_file = PROJECT_ROOT / help_file_name
+        if not help_file.is_file():
+            raise FileNotFoundError(f"Missing required help resource: {help_file}")
+        datas.append((str(help_file), str(help_file.parent.relative_to(PROJECT_ROOT))))
     return datas
 
 

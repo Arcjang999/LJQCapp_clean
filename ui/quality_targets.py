@@ -1,4 +1,5 @@
 from __future__ import annotations
+from datetime import date
 import pandas as pd
 import streamlit as st
 from database import atomic_write, get_connection
@@ -7,9 +8,9 @@ from services.quality_target_service import (adopt_requirement, clear_requiremen
 
 
 def catalog_table(records):
-    return pd.DataFrame([{'检验项目':r['name'],'来源类型':'内置标准' if r['origin']=='builtin' else '实验室自定要求',
-        '来源/版本':r['standard']+' / '+r['version'],'实施日期':r['effective_date'],
-        '测量单位':r['measurement_unit'] or '标准未规定测量单位（以百分数表示）','适用范围':r['scope'],
+    return pd.DataFrame([{'检验项目':r['name'],'要求类型':'内置标准' if r['origin']=='builtin' else '实验室自定要求',
+        '标准或文件/版本':r['standard']+' / '+r['version'],'实施日期':r['effective_date'],
+        '测量单位':r['measurement_unit'] or '标准未规定测量单位（以百分数表示）','检测范围':r['scope'],
         '允许不精密度':r['imprecision_text'],'允许偏倚':r['bias_text'] or '未规定',
         '允许总误差/可比性偏差':r['tea_text'] or '未规定','条款':r['source_clause'],
         'PDF页码':r.get('source_page'),'说明':r['notes']} for r in records])
@@ -20,11 +21,15 @@ def render_spec(spec):
     st.write('允许不精密度：'+spec['imprecision_text'])
     st.write('允许偏倚：'+(spec['bias_text'] or '原条款未规定'))
     st.write('允许总误差/可比性偏差：'+(spec['tea_text'] or '原条款未规定'))
-    st.caption('适用范围：'+spec['scope']+'；测量单位：'+(spec['measurement_unit'] or '标准未规定测量单位，请核对本项目单位'))
+    st.caption('标准规定的检测范围：'+spec['scope']+'；单位：'+(spec['measurement_unit'] or '以本项目设置的单位为准'))
     if spec.get('notes'):st.info(spec['notes'])
     if spec.get('source_url','').startswith('https://'):
         st.link_button('查看标准原文',spec['source_url'])
-    if spec.get('source_page'):st.caption(f"来源：PDF 第 {spec['source_page']} 页（包括封面），详见所列条款。")
+    if spec.get('source_page'):st.caption(f"条款在原文第 {spec['source_page']} 页，页码包含封面。")
+    basis = spec.get('laboratory_basis')
+    if basis:
+        st.caption('实验室依据：'+basis.get('source_name', '')+' / '+basis.get('source_version', ''))
+        st.write('实验室实际要求：'+basis.get('requirement_text', ''))
 
 
 def _current_source(source):
@@ -41,31 +46,174 @@ def render_review_summary(review, *, historical=False):
     if not review:
         return
     if review.get('status') == 'pending':
-        st.info('质量目标资料尚待确认，请补齐本次检验项目和质控品的适用条件及来源核查。')
+        st.info('质量要求还没有确认。请填写检测条件和确认人，然后保存质量目标。')
     recorded = review.get('recorded', {})
     if recorded:
         st.write('实验室自定要求：' + recorded.get('requirement_text', ''))
-        st.caption('来源：' + recorded.get('source_name', '') + ' / ' + recorded.get('source_version', ''))
-        st.caption('请按这些要求人工核对；均值和标准差按本批次设置使用。')
-    st.caption('确认人：' + review.get('confirmed_by', '') + '｜依据：' + review.get('evidence', ''))
+        st.caption('使用文件：' + recorded.get('source_name', '') + ' / ' + recorded.get('source_version', ''))
+        st.caption('请按以上要求检查检测结果，均值和SD使用本批次设置。')
+    st.caption('确认人：' + review.get('confirmed_by', '') + '｜设置说明：' + review.get('evidence', ''))
     local_process = review.get('process_requirements')
     if local_process is not None:
         st.write('本实验室对照与质控要求：' + (local_process.get('requirement_text') or '未设置'))
     for row in review.get('candidates', []):
         if not historical and not _current_source(row.get('standard', {})):
             continue
-        state = {'adopted': '已采用', 'referenced': '参考来源', 'not_selected': '未选为参考',
-                 'pending': '参考条件待核对', 'not_applicable': '不适用'}.get(row.get('disposition'), '待核对')
+        state = {'adopted': '已采用', 'referenced': '作为参考', 'not_selected': '未选用',
+                 'pending': '请补充检测条件', 'not_applicable': '本次检测不采用'}.get(row.get('disposition'), '请检查检测条件')
         st.caption(f"{row['source']}｜{state}：{row.get('reason', '')}")
         if row.get('disposition') == 'adopted' and row.get('kind') not in (None, 'numeric'):
-            st.caption('；'.join(row.get('requirements', [])) + '｜请人工核对')
+            st.caption('；'.join(row.get('requirements', [])) + '｜请按条款检查对照结果')
     for source in review.get('registered_standards', []):
         if not historical and not _current_source(source):
             continue
-        st.caption(f"补充依据：{source['standard']} / {source['version']}；{source['source_clause']}；{source['requirement_text']}（请人工核对）")
+        st.caption(f"补充文件：{source['standard']} / {source['version']}；{source['source_clause']}；{source['requirement_text']}（请按条款检查检测结果）")
     search=review.get('search_record')
     if search:
-        st.caption('标准复核：'+search.get('checked_on','')+'｜'+search.get('rationale',''))
+        label = '本软件已收录标准的检查记录' if search.get('scope') == 'local_catalog' else '标准查找记录'
+        st.caption(label+'：'+search.get('checked_on','')+'｜'+search.get('rationale',''))
+
+
+def render_quality_setup(item, prior, prefix, *, levels=None, goal=None, quick=False, actor=''):
+    """One quality form for quick creation, project settings and editable lots."""
+    from services.quality_setup_service import SD_REQUIREMENT, quality_setup_plan, local_catalog_review
+    from services.quality_catalog_service import browse_quality_catalog
+    from ui.quality_applicability import render_conditions
+
+    condition_args, assessments = render_conditions(item, prior, prefix)
+    plan = quality_setup_plan(item, condition_args['context'])
+    if plan['state'] == 'sd_cv' and not condition_args['search_record']:
+        condition_args['search_record'] = local_catalog_review(item, condition_args['context'])
+    basis = (goal or {}).get('spec', {}).get('laboratory_basis') or {}
+    recorded = prior.get('draft_recorded') or prior.get('recorded') or basis or prior
+    simple_goal = bool(goal and (goal['spec'].get('setup_mode') == 'sd_cv' or goal['spec']['id'].startswith('custom-simple-')))
+    previous_mode = prior.get('mode') or recorded.get('mode') or recorded.get('setup_mode')
+    if not previous_mode:
+        previous_mode = ('sd_cv' if simple_goal else
+                         'source' if goal else
+                         'recorded' if prior.get('decision') == 'record_only' else 'sd_cv')
+    source_value = 'source' if quick else '选择标准或自定义目录'
+    recorded_value = 'recorded' if quick else '记录实验室要求'
+    mode = 'source' if plan['state'] == 'standard' else 'sd_cv'
+    if plan['state'] == 'standard':
+        st.markdown('**引用现行数值标准**')
+        spec = plan['numeric_spec']
+        selected = spec['id']
+        st.session_state[prefix+'_requirement'] = selected
+    else:
+        if plan['state'] == 'blocked':
+            st.markdown('**请先完成检测条件**')
+            st.warning(plan['reason'])
+            st.caption('可以先点击“保存，稍后继续”。填写完整后，再确认质量要求。')
+        else:
+            st.markdown('**SD控制＋实验室CV**')
+            st.caption('本批次按当前方法的质控规则判读；CV按正式期在控结果比较。')
+        with st.expander('高级：其他实验室要求或自定目录', expanded=False):
+            choices = ['sd_cv', source_value, recorded_value]
+            seed = {'source': source_value, 'recorded': recorded_value}.get(previous_mode, previous_mode)
+            if st.session_state.get(prefix+'_mode') not in choices:
+                st.session_state[prefix+'_mode'] = seed if seed in choices else 'sd_cv'
+            choice = st.radio('质量要求设置', choices, key=prefix+'_mode', horizontal=True,
+                format_func=lambda value: {'sd_cv': 'SD控制＋实验室CV', source_value: '自定要求目录',
+                                          recorded_value: '记录其他实验室要求'}[value])
+        mode = {source_value: 'source', recorded_value: 'recorded'}.get(choice, 'sd_cv')
+        spec = None
+        selected = None
+        if mode == 'source':
+            candidates = {row['id'] for row in assessments if row['kind'] == 'numeric' and row['status'] == 'applicable'}
+            sources = {row['id']: row['spec'] for row in browse_quality_catalog()
+                       if row['kind'] in ('numeric', 'custom') and (row['spec']['origin'] != 'builtin' or row['id'] in candidates)}
+            initial = prior.get('requirement_id') or (goal['spec']['id'] if goal else None)
+            if prefix+'_requirement' not in st.session_state or st.session_state.get(prefix+'_requirement') not in [None, *sources]:
+                st.session_state[prefix+'_requirement'] = initial if initial in sources else None
+            selected = st.selectbox('选择实验室自定要求', [None, *sources], key=prefix+'_requirement',
+                format_func=lambda value: '请选择' if value is None else sources[value]['name']+'｜'+sources[value]['standard'])
+            spec = sources.get(selected)
+
+    result = dict(condition_args, mode=mode, levels=[], requirement_id=selected)
+    if spec is not None:
+        st.write(spec['standard']+' / '+spec['version']+' · '+spec['name'])
+        st.write('允许不精密度：'+spec['imprecision_text'])
+        with st.expander('查看标准原文和限值', expanded=False):
+            render_spec(spec)
+        categories = list(dict.fromkeys(row['category'] for row in spec['imprecision'] if row.get('category')))
+        needs_concentration = any('lower' in row or 'upper' in row for row in spec['imprecision'])
+        previous_levels = prior.get('levels') or (goal.get('levels', []) if goal and goal['spec']['id'] == selected else [])
+        for order, level in enumerate(levels or [], 1):
+            order = int(level.get('level_order', order))
+            previous = next((row for row in previous_levels if row['level_order'] == order), {})
+            concentration, category = previous.get('concentration'), previous.get('category', '')
+            if needs_concentration or categories:
+                from services.material_workflow_service import material_label
+                st.markdown(f'**水平 {order}：{material_label(level)}**')
+            if needs_concentration:
+                concentration = st.number_input('质控品浓度（按此浓度选择标准限值）', min_value=0.0,
+                    value=concentration, format='%.4f', key=f'{prefix}_{selected}_{order}_concentration')
+            if categories:
+                category = st.selectbox('水平类别', ['', *categories],
+                    index=categories.index(category)+1 if category in categories else 0,
+                    key=f'{prefix}_{selected}_{order}_category', format_func=lambda value: value or '请选择')
+                # Fib's abnormal-category rule also requires the actual concentration.
+                if selected == 'wst406-2024-fib' and category == '异常' and not needs_concentration:
+                    concentration = st.number_input('异常水平浓度（g/L）', min_value=0.0, value=concentration,
+                        key=f'{prefix}_{selected}_{order}_concentration')
+            result['levels'].append(dict(level_order=order, concentration=concentration, category=category))
+        if not needs_concentration and not categories and levels:
+            st.caption(f'全部 {len(levels)} 个水平采用此限值。')
+        if spec['origin'] == 'builtin' and all(row['kind'] == 'cv' for row in spec['imprecision']):
+            with st.expander('选填：实验室更严CV要求', expanded=False):
+                value = prior.get('supplemental_cv', (goal or {}).get('supplement', {}).get('cv'))
+                if prefix+'_supplemental_cv' not in st.session_state:
+                    st.session_state[prefix+'_supplemental_cv'] = value
+                result['supplemental_cv'] = st.number_input('实验室更严 CV 要求（选填，%）', min_value=0.0,
+                    value=None, key=prefix+'_supplemental_cv', help='填入值须小于各水平的标准CV上限。标准规定的上限会同时保留。')
+    elif mode == 'sd_cv':
+        if plan['cv_supported']:
+            cv = prior.get('cv_limit', recorded.get('cv_limit'))
+            if cv is None and simple_goal and 'cv_limit' not in prior and 'cv_limit' not in recorded:
+                cv = item.get('cv_limit')
+            if prefix+'_cv_limit' not in st.session_state:
+                st.session_state[prefix+'_cv_limit'] = cv
+            result['cv_limit'] = st.number_input('实验室CV上限（选填，%）', min_value=0.0, value=None,
+                key=prefix+'_cv_limit', help='原始定量尺度（浓度、活性、计数等）可设置；留空表示只使用现有质控规则。CV另行比较正式期在控结果的精密度。')
+        else:
+            result['cv_limit'] = None
+            st.caption('Ct、log、S/CO或定性结果沿用当前方法的质控规则，其他要求可在文字依据中填写。')
+
+    if mode in ('sd_cv', 'recorded'):
+        with st.expander('文字要求与依据' if mode == 'sd_cv' else '填写其他实验室要求', expanded=mode == 'recorded'):
+            simple = mode == 'sd_cv'
+            if simple and plan['state'] == 'sd_cv':
+                st.caption('本软件已收录的标准中，没有对应本次检测的数值限值。')
+            result['source_name'] = st.text_input('使用的说明书或实验室文件名称',
+                value=recorded.get('source_name') or ('本实验室SD质控方案' if simple else ''), key=prefix+'_source_name', max_chars=200)
+            result['source_version'] = st.text_input('设置日期或文件版本',
+                value=recorded.get('source_version') or (date.today().isoformat() if simple else ''), key=prefix+'_source_version', max_chars=200)
+            text = recorded.get('requirement_text') or (SD_REQUIREMENT if simple else '')
+            # The service appends the current structured CV; old generated CV text
+            # must not survive a change to that limit or become its input source.
+            if simple:
+                import re
+                text = re.sub(r'\s*实验室自定义CV上限为≤[^。]*。', '', text)
+            result['requirement_text'] = st.text_area('实验室实际要求', value=text,
+                key=prefix+('_recorded' if quick else '_recorded_text'), max_chars=2000)
+            if not simple:
+                st.caption('填写实验室执行的要求和文件名称。查到新的标准时，可在“高级：查找或补充标准”中登记。')
+    person_label = '质量要求确认人' if quick else '确认人'
+    result['confirmed_by'] = st.text_input(person_label, value=prior.get('confirmed_by', actor), key=prefix+'_person', max_chars=80)
+    with st.expander('补充设置说明（选填）' if mode == 'sd_cv' else '质量要求设置说明', expanded=False):
+        evidence = prior.get('evidence', '')
+        if not evidence and spec:
+            evidence = f"{item.get('test_item_name', '')}使用{item.get('method_name', '')}，单位为{item.get('unit_symbol', '')}，全部水平采用{spec['standard']} / {spec['version']}。"
+            old_auto = st.session_state.get(prefix+'_auto_evidence')
+            if old_auto != evidence and st.session_state.get(prefix+'_evidence', '') in ('', old_auto):
+                st.session_state[prefix+'_evidence'] = evidence
+            st.session_state[prefix+'_auto_evidence'] = evidence
+        result['evidence'] = st.text_area('说明此要求如何用于本次检测', value=evidence, key=prefix+'_evidence', max_chars=2000)
+    result['checked'] = st.checkbox('已确认检测方法、单位、各水平和以上质量要求填写正确',
+        value=bool(prior.get('checked')) if quick else False, key=prefix+('_checked' if quick else '_confirmed'))
+    result['blocked'] = plan['state'] == 'blocked'
+    return result
 
 
 def render_adoption(scope,item_id,*,embedded=False,expected_revision=None,on_saved=None):
@@ -79,119 +227,95 @@ def render_adoption(scope,item_id,*,embedded=False,expected_revision=None,on_sav
         with get_connection() as connection:
             frozen=is_frozen_lot(connection,item)
     if embedded:st.markdown('**本批次质量目标**' if scope=='lot' else '**项目质量目标**')
-    from services.quality_catalog_service import browse_quality_catalog
-    current_ids = {row['id'] for row in browse_quality_catalog()}
-    if goal and (frozen or goal['spec']['id'] in current_ids):
-        render_spec(goal['spec'])
-        if scope=='lot' and goal.get('pending'):
-            st.info('请核对下方各水平的适用条件，再确认本批次质量目标。')
-        else:
-            st.caption(f"确认人：{goal['confirmed_by']}｜设置时间：{goal['adopted_at']}")
-        if goal.get('evidence'):st.caption('适用依据：'+goal['evidence'])
-        if goal.get('levels'):
-            st.dataframe(pd.DataFrame([{'水平':v['level_order'],'浓度':v['concentration'],'类别':v['category'],
-                '要求':f"{v['rule']['operator']} {v['rule']['value']:g}{v['rule']['unit']}"} for v in goal['levels']]),hide_index=True)
-    elif item['cv_limit'] is not None:
-        st.caption(f"原设定允许不精密度（CV）：≤{item['cv_limit']:g}%｜依据：{item['quality_target_source_text'] or '未填写'}")
-    render_review_summary(review, historical=frozen)
+    def saved_details():
+        from services.quality_catalog_service import browse_quality_catalog
+        current_ids = {row['id'] for row in browse_quality_catalog()}
+        if goal and (frozen or goal['spec']['id'] in current_ids):
+            render_spec(goal['spec'])
+            if scope=='lot' and goal.get('pending'):
+                st.info('请检查各水平使用的质量要求，然后点击“确认本批次质量目标”。')
+            else:
+                st.caption(f"确认人：{goal['confirmed_by']}｜设置时间：{goal['adopted_at']}")
+            if goal.get('evidence'):st.caption('设置说明：'+goal['evidence'])
+            if goal.get('levels'):
+                st.dataframe(pd.DataFrame([{'水平':v['level_order'],'浓度':v['concentration'],'类别':v['category'],
+                    '要求':f"{v['rule']['operator']} {v['rule']['value']:g}{v['rule']['unit']}"} for v in goal['levels']]),hide_index=True)
+        elif item['cv_limit'] is not None:
+            st.caption(f"原设定允许不精密度（CV）：≤{item['cv_limit']:g}%｜依据：{item['quality_target_source_text'] or '未填写'}")
+        render_review_summary(review, historical=frozen)
     if frozen:
-        st.info('本批次已确认，质量目标不能修改。如需调整，请在新批次设置。' if goal or review or item['cv_limit'] is not None else '本批次未设置质量目标，可继续录入和查看结果。新增批次时请设置并确认质量目标。')
+        saved_details()
+    elif goal or review or item['cv_limit'] is not None:
+        with st.expander('查看已保存的质量要求和文件', expanded=False):
+            saved_details()
+    if frozen:
+        st.info('本批次继续使用已保存的质量要求。需要调整时，请在新批次设置。' if goal or review or item['cv_limit'] is not None else '本批次未设置质量目标，可继续录入和查看结果。新增批次时请设置质量目标。')
         return
-    from ui.quality_applicability import render_conditions
-    condition_args, assessments=render_conditions(item,review,prefix)
-    candidates=standard_candidates(item)
+    levels = []
+    if scope == 'lot':
+        from services.project_config_service import list_lot_item_levels
+        levels = list_lot_item_levels(item_id).to_dict('records')
+        if len(levels) != item['level_count']:
+            st.info('各水平的质控品还没有选齐。请先在“编辑水平设置”中选择并保存，再设置质量要求。')
+            return
+    result = render_quality_setup(item, review, prefix, levels=levels, goal=goal)
+    condition_args = {key: result[key] for key in ('context', 'search_record', 'adopted_standard_ids',
+                                                   'registered_standards', 'process_requirements')}
     def check_current():
-        if scope=='lot' and expected_revision is not None:
+        if scope == 'lot' and expected_revision is not None:
             from services.batch_edit_service import get_batch_item_context
-            current=get_batch_item_context(item_id)
-            if not current['editable']:raise ValueError(current['read_only_reason'])
-            if current['revision']!=expected_revision:raise ValueError('本批次设置已修改，请重新打开后再保存。')
-    if st.button('保存待确认资料',key=prefix+'_save_pending'):
+            current = get_batch_item_context(item_id)
+            if not current['editable']:
+                raise ValueError(current['read_only_reason'])
+            if current['revision'] != expected_revision:
+                raise ValueError('本批次设置已修改，请重新打开后再保存。')
+    pending, confirm = st.columns(2)
+    if pending.button('保存，稍后继续', key=prefix+'_save_pending'):
         try:
             from services.quality_review_service import save_pending_review
+            from services.quality_setup_service import local_catalog_review
             with atomic_write():
                 check_current()
-                save_pending_review(scope,item_id,context=condition_args['context'],
-                    search_record=condition_args['search_record'],registered_standards=condition_args['registered_standards'],
-                    process_requirements=condition_args['process_requirements'],
-                    draft_recorded={key: st.session_state.get(prefix+'_'+suffix, '')
-                        for key,suffix in [('source_name','source_name'),('source_version','source_version'),
-                                           ('requirement_text','recorded_text')]})
-        except ValueError as error:st.error(str(error))
+                search = condition_args['search_record']
+                if result['mode'] == 'sd_cv' and not result['blocked'] and not search:
+                    search = local_catalog_review(item, result['context'])
+                draft_recorded = {key: result.get(key, '') for key in
+                                  ('source_name', 'source_version', 'requirement_text')}
+                if result['mode'] == 'sd_cv':
+                    draft_recorded.update(mode='sd_cv', cv_limit=result.get('cv_limit'))
+                save_pending_review(scope, item_id, context=result['context'], search_record=search,
+                    registered_standards=result['registered_standards'],
+                    process_requirements=result['process_requirements'], draft_recorded=draft_recorded)
+        except ValueError as error:
+            st.error(str(error))
         else:
-            if on_saved is not None:on_saved()
-            st.success('已保存待确认资料；补齐核查后才能确认项目或批次。');st.rerun()
-    applicable=[r['id'] for r in assessments if r['kind']=='numeric' and r['status']=='applicable']
-    if st.session_state.get(prefix+'_applicable_ids') != applicable:
-        st.session_state[prefix+'_applicable_ids'] = applicable
-        if len(applicable) == 1:
-            st.session_state[prefix+'_requirement'] = applicable[0]
-    if condition_args['context'].get('result_scale')!='concentration' or item['input_value_type']!='raw':
-        st.info('请按当前结果类型填写质量要求，并人工核对对照及相关条款。浓度 CV 限值不适用于 Ct、log 或信号比值。')
-        mode='记录实验室要求'
-    else:
-        mode=st.radio('质量目标设置',['选择标准或自定义目录','记录实验室要求'],
-            index=1 if review.get('decision')=='record_only' else 0,key=prefix+'_mode',horizontal=True,
-            format_func=lambda value: {'选择标准或自定义目录':'选择分析质量要求','记录实验室要求':'填写实验室自定要求'}[value])
-    selected=None;spec=None;values=[]
-    if mode=='选择标准或自定义目录':
-        catalog=[row['spec'] for row in browse_quality_catalog() if row['kind'] in ('numeric', 'custom')]
-        suggested=set(applicable)
-        catalog=[r for r in catalog if r['origin']!='builtin' or r['id'] in {s['id'] for s in candidates}]
-        options=sorted(catalog,key=lambda r:(r['id'] not in suggested,r['standard'],r['name']))
-        by_id={r['id']:r for r in options};identifiers=[None]+list(by_id)
-        if st.session_state.get(prefix+'_requirement') not in identifiers:
-            st.session_state[prefix+'_requirement'] = None
-        selected=st.selectbox('选择分析质量要求',identifiers,
-            index=identifiers.index(goal['spec']['id']) if goal and goal['spec']['id'] in by_id else (identifiers.index(applicable[0]) if len(applicable)==1 else 0),
-            format_func=lambda k:'请选择' if k is None else by_id[k]['name']+'｜'+by_id[k]['standard']+'｜'+by_id[k]['version']+'｜'+('标准' if by_id[k]['origin']=='builtin' else '实验室自定要求'),key=prefix+'_requirement')
-        if selected:
-            spec=by_id[selected];render_spec(spec)
-            try:validate_spec_for_item(spec,item)
-            except ValueError as error:st.error(str(error));return
-            if scope=='lot':
-                from services.project_config_service import list_lot_item_levels
-                levels=list_lot_item_levels(item_id)
-                if len(levels)!=item['level_count']:
-                    st.info('请先保存完整的水平设置，再确认质量目标。');return
-                categories=list(dict.fromkeys(r['category'] for r in spec['imprecision'] if r.get('category')))
-                for level in levels.to_dict('records'):
-                    order=level['level_order'];prior=next((r for r in goal.get('levels',[]) if r['level_order']==order),{}) if goal and goal['spec']['id']==selected else {}
-                    from services.material_workflow_service import material_label
-                    st.markdown(f"**水平 {order}：{material_label(level)}**")
-                    concentration=st.number_input('质控品浓度（选填，用于核对适用范围）',min_value=0.0,value=prior.get('concentration'),format='%.4f',key=f'{prefix}_{selected}_{order}_concentration')
-                    category=st.selectbox('水平类别',['请选择']+categories,index=categories.index(prior['category'])+1 if prior.get('category') in categories else 0,key=f'{prefix}_{selected}_{order}_category') if categories else ''
-                    values.append(dict(level_order=order,concentration=concentration,category=category))
-    supplemental_cv=None
-    if spec and spec['origin']=='builtin':
-        supplemental_cv=st.number_input('实验室更严 CV 要求（选填，%）',min_value=0.0,
-            value=goal.get('supplement',{}).get('cv'),key=prefix+'_supplemental_cv',
-            help='保留标准基准；补充值必须严于适用的同尺度 CV 要求。SD 不能在此比较。')
-    recorded=review.get('draft_recorded',review.get('recorded',{}))
-    if mode=='记录实验室要求':
-        source_name=st.text_input('依据名称（说明书、SOP 等）',value=recorded.get('source_name',''),key=prefix+'_source_name',max_chars=200)
-        source_version=st.text_input('依据版本或编号',value=recorded.get('source_version',''),key=prefix+'_source_version',max_chars=200)
-        requirement_text=st.text_area('实验室自定要求',value=recorded.get('requirement_text',''),key=prefix+'_recorded_text',max_chars=2000)
-        st.caption('请填写说明书、SOP 或其他依据规定的要求，并按该要求人工核对。')
-    elif not selected:
-        return
-    person=st.text_input('确认人',value=review.get('confirmed_by',''),key=prefix+'_person',max_chars=80)
-    evidence=st.text_area('适用依据（方法学、单位、浓度水平等）',value=review.get('evidence',''),key=prefix+'_evidence',max_chars=2000)
-    checked=st.checkbox('已核对检验项目、单位、浓度水平及标准或依据版本',key=prefix+'_confirmed')
-    if st.button('确认本批次质量目标' if scope=='lot' else '保存质量目标',key=prefix+'_adopt',disabled=not checked,type='primary'):
+            if on_saved is not None:
+                on_saved()
+            st.success('填写内容已保存。下次可继续填写，完成后再确认项目或批次设置。')
+            st.rerun()
+    if confirm.button('确认本批次质量目标' if scope == 'lot' else '保存质量目标', key=prefix+'_adopt',
+                      disabled=not result['checked'] or result['blocked'], type='primary'):
         try:
             with atomic_write():
                 check_current()
-                if mode=='记录实验室要求':
-                    save_recorded_requirement(scope,item_id,source_name=source_name,source_version=source_version,
-                        requirement_text=requirement_text,confirmed_by=person,evidence=evidence,**condition_args)
+                args = dict(condition_args, confirmed_by=result['confirmed_by'], evidence=result['evidence'])
+                if result['mode'] == 'sd_cv':
+                    from services.quality_setup_service import save_simple_quality
+                    save_simple_quality(scope, item_id, **args, cv_limit=result.get('cv_limit'), levels=result['levels'],
+                        **{key: result[key] for key in ('source_name', 'source_version', 'requirement_text')})
+                elif result['mode'] == 'recorded':
+                    save_recorded_requirement(scope, item_id, **args,
+                        **{key: result[key] for key in ('source_name', 'source_version', 'requirement_text')})
                 else:
-                    adopt_requirement(scope,item_id,selected,confirmed_by=person,evidence=evidence,levels=values,
-                                      supplemental_cv=supplemental_cv,**condition_args)
-        except ValueError as error:st.error(str(error))
+                    adopt_requirement(scope, item_id, result['requirement_id'], **args, levels=result['levels'],
+                                      supplemental_cv=result.get('supplemental_cv'))
+        except ValueError as error:
+            st.error(str(error))
         else:
-            if on_saved is not None:on_saved()
-            st.success('质量目标已保存，请继续确认项目或批次设置。');st.rerun()
+            if on_saved is not None:
+                on_saved()
+            st.success('质量目标已保存，请继续确认项目或批次设置。')
+            st.rerun()
 
 
 def render_batch_quality(method,batch_id,month=None):
@@ -208,6 +332,6 @@ def render_batch_quality(method,batch_id,month=None):
         if not summary.get('goal'):
             return
         render_spec(summary['goal']['spec'])
-        st.caption(f"统计范围：{summary['period']}；{summary['statistics_scope']}。此处只比较实测变异系数与允许不精密度，不能代替标准要求的完整验证。")
+        st.caption(f"统计范围：{summary['period']}；{summary['statistics_scope']}。下表显示实测CV与CV上限的比较；标准中的其他要求请另行检查。")
         st.caption(f"确认人：{summary['goal']['confirmed_by']}；依据：{summary['goal']['evidence']}")
         st.dataframe(pd.DataFrame(summary['rows']).rename(columns={'level':'水平','requirement':'采用要求','category':'水平类别','concentration':'采用浓度','count':'在控点数','days':'检测日数','cv':'实测变异系数（%）','decision':'比较结果'}),hide_index=True,width='stretch')

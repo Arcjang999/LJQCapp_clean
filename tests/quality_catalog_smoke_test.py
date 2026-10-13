@@ -106,7 +106,7 @@ def test_existing_item_draft_shows_standard_preview():
         app.session_state['draft'] = draft
         app.run()
         assert not app.exception
-        assert any(x.label == '质量标准与待核对条件' for x in app.expander)
+        assert any(x.label == '查看质量标准，补充检测条件' for x in app.expander)
         assert any('免疫球蛋白G' in x.value for x in app.caption)
         # An incomplete new-item draft still gives a useful prompt.
         app.session_state['draft'] = dict(draft, method_id=None, unit_id=None)

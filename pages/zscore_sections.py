@@ -141,7 +141,7 @@ def render_zscore_latest_analysis_panel(
     is_building_phase = (not formal_rules_enabled) or latest_run.get("phase") != PHASE_FORMAL_QC
     status = PHASE_TARGET_BUILDING if is_building_phase else str(latest_run.get("run_status", "pending"))
     source_text = (
-        "当前输入预览"
+        "本次输入（尚未保存）"
         if latest_run.get("is_preview")
         else f"最近已保存检测序号 #{get_zscore_display_sequence(latest_run)}"
     )
@@ -1206,8 +1206,8 @@ def render_zscore_entry_section(
     if notice_message:
         st.success(notice_message)
     st.caption(
-        f"当前项目固定为 {level_count} 水平，输入值类型为 {input_value_type_label}，规则组合为 {format_zscore_template_display_name(template)}。"
-        "完成录入后可查看图表与最新结果分析。"
+        f"请填写 {level_count} 个水平的{input_value_type_label}，保存后查看质控图和检测结论。"
+        f"所用规则：{format_zscore_template_display_name(template)}。"
     )
     if cv_limit is not None:
         st.caption(f"当前批次已保存允许不精密度（CV）：≤ {cv_limit:.2f}%")

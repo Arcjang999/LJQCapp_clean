@@ -99,12 +99,12 @@ def _render_instant_transfer_dialog(batch_id: int) -> None:
     target_batch_summary = str(transfer_state.get("target_batch_lot_no") or "").strip() or "系统将新建 LJ 批次"
 
     st.caption(
-        "确认后将把当前即时法批次中的有效点转入一个新建的 LJ 批次，"
-        "转入后，原即时法记录仅供查询，不能继续录入或维护。"
+        "确认后会新建一个LJ批次，并带入本批次的有效检测值。"
+        "今后请在新LJ批次继续录入；原即时法记录保留供查看。"
     )
 
     if transfer_state.get("is_transferred"):
-        st.success("该即时法批次已转入 LJ 法，不能再次执行确认转入。")
+        st.success("本批次已转入LJ法。请到下方显示的LJ项目和批次继续检测。")
         render_compact_stat_metrics(
             [
                 ("当前状态", "已转入 LJ 法"),
@@ -147,7 +147,7 @@ def _render_instant_transfer_dialog(batch_id: int) -> None:
             [
                 "- 前 20 个有效点将作为 LJ 参数建立数据。",
                 "- 第 21 个及之后的有效点将作为 LJ 正式期数据。",
-                "- 转入后，原即时法记录仅供查询，不能继续录入、维护或再次转入。",
+                "- 今后在新LJ批次继续录入；原即时法记录保留供查看。",
             ]
         )
     )
@@ -348,12 +348,12 @@ def _render_instant_si_method_explanation(summary: dict[str, object]) -> None:
             "\n".join(
                 [
                     f"- 当前采用：`{method_label}`。",
-                    "- 判定范围：同一批外部质控品的当前有效点集合。",
+                    "- 使用同一批质控品中尚未禁用的检测值进行判定。",
                     "- 起判条件：有效点数 `n < 3` 时不判定，`n >= 3` 时开始判定。",
                     "- 使用范围：即刻法 SI 表仅用于前 20 个有效点，超过后应转入 LJ 法。",
                     f"- 公式：`{formula}`，其中 `s` 使用样本标准差。",
                     "- 判定阈值：SI上限和 SI下限均不超过 n2s 为在控；超过 n2s 但不超过 n3s 为警告；超过 n3s 为疑似离群。",
-                    "- 处理方式：系统不自动禁用，保留 / 禁用 / 恢复由用户手工处理。",
+                    "- 疑似离群结果由您核对。可在“检测记录”中选中一条，再点保留、禁用或恢复。",
                 ]
             )
         )

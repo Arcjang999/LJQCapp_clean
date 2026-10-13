@@ -141,11 +141,11 @@ def _render_catalogue_picker(ctx):
     if not ctx.get('catalogue_open'):
         return
     with st.container(border=True):
-        st.caption('按产品编号、名称、浓度或浓度编号查找，核对后带入本项目。实际批号在建立批次时选择。')
+        st.caption('输入产品编号、名称、浓度或浓度编号，找到产品后点击“使用此目录产品”。质控品批号在新增批次时选择。')
         query = st.text_input('搜索名录产品', key='project_catalogue_query_' + ctx['token'])
         matches = list_catalog_product_choices(query=query)
         if matches.empty:
-            st.info('没有符合条件的目录产品，请调整搜索内容；也可在质控品管理中新增其他产品。')
+            st.info('没有找到产品，请换名称或编号搜索。也可在“质控品管理”中新增产品。')
             return
         st.dataframe(matches[['manufacturer_name', *PRODUCT_LABELS]].rename(columns={'manufacturer_name':'厂商', **PRODUCT_LABELS}), hide_index=True,
                      width='stretch', height=210)
@@ -207,7 +207,7 @@ def _render_project_form(ctx):
     if ctx['template_id'] is not None:
         st.divider()
         if ctx['draft'] != ctx['initial']:
-            st.caption('停用按已保存的项目资料执行，本次未保存的修改不会一并保存。')
+            st.caption('点击“停用项目”前，如需保留本次修改，请先点击“保存项目”。')
         if st.button('停用项目', key='project_editor_disable'):
             _begin_project_status(ctx, disabled=True)
 
@@ -246,7 +246,7 @@ def _render_project_status_confirmation(ctx):
     st.subheader(('停用项目' if disabled else '恢复项目') + '：' + confirmation['saved_name'])
     st.info('原有批次、检测结果和报告仍可查询。')
     if disabled and ctx['draft'] != ctx['initial']:
-        st.caption('仅停用当前已保存的项目；本次未保存的修改不会一并保存。')
+        st.caption('此次操作只停用项目，编辑页面尚未保存的内容仍需另行保存。')
     if disabled and confirmation['step'] == 'reason':
         confirmation['reason'] = st.text_input('停用原因 *', value=confirmation['reason'],
             key='project_disable_reason_' + confirmation['token'])
@@ -360,24 +360,26 @@ def _panel_values(ctx, template, options):
         else:
             values[field] = st.number_input(label, min_value=1 if field == 'level_count' else 5,
                 max_value=3 if field == 'level_count' else 20, value=int(values[field]), step=1, key=key)
-    st.caption('请逐项核对质控方法，质控品有多个水平也不会自动改为多水平法。选择即时法后，累计20个有效建立点再人工确认转入LJ。')
+    st.caption('请为各检验项目选择质控方法。使用即时法时，累计20个有效结果后可点击转入LJ。')
     return dict(values)
 
 
 def _render_panel_source(ctx, template, options):
     from services.project_config_service import list_project_templates, template_item_rows, preview_panel_items
     from services.master_data_service import list_test_items
-    source = st.radio('带入来源', ['已有项目', '质控品适用检验项目', '选择检验项目', '导入配置清单'],
-                      horizontal=True, key='panel_source_' + ctx['token'])
+    source = st.radio('怎样添加检验项目', ['已有项目', '质控品适用检验项目', '选择检验项目', '导入配置清单'],
+                      horizontal=True, key='panel_source_' + ctx['token'],
+                      format_func=lambda value: {'已有项目': '从已有项目复制', '质控品适用检验项目': '从质控品的项目清单选择',
+                                                 '选择检验项目': '自行选择检验项目', '导入配置清单': '上传配置文件'}[value])
     candidates = []
     if source == '已有项目':
         templates = list_project_templates()
         names = {int(r['id']): r['template_name'] for r in templates.to_dict('records') if int(r['id']) != ctx['template_id']}
-        chosen = st.selectbox('来源项目', [None, *names], format_func=lambda value: '请选择' if value is None else names[value],
+        chosen = st.selectbox('从哪个项目复制', [None, *names], format_func=lambda value: '请选择' if value is None else names[value],
                               key='panel_source_template_' + ctx['token'])
         if chosen:
             candidates = template_item_rows(chosen)
-            st.caption('带入后请核对各项的方法、单位和输入值类型，再逐项确认当前项目的质量要求。')
+            st.caption('复制后可修改各项的检测方法、单位和结果类型。保存后，请分别设置质量要求。')
     elif source == '导入配置清单':
         file = st.file_uploader('项目配置 XLSX', type=['xlsx'], key='panel_source_file_' + ctx['token'])
         if file:
@@ -394,7 +396,7 @@ def _render_panel_source(ctx, template, options):
             ids = {int(row['test_item_id']) for row in coverage if not row.get('is_disabled')}
             tests = tests[tests.id.isin(ids)]
             if tests.empty:
-                st.info('尚未登记此质控品适用的检验项目。请在基础资料中核对并保存适用项目，或在此逐项选择本次检测项目。')
+                st.info('此质控品还没有检验项目清单。请在“质控品管理”中登记，或选择“自行选择检验项目”。')
         names = {int(r['id']): str(r['chinese_name']) + ('｜' + str(r['standard_code']) if r.get('standard_code') else '')
                  for r in tests.to_dict('records')}
         selected = st.multiselect('本次检验项目', list(names), format_func=names.get,
@@ -436,7 +438,7 @@ def _panel_frame(rows, options):
         except (TypeError, ValueError):
             review = {}
         current = {'行标识': row['row_key'], '检验项目': row.get('test_item_name', ''),
-                   '质量要求': '已确认，修改后需重核' if review.get('status') == 'confirmed' else '待逐项核对',
+                   '质量要求': '已确认，修改后请重新设置' if review.get('status') == 'confirmed' else '请分别设置质量要求',
                    '备注': row.get('notes', '')}
         for field, label in _PANEL_FIELDS.items():
             current[label] = options[field].get(row.get(field), '') if field in options else row.get(field)
@@ -466,7 +468,7 @@ def _render_panel_form(ctx):
         _render_panel_source(ctx, template, options)
         return
     prepared = ctx['panel_preview']
-    st.info(f"本次新增 {prepared['added_count']} 项，保留已有 {prepared['retained_count']} 项。可逐项修改；保存后仍需核对质量要求。")
+    st.info(f"本次新增 {prepared['added_count']} 项，保留已有 {prepared['retained_count']} 项。请在表中修改方法、单位或试剂，保存后分别设置质量要求。")
     entries = pd.DataFrame(prepared['entries'])
     if not entries.empty:
         with st.expander('带入清单'):
@@ -504,7 +506,7 @@ def _render_panel_form(ctx):
             if yes.button('应用以上设置', key='panel_bulk_apply'):
                 if ctx['draft']['rows'] != proposed['original_rows']:
                     ctx.pop('bulk_preview', None)
-                    st.error('逐项填写已变化，请重新预览统一设置。')
+                    st.error('表格内容已经修改，请再次点击“预览统一设置”。')
                 else:
                     ctx['draft']['rows'] = proposed['rows']
                     ctx.pop('bulk_preview', None)
@@ -522,7 +524,7 @@ def _render_panel_form(ctx):
         except (TypeError, ValueError) as exc:
             st.error(str(exc))
         else:
-            _finish(f"已保存 {result['saved_count']} 项。请逐项核对质量要求后确认项目设置。")
+            _finish(f"已保存 {result['saved_count']} 项。请分别设置质量要求，然后点击“确认项目设置”。")
 
 
 def _render_confirmation(ctx):

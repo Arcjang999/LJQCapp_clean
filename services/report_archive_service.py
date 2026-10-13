@@ -165,7 +165,7 @@ def _read_original(record):
 
 def _check_source(version):
     if not isinstance(version, dict) or not version.get('fingerprint'):
-        raise ValueError('报告缺少生成依据，请重新核对。')
+        raise ValueError('报告预览资料不完整，请重新打开报告页面并查看预览。')
     current = range_source_version(version.get('qc_method'), version.get('batch_id'),
         version.get('period_start'), version.get('period_end'), handling_versions=version.get('handling_versions'))
     if current['fingerprint'] != version['fingerprint']:
@@ -211,8 +211,8 @@ def _status_pdf(report, events, unregistered):
                      f"关联复测：{row['retest_count']} 次；附件：{row['attachment_count']} 份。")
     for row in unregistered:
         lines.append(f"原检测 {row.get('test_time') or '未记录'}；检测编号 {row['source_id']}；尚未登记失控处理。")
-    lines.append('按原检测日期选择处理事项。关联复测保留所选处理版本的完整证据，范围外复测不计入本报告检测统计。')
-    lines.append('未记录评估、复测或附件不代表无需评估、已经复测或处理完成；本报告不自动确认患者结果可放行。')
+    lines.append('按原检测日期列入处理记录。所选记录中的全部复测一并保存；报告日期以外的复测单独列出，检测次数只统计所选期间。')
+    lines.append('缺项显示“未记录”，请结合原始记录核对实际评估、复测和处理完成情况。患者结果是否可放行，由实验室结合调查确认。')
     buffer = BytesIO()
     with plt.rc_context(layout._build_pdf_rc_params(_resolve_pdf_font_name())):
         with PdfPages(buffer) as pdf:
@@ -337,7 +337,7 @@ def find_existing_archive(request_key, request_digest, connection):
         raise ValueError('请重新核对报告后保存。')
     row = connection.execute('SELECT export_id,request_digest FROM qc_report_archive_files WHERE request_key=?', (key,)).fetchone()
     if row is not None and row['request_digest'] != request_digest:
-        raise ValueError('本次保存标识已用于不同报告，请核对原归档，勿重复保存。')
+        raise ValueError('本次操作已经保存了另一份报告。请到报告历史查看，再重新核对要生成的报告。')
     return int(row['export_id']) if row is not None else None
 
 
@@ -351,7 +351,7 @@ def persist_complete_report_archive(export_id, archive, *, request_key, connecti
     existing = find_existing_archive(request_key, archive['request_digest'], connection)
     if existing is not None:
         if existing != export_id:
-            raise ValueError('本次报告已有保存回执，请返回原归档。')
+            raise ValueError('本次报告已经保存，请到报告历史下载。')
         return export_id
     manifest = archive['manifest']
     _check_source(archive['source_version'])

@@ -184,10 +184,24 @@ def assess(item, context=None, *, on_date=None):
     return rows
 
 
-def validate_search_record(record, *, confirmed_by, has_process):
+def validate_search_record(record, *, confirmed_by, has_process, item=None, context=None):
     """A missing local catalog entry is never treated as proof of absence."""
     if not isinstance(record, dict):
         raise ValueError('目录尚未收录适用数值要求，请先登记官方标准查找与复核记录。')
+    if record.get('scope') == 'local_catalog':
+        from services.quality_setup_service import local_catalog_review
+        if item is None or context is None:
+            raise ValueError('请重新核对当前检验项目和检测条件。')
+        current = local_catalog_review(item, context)
+        if record.get('catalog_fingerprint') != current['catalog_fingerprint']:
+            raise ValueError('已收录标准已更新，请重新核对质量要求。')
+        try:
+            checked = date.fromisoformat(record.get('checked_on', ''))
+        except (TypeError, ValueError):
+            raise ValueError('核对日期不完整，请重新确认质量要求。') from None
+        if checked > date.today() or record.get('conclusion') != 'no_numeric':
+            raise ValueError('请重新核对当前已收录数值标准。')
+        return {**current, 'checked_on': checked.isoformat(), 'confirmed_by': confirmed_by}
     required = ('query', 'official_url', 'checked_on', 'conclusion', 'rationale')
     if not all(str(record.get(k) or '').strip() for k in required):
         raise ValueError('请完整填写标准查找词、官方来源、核查日期、结论及依据。')
@@ -201,9 +215,9 @@ def validate_search_record(record, *, confirmed_by, has_process):
     if checked > date.today():
         raise ValueError('标准核查日期不能晚于今天。')
     if record['conclusion'] not in ('no_applicable', 'no_numeric', 'registered'):
-        raise ValueError('标准目录未覆盖时，需完成复核，不能以未检索到直接确认。')
+        raise ValueError('软件尚未收录所需标准。请填写标准查找记录和核查结论，再确认质量要求。')
     if has_process and record['conclusion'] == 'no_applicable':
-        raise ValueError('已有适用过程或定性标准，不能记录为没有适用标准；请核查是否仅缺数值要求。')
+        raise ValueError('已找到对照、操作或定性要求。请检查是否只是缺少数值限值，并修改标准查找结论。')
     return {**{k: str(record[k]).strip() for k in required}, 'confirmed_by': confirmed_by}
 
 

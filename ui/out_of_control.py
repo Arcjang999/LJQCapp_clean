@@ -69,7 +69,7 @@ def render_record_selector(source_type, records, *, key):
 
 
 def render_snapshot(snapshot):
-    st.markdown('**原检测依据**')
+    st.markdown('**原检测记录**')
     fields = [('project_name', '项目'), ('test_item_name', '检验项目'), ('instrument_name', '仪器'),
               ('test_time', '检测时间'), ('method_name', '方法学'), ('unit_symbol', '单位')]
     rows = [{'项目': label, '记录内容': display(snapshot.get(k))} for k, label in fields]
@@ -80,7 +80,7 @@ def render_snapshot(snapshot):
     context = snapshot.get('context') or {}
     profile = snapshot.get('target_profile') or {}
     rows += [{'项目': '实际试剂批号', '记录内容': display(context.get('reagent_lot_no'))},
-             {'项目': '参数版本', '记录内容': f"第 {profile['version_no']} 版" if profile.get('version_no') else '未记录'}]
+             {'项目': '均值和SD版本', '记录内容': f"第 {profile['version_no']} 版" if profile.get('version_no') else '未记录'}]
     st.dataframe(pd.DataFrame(rows), hide_index=True, width='stretch')
     levels = []
     for level in snapshot.get('levels', []):
@@ -176,7 +176,7 @@ def _leave(selection):
 
 
 def _render_retests(event, ctx, *, disabled):
-    st.markdown('**复测证据**')
+    st.markdown('**复测记录**')
     saved = ctx['content'].get('retest_refs', [])
     if disabled:
         for index, ref in enumerate(event.get('retest_refs') or saved):
@@ -203,7 +203,7 @@ def _render_retests(event, ctx, *, disabled):
         candidate = by_key[pair]
         prior = next((r for r in saved if (r['source_type'], int(r['source_id'])) == pair), {})
         with st.expander(f"复测资料：{candidate.get('test_time', pair[1])}", expanded=True):
-            if candidate.get('unavailable'): st.warning('此项复测资料需要重新核对；保存处理记录前会再次检查是否可用。')
+            if candidate.get('unavailable'): st.warning('这条已选复测记录暂时无法读取。请重新选择复测记录，再保存处理内容。')
             render_snapshot(candidate.get('snapshot') or {})
             differences = candidate.get('differences') or []
             if differences:
@@ -220,7 +220,7 @@ def _render_retests(event, ctx, *, disabled):
     persisted = {(r['source_type'], int(r['source_id'])) for r in event.get('content', {}).get('retest_refs', [])}
     if persisted - set(selection):
         ctx['change_reason'] = st.text_input('取消复测关联的原因', key=f"ooc_unlink_reason_{ctx['token']}")
-    if not by_key: st.caption('暂无可确认属于同一检测系统的后续复测。')
+    if not by_key: st.caption('尚无本项目在同一仪器、同一方法下保存的后续复测记录。')
 
 
 def _render_attachments(event, ctx, *, disabled):
@@ -275,7 +275,7 @@ def _render_history(event):
                 '处理状态': STATUS_LABELS.get(r.get('status'), '未记录'), '记录人': r.get('saved_by'),
                 '保存时间': r.get('saved_at'), '修改原因': r.get('change_reason') or '—'} for r in revisions]),
                 hide_index=True, width='stretch')
-            selected = st.selectbox('查看已保存处理版本', [r['revision_no'] for r in revisions],
+            selected = st.selectbox('选择已保存的处理记录', [r['revision_no'] for r in revisions],
                 index=len(revisions)-1, key=f"ooc_history_{event['event_id']}_{event['current_revision_no']}",
                 format_func=lambda n: f'第 {n} 版')
             historical = service.get_event(event['event_id'], selected)
@@ -292,10 +292,10 @@ def _render_history(event):
                         key=f"ooc_history_attachment_{event['event_id']}_{selected}_{attachment['attachment_id']}")
                 except Exception as exc: show_error(exc)
             from services.out_of_control_report_service import generate_event_report, list_event_reports, read_event_report
-            if st.button('生成此版本处理报告', key=f"ooc_report_{event['event_id']}"):
+            if st.button('按所选记录生成处理报告', key=f"ooc_report_{event['event_id']}"):
                 try:
                     generate_event_report(event['event_id'], selected)
-                    st.success('处理报告已归档。')
+                    st.success('处理报告已保存，可在下方下载。')
                 except Exception as exc: show_error(exc)
             for report in list_event_reports(event['event_id']):
                 try:
@@ -346,7 +346,7 @@ def render_event_detail(selection):
     classification = display(event['original_classification'])
     st.subheader(f'{classification}处理')
     st.caption(f"处理状态：{STATUS_LABELS[event['status']]}｜已保存第 {event['current_revision_no']} 版")
-    if event.get('evaluation_changed'): st.info('这次检测的判读已有更新。这里保留登记时的检测依据和处理记录，请结合最新判读核对。')
+    if event.get('evaluation_changed'): st.info('这次检测的判读结果已更新。下方显示登记处理时保存的检测记录，请与最新检测结论核对。')
     stale = ctx['revision_no'] != event['current_revision_no']
     if stale:
         st.warning('处理资料已更新。本次未保存输入仍保留，请核对后重新打开。')
@@ -371,7 +371,7 @@ def render_event_detail(selection):
         if st.session_state[key] not in assessments: assessments.append(st.session_state[key])
         ctx['content']['patient_impact_assessment'] = st.selectbox('是否需要评估患者影响',
             assessments, key=key, disabled=disabled, format_func=lambda v: v or '未记录')
-        st.caption('记录影响范围和评估依据，由实验室判断后续处置。')
+        st.caption('需要评估时，请填写受影响的检测结果、核对情况和实验室决定的处理办法。')
         for field in ('patient_impact_start', 'patient_impact_end'):
             _text(ctx, field, disabled=disabled, label=CONTENT_LABELS[field] + '（可选，年-月-日 时:分:秒）')
         for field in ('patient_impact_scope', 'patient_impact_actions', 'patient_impact_basis'):

@@ -98,9 +98,9 @@ def _reagents(c, source, when):
 
 
 def _quality_issues(c, item, source):
-    """Apply the existing task-0 review to the confirmed source; no frozen-lot bypass."""
+    """Check saved identity and evidence without re-adopting a frozen local catalog."""
     from services.quality_target_service import item_context, get_requirement, validate_spec_for_item
-    from services.quality_review_service import build_review, _digest as quality_digest, _identity
+    from services.quality_review_service import build_review, _digest as quality_digest, _identity, is_frozen_lot
     review = _decode(source.get('quality_review_json'))
     goal = _decode(source.get('quality_goal_json'))
     if review.get('version') != 2 or review.get('status') != 'confirmed':
@@ -120,6 +120,24 @@ def _quality_issues(c, item, source):
             expected = {(r['level_order'], r['qc_level_id']) for r in _levels(c, item['id'])}
             if goal.get('pending') or expected != {(r['level_order'], r['qc_level_id']) for r in goal.get('levels', [])}:
                 raise ValueError('请逐水平核对质量要求、浓度及适用依据。')
+        if review.get('search_record', {}).get('scope') == 'local_catalog' and is_frozen_lot(c, current):
+            from services.quality_applicability_service import context_errors
+            if review != _decode(current.get('quality_review_json')):
+                raise ValueError('已确认的质量依据与检测配置不一致，请重新打开批次核对。')
+            expected_levels = [dict(level_order=row['level_order'], qc_level_id=row['qc_level_id'])
+                               for row in _levels(c, item['id'])]
+            if review.get('levels') != expected_levels or context_errors(current, review.get('context', {})):
+                raise ValueError('已确认的检测条件或质控水平发生变化，请核对批次设置。')
+            if not review.get('confirmed_by') or not review.get('evidence'):
+                raise ValueError('质量依据的确认记录不完整，请核对批次设置。')
+            if review.get('decision') == 'record_only' and not all(review.get('recorded', {}).get(key)
+                    for key in ('source_name', 'source_version', 'requirement_text')):
+                raise ValueError('SD控制依据不完整，请核对批次设置。')
+            if review.get('decision') not in ('custom', 'record_only'):
+                raise ValueError('已确认的本地质量要求来源不一致，请核对批次设置。')
+            if review.get('context', {}).get('result_scale') == 'qualitative':
+                raise ValueError('已登记定性依据；当前工作台不支持阳性或阴性结果录入。')
+            return []
         rebuilt = build_review(c, current, source_spec=spec, confirmed_by=review.get('confirmed_by'),
             evidence=review.get('evidence'), context=review.get('context'), search_record=review.get('search_record'),
             recorded=review.get('recorded'), registered_standards=review.get('registered_standards'),
@@ -147,7 +165,7 @@ def _item(c, item, config, when):
     if config['status'] != 'active' or config['is_disabled'] or config['template_status'] != 'active' or config['template_disabled']:
         problem('项目或批次设置尚未确认，或已停用。')
     if not binding or binding.get('binding_status') != 'active' or binding.get('qc_method') != method:
-        problem('此批次尚未准备好，请先从项目与批次设置中打开并核对。', 'binding')
+        problem('本批次设置尚未完成，请到批次管理填写质控品、浓度水平和参数，再确认使用。', 'binding')
     if len(levels) != item['level_count'] or (method == 'zscore' and item['level_count'] not in (2, 3)) or (method != 'zscore' and item['level_count'] != 1):
         problem('质控水平不完整或与所选方法不一致，请核对完整水平。', 'levels')
     identity = [config['lab_instrument_id'], config['qc_material_id'], config['qc_material_lot_id'],
@@ -157,7 +175,7 @@ def _item(c, item, config, when):
     if len(frozen_identity) < 8 or any(identity[k] != frozen_identity[k] for k in compare):
         problem('当前批次与所选仪器或检测项目不一致，请重新核对项目设置。', 'binding')
     if [r['qc_level_id'] for r in levels] != [r.get('qc_level_id') for r in source.get('levels', [])]:
-        problem('实际材料或水平顺序已变化，请重新核对批次组合。', 'levels')
+        problem('质控品、批号或浓度水平顺序已修改，请重新打开本组录入并选择质控品。', 'levels')
     for table, identifier, label in [('lab_instruments', identity[0], '仪器'), ('md_qc_materials', identity[1], '质控品'),
         ('md_test_items', identity[3], '检测项'), ('md_units', identity[5], '单位'), ('md_methods', identity[6], '方法学'), ('md_reagents', identity[7], '试剂')]:
         if not identifier or not c.execute(f'SELECT 1 FROM {table} WHERE id=? AND is_disabled=0', (identifier,)).fetchone():

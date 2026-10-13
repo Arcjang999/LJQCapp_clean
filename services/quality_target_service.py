@@ -231,7 +231,7 @@ def runtime_goal(method,batch_id):
 def evaluate_cv(goal,level_order,cv,*,count,days=None):
     entry=next((r for r in goal.get('levels',[]) if r['level_order']==level_order),None)
     if not entry or goal.get('pending'):return '未确认适用要求'
-    if entry['rule']['kind']!='cv':return 'SD 要求仅展示，暂不自动评价'
+    if entry['rule']['kind']!='cv':return '标准SD上限仅展示，暂不自动比较'
     if count<2 or cv is None or not math.isfinite(float(cv)):return '数据不足，暂不评价'
     if goal['spec']['scope'].startswith('日间') and (days is None or days<2):return '不足两个检测日，暂不评价日间 CV'
     threshold=entry['rule']['value']
@@ -242,7 +242,10 @@ def batch_quality_summary(method,batch_id,month=None):
     goal=runtime_goal(method,batch_id)
     from services.quality_review_service import runtime_review
     review=runtime_review(method,batch_id)
-    if not goal:return dict(goal={},review=review,rows=[],period=month or '本批次全部正式期',statistics_scope='仅登记依据，尚无自动评价') if review else {}
+    if not goal:
+        scope = ('本批次SD控制；未设置CV上限，未进行CV目标比较'
+                 if review.get('search_record', {}).get('scope') == 'local_catalog' else '仅登记依据，尚无自动评价')
+        return dict(goal={},review=review,rows=[],period=month or '本批次全部正式期',statistics_scope=scope) if review else {}
     values={r['level_order']:[] for r in goal.get('levels',[])};dates={k:set() for k in values}
     def add(order,value,when):
         if order not in values or (month and not str(when).startswith(month)):return
@@ -268,7 +271,7 @@ def batch_quality_summary(method,batch_id,month=None):
         cv=calculate_cv_percent(data.mean(),data.std(ddof=1)) if len(data)>1 else None
         decision='即时法过渡期，暂不评价正式期 CV' if method=='instant' else evaluate_cv(goal,order,cv,count=len(data),days=len(dates[order]))
         rows.append(dict(level=f'水平 {order}',requirement=requirement_text(entry['rule']),category=entry['category'],concentration=entry['concentration'],count=len(data),days=len(dates[order]),cv=cv,decision=decision))
-    return dict(goal=goal,review=review,rows=rows,period=month or '本批次全部正式期',statistics_scope='仅正式期在控结果；Z-score 按整次在控筛选；SD 要求、偏倚和总误差不自动评价')
+    return dict(goal=goal,review=review,rows=rows,period=month or '本批次全部正式期',statistics_scope='仅正式期在控结果；Z-score按整次在控筛选；标准SD上限、偏倚和总误差不自动比较，质控图仍按所选规则判读')
 
 
 IMPORT_COLUMNS=['检验项目','来源名称','版本','实施日期','单位','允许不精密度类型','上限','比较符','浓度下限','浓度上限','水平类别','允许偏倚说明','允许总误差说明','来源链接或依据','确认人']

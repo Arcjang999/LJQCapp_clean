@@ -26,8 +26,8 @@ def select_item_materials(items,material_id,prefix,existing=None):
                 key=f'{prefix}_{item["id"]}_{position}')
             if lid is not None: values.append(lid)
         selections[item['id']]=values
-    if materials.empty:st.info('此质控品尚无可选批号，请先在基础资料中添加浓度水平、浓度编号、批号和效期。')
-    st.caption('请为每个水平选择质控品，并核对浓度编号、批号和效期。')
+    if materials.empty:st.info('请到“质控品管理 → 管理批次”登记批号、效期和浓度水平，再回来选择。')
+    st.caption('逐水平选择质控品，核对浓度编号、批号和效期。')
     return selections
 
 
@@ -44,10 +44,10 @@ def render_material_config_creation(template_id, *, on_created=None):
         if goal:
             st.caption(f"{item['test_item_name']}｜质量目标：{source_label(goal['spec'])}；保存后请核对各浓度水平的质量目标。")
         else:
-            with st.expander(f"{item['test_item_name']}：允许不精密度（选填）"):
-                value=st.number_input('允许不精密度（CV%，选填）',value=None if pd.isna(item['cv_limit']) else float(item['cv_limit']),
+            with st.expander(f"{item['test_item_name']}：实验室CV上限（选填）"):
+                value=st.number_input('实验室CV上限（选填，%）',value=None if pd.isna(item['cv_limit']) else float(item['cv_limit']),
                     min_value=0.0,format='%.4f',help=CV_REQUIREMENT_HELP,key=f'v12_create_cv_{template_id}_{item["id"]}')
-                source=st.text_input('允许不精密度依据（选填）',value=item['quality_target_source_text'] or '',key=f'v12_create_cv_source_{template_id}_{item["id"]}')
+                source=st.text_input('CV要求依据（选填）',value=item['quality_target_source_text'] or '',key=f'v12_create_cv_source_{template_id}_{item["id"]}')
                 requirements[item['id']]=dict(cv_limit=value,quality_target_source_text=source)
     name=st.text_input('批次名称（留空自动生成）',key='v11_create_config_name')
     if st.button('保存批次设置',type='primary',key='v11_create_config_button',width='stretch'):

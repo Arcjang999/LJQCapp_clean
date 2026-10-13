@@ -288,10 +288,10 @@ def _apply_lj_building_outlier_snapshot(
 
     stats["target_ready"] = int(len(effective_building_df)) >= int(target_count) and stats["sd"] is not None
     if stats["target_ready"]:
-        stats["message"] = "建靶已完成，后续结果会自动进行 Westgard 质控判定。"
+        stats["message"] = "均值和标准差已建立，下一次检测开始按 Westgard 规则判断结果。"
     else:
         remaining = max(int(target_count) - int(len(effective_building_df)), 0)
-        stats["message"] = f"当前建靶未完成，还需补充 {remaining} 个有效建靶点。"
+        stats["message"] = f"还需 {remaining} 个有效检测点来建立均值和标准差，请继续录入结果。"
 
     if suspect_build_id is not None:
         suspect_row = dataframe.loc[dataframe["id"] == suspect_build_id].iloc[0]
@@ -314,7 +314,7 @@ def _calculate_qc_results_impl(results_df: pd.DataFrame, target_count: int) -> t
     if math.isclose(float(stats["sd"]), 0.0, abs_tol=1e-12):
         dataframe.loc[formal_mask, "status"] = "无法判定（SD=0）"
         dataframe.loc[formal_mask, "analysis_prompt"] = "建靶已完成，但 SD=0，暂时无法进行 Westgard 规则分析。"
-        stats["message"] = "建靶已完成，但 SD=0，后续结果暂时无法计算 z 值和 Westgard 规则。"
+        stats["message"] = "已收齐建靶数据，但标准差为0。请检查结果并继续采集，待标准差可用后判断失控。"
         if formal_mask.any():
             stats["latest_analysis"] = dataframe.loc[formal_mask, "analysis_prompt"].iloc[-1]
         return dataframe, stats
@@ -356,7 +356,7 @@ def _calculate_versioned_lj(results_df,target_count):
     for profile_id,group in results_df[results_df.target_profile_id.notna()].groupby('target_profile_id',sort=True):
         profile=target_profile('lj',batch_id,profile_id=int(profile_id))
         if profile is None:
-            raise ValueError('结果引用的靶值版本缺失，不能按当前参数替代。')
+            raise ValueError('未找到这条检测当时使用的均值和标准差，请从包含原参数的完整备份恢复。')
         level=profile['levels'][0]
         if profile['version_no']==1 and profile['source']=='building':
             legacy=base[base.phase==LJ_FORMAL_PHASE_LABEL]

@@ -41,7 +41,9 @@ def _rows(context):
     if not events:
         return []
     with get_connection() as connection:
-        rows = event_history_table(connection, pd.DataFrame(events)).to_dict('records')
+        rows = event_history_table(connection, pd.DataFrame(events)).rename(columns={
+            '调整记录编号': '事件编号', '批号验证记录': '关联验证',
+        }).to_dict('records')
     systems = {system['id']: system for system in context['systems']}
     events_by_id = {event['id']: event for event in events}
     for row in rows:
@@ -66,8 +68,8 @@ def _verification_detail(verification):
 
 def _render_event(context, event, *, original=False):
     row = _event_summary(context, event)
-    st.markdown('**原事件**' if original else '**所选事件详情**')
-    st.caption(f"事件 {event['id']}｜{row['操作']}｜{row['检验项目、仪器及试剂']}")
+    st.markdown('**原使用记录**' if original else '**所选使用记录**')
+    st.caption(f"记录 {event['id']}｜{row['操作']}｜{row['检验项目、仪器及试剂']}")
     st.write(f"调整前：{row['调整前']} → 调整后：{row['调整后']}")
     st.write('生效时间：' + str(event['effective_at']))
     if row['时间状态'] == '尚未生效':
@@ -75,12 +77,12 @@ def _render_event(context, event, *, original=False):
     st.write('原因或依据：' + str(event.get('reason') or '未记录'))
     st.caption('操作者：' + str(event.get('operator') or '未记录'))
     if event.get('corrects_event_id'):
-        st.caption(f"本条更正事件 {event['corrects_event_id']}，原事件继续保留。")
+        st.caption(f"对应原记录 {event['corrects_event_id']}；原记录在列表中保留。")
     verification = next((row for row in context['verifications'] if row['id'] == event.get('verification_id')), None)
     if verification:
         _verification_detail(verification)
     elif row['关联验证'] != '—':
-        st.caption('关联验证：' + row['关联验证'])
+        st.caption('批号验证记录：' + row['关联验证'])
 
 
 def _filter_changed(key):
@@ -155,11 +157,11 @@ def render_reagent_history_workspace():
     visible = [row for row in rows if _matches(row, events[row['事件编号']], query, system_id)]
     ids = [row['事件编号'] for row in visible]
     selected = st.session_state.get('reagent_history_selected_event')
-    st.caption(f'共 {len(ids)} 条记录。选择一行查看详情；原事件保留，更正另记一条。')
+    st.caption(f'共 {len(ids)} 条记录。选择一行查看详情；更正保存为新记录，原记录保留。')
     if visible:
         key = 'reagent_history_table_' + sha1(str((ids, st.session_state.get('reagent_history_table_version', 0))).encode()).hexdigest()[:12]
         columns = ['事件编号', '检验项目、仪器及试剂', '操作', '调整前', '调整后', '生效时间', '时间状态', '确认人']
-        st.dataframe(pd.DataFrame(visible)[columns], key=key, hide_index=True, width='stretch',
+        st.dataframe(pd.DataFrame(visible)[columns].rename(columns={'事件编号': '记录编号'}), key=key, hide_index=True, width='stretch',
             height=min(350, max(115, 36 * len(ids) + 38)), selection_mode='single-row',
             selection_default={'selection': {'rows': [ids.index(selected)] if selected in ids else []}},
             on_select=partial(_select_event, key, ids))
@@ -171,7 +173,7 @@ def render_reagent_history_workspace():
         _render_event(context, event)
         children = [row for row in context['history_events'] if row.get('corrects_event_id') == selected]
         if children:
-            st.caption('后续更正：' + '、'.join(f"事件 {row['id']}" for row in children))
+            st.caption('后续更正记录：' + '、'.join(f"记录 {row['id']}" for row in children))
         if event['event_type'] in ('reagent', 'correction'):
             current = get_reagent_correction_context(selected)
             if not current['can_correct']:
@@ -181,7 +183,7 @@ def render_reagent_history_workspace():
                     open_reagent_history_dialog(selected)
                 except ValueError as error:
                     st.error(str(error))
-    st.caption('更正只追加试剂使用记录，既往检测结果仍保留当时保存的实际批号及判定。')
+    st.caption('更正后保存一条新的试剂使用记录。检测结果按检测时保存的批号和判读查询。')
     _render_result_history(context)
 
 
@@ -255,7 +257,7 @@ def _render_editor(state, current):
     draft['reagent_lot_id'] = st.selectbox('更正后的试剂批号', [None] + list(lots), key=lot_key,
         placeholder='请选择试剂批号',
         format_func=lambda value: '请选择试剂批号' if value is None else f"{lots[value]['lot_no']}｜效期 {lots[value]['expiry_date']}")
-    draft['effective_at'] = st.datetime_input('实际生效时间', value=None, key=_key(state, 'effective_at', draft['effective_at']))
+    draft['effective_at'] = st.datetime_input('生效时间', value=None, key=_key(state, 'effective_at', draft['effective_at']))
     if _effective_time(draft['effective_at']) is None:
         st.info('请填写有效的生效时间。')
     verifications = _applicable_verifications(context, draft['reagent_lot_id'], draft['effective_at'])
@@ -271,7 +273,7 @@ def _render_editor(state, current):
         st.info('所选批号在该生效时间没有可采用的通过验证，请核对验证结论和时间。')
     draft['operator'] = st.text_input('操作者', key=_key(state, 'operator', draft['operator']))
     draft['reason'] = st.text_area('更正原因', key=_key(state, 'reason', draft['reason']))
-    draft['confirmed'] = st.checkbox('已核对原事件、试剂批号、验证记录及生效时间；既往检测结果保留原批号',
+    draft['confirmed'] = st.checkbox('已核对原使用记录、试剂批号、验证记录和生效时间',
         key=_key(state, 'confirmed', draft['confirmed']))
     cancel, save = st.columns(2)
     if cancel.button('取消', key='reagent_history_cancel', width='stretch'):
@@ -284,7 +286,7 @@ def _render_editor(state, current):
             if _effective_time(draft['effective_at']) is None:
                 raise ValueError('请填写有效的生效时间。')
             if not draft['confirmed']:
-                raise ValueError('请明确确认本次更正内容。')
+                raise ValueError('请勾选核对确认后保存。')
             if draft['reagent_lot_id'] is None or draft['verification_id'] is None:
                 raise ValueError('请选择试剂批号及适用的通过验证记录。')
             event_id = save_reagent_correction(state['event_id'], dict(draft), expected_fingerprint=state['fingerprint'])
@@ -294,7 +296,7 @@ def _render_editor(state, current):
             st.session_state['reagent_history_selected_event'] = event_id
             st.session_state['reagent_history_saved_event'] = event_id
             st.session_state['reagent_history_table_version'] = int(st.session_state.get('reagent_history_table_version', 0)) + 1
-            st.session_state['reagent_history_notice'] = '更正记录已保存。原事件及既往检测结果继续保留。'
+            st.session_state['reagent_history_notice'] = '更正记录已保存，可在列表中查看新旧记录。'
             _close()
 
 

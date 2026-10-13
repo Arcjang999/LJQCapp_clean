@@ -99,7 +99,7 @@ def _readonly(context):
     for row in context['levels']:
         rows.append({'水平': row['level_order'], '浓度水平': row['level_name'], '浓度编号': row.get('level_code', ''),
             '批号': row.get('lot_no', ''), '效期': row.get('expiry_date', ''),
-            '均值和标准差来源': TARGET_SOURCE_LABELS.get(row['target_source'], row['target_source']),
+            '均值和SD的设置方式': TARGET_SOURCE_LABELS.get(row['target_source'], row['target_source']),
             '均值': row.get('target_mean'), '标准差': row.get('target_sd'),
             '已确认': '是' if row.get('target_confirmed') else '否', '备注': row.get('notes', '')})
     if rows:
@@ -117,7 +117,7 @@ def _render_levels(state, current):
         _readonly(current)
         return
     if int(current['revision']) != state['revision']:
-        st.warning('批次设置已修改。当前填写内容仍保留，请关闭后重新打开，核对最新设置。')
+        st.warning('这个批次已在别处修改。请关闭窗口后重新打开，再填写本次修改。')
     if state['discard']:
         st.warning('本次修改尚未保存，是否放弃？')
         left, right = st.columns(2)
@@ -138,12 +138,12 @@ def _render_levels(state, current):
         return material_label(available[level_id]) + ('（当前不可选用）' if level_id not in active_ids else '')
     draft['selected'] = st.multiselect('选择各水平使用的质控品', list(available),
         format_func=label, key=_key(state, 'selected', list(draft['selected'])))
-    st.caption(f'本检验项目需要 {item["level_count"]} 个水平，按上方选择顺序保存。请同时核对浓度编号、批号和效期。')
+    st.caption(f'请选择 {item["level_count"]} 个水平，并检查浓度编号、批号和效期。选择的第一条保存为水平1，后续依次排列。')
     for order, level_id in enumerate(draft['selected'], start=1):
         row = draft['levels'].setdefault(level_id, dict(qc_level_id=level_id, target_source='building',
             target_mean=None, target_sd=None, target_confirmed=False, notes=''))
         st.markdown(f'**水平 {order}：{label(level_id)}**')
-        row['target_source'] = st.selectbox('均值和标准差来源', list(TARGET_SOURCE_LABELS),
+        row['target_source'] = st.selectbox('均值和SD的设置方式', list(TARGET_SOURCE_LABELS),
             format_func=TARGET_SOURCE_LABELS.get, key=_key(state, f'{level_id}_source', row['target_source']))
         left, right, cv_column = st.columns(3)
         row['target_mean'] = left.number_input('均值', format='%.6f',
@@ -157,7 +157,7 @@ def _render_levels(state, current):
                 from ui.cv import render_target_cv
                 render_target_cv(row['target_mean'], row['target_sd'], preview_limit,
                     input_value_type=str(item['input_value_type']), pending=row['target_source'] == 'copied_pending')
-        row['target_confirmed'] = st.checkbox('已核对本水平的均值和标准差',
+        row['target_confirmed'] = st.checkbox('已确认本水平的均值和SD',
             key=_key(state, f'{level_id}_confirmed', row['target_confirmed']))
         row['notes'] = st.text_area('备注', key=_key(state, f'{level_id}_notes', row['notes']))
         if row['target_source'] == 'building':
@@ -183,7 +183,7 @@ def _render_levels(state, current):
         except ValueError as error:
             st.error(str(error))
         else:
-            _close('水平设置已保存，请核对质量目标并确认批次设置。')
+            _close('水平设置已保存。请点击“质量目标”设置要求，再点击“确认批次设置”。')
 
 
 def _render_product_recheck(state, current):
@@ -200,8 +200,8 @@ def _render_product_recheck(state, current):
         st.warning(str(error))
     else:
         return
-    st.markdown('**重新核对试剂与质控品**')
-    st.caption('本批次尚未启用。请核对当前适用依据并保存，再确认质量目标；实际批号和水平保持原设置。')
+    st.markdown('**确认本批次使用的质控品**')
+    st.caption('在下方点击“确认所选质控品”，再点击“保存本批次质控品确认”。保存后继续设置质量目标。')
     item, config = current['item'], current['config']
     ctx = state.setdefault('product_recheck', dict(token=state['token'], draft={
         'qc_material_id': int(config['qc_material_id']),
@@ -214,7 +214,7 @@ def _render_product_recheck(state, current):
     state.setdefault('product_recheck_initial', deepcopy(ctx['draft']))
     state['product_recheck_dirty'] = ctx['draft'] != state['product_recheck_initial'] or any(
         key.endswith('_editor') and value for key, value in ctx.items())
-    if st.button('保存本批次选品核对', key=_quality_prefix(state['item_id']) + 'product_save', disabled=not valid):
+    if st.button('保存本批次质控品确认', key=_quality_prefix(state['item_id']) + 'product_save', disabled=not valid):
         try:
             revision = save_draft_product_choice('lot', state['item_id'],
                 ctx['draft']['product_choice_review'], expected_revision=state['revision'])
@@ -248,7 +248,7 @@ def _render_quality(state, current):
             if _restorable_quality_key(key):
                 st.session_state[key] = value
     if int(current['revision']) != state['revision']:
-        st.error('批次设置已修改，请关闭后重新打开质量目标，核对最新设置。')
+        st.error('这个批次已在别处修改。请关闭窗口后重新打开“质量目标”。')
     else:
         _render_product_recheck(state, current)
         from ui.quality_targets import render_adoption

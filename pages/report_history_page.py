@@ -237,7 +237,7 @@ def _render_report_history_card(record: ReportHistoryRecord) -> None:
                 [
                     ("项目名称", record.project_name),
                     ("质控方法", _display_method_label(record.method_label)),
-                    ("批次标识", record.batch_label),
+                    ("批次", record.batch_label),
                                         ("报告期间", record.report_period_label),
                     ("输入值类型", record.input_value_type_label),
                     ("生成时间", record.generated_at_label),
@@ -333,7 +333,7 @@ def _render_archived_download(record: ReportHistoryRecord) -> None:
         except ValueError as error:
             st.error(str(error))
         else:
-            st.download_button('下载已保存的完整归档', data, file_name=metadata['archive_name'], mime='application/zip',
+            st.download_button('下载原报告和附件（ZIP）', data, file_name=metadata['archive_name'], mime='application/zip',
                                key=f'report_history_archive_{record.export_id}', use_container_width=True)
 
 
@@ -359,12 +359,12 @@ def _render_event_report_card(record: ReportHistoryRecord) -> None:
         if st.button("查看当前处理记录", key=f"report_history_event_{record.export_id}"):
             navigate_event(event["source_type"], event["source_id"], event_id=event["event_id"])
             st.rerun()
-        if st.button("按当前处理版本生成报告", key=f"report_history_event_regenerate_{record.export_id}"):
+        if st.button("按当前处理记录生成报告", key=f"report_history_event_regenerate_{record.export_id}"):
             try:
                 result = regenerate_report_from_history(record)
             except (ValueError, sqlite3.Error, OSError) as exc:
                 st.warning(str(exc) if isinstance(exc, ValueError) else '处理报告暂未保存，请稍后重试。原报告仍保留。')
             else:
-                st.download_button("下载当前处理版本报告", result.pdf_bytes, file_name=result.file_name,
+                st.download_button("下载当前处理记录的报告", result.pdf_bytes, file_name=result.file_name,
                                    mime="application/pdf", key=f"report_history_event_new_{record.export_id}")
                 st.caption("处理记录未修改时，下载的是此前保存的报告。补充或更正处理记录后，可生成新报告。")

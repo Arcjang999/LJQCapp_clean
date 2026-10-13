@@ -17,6 +17,7 @@ def seed(output):
     from services.material_workflow_service import register_control_material, create_material_config
     from services.project_workspace_service import resolve_batch_binding
     from services.quality_target_service import adopt_requirement
+    from tests.quality_review_fixtures import confirm_fixture_product_choice
     from services.lot_lifecycle_service import workbench_systems, create_target_profile
     from services.reagent_lifecycle_edit_service import get_reagent_workspace_context
     from tests.project_management_v11_smoke_test import _seed_v11_configuration_dependencies
@@ -50,6 +51,7 @@ def seed(output):
             input_value_type='raw', unit_id=unit, method_id=method_id, reagent_id=d['reagent_id'],
             level_count=count, target_n=20, cv_limit=None)])
         ti = list_template_items(tid).iloc[0]
+        confirm_fixture_product_choice('project', int(ti['id']))
         adopt_requirement('project', int(ti['id']), 'wst403-2024-042', confirmed_by='隔离验收人员',
             evidence='内置IgG、血清、g/L和免疫测定条件核对，仅使用合成检测值验收软件。', context=conditions)
         activate_project_template(tid)

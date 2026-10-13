@@ -22,9 +22,9 @@ def _render_manufacturers_tab():
 
 
 def _render_test_items_tab():
-    st.caption('先按名称、代码或别名查找检验项目，核对后选用。名称目录收录了 WS/T 886—2026 的296项；该标准实施日期为2026年11月1日，选用名称后仍须另行确认适用的质量要求。')
+    st.caption('按名称、代码或别名查找检验项目。选好项目后，在“质量目标”中设置该项目的要求。')
     render_master_data_workspace('test_item')
-    with st.expander('词库来源'):
+    with st.expander('检验项目名称来源'):
         sources = list_sources()
         columns = {'source_name': '来源名称', 'publisher': '发布机构', 'version_label': '版本',
                    'effective_date': '生效日期', 'active_record_count': '收录条目数'}
@@ -63,7 +63,7 @@ def render_master_data_page():
     from ui.common import render_module_header
     render_module_header(
         title='基础资料', eyebrow='资料管理',
-        caption='维护医院使用的检验项目、厂家、仪器、试剂、质控品、方法学和单位。请先搜索已有资料，未找到时再新增。',
+        caption='先搜索并选择已有资料；缺少时点击“新增”，填写后保存。',
         tone='materials',
     )
     tabs = _tabs(['厂家', '检验项目', '仪器', '试剂', '质控品与批号', '方法学与单位'], 'md_category_tabs')

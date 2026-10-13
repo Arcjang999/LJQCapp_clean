@@ -58,7 +58,7 @@ def database_state():
 class ProductRecommendationTests(unittest.TestCase):
     def assert_stale_rejection_preserves_database(self, action):
         before = database_state()
-        with self.assertRaisesRegex(ValueError, '适用资料已变化'):
+        with self.assertRaisesRegex(ValueError, '可用的质控品资料已修改'):
             action()
         self.assertEqual(before, database_state())
 
@@ -90,7 +90,7 @@ class ProductRecommendationTests(unittest.TestCase):
             review = validate_qc_product_choice(qc_material_id=scope['qc_material_id'], **selection(scope))
             values = relation(scope); values['evidence'] = '补充的平台适用核对依据'
             save_qc_product_relation(values, relation_id=rid, expected_revision=1)
-            with self.assertRaisesRegex(ValueError, '已变化'):
+            with self.assertRaisesRegex(ValueError, '质控品资料已修改'):
                 validate_choice_review(review, qc_material_id=scope['qc_material_id'], **selection(scope))
             set_qc_product_relation_disabled(rid, disabled=True, reason='重新核对适用资料', confirmed_by='核对人员', expected_revision=2)
             self.assertEqual([], get_qc_product_recommendations(**selection(scope))['candidates'])
@@ -138,7 +138,7 @@ class ProductRecommendationTests(unittest.TestCase):
             preview = preview_panel_items(f['template_id'], [row])
             values['evidence'] = '整组预览后修改的依据'
             save_qc_product_relation(values, relation_id=rid, expected_revision=1)
-            with self.assertRaisesRegex(ValueError, '重新(预览|核对)'):
+            with self.assertRaisesRegex(ValueError, '重新选择质控品'):
                 save_panel_items(f['template_id'], preview['rows'], expected_revision=preview['expected_revision'])
             self.assertEqual(1, len(list_template_items(f['template_id'])))
 
@@ -151,7 +151,7 @@ class ProductRecommendationTests(unittest.TestCase):
                 model = connection.execute('SELECT instrument_model_id FROM lab_instruments WHERE id=?', (scope['lab_instrument_id'],)).fetchone()[0]
                 manufacturer = connection.execute('SELECT manufacturer_id FROM md_instrument_models WHERE id=?', (model,)).fetchone()[0]
                 connection.execute("UPDATE md_instrument_models SET model='核对后的型号' WHERE id=?", (model,))
-            with self.assertRaisesRegex(ValueError, '已变化'):
+            with self.assertRaisesRegex(ValueError, '质控品资料已修改'):
                 validate_choice_review(review, qc_material_id=scope['qc_material_id'], **selection(scope))
             with db.get_connection() as connection:
                 connection.execute('UPDATE md_instrument_models SET is_disabled=1 WHERE id=?', (model,))
@@ -302,7 +302,7 @@ class ProductRecommendationTests(unittest.TestCase):
             changed['evidence'] = '启用以后新增的推荐资料'
             save_qc_product_relation(changed, relation_id=rid, expected_revision=2)
             self.assertEqual([], validate_lot_config(cid))
-            with self.assertRaisesRegex(ValueError, '已确认批次'):
+            with self.assertRaisesRegex(ValueError, '本批次已确认'):
                 save_draft_product_choice('lot', ciid, fresh, expected_revision=get_lot_config(cid)['revision_no'])
             with db.read_snapshot() as connection:
                 self.assertEqual(confirmed, connection.execute('SELECT product_choice_review_json FROM qc_lot_config_items WHERE id=?', (ciid,)).fetchone()[0])

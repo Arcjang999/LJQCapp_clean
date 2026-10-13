@@ -99,7 +99,7 @@ def _build_filtered_realtime_profiles(
             start_date,
             end_date,
             True,
-            "结束日期不能早于开始日期，当前已暂时清空正式期实时统计展示。",
+            "结束日期早于开始日期，请重新选择日期后查看统计。",
         )
 
     start_timestamp = pd.Timestamp(start_date)

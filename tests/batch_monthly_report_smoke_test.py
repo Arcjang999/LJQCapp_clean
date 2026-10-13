@@ -313,7 +313,7 @@ def test_zscore_whole_run_count_and_quality_evaluation_boundaries():
         assert rows[0]['days']==1 and '不足两个检测日' in rows[0]['decision']
         goal['levels'][0]['rule']=select_rule(get_requirement('wst403-2024-082'),5)
         rows=versioned_quality_summary('lj',batch,'2026-09',lj_records,existing={'goal':goal})['rows']
-        assert 'SD 要求仅展示' in rows[0]['decision']
+        assert '标准SD上限仅展示' in rows[0]['decision']
 
 
 def test_single_archive_rejects_changed_source_for_both_methods():

@@ -230,14 +230,14 @@ def build_zscore_rule_templates() -> dict[str, dict[str, Any]]:
             "level_ids": ["Level 1", "Level 2"],
             "rule_ids": ["1_2s", "1_3s", "2_2s", "R_4s", "4_1s", "10_x"],
             "required_n": 5,
-            "note": "两水平流程采用经典多规则组合，适用于双水平室内质控；正式规则仅在正式质控期启用。",
+            "note": "每次录入两个水平。进入正式期后，按两水平质控规则一起判断本次结果。",
         },
         "3_level_threes": {
             "label": "3-level threes",
             "level_ids": ["Level 1", "Level 2", "Level 3"],
             "rule_ids": ["1_2s", "1_3s", "2of3_2s", "R_4s", "3_1s", "12_x"],
             "required_n": 5,
-            "note": "三水平流程采用面向三水平 IQC 的规则组合，用于多水平联合观察与判读。",
+            "note": "每次录入三个水平，按三水平质控规则一起判断本次结果。",
         },
     }
 
@@ -1321,7 +1321,7 @@ def _rebuild_zscore_batch_state_impl(batch_id: int) -> dict[str, Any]:
         )
         for level_result in normalized_level_results:
             if level_result.get("raw_value") is None:
-                raise ValueError(f"run #{raw_run['id']} 的 {level_result['level_id']} 输入值不能为空")
+                raise ValueError(f"检测记录 {raw_run['id']} 的 {level_result['level_id']} 缺少结果，请补填。")
 
         current_phase = determine_zscore_phase(target_profiles, level_ids)
         updated_profiles = deepcopy(target_profiles)
@@ -1547,7 +1547,7 @@ def delete_saved_zscore_run(run_id: int) -> dict[str, Any]:
     batch_id = int(existing_run["batch_id"])
     if bool(existing_run.get("is_locked_for_maintenance")):
         raise ValueError("建靶期数据在正式期启用后已锁定，不允许删除。")
-    raise ValueError("原始记录须保留追溯，不允许删除；建靶期可使用禁用并保留原因。")
+    raise ValueError("请保留原始记录。建靶记录需要退出统计时，选择“禁用”并填写原因。")
 
 
 def _get_zscore_run_for_maintenance(run_id: int) -> dict[str, Any]:
@@ -1575,11 +1575,11 @@ def _get_zscore_level_result_for_outlier_action(level_result_id: int) -> tuple[d
         None,
     )
     if target_run is None or _normalize_run_phase(target_run.get("phase")) != PHASE_TARGET_BUILDING:
-        raise ValueError("仅建靶期的 run 支持离群值处理。")
+        raise ValueError("请在建靶期检测记录中处理离群值。")
 
     target_level_result = _get_level_result(target_run, str(raw_level_result["level_id"]))
     if target_level_result is None:
-        raise ValueError(f"未找到 Z-score level result {level_result_id}")
+        raise ValueError(f"未找到多水平检测明细 {level_result_id}，请返回记录列表重新选择。")
     return target_run, target_level_result, batch_id
 
 

@@ -366,7 +366,7 @@ class PhaseTransitionTests(unittest.TestCase):
                 copies = connection.execute("SELECT * FROM qc_result_contexts WHERE provenance='instant_transfer'").fetchall()
                 self.assertEqual(20, len(copies))
                 self.assertTrue(all(row['source_context_id'] and row['reagent_lot_id'] == lot for row in copies))
-            with self.assertRaisesRegex(ValueError, '只读'):
+            with self.assertRaisesRegex(ValueError, '已转入 LJ'):
                 entry(21, 100)
             with self.assertRaisesRegex(ValueError, '已转入'):
                 confirm_instant_transfer_to_lj(batch)

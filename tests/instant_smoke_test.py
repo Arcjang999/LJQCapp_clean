@@ -665,7 +665,7 @@ def test_lj_page_uses_business_labels_and_marks_instant_origin() -> None:
         at.run()
 
         assert not list(at.exception)
-        assert [tab.label for tab in at.tabs] == ['当前批次', '月度报告']
+        assert [tab.label for tab in at.tabs] == ['当前批次', '质控报告']
         assert not any(widget.key in ('v12_lj_project_selector', 'v12_lj_batch_selector') for widget in at.selectbox)
         captions = [str(item.value) for item in at.caption]
         assert any('TransferUI' in value and 'Transfer-LOT' in value for value in captions)
@@ -700,7 +700,7 @@ def test_zscore_page_uses_business_labels_in_management_and_context() -> None:
         at.run()
 
         assert not list(at.exception)
-        assert [tab.label for tab in at.tabs] == ['当前批次', '月度报告']
+        assert [tab.label for tab in at.tabs] == ['当前批次', '质控报告']
         assert not any(widget.key in ('v12_zscore_project_selector', 'v12_zscore_batch_selector') for widget in at.selectbox)
         captions = [str(item.value) for item in at.caption]
         assert any('ZAlpha' in value and 'Z-Inst' in value and 'ZLOT-01' in value and '2 水平' in value and 'Ct值' in value for value in captions)

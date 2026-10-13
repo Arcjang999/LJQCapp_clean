@@ -103,7 +103,8 @@ class BatchProductRecheckUITests(unittest.TestCase):
             unchanged = database_state()
             app.button(key=prefix + 'adopt').click().run()
             assert_clean(app)
-            self.assertTrue(any('适用资料已变化' in error.value for error in app.error))
+            self.assertTrue(any('质控品资料已修改' in error.value and '重新选择质控品' in error.value
+                                for error in app.error))
             self.assertEqual(unchanged, database_state(), '过期选品依据不能绕过重核直接确认质量')
             assert_quality_draft(self, app, prefix)
             app.button(key=prefix + 'product_confirm').click().run()
@@ -210,7 +211,7 @@ class BatchProductRecheckUITests(unittest.TestCase):
             with patch('services.qc_product_recommendation_service.save_draft_product_choice', side_effect=race_owner):
                 app.button(key=prefix + 'product_save').click().run()
             assert_clean(app)
-            self.assertTrue(any('仅待确认草稿' in error.value for error in app.error))
+            self.assertTrue(any('已停用' in error.value and '先恢复' in error.value for error in app.error))
             after = get_batch_item_context(item)
             self.assertFalse(after['editable'])
             self.assertEqual(before['revision'], after['revision'])

@@ -17,7 +17,7 @@ from services.quality_target_service import decode
 from services.quality_review_service import validate_quality_review
 
 _CREATE_KEY = 'batch_workspace_create'
-_STATUS_LABELS = {'draft': '待确认', 'active': '设置已确认', 'disabled': '已停用', 'superseded': '已替代'}
+_STATUS_LABELS = {'draft': '设置尚未确认', 'active': '设置已确认', 'disabled': '已停用', 'superseded': '已换用新批次'}
 
 
 def _select_row(widget_key, ids, state_key):
@@ -66,7 +66,7 @@ def render_batch_item_detail(item_id):
         from services.lot_lifecycle_service import target_profile
         profile = target_profile(binding['qc_method'], binding['runtime_batch_id'])
     if profile:
-        st.caption(f"当前生效参数 V{profile['version_no']}｜生效时间：{profile['effective_at']}")
+        st.caption(f"当前使用的均值和SD（第{profile['version_no']}版）｜开始使用时间：{profile['effective_at']}")
         names = {f"Level {int(row['level_order'])}": row['level_name'] for row in levels}
         st.dataframe(pd.DataFrame([{'质控水平': names.get(level['level_id'], level['level_id']),
             '设定均值': level['mean'], 'SD': level['sd'],
@@ -75,10 +75,10 @@ def render_batch_item_detail(item_id):
         st.caption('如需调整控制参数，请前往“批号使用与追溯 → 均值和标准差管理”。')
     elif levels:
         st.dataframe(pd.DataFrame([{'质控水平': level['level_name'],
-            '均值和标准差来源': TARGET_SOURCE_LABELS.get(level['target_source'], level['target_source']),
+            '均值和SD的设置方式': TARGET_SOURCE_LABELS.get(level['target_source'], level['target_source']),
             '设定均值': level['target_mean'], 'SD': level['target_sd'],
             '设定变异系数（%）': calculate_cv_percent(level['target_mean'], level['target_sd']),
-            '参数确认': '已确认' if level['target_confirmed'] else '待确认', '备注': level.get('notes') or ''}
+            '参数确认': '已确认' if level['target_confirmed'] else '尚未确认', '备注': level.get('notes') or ''}
             for level in levels]), hide_index=True, width='stretch')
         if item['qc_method'] == 'instant':
             st.caption('即时法按有效结果计算均值和标准差，当前计算结果请在工作台查看。')
@@ -96,7 +96,7 @@ def render_batch_item_detail(item_id):
         st.caption(f"允许不精密度（CV）：≤{item['cv_limit']:g}%｜依据：{item.get('quality_target_source_text') or '未填写'}")
     render_review_summary(review)
     if ctx['editable'] and (validate_quality_review('lot', item_id) or goal.get('pending')):
-        st.info('请点击“质量目标”，核对并确认本批次使用的要求。')
+        st.info('请点击“质量目标”，填写并保存本批次的质量要求。')
     elif not goal and not review and item.get('cv_limit') is None:
         st.caption('本批次未设置质量目标。')
 
@@ -125,7 +125,7 @@ def render_batch_detail(config_id):
     st.divider()
     if config['is_disabled']:
         st.info('批次已停用，原设置和检测结果仍保留。')
-        if st.button('恢复为待确认批次', key='v11_restore_lot_config_button'):
+        if st.button('恢复批次', key='v11_restore_lot_config_button'):
             from ui.config_confirmation import confirm_batch_status
             confirm_batch_status(config_id, disabled=False, expected_revision=int(config['revision_no']))
     else:
@@ -133,12 +133,12 @@ def render_batch_detail(config_id):
         if config['status'] == 'draft':
             if errors:
                 st.warning('请完成以下设置：\n\n' + '\n'.join(f'- {error}' for error in errors))
-            if st.button('校验并确认批次设置', key=f'v11_activate_lot_config_{config_id}', type='primary', disabled=bool(errors)):
+            if st.button('确认批次设置', key=f'v11_activate_lot_config_{config_id}', type='primary', disabled=bool(errors)):
                 try:
                     with atomic_write():
                         current = get_lot_config(config_id)
                         if current['revision_no'] != config['revision_no']:
-                            raise ValueError('批次设置已修改，请重新核对。')
+                            raise ValueError('这个批次已在别处修改，请重新打开批次后再确认。')
                         activate_lot_config(config_id)
                 except ValueError as error:
                     st.error(str(error))
@@ -194,7 +194,7 @@ def _render_creation_dialog():
         st.session_state.pop(_CREATE_KEY, None)
         st.session_state['v11_selected_lot_config_id'] = config_id
         st.session_state['batch_clear_search_pending'] = True
-        st.session_state['v11_copy_notice'] = '批次已建立。请选择检验项目，核对水平设置和质量目标。'
+        st.session_state['v11_copy_notice'] = '批次已建立。请选择检验项目，分别完成“编辑水平设置”和“质量目标”，再点击“确认批次设置”。'
         st.session_state['batch_table_version'] = st.session_state.get('batch_table_version', 0) + 1
         st.rerun(scope='app')
     render_material_config_creation(ctx['template_id'], on_created=created)
@@ -238,7 +238,7 @@ def render_batch_workspace():
     if st.button('新增批次', type='primary', key='batch_create', disabled=not can_create):
         _begin_create(project)
     if not can_create:
-        st.caption('新增批次前，请选择一个已确认设置的项目。')
+        st.caption('请先在上方“项目”中选择一个设置已确认的项目，再点击“新增批次”。')
     configs = list_lot_configs(template_id=project, include_disabled=include)
     if not configs.empty:
         from services.material_workflow_service import config_material_summary

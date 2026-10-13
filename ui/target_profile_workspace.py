@@ -21,7 +21,7 @@ MODAL_KEY = 'target_profile_dialog'
 _CLEANUP_KEY = 'target_profile_dialog_cleanup'
 _FILTERS_KEY = 'target_profile_filters'
 SOURCE_LABELS = {'manual': '实验室确认', 'manufacturer': '经实验室确认的厂家赋值',
-                 'revision': '已有均值和标准差修订', 'building': '本批质控结果建立'}
+                 'revision': '调整已有均值和标准差', 'building': '本批质控结果建立'}
 _USAGE_LABELS = {'active': '正式使用', 'parallel': '新旧批同时使用', 'ended': '停止使用', 'pending': '待开始使用'}
 
 
@@ -111,7 +111,7 @@ def _render_detail(context):
     if current:
         _render_profile(current, context)
     else:
-        st.info('尚无生效的确认版本。可核对全部水平后确认均值和标准差；按本批质控结果建立的流程继续保留。')
+        st.info('点击“确认均值和标准差”填写各水平参数；用本批结果建立时，可回质控工作台查看采集进度。')
     if not context['editable']:
         st.info(context['read_only_reason'])
     action = '调整均值和标准差' if current else '确认均值和标准差'
@@ -148,7 +148,7 @@ def _filter_changed(key):
 def render_target_profile_workspace():
     contexts = list_target_profile_batches()
     if not contexts:
-        st.info('确认单水平或多水平的批次设置后，可在此管理均值和标准差。即时法继续按原流程累计质控结果。')
+        st.info('先完成单水平或多水平的批次设置，再到这里确认均值和标准差。即时法在其工作台录入并查看有效点数。')
         return
     projects = {context['template']['id']: context['template']['template_name'] for context in contexts}
     for key, default in [('target_profile_search', ''), ('target_profile_project', None)]:
@@ -222,7 +222,7 @@ def _render_editor(state, current):
         label = level['level_name'] + (f"（编号 {level['level_code']}）" if level['level_code'] else '')
         st.markdown(f"**{label}｜批号 {level['lot_no']}**")
         if level['retained_version']:
-            st.caption(f"未更换水平的原参数 V{level['retained_version']} 已预填，请核对后确认。")
+            st.caption(f"原水平的均值和标准差 V{level['retained_version']} 已带入，请核对后确认。")
         left, middle, right = st.columns(3)
         row['mean'] = left.number_input('均值', key=_key(state, f'{index+1}_mean', row['mean']), format='%.6f')
         row['sd'] = middle.number_input('标准差', key=_key(state, f'{index+1}_sd', row['sd']), min_value=0.0, format='%.6f')
@@ -231,7 +231,8 @@ def _render_editor(state, current):
     draft['effective_at'] = st.datetime_input('生效时间', key=_key(state, 'effective_at', draft['effective_at']))
     draft['evidence'] = st.text_area('均值和标准差依据及调整原因', key=_key(state, 'evidence', draft['evidence']))
     draft['confirmed_by'] = st.text_input('确认人', key=_key(state, 'confirmed_by', draft['confirmed_by']))
-    draft['confirmed'] = st.checkbox('已确认全部水平的均值和标准差适用；新参数生效后重新累计连续规则，旧结果保留原参数',
+    st.caption('新的均值和标准差自所填时间开始使用，连续规则从该时刻重新累计；之前检测按原参数查看。')
+    draft['confirmed'] = st.checkbox('已确认全部水平的均值、标准差适用，并核对生效时间',
         key=_key(state, 'confirmed', draft['confirmed']))
     cancel, save = st.columns(2)
     if cancel.button('取消', key='target_profile_cancel', width='stretch'):

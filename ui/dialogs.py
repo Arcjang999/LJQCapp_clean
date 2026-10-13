@@ -59,9 +59,9 @@ def render_record_maintenance_dialog(
 
     normalized_input_value_type = normalize_input_value_type(input_value_type)
     input_value_type_label = get_input_value_type_label(normalized_input_value_type)
-    st.caption(f"请选择一条检测记录，查看检测时间、检测人和“{input_value_type_label}”。尚未进入正式期的参数建立记录可维护；正式期记录仅供查询。")
+    st.caption(f"请选择一条检测记录，查看检测时间、检测人和“{input_value_type_label}”。批次还在建靶时，可修改或禁用记录；进入正式期后保留供查看。")
     if qc_df.empty:
-        st.info("当前批次暂无检测记录可维护。")
+        st.info("本批次还没有保存检测记录，请先录入一次结果。")
         if st.button("关闭", key="close_record_dialog_empty", width="stretch"):
             close_record_maintenance_dialog()
             st.rerun()
@@ -177,7 +177,7 @@ def render_record_maintenance_dialog(
                                 st.rerun()
 
             with maintenance_right:
-                st.info("原始检测记录保留追溯，不提供删除。参数建立期可通过禁用保留原值及维护原因。")
+                st.info("原始检测记录保留供查看。建靶时可禁用疑似离群结果：原始值和填写的原因仍会保存，统计和默认图表会跳过这条记录。")
 
     st.divider()
     if st.button("关闭", key="close_record_dialog", width="stretch"):
@@ -208,10 +208,10 @@ def render_zscore_record_maintenance_dialog(
     input_value_type = normalize_input_value_type(batch_context["batch"]["input_value_type"])
     input_value_type_label = get_input_value_type_label(input_value_type)
     st.caption(
-        f"请选择一整次检测，核对检测时间、检测人和各水平的“{input_value_type_label}”。尚未进入正式期的参数建立记录可维护；批次进入正式期后，原检测记录仅供查询。"
+        f"请选择一整次检测，核对检测时间、检测人和各水平的“{input_value_type_label}”。批次还在建靶时，可修改或禁用记录；进入正式期后保留供查看。"
     )
     if not saved_runs:
-        st.info("当前批次暂无已保存的检测记录可维护。")
+        st.info("本批次还没有保存检测记录，请先录入一次结果。")
         if st.button("关闭", key="close_zscore_record_dialog_empty", width="stretch"):
             close_zscore_record_maintenance_dialog()
             st.rerun()
@@ -270,7 +270,7 @@ def render_zscore_record_maintenance_dialog(
                     f"触发规则 {format_zscore_rule_hits(selected_run.get('rule_hits_run', []))}"
                 )
                 if is_locked_for_maintenance:
-                    st.info(availability['reason'] or "批次已进入正式期，这条参数建立记录仅供查询，不能修改或删除。")
+                    st.info(availability['reason'] or "批次已进入正式期，这条建靶记录保留供查看。")
                     readonly_prefix = f"readonly_zscore_run_{dialog_nonce}_{int(selected_run_id)}"
                     st.datetime_input(
                         "检测时间",
@@ -406,7 +406,7 @@ def render_zscore_record_maintenance_dialog(
                                     st.rerun()
 
             with maintenance_right:
-                st.info("每次检测及各水平原始结果均保留，不能删除。参数建立期的保留、禁用或恢复会同时应用于本次检测的所有水平。")
+                st.info("每次检测的原始结果保留供查看。建靶时，保留、禁用或恢复会同时作用于这次检测的全部水平。")
 
     st.divider()
     if st.button("关闭", key="close_zscore_record_dialog", width="stretch"):
