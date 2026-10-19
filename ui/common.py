@@ -1122,6 +1122,7 @@ def open_global_page(page_key: str, *, rerun: bool = True) -> None:
 
     from ui.daily_navigation import remember_daily_return
     remember_daily_return()
+    st.session_state['onboarding_open'] = False
     for session_key in GLOBAL_PAGE_SESSION_KEYS:
         st.session_state[session_key] = session_key == page_key
     if page_key == "show_settings_page":
@@ -1141,11 +1142,12 @@ def _open_user_guide_page(practical: bool = False) -> None:
     open_global_page("show_user_guide_page", rerun=False)
 
 
-def open_reference_management(kind: str, *, category=None, rerun=True) -> None:
+def open_reference_management(kind: str, *, category=None, rerun=True, close_menu=True) -> None:
     if kind not in ('manufacturer', 'instrument', 'reagent'):
         raise ValueError('请选择要维护的资料。')
     st.session_state['reference_management_kind'] = kind
-    st.session_state['global_management_menu'] = False
+    if close_menu:
+        st.session_state['global_management_menu'] = False
     if category is not None:
         st.session_state['reference_pending_manufacturer_category'] = category
     open_global_page('show_reference_management_page', rerun=rerun)
@@ -1176,7 +1178,7 @@ def _active_module_tone() -> str:
 
 def render_page_chrome() -> None:
     with st.container(key="module_topbar"):
-        title_column, action_column = st.columns([0.40, 0.60], gap="medium", vertical_alignment="center")
+        title_column, action_column = st.columns([0.32, 0.68], gap="medium", vertical_alignment="center")
         with title_column:
             st.markdown(
                 '<div class="app-wordmark"><span class="app-wordmark-mark" aria-hidden="true">质控</span>'
@@ -1186,7 +1188,7 @@ def render_page_chrome() -> None:
             )
         with action_column:
             with st.container(key="module_navigation"):
-                qc_column, management_column, history_column, settings_column, feedback_column = st.columns([1.15, 1.25, 1, 1, 0.8], gap="small")
+                qc_column, management_column, history_column, settings_column, onboarding_column, feedback_column = st.columns([1.15, 1.25, 1, 1, 1, 0.8], gap="small")
                 with qc_column:
                     if st.button("质控品管理", key="open_qc_materials_page", width="stretch"):
                         open_global_page("show_qc_materials_page")
@@ -1213,6 +1215,10 @@ def render_page_chrome() -> None:
                 with settings_column:
                     if st.button("系统设置", key="open_system_settings", use_container_width=True):
                         open_global_page("show_settings_page")
+                with onboarding_column:
+                    from ui.onboarding import onboarding_is_busy, open_onboarding
+                    if st.button('首次引导', key='open_onboarding', width='stretch', disabled=onboarding_is_busy()):
+                        open_onboarding()
                 with feedback_column:
                     with st.container(key="module_nav_help"):
                         with st.popover("帮助", width="stretch", key="global_help_menu", on_change="rerun"):

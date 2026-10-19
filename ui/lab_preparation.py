@@ -13,6 +13,12 @@ from services.lab_preparation_service import (
 DIALOG_KEY = 'lab_preparation_dialog'
 
 
+def open_lab_preparation_dialog():
+    st.session_state[DIALOG_KEY] = dict(token=uuid4().hex, request_key=uuid4().hex, data=b'',
+                                      filename='', review=None, error='', discard=False, widget_had_upload=False)
+    st.rerun(scope='app')
+
+
 def _close():
     st.session_state.pop(DIALOG_KEY, None)
     st.rerun(scope='app')
@@ -116,8 +122,6 @@ def render_lab_preparation_entry():
     busy = any(st.session_state.get(key) for key in
         ('qc_record_dialog', 'qc_transfer_dialog', 'zscore_reference_dialog', 'show_instant_transfer_dialog', DIALOG_KEY))
     if st.button('准备单位资料', key='lab_prep_open', disabled=busy):
-        st.session_state[DIALOG_KEY] = dict(token=uuid4().hex, request_key=uuid4().hex, data=b'',
-                                          filename='', review=None, error='', discard=False, widget_had_upload=False)
-        st.rerun(scope='app')
+        open_lab_preparation_dialog()
     if st.session_state.get(DIALOG_KEY):
         _render_dialog()

@@ -5,8 +5,6 @@ import logging
 import streamlit as st
 
 from database import init_db
-from pages.instant_page import render_instant_page
-from pages.lj_page import render_lj_page
 from pages.main_page import (
     INSTANT_ENTRY_LABEL,
     LJ_ENTRY_LABEL,
@@ -15,12 +13,6 @@ from pages.main_page import (
     normalize_top_level_method_selection,
     render_main_entry_page,
 )
-from pages.master_data_page import render_master_data_page
-from pages.project_management_page import render_project_management_page
-from pages.report_history_page import render_report_history_page
-from pages.settings_page import render_settings_page
-from pages.quality_targets_page import render_quality_targets_page
-from pages.zscore_page import render_zscore_page
 from ui.common import APP_TITLE, inject_global_styles, render_page_chrome
 
 
@@ -69,8 +61,11 @@ except (ValueError, OSError):
 
 normalize_top_level_method_selection()
 _consume_pending_navigation_intent()
+from ui.onboarding import prepare_onboarding, render_onboarding
+prepare_onboarding()
 inject_global_styles()
 render_page_chrome()
+render_onboarding()
 from ui.daily_navigation import render_daily_return
 render_daily_return()
 
@@ -100,18 +95,22 @@ if bool(st.session_state.get("show_out_of_control_page", False)):
     st.stop()
 
 if bool(st.session_state.get("show_quality_targets_page", False)):
+    from pages.quality_targets_page import render_quality_targets_page
     render_quality_targets_page()
     st.stop()
 
 if bool(st.session_state.get("show_settings_page", False)):
+    from pages.settings_page import render_settings_page
     render_settings_page()
     st.stop()
 
 if bool(st.session_state.get("show_report_history_page", False)):
+    from pages.report_history_page import render_report_history_page
     render_report_history_page()
     st.stop()
 
 if bool(st.session_state.get("show_master_data_page", False)):
+    from pages.master_data_page import render_master_data_page
     render_master_data_page()
     st.stop()
 
@@ -126,6 +125,7 @@ if bool(st.session_state.get("show_reference_management_page", False)):
     st.stop()
 
 if bool(st.session_state.get("show_project_management_page", False)):
+    from pages.project_management_page import render_project_management_page
     render_project_management_page()
     st.stop()
 
@@ -142,10 +142,13 @@ if selected_method != MAIN_ENTRY_LABEL:
 if selected_method == MAIN_ENTRY_LABEL:
     render_main_entry_page()
 elif selected_method == LJ_ENTRY_LABEL:
+    from pages.lj_page import render_lj_page
     render_lj_page()
 elif selected_method == ZSCORE_ENTRY_LABEL:
+    from pages.zscore_page import render_zscore_page
     render_zscore_page()
 elif selected_method == INSTANT_ENTRY_LABEL:
+    from pages.instant_page import render_instant_page
     render_instant_page()
 else:
     render_main_entry_page()

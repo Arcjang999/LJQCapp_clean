@@ -551,6 +551,12 @@ def _create_indexes(connection: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_md_test_items_search
         ON md_test_items (chinese_name, abbreviation, standard_code);
 
+        CREATE INDEX IF NOT EXISTS idx_md_test_items_standard_code
+        ON md_test_items (standard_code);
+
+        CREATE INDEX IF NOT EXISTS idx_md_test_items_normalized_name
+        ON md_test_items (LOWER(TRIM(chinese_name)));
+
         CREATE INDEX IF NOT EXISTS idx_md_aliases_search
         ON md_aliases (normalized_alias, entity_type, entity_id);
 
