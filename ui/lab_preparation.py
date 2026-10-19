@@ -24,7 +24,7 @@ def _close():
     st.rerun(scope='app')
 
 
-@st.dialog('单位资料准备', width='large', dismissible=False)
+@st.dialog('从Excel批量登记资料', width='large', dismissible=False)
 def _render_dialog():
     state = st.session_state[DIALOG_KEY]
     if state['discard']:
@@ -37,7 +37,7 @@ def _render_dialog():
             _close()
         return
     st.caption('下载清单，填写实验室、人员、仪器、检验项目、计量单位、方法学、试剂和质控品批号，再上传检查。')
-    st.info('保存资料后，点击“新建项目”，设置质量目标、质控品批号、各水平及均值和标准差，再登记试剂批号验证。')
+    st.info('保存后，到首页点击“新建项目”，选择仪器、试剂和质控品，填写质量要求并保存。')
     template, reference = st.columns(2)
     template.download_button('下载空白单位资料清单', build_lab_preparation_template(),
         file_name='单位资料准备清单.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -121,7 +121,7 @@ def render_lab_preparation_entry():
                 st.dataframe(pd.DataFrame(rows)[['工作表', '清单编号', '处理', '内容']], hide_index=True, width='stretch')
     busy = any(st.session_state.get(key) for key in
         ('qc_record_dialog', 'qc_transfer_dialog', 'zscore_reference_dialog', 'show_instant_transfer_dialog', DIALOG_KEY))
-    if st.button('准备单位资料', key='lab_prep_open', disabled=busy):
+    if st.button('下载填写表或导入Excel', key='lab_prep_open', disabled=busy):
         open_lab_preparation_dialog()
     if st.session_state.get(DIALOG_KEY):
         _render_dialog()

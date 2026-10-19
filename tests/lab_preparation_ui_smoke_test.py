@@ -23,8 +23,12 @@ class LabPreparationUI(unittest.TestCase):
         app = AppTest.from_string(APP, default_timeout=15).run()
         self.assertFalse(list(app.exception), list(app.exception))
         self.assertFalse(app.get('file_uploader'))
+        excel = next(item for item in app.expander if 'Excel' in item.label and '选用' in item.label)
+        self.assertFalse(excel.proto.expanded)
+        self.assertEqual('下载填写表或导入Excel', excel.button(key='lab_prep_open').label)
         app.button(key='lab_prep_open').click().run()
         self.assertFalse(list(app.exception), list(app.exception))
+        self.assertEqual('从Excel批量登记资料', app.get('dialog')[0].proto.dialog.title)
         self.assertEqual(2, len(app.get('download_button')))
         self.assertEqual(1, len(app.get('file_uploader')))
         data = dataframes_to_xlsx_bytes(tables())
@@ -36,6 +40,21 @@ class LabPreparationUI(unittest.TestCase):
         app.button(key='lab_prep_review').click().run()
         self.assertFalse(list(app.exception), list(app.exception))
         self.assertFalse(app.button(key='lab_prep_save').disabled)
+
+    def test_excel_import_is_optional_and_settings_can_be_saved_without_a_file(self):
+        with TemporaryDatabaseContext():
+            app = AppTest.from_string(APP, default_timeout=15).run()
+            self.assertFalse(list(app.exception), list(app.exception))
+            self.assertFalse(app.get('file_uploader'))
+            self.assertNotIn('lab_preparation_dialog', app.session_state.filtered_state)
+            excel = next(item for item in app.expander if 'Excel' in item.label and '选用' in item.label)
+            self.assertFalse(excel.proto.expanded)
+            self.assertEqual('下载填写表或导入Excel', excel.button(key='lab_prep_open').label)
+            app.text_input(key='settings_lab_name').set_value('直接填写实验室')
+            app.button(key='save_system_settings').click().run()
+            self.assertFalse(list(app.exception), list(app.exception))
+            self.assertEqual('直接填写实验室', get_report_settings().lab_name)
+            self.assertNotIn('lab_preparation_dialog', app.session_state.filtered_state)
 
     def test_review_and_cancel_continue_preserve_file_without_writes(self):
         with TemporaryDatabaseContext():

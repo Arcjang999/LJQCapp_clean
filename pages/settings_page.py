@@ -75,13 +75,11 @@ def render_settings_page() -> None:
     from ui.common import render_module_header
     render_module_header(
         title="系统设置",
-        caption="填写报告上的单位和人员，保存设置；数据备份和恢复在下方操作。",
+        caption="填写实验室、科室和人员，保存设置；数据备份和恢复在下方操作。",
         tone="settings",
     )
-    from ui.lab_preparation import render_lab_preparation_entry
-    render_lab_preparation_entry()
     render_workbench_context_bar(
-        title="当前报告默认信息",
+        title="当前实验室信息",
         caption="下方填写单位、检验员和复核员，点“保存设置”。之后生成的报告使用这些信息。",
         items=[
             ("实验室名称", current_settings.lab_name or "未填写"),
@@ -94,7 +92,7 @@ def render_settings_page() -> None:
 
     with st.container():
         render_section_intro(
-            title="报告默认信息",
+            title="实验室信息",
             caption="填写实验室、科室、检验员、复核员和报告声明，点“保存设置”。",
             tone="accent",
         )
@@ -139,6 +137,12 @@ def render_settings_page() -> None:
             st.write(f"检验员：{REPORT_SETTINGS_FALLBACKS['qc_owner_name']}")
             st.write(f"复核员：{REPORT_SETTINGS_FALLBACKS['reviewer_name']}")
             st.write(f"报告声明：{REPORT_SETTINGS_FALLBACKS['report_statement']}")
+
+    with st.expander('从Excel批量登记资料（选用）', expanded=bool(
+            st.session_state.get('lab_preparation_dialog') or st.session_state.get('lab_preparation_receipt'))):
+        from ui.lab_preparation import render_lab_preparation_entry
+        st.caption('下载填写表，一次填写实验室、仪器、试剂和质控品，再上传保存。')
+        render_lab_preparation_entry()
 
     with st.container():
         render_section_intro(

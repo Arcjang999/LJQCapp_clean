@@ -74,7 +74,7 @@ class UserGuideSmokeTest(unittest.TestCase):
                              (ROOT / 'docs' / 'images' / 'first-use' / name).read_bytes())
             reference = 'images/first-use/' + name
             self.assertEqual(user_guide._help_image_path(bundled.resource_dir, reference), bundled_picture.resolve())
-        self.assertEqual(source.sections[0][0], '首次使用先准备资料')
+        self.assertEqual(source.sections[0][0], '首次使用')
         index = (self.stage / 'docs' / 'current_user_guide.md').read_text(encoding='utf-8')
         targets = re.findall(r'\]\(OPERATION_GUIDE\.md#([^\)]+)\)', index)
         self.assertEqual(len(targets), len(source.sections))
@@ -150,7 +150,7 @@ class UserGuideSmokeTest(unittest.TestCase):
             self.assertEqual(len(app.get('image')), 2)
             self.assertTrue(any('暂时无法显示' in item.value for item in app.caption))
             self.assertFalse(app.button(key='user_guide_home').disabled)
-            self.assertTrue(any('## 首次使用先准备资料' in item.value for item in app.markdown))
+            self.assertTrue(any('## 首次使用' in item.value for item in app.markdown))
             directory = self.stage / 'docs'
             for reference in ('../secret.png', '/private/tmp/secret.png', 'https://example.com/a.png',
                               'current_user_guide.md'):

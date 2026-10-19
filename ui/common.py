@@ -1217,7 +1217,7 @@ def render_page_chrome() -> None:
                         open_global_page("show_settings_page")
                 with onboarding_column:
                     from ui.onboarding import onboarding_is_busy, open_onboarding
-                    if st.button('首次引导', key='open_onboarding', width='stretch', disabled=onboarding_is_busy()):
+                    if st.button('首次引导', key='open_onboarding', type='primary', width='stretch', disabled=onboarding_is_busy()):
                         open_onboarding()
                 with feedback_column:
                     with st.container(key="module_nav_help"):

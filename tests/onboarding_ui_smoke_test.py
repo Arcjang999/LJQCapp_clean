@@ -25,6 +25,10 @@ def business_state():
     """Guide progress may change; navigation must not write business records."""
     state = stored_business_state()
     state.pop('app_settings', None)
+    # The current workbench refreshes this touch timestamp on each render.
+    # Keep the complete binding and source snapshot in the comparison.
+    for row in state.get('qc_workbench_bindings', []):
+        row['updated_at'] = None
     return state
 
 
@@ -69,6 +73,9 @@ class OnboardingUiTests(unittest.TestCase):
         self.assertEqual('首次引导', dialogs[0].proto.dialog.title)
         self.assertTrue(any(button.key == 'onboarding_skip' for button in app.button))
 
+    def assert_primary(self, app, key):
+        self.assertEqual('primary', app.button(key=key).proto.type)
+
     def assert_no_guide(self, app):
         self.assert_clean(app)
         self.assertFalse(app.session_state.filtered_state.get('onboarding_open', False))
@@ -88,6 +95,26 @@ class OnboardingUiTests(unittest.TestCase):
         self.assert_guide(self.app(), 'unit')
         self.assertEqual(before, business_state())
 
+    def test_guide_has_three_concrete_steps_and_finishes_at_new_project(self):
+        app = self.app()
+        steps = [(button.key, button.label) for button in app.button
+                 if (button.key or '').startswith('onboarding_step_')]
+        self.assertEqual([
+            ('onboarding_step_unit', '实验室信息'),
+            ('onboarding_step_materials', '仪器试剂管理'),
+            ('onboarding_step_project', '新建项目'),
+        ], steps)
+        self.assertTrue(any(item.value == '第 1 步，共 3 步' for item in app.caption))
+        self.assertEqual('填写实验室信息', app.button(key='onboarding_unit').label)
+        self.assertFalse(any(button.key == 'onboarding_verification' for button in app.button))
+        self.click(app, 'onboarding_next')
+        self.assert_guide(app, 'materials')
+        self.click(app, 'onboarding_next')
+        self.assert_guide(app, 'project')
+        self.assertTrue(any(item.value == '第 3 步，共 3 步' for item in app.caption))
+        self.assertTrue(any(button.key == 'onboarding_finish' for button in app.button))
+        self.assertFalse(any(button.key == 'onboarding_next' for button in app.button))
+
     def test_skip_keeps_progress_and_header_button_resumes_in_new_session(self):
         app = self.app()
         before = business_state()
@@ -99,6 +126,7 @@ class OnboardingUiTests(unittest.TestCase):
         app = self.app()
         self.assert_no_guide(app)
         self.assertEqual('首次引导', app.button(key='open_onboarding').label)
+        self.assert_primary(app, 'open_onboarding')
         self.click(app, 'open_onboarding')
         self.assert_guide(app, 'materials')
         self.assertEqual(before, business_state())
@@ -137,6 +165,7 @@ class OnboardingUiTests(unittest.TestCase):
         self.assert_no_guide(app)
         self.assertTrue(app.session_state['show_settings_page'])
         self.assertEqual(0, len(app.get('dialog')))
+        self.assert_primary(app, 'onboarding_continue')
         for key, value in (
             ('settings_lab_name', '测试实验室'), ('settings_department_name', '检验科'),
             ('settings_qc_owner_name', '张检验'), ('settings_reviewer_name', '李复核'),
@@ -148,12 +177,12 @@ class OnboardingUiTests(unittest.TestCase):
                          (settings.lab_name, settings.department_name, settings.qc_owner_name, settings.reviewer_name))
         self.click(app, 'onboarding_continue')
         self.assert_guide(app, 'unit')
-        self.assertTrue(any(item.value == '已填写单位信息。' for item in app.caption))
+        self.assertTrue(any(item.value == '已填写实验室信息。' for item in app.caption))
         self.click(app, 'onboarding_next')
         self.assert_guide(app, 'materials')
         self.assertEqual(before, business_state())
 
-    def test_material_entries_and_reagent_verification_open_existing_pages(self):
+    def test_material_entries_open_existing_pages(self):
         app = self.app()
         before = business_state()
         self.click(app, 'onboarding_step_materials')
@@ -171,24 +200,20 @@ class OnboardingUiTests(unittest.TestCase):
                 self.assertEqual(0, len(app.get('dialog')))
                 self.click(app, 'onboarding_continue')
                 self.assert_guide(app, 'materials')
-        self.click(app, 'onboarding_step_start')
-        self.click(app, 'onboarding_verification')
-        self.assert_no_guide(app)
-        self.assertTrue(app.session_state['show_reference_management_page'])
-        self.assertEqual('reagent', app.session_state['reference_management_kind'])
-        self.click(app, 'onboarding_continue')
-        self.assert_guide(app, 'start')
         self.assertEqual(before, business_state())
 
     def test_checklist_is_the_only_dialog_and_cancel_returns_to_guide(self):
         app = self.app()
         before = business_state()
         self.click(app, 'onboarding_step_materials')
+        excel = next(item for item in app.expander if 'Excel' in item.label and '选用' in item.label)
+        self.assertFalse(excel.proto.expanded)
+        self.assertEqual('onboarding_checklist', excel.button[0].key)
         self.click(app, 'onboarding_checklist')
         self.assert_no_guide(app)
         self.assertTrue(app.session_state['lab_preparation_dialog'])
         self.assertEqual(1, len(app.get('dialog')))
-        self.assertEqual('单位资料准备', app.get('dialog')[0].proto.dialog.title)
+        self.assertEqual('从Excel批量登记资料', app.get('dialog')[0].proto.dialog.title)
         self.assertTrue(app.button(key='open_onboarding').disabled)
         self.click(app, 'lab_prep_cancel')
         self.assertNotIn('lab_preparation_dialog', app.session_state.filtered_state)
@@ -251,7 +276,7 @@ class OnboardingUiTests(unittest.TestCase):
     def test_completion_stays_closed_and_can_still_be_opened_manually(self):
         app = self.app()
         before = business_state()
-        self.click(app, 'onboarding_step_start')
+        self.click(app, 'onboarding_step_project')
         self.click(app, 'onboarding_finish')
         self.assert_no_guide(app)
         self.assertEqual('completed', get_onboarding_state()['status'])
@@ -259,7 +284,7 @@ class OnboardingUiTests(unittest.TestCase):
         app = self.app()
         self.assert_no_guide(app)
         self.click(app, 'open_onboarding')
-        self.assert_guide(app, 'start')
+        self.assert_guide(app, 'project')
         self.assertEqual(before, business_state())
 
     def test_progress_save_failure_keeps_original_step_open_and_does_not_navigate(self):

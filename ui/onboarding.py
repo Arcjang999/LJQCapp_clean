@@ -13,7 +13,7 @@ from services.onboarding_service import (
 )
 
 
-STEP_TITLES = ('单位信息', '准备资料', '建立项目', '开始检测')
+STEP_TITLES = ('实验室信息', '仪器试剂管理', '新建项目')
 
 
 def onboarding_is_busy() -> bool:
@@ -95,35 +95,41 @@ def _render_unit(ready: dict) -> None:
     st.write('填写**实验室、科室、检验员和复核员**，点击**保存设置**；'
              '在下方核对**当前数据保存位置**。')
     if ready['unit']:
-        st.caption('已填写单位信息。')
-    if st.button('填写单位信息', key='onboarding_unit', type='primary', width='stretch'):
+        st.caption('已填写实验室信息。')
+    if st.button('填写实验室信息', key='onboarding_unit', type='primary', width='stretch'):
         _open_page('unit', 'show_settings_page')
 
 
 def _render_materials(ready: dict) -> None:
-    st.write('先搜索已有资料，缺少的再补充。**批号和效期按包装填写。**')
+    st.write('登记本次要用的**仪器、试剂和质控品**。已有的可直接选择。')
     actions = (
-        ('仪器', '仪器管理', 'instrument', 'onboarding_instrument'),
-        ('试剂批号', '试剂管理', 'reagent_lot', 'onboarding_reagent'),
-        ('质控品批号与水平', '质控品管理', 'qc_lot', 'onboarding_qc'),
+        ('仪器', '填仪器名称、厂家和型号。', '仪器管理', 'instrument', 'onboarding_instrument'),
+        ('试剂', '填产品、批号和效期。', '试剂管理', 'reagent_lot', 'onboarding_reagent'),
+        ('质控品', '填产品、批号、效期和水平。', '质控品管理', 'qc_lot', 'onboarding_qc'),
     )
-    for column, (label, button, flag, key) in zip(st.columns(3), actions):
+    for column, (label, instruction, button, flag, key) in zip(st.columns(3), actions):
         with column:
             st.markdown('**' + label + '**')
-            st.caption('已登记' if ready[flag] else '待登记')
+            st.caption(instruction)
+            if ready[flag]:
+                st.caption('已有登记')
             if st.button(button, key=key, width='stretch'):
                 _open_page('materials', 'show_qc_materials_page',
                            reference={'instrument': 'instrument', 'reagent_lot': 'reagent'}.get(flag, ''))
-    if st.button('用清单一次准备', key='onboarding_checklist', width='stretch'):
-        if _leave('materials'):
-            from ui.common import open_global_page
-            from ui.lab_preparation import open_lab_preparation_dialog
-            open_global_page('show_settings_page', rerun=False)
-            open_lab_preparation_dialog()
+    with st.expander('从Excel批量登记资料（选用）'):
+        st.caption('下载填写表，一次填写实验室、仪器、试剂和质控品，再上传保存。')
+        if st.button('下载填写表或导入Excel', key='onboarding_checklist', width='stretch'):
+            if _leave('materials'):
+                from ui.common import open_global_page
+                from ui.lab_preparation import open_lab_preparation_dialog
+                open_global_page('show_settings_page', rerun=False)
+                open_lab_preparation_dialog()
 
 
 def _render_project(ready: dict) -> None:
-    st.write('选择**检验项目、仪器、试剂和质控品**，核对质量要求后，点击**确认保存并进入录入**。')
+    st.markdown('1. 选择**检验项目、仪器、试剂和质控品**，填好批号和各水平。\n'
+                '2. 核对**质量要求**，点击**下一步：查看设置**。\n'
+                '3. 点击**确认保存并进入录入**。')
     if ready['project']:
         st.caption('已有项目，可继续使用。')
     if st.button('新建项目', key='onboarding_project', type='primary', width='stretch'):
@@ -131,17 +137,6 @@ def _render_project(ready: dict) -> None:
             _project_home()
             from ui.project_dialogs import open_project_dialog
             open_project_dialog('project')
-
-
-def _render_start(ready: dict) -> None:
-    st.markdown('1. 在**试剂管理**登记批号验证，通过后切换到本次使用的批号。\n'
-                '2. 在**我的项目**勾选项目，点击**打开所选项目**，再选择检验项目和批次。\n'
-                '3. 填写**检测时间、检测人和结果**。LJ 和即时法点**保存检测结果**；'
-                '多水平填齐各水平后点**保存本次检测**。')
-    if not ready['project']:
-        st.caption('还没有项目，可返回上一步新建。')
-    if st.button('登记试剂批号验证', key='onboarding_verification', width='stretch'):
-        _open_page('start', '', reference='reagent')
 
 
 @st.dialog('首次引导', width='large', dismissible=False)
@@ -159,14 +154,14 @@ def _render_dialog() -> None:
     step = state['step']
     index = STEP_IDS.index(step)
     st.caption(f'第 {index + 1} 步，共 {len(STEP_IDS)} 步')
-    for column, target, title in zip(st.columns(4), STEP_IDS, STEP_TITLES):
+    for column, target, title in zip(st.columns(len(STEP_IDS)), STEP_IDS, STEP_TITLES):
         if column.button(title, key='onboarding_step_' + target, width='stretch',
                          type='primary' if target == step else 'secondary'):
             if _save(target):
                 st.rerun(scope='app')
     st.subheader(STEP_TITLES[index])
     {'unit': _render_unit, 'materials': _render_materials,
-     'project': _render_project, 'start': _render_start}[step](ready)
+     'project': _render_project}[step](ready)
     st.divider()
     later, back, forward = st.columns(3)
     if later.button('稍后再做', key='onboarding_skip', width='stretch'):
@@ -181,7 +176,7 @@ def _render_dialog() -> None:
         if forward.button('下一步', key='onboarding_next', width='stretch'):
             if _save(STEP_IDS[index + 1]):
                 st.rerun(scope='app')
-    elif forward.button('完成引导，进入项目工作台', key='onboarding_finish', type='primary', width='stretch'):
+    elif forward.button('完成引导', key='onboarding_finish', width='stretch'):
         if _save(step, 'completed'):
             st.session_state['onboarding_open'] = False
             st.session_state.pop('onboarding_return_pending', None)
@@ -195,5 +190,5 @@ def render_onboarding() -> None:
     if st.session_state.get('onboarding_open'):
         _render_dialog()
     elif st.session_state.get('onboarding_return_pending'):
-        if st.button('继续首次引导', key='onboarding_continue'):
+        if st.button('继续首次引导', key='onboarding_continue', type='primary'):
             open_onboarding()

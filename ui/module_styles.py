@@ -117,7 +117,11 @@ def module_styles(tone: str = "projects") -> str:
     .st-key-open_project_management_page button, .st-key-open_quality_targets_page button {{ background:#F0F5FE !important; border-color:#C7D8F2 !important; color:#2459A9 !important; }}
     .st-key-open_out_of_control_page button {{ background:#FFF5EC !important; border-color:#EDCCAF !important; color:#A34C14 !important; }}
     .st-key-open_report_history_page button {{ background:#F5F0FB !important; border-color:#D8C9EA !important; color:#6945A5 !important; }}
-    .st-key-open_system_settings button, .st-key-open_onboarding button, .st-key-module_nav_help button {{ background:#F2F4F7 !important; border-color:#D3DAE3 !important; color:#526174 !important; }}
+    .st-key-open_system_settings button, .st-key-module_nav_help button {{ background:#F2F4F7 !important; border-color:#D3DAE3 !important; color:#526174 !important; }}
+    .st-key-open_onboarding div.stButton > button, .st-key-onboarding_continue div.stButton > button,
+    .st-key-onboarding_step_unit div.stButton > button[kind="primary"],
+    .st-key-onboarding_step_materials div.stButton > button[kind="primary"],
+    .st-key-onboarding_step_project div.stButton > button[kind="primary"] {{ background:#2459A9 !important; border-color:#2459A9 !important; color:#FFF !important; }}
     .st-key-module_navigation button {{ font-size:13px; font-weight:650; white-space:normal; min-height:40px; }}
     @media(max-width:900px) {{
         .st-key-module_topbar > [data-testid="stHorizontalBlock"] {{ flex-wrap:wrap; }}

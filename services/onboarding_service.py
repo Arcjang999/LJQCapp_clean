@@ -7,7 +7,7 @@ import sqlite3
 from database import get_app_settings, read_snapshot, save_app_settings
 
 
-STEP_IDS = ('unit', 'materials', 'project', 'start')
+STEP_IDS = ('unit', 'materials', 'project')
 ONBOARDING_SETTINGS_KEY = 'first_use_onboarding'
 STATE_VERSION = 1
 _STATUSES = ('new', 'active', 'skipped', 'completed')
@@ -17,9 +17,12 @@ _PROJECT_TABLES = ('qc_project_templates', 'projects', 'instant_projects', 'zsco
 def _normalize_state(value: object) -> dict:
     if not isinstance(value, dict):
         value = {}
+    step = value.get('step')
+    if step == 'start':
+        step = 'project'
     return {
         'version': STATE_VERSION,
-        'step': value.get('step') if value.get('step') in STEP_IDS else STEP_IDS[0],
+        'step': step if step in STEP_IDS else STEP_IDS[0],
         'status': value.get('status') if value.get('status') in _STATUSES else 'new',
     }
 

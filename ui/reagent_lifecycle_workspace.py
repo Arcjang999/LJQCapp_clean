@@ -213,6 +213,7 @@ def _render_detail(context, lot, *, product_id=None):
     available = lot['id'] in {row['id'] for row in context['lots']}
     systems = _systems(context, lot['id'])
     active = [row for row in systems if row['available']]
+    st.caption('把实验室对这批试剂的检查结论和依据记在这里。')
     left, right = st.columns(2)
     if left.button('登记批号验证', key='reagent_verify', disabled=not available or not active, width='stretch'):
         open_reagent_lifecycle_dialog('verify', lot['id'], product_id=product_id)

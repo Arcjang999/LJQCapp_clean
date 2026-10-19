@@ -43,7 +43,7 @@ class OnboardingServiceTests(unittest.TestCase):
                              if ONBOARDING_SETTINGS_KEY not in line)
 
     def test_new_database_shows_guide_and_progress_survives_new_process(self):
-        self.assertEqual(('unit', 'materials', 'project', 'start'), STEP_IDS)
+        self.assertEqual(('unit', 'materials', 'project'), STEP_IDS)
         self.assertEqual({'version': 1, 'step': 'unit', 'status': 'new'}, get_onboarding_state())
         self.assertTrue(should_auto_show_onboarding())
         saved = save_onboarding_progress('project')
@@ -62,12 +62,27 @@ class OnboardingServiceTests(unittest.TestCase):
         save_onboarding_progress(get_onboarding_state()['step'])
         self.assertEqual('active', get_onboarding_state()['status'])
         self.assertTrue(should_auto_show_onboarding())
-        save_onboarding_progress('start', status='completed')
+        save_onboarding_progress('project', status='completed')
         self.assertFalse(should_auto_show_onboarding())
         # Completing the guide is navigation only and needs no detection data.
         self.assertFalse(get_onboarding_readiness()['project'])
         save_onboarding_progress('unit')
         self.assertEqual('active', get_onboarding_state()['status'])
+
+    def test_legacy_last_step_resumes_at_project_without_losing_status_or_settings(self):
+        database.save_app_settings({'lab_name': '现有单位', 'report_statement': '原报告说明', 'reviewer_name': '原复核员'})
+        before = self.dump_without_progress()
+        for status in ('new', 'active', 'skipped', 'completed'):
+            with self.subTest(status=status):
+                database.save_app_settings({ONBOARDING_SETTINGS_KEY: json.dumps(
+                    {'version': 1, 'step': 'start', 'status': status})})
+                with database.read_snapshot() as connection:
+                    stored_before = '\n'.join(connection.iterdump())
+                self.assertEqual({'version': 1, 'step': 'project', 'status': status}, get_onboarding_state())
+                self.assertEqual(status not in ('skipped', 'completed'), should_auto_show_onboarding())
+                self.assertEqual(before, self.dump_without_progress())
+                with database.read_snapshot() as connection:
+                    self.assertEqual(stored_before, '\n'.join(connection.iterdump()))
 
     def test_any_registered_project_including_draft_or_disabled_suppresses_auto_open(self):
         cases = (
@@ -118,11 +133,11 @@ class OnboardingServiceTests(unittest.TestCase):
         with database.get_connection() as connection:
             connection.execute("INSERT INTO projects(name) VALUES('已有业务项目')")
         before = self.dump_without_progress()
-        for step, status in (('materials', 'active'), ('project', 'skipped'), ('start', 'completed')):
+        for step, status in (('materials', 'active'), ('project', 'skipped'), ('project', 'completed')):
             save_onboarding_progress(step, status=status)
             self.assertEqual(before, self.dump_without_progress())
         saved = get_onboarding_state()
-        for step, status in (('unknown', 'active'), ('unit', 'unknown')):
+        for step, status in (('unknown', 'active'), ('start', 'active'), ('unit', 'unknown')):
             with self.assertRaises(ValueError):
                 save_onboarding_progress(step, status=status)
             self.assertEqual(saved, get_onboarding_state())

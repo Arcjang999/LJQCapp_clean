@@ -98,7 +98,7 @@ def render_user_guide_page() -> None:
         return_to_project_workspace()
     practical = bool(st.session_state.get('user_guide_practical'))
     render_module_header('操作说明' if practical else '使用说明',
-        caption='先准备自己的资料，再建项、录入、处理失控、报告归档与备份。',
+        caption='填写实验室信息，登记仪器、试剂和质控品，再新建项目。',
         tone='guide', eyebrow='操作帮助')
     guide = _read_help()
     if guide is None:
