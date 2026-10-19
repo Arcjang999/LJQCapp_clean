@@ -5,8 +5,10 @@ import hashlib
 import streamlit as st
 
 from services.quality_applicability_service import (
-    CONTEXT_LABELS, CONTEXT_OPTIONS, assess, default_context, infer_technique, context_errors, source_status,
+    CONTEXT_LABELS, CONTEXT_OPTIONS, assess, default_context, infer_technique, context_errors,
+    missing_context_fields, source_status,
 )
+from ui.required_fields import required_field
 
 
 def _applicability_label(row):
@@ -58,24 +60,43 @@ def render_draft_standard_preview(draft):
 
 def render_conditions(item, review, prefix):
     saved = review.get('context') or default_context(item)
+    inferred = infer_technique(item)
+    # Widget values arrive before a rerun, while saved may still be an older
+    # review (or the previous quick-setup draft). Guide the current inputs.
+    current = {key: st.session_state.get(prefix+'_context_'+key, saved.get(key, ''))
+               for key in CONTEXT_LABELS}
+    if inferred:
+        current['technique'] = inferred
+    missing = missing_context_fields(current)
     context = {}
-    with st.expander('检测条件', expanded=bool(context_errors(item, saved))):
-        st.caption('请检查已填选项，并填写空白项和本次标本。方法学：' + (item.get('method_name') or '未设置'))
+    # Keep these five inputs visible so a missing condition cannot be hidden
+    # behind an expander. The keys and original widget labels stay unchanged.
+    with st.container(border=True, key=prefix+'_conditions'):
+        st.markdown('**检测条件**')
+        st.caption('以下5项均为必填。请检查已填选项，并填写本次标本。方法学：' + (item.get('method_name') or '未设置'))
+        if missing:
+            st.info(f'还有 {len(missing)} 项必填：' + '、'.join(CONTEXT_LABELS[key] for key in missing)
+                    + '。请填写下方标出的输入框。')
         columns = st.columns(2)
         for index, (key, options) in enumerate(CONTEXT_OPTIONS.items()):
             values = list(options)
             prior = saved.get(key, '')
-            if key == 'technique' and infer_technique(item):
-                prior = infer_technique(item)
+            if key == 'technique' and inferred:
+                prior = inferred
                 widget_key = prefix + '_context_' + key
                 if widget_key in st.session_state and st.session_state[widget_key] != prior:
                     st.session_state[widget_key] = prior
-            context[key] = columns[index % 2].selectbox(CONTEXT_LABELS[key], values,
-                index=values.index(prior) if prior in values else 0,
-                format_func=options.get, key=prefix+'_context_'+key,
-                disabled=key == 'technique' and bool(infer_technique(item)))
-        context['specimen'] = st.text_input('标本或基质', value=saved.get('specimen', ''),
-            key=prefix+'_context_specimen', max_chars=200)
+            widget_key = prefix+'_context_'+key
+            with columns[index % 2], required_field(widget_key, missing=key in missing,
+                    message='请选择'+CONTEXT_LABELS[key]+'。'):
+                context[key] = st.selectbox(CONTEXT_LABELS[key], values,
+                    index=values.index(prior) if prior in values else 0,
+                    format_func=options.get, key=widget_key,
+                    disabled=key == 'technique' and bool(inferred))
+        with required_field(prefix+'_context_specimen', missing='specimen' in missing,
+                message='请填写标本或基质。'):
+            context['specimen'] = st.text_input('标本或基质', value=saved.get('specimen', ''),
+                key=prefix+'_context_specimen', max_chars=200)
     rows = assess(item, context)
     with st.expander('查看标准及填写对照要求', expanded=False):
         for row in rows:

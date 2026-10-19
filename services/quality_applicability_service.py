@@ -66,14 +66,19 @@ def default_context(item):
                 result_kind='qualitative' if scale == 's_co' else '', result_scale=scale, purpose='')
 
 
-def context_errors(item, context):
-    errors = []
-    for key, options in CONTEXT_OPTIONS.items():
-        if context.get(key) not in options or not context.get(key):
-            errors.append('请补充' + CONTEXT_LABELS[key] + '。')
+def missing_context_fields(context):
+    """Required blanks shared by the validation and the input guidance."""
+    missing = [key for key, options in CONTEXT_OPTIONS.items()
+               if context.get(key) not in options or not context.get(key)]
     if not str(context.get('specimen') or '').strip():
-        errors.append('请补充标本或基质。')
-    elif len(str(context['specimen'])) > 200:
+        missing.append('specimen')
+    return missing
+
+
+def context_errors(item, context):
+    missing = missing_context_fields(context)
+    errors = ['请补充' + CONTEXT_LABELS[key] + '。' for key in missing]
+    if 'specimen' not in missing and len(str(context['specimen'])) > 200:
         errors.append('标本或基质不能超过 200 字。')
     inferred = infer_technique(item)
     if inferred and context.get('technique') and context['technique'] != inferred:
