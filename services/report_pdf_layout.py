@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
 from io import BytesIO
 import math
 import textwrap
 from typing import Any
 
 import pandas as pd
+from fontTools.ttLib import TTFont, TTLibError
+from matplotlib import font_manager
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.backends.backend_agg import RendererAgg
@@ -211,6 +214,22 @@ def _scope_metric(report, text):
     return text if 'monthly' in report.report_type else text.replace('月度', '报告期').replace('本月', '报告期')
 
 
+@lru_cache(maxsize=128)
+def _is_pdf_truetype_font_file(font_file: str) -> bool:
+    try:
+        with TTFont(font_file, fontNumber=0, lazy=True) as font:
+            return 'glyf' in font and 'loca' in font and 'CFF ' not in font and 'CFF2' not in font
+    except (OSError, TTLibError):
+        return False
+
+
+def _is_pdf_truetype_font_family(font_name: str) -> bool:
+    matching_fonts = [font for font in font_manager.fontManager.ttflist
+                      if font.name.casefold() == font_name.casefold()]
+    # Every available weight must be safe: bold text can select a different file.
+    return bool(matching_fonts) and all(_is_pdf_truetype_font_file(font.fname) for font in matching_fonts)
+
+
 def _build_pdf_rc_params(font_name: str) -> dict[str, object]:
     font_fallbacks: list[str] = []
     for candidate in [
@@ -220,6 +239,8 @@ def _build_pdf_rc_params(font_name: str) -> dict[str, object]:
     ]:
         resolved_name = str(candidate or "").strip()
         if not resolved_name or resolved_name == "DejaVu Sans" or resolved_name in font_fallbacks:
+            continue
+        if not _is_pdf_truetype_font_family(resolved_name):
             continue
         font_fallbacks.append(resolved_name)
     font_fallbacks.append("DejaVu Sans")

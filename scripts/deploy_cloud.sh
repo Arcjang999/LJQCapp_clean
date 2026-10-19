@@ -14,7 +14,7 @@ if [[ ! "$QC_HOST" =~ ^[a-zA-Z0-9.-]+$ ]]; then
 fi
 
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv nginx fontconfig fonts-noto-cjk poppler-utils
+DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv nginx fontconfig fonts-noto-cjk fonts-wqy-microhei poppler-utils
 if ! id ljqc >/dev/null 2>&1; then
   useradd --system --home-dir /var/lib/ljqc --create-home --shell /usr/sbin/nologin ljqc
 fi

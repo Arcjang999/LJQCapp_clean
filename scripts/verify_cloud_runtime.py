@@ -154,6 +154,7 @@ def _font_proof(output_dir: Path) -> dict:
 
 
 def _check_pdf(pdf_bytes: bytes, expected_chinese: str, destination: Path) -> dict:
+    from fontTools.ttLib import TTFont
     from pypdf import PdfReader
 
     if not pdf_bytes.startswith(b"%PDF-"):
@@ -183,7 +184,20 @@ def _check_pdf(pdf_bytes: bytes, expected_chinese: str, destination: Path) -> di
                 embedded_keys = [key for key in ("/FontFile", "/FontFile2", "/FontFile3") if descriptor.get(key)]
                 if not embedded_keys or not all(descriptor[key].get_object().get_data() for key in embedded_keys):
                     raise AssertionError(f"{destination.name}: font {base_name} has no embedded font program")
-                fonts[base_name] = {"subtype": subtype, "embedded_font_streams": embedded_keys}
+                font_result = {"subtype": subtype, "embedded_font_streams": embedded_keys}
+                if "/FontFile2" in embedded_keys:
+                    program = descriptor["/FontFile2"].get_object().get_data()
+                    # A CFF-flavoured OpenType/TTC font can be embedded under
+                    # FontFile2 and still render in some readers. Validate its
+                    # actual outline format, not only the PDF dictionary key.
+                    if program[:4] not in (b"\x00\x01\x00\x00", b"true"):
+                        raise AssertionError(f"{destination.name}: FontFile2 for {base_name} is not a TrueType sfnt program")
+                    with TTFont(BytesIO(program), lazy=True) as true_type:
+                        tables = set(true_type.keys())
+                        if not {"glyf", "loca"}.issubset(tables) or tables.intersection({"CFF ", "CFF2"}):
+                            raise AssertionError(f"{destination.name}: FontFile2 for {base_name} lacks TrueType glyf outlines or contains CFF")
+                    font_result["true_type_glyf_validated"] = True
+                fonts[base_name] = font_result
     if not fonts:
         raise AssertionError(f"{destination.name}: no embedded fonts found")
     result = {"path": str(destination), "bytes": len(pdf_bytes), "pages": len(reader.pages),
@@ -191,9 +205,12 @@ def _check_pdf(pdf_bytes: bytes, expected_chinese: str, destination: Path) -> di
     renderer = shutil.which("pdftoppm")
     if renderer:
         prefix = destination.with_suffix("")
-        subprocess.run([renderer, "-f", "1", "-singlefile", "-scale-to", "1600", "-png", str(destination), str(prefix)],
-                       check=True, capture_output=True, text=True, timeout=90)
+        rendered = subprocess.run([renderer, "-f", "1", "-singlefile", "-scale-to", "1600", "-png", str(destination), str(prefix)],
+                                  check=True, capture_output=True, text=True, timeout=90)
+        if "mismatch between font type and embedded font file" in rendered.stderr.lower():
+            raise AssertionError(f"{destination.name}: pdftoppm reports a font type/embedded program mismatch: {rendered.stderr.strip()}")
         result["first_page_png"] = str(prefix.with_suffix(".png"))
+        result["pdf_renderer_stderr"] = rendered.stderr.strip()
     else:
         result["first_page_png"] = None
         result["render_note"] = "pdftoppm unavailable; PDF structural and text checks completed."

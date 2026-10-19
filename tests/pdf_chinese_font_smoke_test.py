@@ -5,6 +5,7 @@ import sys
 import unittest
 import warnings
 
+from fontTools.ttLib import TTFont
 from pypdf import PdfReader
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,6 +43,12 @@ def assert_embedded_chinese_pdf(testcase, data, expected):
                 embedded.append(descriptor['/FontFile2'].get_object().get_data())
     testcase.assertTrue(embedded, 'No embedded TrueType fonts found')
     testcase.assertTrue(all(embedded), 'An embedded font is empty')
+    for program in embedded:
+        with TTFont(BytesIO(program)) as font:
+            testcase.assertIn('glyf', font, 'FontFile2 must contain TrueType outlines')
+            testcase.assertIn('loca', font)
+            testcase.assertNotIn('CFF ', font, 'CFF outlines cannot be embedded as FontFile2')
+            testcase.assertNotIn('CFF2', font)
 
 
 class ChinesePdfFontTests(unittest.TestCase):

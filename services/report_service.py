@@ -28,6 +28,7 @@ from database import (
 from plotting import CONFIGURED_FONT_FALLBACKS as PLOT_CONFIGURED_FONT_FALLBACKS
 from qc_logic import LJ_FORMAL_PHASE_LABEL, calculate_qc_results
 from services.report_pdf_layout import (
+    _is_pdf_truetype_font_family,
     render_lj_monthly_report_pdf,
     render_zscore_monthly_report_pdf,
 )
@@ -56,12 +57,12 @@ LJ_METHOD_LABEL = "单水平（LJ法）"
 LJ_REPORT_TITLE = "单水平（LJ法）月度质控报告"
 DEFAULT_DECLARATION = DEFAULT_REPORT_STATEMENT
 PDF_FONT_CANDIDATES = [
+    "WenQuanYi Micro Hei",
+    "WenQuanYi Zen Hei",
     "Noto Sans CJK SC",
     "Noto Sans CJK JP",
     "Noto Serif CJK SC",
     "Noto Serif CJK JP",
-    "WenQuanYi Zen Hei",
-    "WenQuanYi Micro Hei",
     "Microsoft YaHei",
     "Microsoft YaHei UI",
     "SimHei",
@@ -1610,7 +1611,7 @@ def _resolve_pdf_font_name() -> str:
 
     for font_name in resolved_candidates:
         matched_font = available_fonts.get(font_name.lower())
-        if matched_font and matched_font != "DejaVu Sans":
+        if matched_font and matched_font != "DejaVu Sans" and _is_pdf_truetype_font_family(matched_font):
             return matched_font
     return "DejaVu Sans"
 

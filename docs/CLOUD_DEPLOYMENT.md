@@ -13,7 +13,7 @@ cd /opt/ljqcapp
 sudo bash scripts/deploy_cloud.sh YOUR_PUBLIC_IP
 ```
 
-脚本安装 Noto 中文字体、网页运行依赖和 Nginx，并启用开机自动运行。`requirements-cloud.txt` 不安装桌面启动器所用的 Qt。`MPLCONFIGDIR` 指向运行账号可写的缓存；图表使用无界面渲染，PDF 嵌入字体并保留中文字形映射。
+脚本安装 Noto 和文泉驿中文字体、网页运行依赖和 Nginx，并启用开机自动运行。`requirements-cloud.txt` 不安装桌面启动器所用的 Qt。`MPLCONFIGDIR` 指向运行账号可写的缓存；图表使用无界面渲染，PDF 选用可嵌入的 TrueType 中文字体并保留中文字形映射。
 
 运行记录在 `/var/lib/ljqc/qc_lj_app.db`，附件跟随该库保存，备份在 `/var/lib/ljqc/backups`。源码目录的 `data/storage_config.json` 只保存云端路径，不复制个人电脑上的配置。部署脚本遇到不同的已有路径会停止，避免覆盖现有数据。
 
