@@ -89,6 +89,10 @@ def range_source_version(method, batch_id, start_date, end_date, *, handling_ver
             JOIN qc_ooc_events e ON e.id=p.event_id JOIN {table} r ON r.id=e.source_id
             WHERE e.source_type=? AND r.batch_id=? ORDER BY p.id''', (source_type, batch_id))
         binding = rows(c, 'SELECT * FROM qc_workbench_bindings WHERE qc_method=? AND runtime_batch_id=? ORDER BY id', (method, batch_id))
+        # Opening a workbench refreshes this timestamp even when its source is
+        # unchanged. Keep every binding identity, status, revision and snapshot
+        # field in the report basis, but not that render-time refresh marker.
+        binding = [{key: value for key, value in row.items() if key != 'updated_at'} for row in binding]
         source_identity, _, _ = source_context(c, method, batch_id, read_only=True)
         usage_events = rows(c, 'SELECT * FROM qc_lot_change_events WHERE system_id=? AND effective_at>=? AND effective_at<? ORDER BY effective_at,id',
                             (source_identity.get('system_id'), str(period.start_time), str(period.end_exclusive)))
