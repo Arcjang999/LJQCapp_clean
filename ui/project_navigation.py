@@ -129,16 +129,14 @@ def open_project_setup(template_id, *, config_id=None, lot_config_item_id=None,
     st.rerun()
 
 
-def _select_row(key, ids, state_key, enter_project=False):
+def _select_row(key, ids, state_key):
     event = st.session_state.get(key, {})
     rows = event.get('selection', {}).get('rows', [])
     value = ids[rows[0]] if rows and 0 <= rows[0] < len(ids) else None
     st.session_state[state_key] = value
-    if enter_project and value is not None:
-        st.session_state['workspace_project_id'] = value
 
 
-def _table(frame, display, state_key, prefix, *, enter_project=False):
+def _table(frame, display, state_key, prefix):
     ids = [int(x) for x in frame.id]
     fingerprint = sha1((','.join(map(str,ids)) + ':' + str(st.session_state.get('project_table_version',0))).encode()).hexdigest()[:10]
     key = prefix + '_' + fingerprint
@@ -146,7 +144,7 @@ def _table(frame, display, state_key, prefix, *, enter_project=False):
     default_rows = [ids.index(selected)] if selected in ids else []
     st.dataframe(display, hide_index=True, width='stretch', height=min(380, max(115, 36*len(ids)+38)),
         key=key, selection_mode='single-row', selection_default={'selection':{'rows':default_rows}},
-        on_select=partial(_select_row,key,ids,state_key,enter_project))
+        on_select=partial(_select_row,key,ids,state_key))
     return st.session_state.get(state_key) if st.session_state.get(state_key) in ids else None
 
 
@@ -178,9 +176,9 @@ def _render_project_list():
     display['status'] = ['已停用' if r['is_disabled'] else ('设置已确认' if r['status']=='active' else '待完善') for r in projects.to_dict('records')]
     display = display.drop(columns=['is_disabled']).rename(columns={'template_name':'项目名称','project_group':'分组',
         'instrument_name':'仪器','item_count':'检验项目数','status':'状态'})
-    st.caption('勾选项目行首的选择框进入工作台；返回列表后保留原选择。')
-    selected_id = _table(projects, display, 'home_selected_project_id', 'home_projects', enter_project=True)
-    if selected_id is not None and st.button('打开所选项目', key='home_open_project'):
+    st.caption('先勾选一个项目，再点击“打开所选项目”。')
+    selected_id = _table(projects, display, 'home_selected_project_id', 'home_projects')
+    if st.button('打开所选项目', key='home_open_project', disabled=selected_id is None):
         st.session_state['workspace_project_id'] = selected_id
         st.rerun()
 

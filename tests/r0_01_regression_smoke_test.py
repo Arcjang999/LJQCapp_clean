@@ -27,7 +27,7 @@ def test_filter_and_batch_survive_real_route_cleanup():
         app.selectbox(key='home_project_filter_group').set_value('血筛').run()
         app.selectbox(key='home_project_filter_instrument').set_value(f['data']['lab_instrument_id']).run()
         select_table_row(app,0)
-        app.run()
+        app.button(key='home_open_project').click().run()
         names=app.dataframe[0].value['检验项目'].tolist()
         select_table_row(app,names.index('V11 单水平项目'))
         key=f"workspace_batch_{f['bindings']['lj']['project_template_item_id']}"

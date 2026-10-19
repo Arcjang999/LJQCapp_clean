@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import sys
+from unittest.mock import patch
 
 from streamlit.testing.v1 import AppTest
 
@@ -64,7 +65,7 @@ def select_table_row(app, row, index=0):
     state = app._tree.get_widget_states()
     selected = state.widgets.add()
     selected.id = table.proto.id
-    selected.string_value = json.dumps({'selection': {'rows': [row], 'columns': [], 'cells': []}})
+    selected.string_value = json.dumps({'selection': {'rows': [] if row is None else [row], 'columns': [], 'cells': []}})
     app._run(state)
     assert_clean(app)
 
@@ -158,6 +159,9 @@ def test_project_dialog_create_edit_cancel_disable_restore():
         assert get_project_template(tid)['is_disabled']
         app.checkbox(key='home_show_disabled_projects').check().run()
         select_table_row(app, 0)
+        assert 'workspace_project_id' not in app.session_state
+        assert app.session_state['home_selected_project_id'] == tid
+        app.button(key='home_open_project').click().run()
         assert app.session_state['workspace_project_id'] == tid
         app.button(key='workspace_edit_project').click().run()
         assert not any(button.key == 'project_dialog_save' for button in app.button)
@@ -203,17 +207,39 @@ def test_project_selection_uses_id_and_filter_clears_hidden_selection():
         assert {box.key for box in app.selectbox} == {'home_project_filter_group', 'home_project_filter_instrument'}
         names = app.dataframe[0].value['项目名称'].tolist()
         assert set(names) == {'Alpha项目', 'Beta项目', 'Gamma项目'}
+        assert app.button(key='home_open_project').disabled
         select_table_row(app, names.index('Beta项目'))
+        assert 'workspace_project_id' not in app.session_state
+        assert app.session_state['home_selected_project_id'] == second
+        assert not app.button(key='home_open_project').disabled
+        select_table_row(app, None)
+        assert 'workspace_project_id' not in app.session_state
+        assert app.session_state['home_selected_project_id'] is None
+        assert app.button(key='home_open_project').disabled
+        assert app.button(key='home_edit_project').disabled
+        select_table_row(app, names.index('Beta项目'))
+        app.button(key='home_open_project').click().run()
         assert app.session_state['workspace_project_id'] == second
         app.button(key='workspace_back').click().run()
         assert app.session_state['home_selected_project_id'] == second
-        app.button(key='home_open_project').click().run()
-        assert app.session_state['workspace_project_id'] == second
+        # Reorder the rendered rows while retaining the selected project. Its
+        # database ID, rather than the previous row number, must still open.
+        def sorted_projects(include_disabled=False):
+            frame = list_project_templates(include_disabled=include_disabled)
+            return frame.sort_values(['item_count', 'template_name']).reset_index(drop=True)
+        with patch('ui.project_navigation.list_project_templates', side_effect=sorted_projects):
+            app.run()
+            assert app.dataframe[0].value['项目名称'].tolist()[0] == 'Beta项目'
+            assert app.session_state['home_selected_project_id'] == second
+            assert not app.button(key='home_open_project').disabled
+            app.button(key='home_open_project').click().run()
+            assert app.session_state['workspace_project_id'] == second
         app.button(key='workspace_back').click().run()
         app.selectbox(key='home_project_filter_instrument').set_value(data['lab_instrument_id']).run()
         assert_clean(app)
         assert set(app.dataframe[0].value['项目名称']) == {'Alpha项目', 'Gamma项目'}
         assert app.session_state['home_selected_project_id'] is None
+        assert app.button(key='home_open_project').disabled
         assert app.button(key='home_edit_project').disabled
         app.selectbox(key='home_project_filter_group').set_value('生化').run()
         assert app.dataframe[0].value['项目名称'].tolist() == ['Gamma项目']
@@ -223,8 +249,10 @@ def test_project_selection_uses_id_and_filter_clears_hidden_selection():
         assert app.button(key='home_edit_project').disabled
         assert not any(button.key == 'home_disable_project' for button in app.button)
         select_table_row(app, 0)
-        assert app.session_state['workspace_project_id'] == first
+        assert 'workspace_project_id' not in app.session_state
         assert app.session_state['home_selected_project_id'] == first
+        app.button(key='home_open_project').click().run()
+        assert app.session_state['workspace_project_id'] == first
         shown = app.dataframe[0].value
         assert len(shown) == 3
         assert dict(zip(shown['质控方法'], shown['水平数'])) == {'单水平（LJ）': 1, '多水平法': 3, '即时法': 1}
@@ -237,6 +265,7 @@ def test_project_selection_uses_id_and_filter_clears_hidden_selection():
         assert_clean(app)
         assert not app.dataframe  # Method names no longer decide the project list.
         assert app.session_state['home_selected_project_id'] is None
+        assert not any(button.key == 'home_open_project' for button in app.button)
         assert app.button(key='home_edit_project').disabled
         app.text_input(key='home_project_filter_search').set_value('').run()
         app.selectbox(key='home_project_filter_group').set_value('全部').run()
@@ -255,6 +284,7 @@ def test_disable_two_confirmations_preserve_unsaved_edits_and_revision():
         initial = dict(get_project_template(tid))
         app = AppTest.from_function(workspace_page, default_timeout=15).run()
         select_table_row(app, 0)
+        app.button(key='home_open_project').click().run()
         app.button(key='workspace_edit_project').click().run()
         app.text_input(key=draft_key(app, 'template_name')).set_value('不能偷偷保存的新名称')
         app.text_area(key=draft_key(app, 'notes')).set_value('取消后保留的填写内容')

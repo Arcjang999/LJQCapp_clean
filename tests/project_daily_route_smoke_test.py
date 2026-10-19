@@ -125,6 +125,8 @@ class ProjectDailyRouteTest(unittest.TestCase):
         names = app.dataframe[0].value['项目名称'].tolist()
         select_table_row(app, names.index(title))
         self.healthy(app)
+        app.button(key='home_open_project').click().run()
+        self.healthy(app)
         # A specific item/batch remains selected independently of whole-group entry.
         select_table_row(app, 1)
         self.healthy(app)
@@ -162,6 +164,7 @@ class ProjectDailyRouteTest(unittest.TestCase):
             'open_main_zscore_card', 'open_main_instant_card'} for b in app.button))
         names = app.dataframe[0].value['项目名称'].tolist()
         select_table_row(app, names.index('日常20项工程验收'))
+        app.button(key='home_open_project').click().run()
         self.healthy(app)
         self.assertEqual(len(app.dataframe[0].value), 20)
         self.assertEqual(set(app.dataframe[0].value['质控方法']), {'单水平（LJ）', '多水平法', '即时法'})
