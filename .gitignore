@@ -6,6 +6,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .cache/
+.venv/
 
 # Coverage and local test output
 .coverage

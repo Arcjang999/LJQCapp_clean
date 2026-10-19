@@ -227,6 +227,7 @@ def _build_pdf_rc_params(font_name: str) -> dict[str, object]:
         "font.family": "sans-serif",
         "font.sans-serif": font_fallbacks,
         "axes.unicode_minus": False,
+        "pdf.fonttype": 42,
     }
 
 

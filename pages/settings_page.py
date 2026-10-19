@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from hashlib import sha256
+import os
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import streamlit as st
 
@@ -37,6 +40,10 @@ STORAGE_SESSION_KEYS = {
     "restore_file": "settings_storage_selected_restore_file",
     "restore_confirmed": "settings_storage_restore_confirmed",
 }
+
+
+def _is_cloud_mode() -> bool:
+    return os.environ.get("LJQC_DEPLOYMENT_MODE", "").strip().lower() == "cloud"
 
 
 def _format_settings_path_summary(path: Path | None, *, tail_parts: int = 2) -> str:
@@ -145,10 +152,13 @@ def render_settings_page() -> None:
         render_lab_preparation_entry()
 
     with st.container():
+        cloud_mode = _is_cloud_mode()
         render_section_intro(
             title="数据保存与备份",
-            caption="查看或更改数据保存位置，以及备份和恢复数据。",
-            badges=["更改数据保存位置", "备份恢复", "重启后生效"],
+            caption=("下载完整备份，或上传备份恢复数据。" if cloud_mode else
+                     "查看或更改数据保存位置，以及备份和恢复数据。"),
+            badges=(["下载备份", "上传恢复"] if cloud_mode else
+                    ["更改数据保存位置", "备份恢复", "重启后生效"]),
             tone="muted",
         )
         _render_storage_section()
@@ -161,6 +171,9 @@ def _hydrate_settings_form_state(settings: ReportSettings, *, force: bool) -> No
 
 
 def _render_storage_section() -> None:
+    if _is_cloud_mode():
+        _render_cloud_storage_section()
+        return
     status = get_database_location_status()
     render_workbench_context_bar(
         title="当前数据保存位置",
@@ -343,6 +356,85 @@ def _render_storage_section() -> None:
             st.success(storage_message(result.message))
             if result.protection_backup_path is not None:
                 st.caption(f"恢复前的数据备份：{result.protection_backup_path}")
+
+
+def _render_cloud_storage_section() -> None:
+    notice = st.session_state.pop("settings_cloud_restore_notice", "")
+    if notice:
+        st.success(notice)
+
+    st.markdown("**数据备份**")
+    st.caption("项目资料、检测记录、处理附件和已保存报告一同备份。")
+    if st.button("生成完整备份", key="cloud_create_backup", use_container_width=True):
+        try:
+            result = create_database_backup()
+        except RuntimeError as exc:
+            st.error(storage_message(exc))
+        else:
+            st.session_state["settings_cloud_backup_path"] = str(result.target_path)
+            st.success("备份已生成，点击下方按钮下载。")
+    _render_cloud_backup_download("settings_cloud_backup_path", "下载完整备份", "cloud_download_backup")
+    _render_cloud_backup_download(
+        "settings_cloud_protection_path", "下载恢复前的数据备份", "cloud_download_protection_backup"
+    )
+
+    st.markdown("**从备份恢复数据**")
+    st.warning("恢复会替换所有人当前使用的数据。请先让其他人退出，恢复前会自动备份当前数据。")
+    uploaded = st.file_uploader("选择备份文件", type=["zip", "db"], key="cloud_restore_upload")
+    payload = uploaded.getvalue() if uploaded is not None else b""
+    signature = sha256(payload).hexdigest() if uploaded is not None else ""
+    if signature != st.session_state.get("settings_cloud_restore_signature", ""):
+        st.session_state["settings_cloud_restore_signature"] = signature
+        st.session_state["settings_cloud_restore_confirmed"] = False
+
+    if uploaded is None:
+        st.checkbox("我确认用此备份替换当前数据。", key="settings_cloud_restore_confirmed", disabled=True)
+        st.button("确认恢复数据", key="cloud_confirm_restore", type="primary",
+                  use_container_width=True, disabled=True)
+        return
+
+    try:
+        with TemporaryDirectory(prefix="ljqc-upload-") as temporary:
+            backup_file = Path(temporary) / ("backup.zip" if uploaded.name.lower().endswith(".zip") else "backup.db")
+            backup_file.write_bytes(payload)
+            restore_ready, message = validate_backup_file(backup_file)
+            if restore_ready:
+                st.success(message)
+            else:
+                st.warning(storage_message(message))
+            confirmed = st.checkbox("我确认用此备份替换当前数据。", key="settings_cloud_restore_confirmed",
+                                    disabled=not restore_ready)
+            if st.button("确认恢复数据", key="cloud_confirm_restore", type="primary",
+                         use_container_width=True, disabled=not (restore_ready and confirmed)):
+                try:
+                    result = restore_database_from_backup_file(backup_file)
+                except RuntimeError as exc:
+                    st.error(storage_message(exc))
+                else:
+                    st.session_state.clear()
+                    st.session_state["show_settings_page"] = True
+                    st.session_state["settings_cloud_restore_notice"] = (
+                        "数据已恢复，请其他使用者刷新页面后继续。" + " ".join(result.warnings)
+                    )
+                    if result.protection_backup_path is not None:
+                        st.session_state["settings_cloud_protection_path"] = str(result.protection_backup_path)
+                    st.rerun()
+    except OSError:
+        st.error("无法读取备份文件，请重新选择后重试。")
+
+
+def _render_cloud_backup_download(session_key: str, label: str, key: str) -> None:
+    backup_path = _read_optional_path(session_key)
+    if backup_path is None:
+        return
+    try:
+        data = backup_path.read_bytes()
+    except OSError:
+        st.warning("备份文件暂时无法下载，请重新生成备份。")
+        return
+    st.download_button(label, data=data, file_name=backup_path.name,
+                       mime="application/zip" if backup_path.suffix == ".zip" else "application/octet-stream",
+                       key=key, use_container_width=True)
 
 
 def _read_optional_path(session_key: str) -> Path | None:
