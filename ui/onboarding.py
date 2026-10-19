@@ -92,8 +92,7 @@ def _project_home() -> None:
 
 
 def _render_unit(ready: dict) -> None:
-    st.write('填写**实验室、科室、检验员和复核员**，点击**保存设置**；'
-             '在下方核对**当前数据保存位置**。')
+    st.write('填写**实验室、科室、检验员和复核员**，点击**保存设置**。')
     if ready['unit']:
         st.caption('已填写实验室信息。')
     if st.button('填写实验室信息', key='onboarding_unit', type='primary', width='stretch'):
