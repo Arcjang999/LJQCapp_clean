@@ -76,16 +76,25 @@ def open_configured_batch(binding):
     st.rerun()
 
 
-def open_project_setup(template_id, *, config_id=None, lot_config_item_id=None,
+def open_project_setup(template_id=None, *, config_id=None, lot_config_item_id=None,
                        settings_target='project', system_id=None, reagent_lot_id=None):
     from ui.common import open_global_page
     from database import read_snapshot
     item=None;binding=None
-    if lot_config_item_id is not None:
-        with read_snapshot() as connection:
+    with read_snapshot() as connection:
+        if template_id is not None:
+            found=connection.execute('SELECT id FROM qc_project_templates WHERE id=?',(int(template_id),)).fetchone()
+            if found is None:
+                raise ValueError('所选项目不可用，请返回项目工作台重新选择。')
+        if config_id is not None:
+            found=connection.execute('SELECT template_id FROM qc_lot_configs WHERE id=?',(int(config_id),)).fetchone()
+            if found is None or template_id is None or found['template_id']!=int(template_id):
+                raise ValueError('请返回项目工作台，重新选择该项目的批次。')
+        if lot_config_item_id is not None:
             found=connection.execute('''SELECT i.*,c.template_id FROM qc_lot_config_items i
                 JOIN qc_lot_configs c ON c.id=i.lot_config_id WHERE i.id=?''',(int(lot_config_item_id),)).fetchone()
-            if found is None or found['template_id']!=int(template_id) or found['lot_config_id']!=int(config_id):
+            if (found is None or template_id is None or config_id is None
+                    or found['template_id']!=int(template_id) or found['lot_config_id']!=int(config_id)):
                 raise ValueError('请返回项目工作台，重新选择该检验项目的批次。')
             item=dict(found)
             found=connection.execute('SELECT id FROM qc_workbench_bindings WHERE lot_config_item_id=?',(int(lot_config_item_id),)).fetchone()
@@ -94,11 +103,16 @@ def open_project_setup(template_id, *, config_id=None, lot_config_item_id=None,
                 valid=connection.execute('SELECT 1 FROM qc_detection_systems WHERE id=? AND template_item_id=?',
                     (system_id,item['source_template_item_id'])).fetchone()
                 if not valid:raise ValueError('检测设置已更新，请返回项目工作台重新选择当前批次。')
-    st.session_state['v11_selected_template_id'] = int(template_id)
+    st.session_state['v11_selected_template_id'] = int(template_id) if template_id is not None else None
     st.session_state.pop('v11_template_selector', None)
+    st.session_state.pop('v11_pending_existing_config_id', None)
+    st.session_state.pop('v11_pending_copied_config_id', None)
+    st.session_state.pop('daily_settings_focus', None)
     if config_id is not None:
         st.session_state['v11_pending_existing_config_id'] = int(config_id)
-    st.session_state['batch_project_filter'] = int(template_id)
+    else:
+        st.session_state.pop('v11_selected_lot_config_id', None)
+    st.session_state['batch_project_filter'] = int(template_id) if template_id is not None else None
     st.session_state['batch_search'] = ''
     st.session_state['v11_management_tabs'] = '批次管理'
     if item is not None:
@@ -275,7 +289,7 @@ def _render_workspace(template_id):
                 else:
                     open_configured_batch(binding)
             if settings.button('批次设置', key='workspace_batch_settings', width='stretch'):
-                open_project_setup(template_id, config_id=config['lot_config_id'])
+                open_project_setup(template_id, config_id=config['lot_config_id'], lot_config_item_id=cid)
         if st.button('新增批次', key='workspace_create_batch', disabled=template['status']!='active'):
             st.session_state['workspace_create_batch_for'] = template_id
             st.rerun()
@@ -307,8 +321,8 @@ def _render_batch_creation_dialog():
         st.session_state['v11_management_tabs'] = '批次管理'
         from ui.common import open_global_page
         open_global_page('show_project_management_page')
-    render_material_config_creation(tid, on_created=created)
-    if st.button('取消', key='workspace_cancel_batch'):
+    registering = render_material_config_creation(tid, on_created=created)
+    if st.button('取消', key='workspace_cancel_batch', disabled=registering):
         st.session_state.pop('workspace_create_batch_for', None)
         st.rerun(scope='app')
 

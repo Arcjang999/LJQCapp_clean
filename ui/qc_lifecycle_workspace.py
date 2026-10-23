@@ -105,7 +105,8 @@ def _prepare_fields(state):
     if existing:
         st.info('此批号已有待确认批次，可打开核对；尚未加入的检验项目可在下方选择。' if eligible
                 else '此批号已有批次，请打开已有批次核对或继续使用。')
-        if st.button('打开已有新批次核对', key='qcl_open_existing'):
+        registering = bool(st.session_state.get('qc_lifecycle_register_' + state['token'] + '_registration'))
+        if st.button('打开已有新批次核对', key='qcl_open_existing', disabled=registering):
             _cancel(state, existing['id'])
     names = {row['source_template_item_id']: row['test_item_name'] + ' · ' + QC_METHOD_LABELS[row['qc_method']] for row in eligible}
     chosen = [item for item in draft['items'] if item in names]
@@ -114,7 +115,7 @@ def _prepare_fields(state):
         st.session_state[_prefix(state) + 'items'] = chosen
     _field(state, 'items', '本次更换质控批号的检验项目 *', 'multiselect', options=list(names), format_func=names.get, placeholder='请选择检验项目')
     if not lots:
-        st.info('先到“质控品管理 → 管理批次”登记新批号和浓度水平，再回来选择。')
+        st.info('还没有其他可选批号。点击下方“登记质控品批号”，登记新批号和浓度水平，保存后在这里选择。')
     st.caption('准备后进入新批次核对。质量目标及各水平设置确认后再录入，旧批检测结果保留。')
     return {'target_qc_lot_id': target, 'template_item_ids': draft['items']}
 
@@ -186,6 +187,18 @@ def _render_dialog():
             _close(state['review_after_close'])
         return
     context = state['context']
+    registration_key = 'qc_lifecycle_register_' + state['token']
+    if st.session_state.pop(registration_key + '_registration_saved', None) is not None:
+        from services.material_registration_refresh_service import can_refresh_registered_materials
+        current = (get_qc_config_context(state['context_id']) if state['kind'] == 'prepare'
+                   else get_qc_binding_context(state['context_id']))
+        if can_refresh_registered_materials(context, current):
+            state['context'] = context = current
+            state['fingerprint'] = current['fingerprint']
+        else:
+            state['registration_refresh_blocked'] = True
+    if state.get('registration_refresh_blocked'):
+        st.warning('批次资料或验证记录已在别处修改。刚登记的批号已保留，请关闭本窗口后重新打开，核对最新内容。')
     if state['kind'] == 'prepare':
         st.caption('来源批次：' + context['config']['config_name'])
     else:
@@ -200,11 +213,15 @@ def _render_dialog():
     else:
         reason = _field(state, 'reason', '换批原因或状态调整依据 *', 'text_area')
         values.update(effective_at=when, operator=person, reason=reason)
+    registering = False
+    if state['kind'] in ('prepare', 'verify', 'combination'):
+        from ui.material_registration import render_material_registration_shortcut
+        registering = render_material_registration_shortcut(context['config']['qc_material_id'], key=registration_key)
     left, right = st.columns(2)
-    if left.button('取消', key='qcl_cancel', width='stretch'):
+    if left.button('取消', key='qcl_cancel', width='stretch', disabled=registering):
         _cancel(state)
     label = {'prepare': '准备新批次并核对', 'verify': '保存验证记录', 'state': '确认使用状态', 'combination': '建立新组合并核对'}[state['kind']]
-    if right.button(label, key='qcl_save', type='primary', width='stretch'):
+    if right.button(label, key='qcl_save', type='primary', width='stretch', disabled=registering):
         try:
             if state['kind'] == 'prepare' and values['target_qc_lot_id'] is None:
                 raise ValueError('请选择新质控品批号。')

@@ -17,20 +17,39 @@ from services.qc_product_recommendation_service import (
 )
 
 
+def has_pending_product_relation(ctx):
+    return any(key.endswith('_editor') and bool(value) for key, value in ctx.items())
+
+
+def render_pending_product_relation_notice(ctx):
+    pending = has_pending_product_relation(ctx)
+    if pending:
+        st.info('下方配套记录尚未完成。请先保存或取消配套记录，再继续项目设置。')
+    return pending
+
+
 def render_product_choice(ctx, *, reagent_id, lab_instrument_id, test_item_id=None,
-                          method_id=None, field='qc_material_id', locked=False, prefix=None):
+                          method_id=None, field='qc_material_id', locked=False, prefix=None,
+                          allow_relation_edit=True):
     prefix = prefix or 'project_product_' + ctx['token']
     draft = ctx['draft']
     scope = dict(reagent_id=reagent_id, lab_instrument_id=lab_instrument_id,
                  test_item_id=test_item_id, method_id=method_id)
+    def pending_editor():
+        editor = ctx.get(prefix + '_editor')
+        if editor and allow_relation_edit:
+            frozen = {name: editor['values'].get(name) for name in scope}
+            _render_relation_editor(ctx, frozen, editor['values'].get('qc_material_id'), prefix)
     if reagent_id is None or lab_instrument_id is None:
         st.info('选择仪器和试剂后，在这里选择本次使用的质控品。')
         draft.pop('product_choice_review', None)
+        pending_editor()
         return False
     try:
         suggestions = get_qc_product_recommendations(**scope)
     except ValueError as error:
         st.error(str(error))
+        pending_editor()
         return False
     if ctx.get(prefix + '_context') != suggestions['context']:
         ctx[prefix + '_context'] = suggestions['context']
@@ -41,6 +60,8 @@ def render_product_choice(ctx, *, reagent_id, lab_instrument_id, test_item_id=No
         st.warning('试剂与质控品的使用记录已更新，请重新选择并点击“确认所选质控品”。')
     candidates = {int(row['qc_material_id']): row for row in suggestions['candidates']}
     products = {int(row['id']): row for row in list_qc_materials(include_disabled=False).to_dict('records')}
+    if not products and not locked:
+        st.info('还没有可选的质控品产品。展开“补充基础资料”，选择“质控品产品”并登记；保存后再选择本次批号。')
     current = draft.get(field)
     if locked:
         row = products.get(current)
@@ -113,9 +134,10 @@ def render_product_choice(ctx, *, reagent_id, lab_instrument_id, test_item_id=No
         else:
             valid = True
             st.caption('本次质控品已确认。')
-    with st.expander('登记试剂配套的质控品'):
-        st.caption('在这里记录这套仪器和试剂可使用哪些质控品，方便下次选择。质控品批号另行登记。')
-        _render_relation_editor(ctx, scope, current, prefix)
+    if allow_relation_edit:
+        with st.expander('登记试剂配套的质控品'):
+            st.caption('在这里记录这套仪器和试剂可使用哪些质控品，方便下次选择。质控品批号另行登记。')
+            _render_relation_editor(ctx, scope, current, prefix)
     return valid
 
 

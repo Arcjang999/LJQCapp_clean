@@ -145,7 +145,7 @@ def _render_catalogue_picker(ctx):
         query = st.text_input('搜索名录产品', key='project_catalogue_query_' + ctx['token'])
         matches = list_catalog_product_choices(query=query)
         if matches.empty:
-            st.info('没有找到产品，请换名称或编号搜索。也可在“质控品管理”中新增产品。')
+            st.info('没有找到产品，请换名称或编号搜索。也可展开下方“补充基础资料”，选择“质控品产品”登记。')
             return
         st.dataframe(matches[['manufacturer_name', *PRODUCT_LABELS]].rename(columns={'manufacturer_name':'厂商', **PRODUCT_LABELS}), hide_index=True,
                      width='stretch', height=210)
@@ -165,14 +165,15 @@ def _render_catalogue_picker(ctx):
 
 def _render_project_form(ctx):
     from services.master_data_service import list_lab_instruments, list_qc_materials, list_reagents, list_methods
+    from ui.project_dependencies import project_dependency_pending, render_project_dependencies
+    from ui.qc_product_choice import render_pending_product_relation_notice
     st.subheader('编辑项目' if ctx['template_id'] else '新建项目')
     if ctx['initial'].get('is_disabled'):
         _render_disabled_project(ctx)
         return
     locked = ctx['template_id'] is not None and project_identity_locked(ctx['template_id'])
-    if ctx['template_id'] is None and st.button('单检验项目快捷设置', key='group_use_quick'):
-        from ui.quick_project_setup import request_setup_mode
-        request_setup_mode(ctx, 'quick')
+    dependency_pending = project_dependency_pending(ctx)
+    switch_requested = ctx['template_id'] is None and st.button('单检验项目快捷设置', key='group_use_quick', disabled=dependency_pending)
     _text(ctx, 'template_name', '项目名称 *')
     if not locked:
         _render_catalogue_picker(ctx)
@@ -184,17 +185,21 @@ def _render_project_form(ctx):
         _choice(ctx, 'default_method_id', '默认方法学', list_methods(include_disabled=True), ['method_name'], optional=True)
     from ui.qc_product_choice import render_product_choice
     reviewed = render_product_choice(ctx, reagent_id=ctx['draft']['default_reagent_id'],
-        lab_instrument_id=ctx['draft']['lab_instrument_id'], method_id=ctx['draft']['default_method_id'], locked=locked)
+        lab_instrument_id=ctx['draft']['lab_instrument_id'], method_id=ctx['draft']['default_method_id'],
+        locked=locked or dependency_pending, allow_relation_edit=not dependency_pending)
     if locked:
         st.caption('已添加检验项目或批次，不能更换仪器和质控品。如需更换，请新建项目。')
     _text(ctx, 'project_group', '分组', placeholder='例如：血筛、生化、分子')
     _qc_choices(ctx, defaults=True)
     st.caption('默认设置只带入以后新增的检验项目，各项可分别调整。')
     _text(ctx, 'notes', '项目备注', multiline=True)
+    registration_open = render_project_dependencies(ctx, kind='project', locked_identity=locked)
+    relation_pending = render_pending_product_relation_notice(ctx)
     cancel, save = st.columns(2)
-    if cancel.button('取消', key='project_dialog_cancel'):
+    if cancel.button('取消', key='project_dialog_cancel', disabled=registration_open):
         _cancel(ctx)
-    if save.button('保存项目', type='primary', key='project_dialog_save', disabled=ctx['template_id'] is None and not reviewed):
+    if save.button('保存项目', type='primary', key='project_dialog_save',
+                   disabled=registration_open or relation_pending or (ctx['template_id'] is None and not reviewed)):
         try:
             tid = save_project_details(ctx['draft'], template_id=ctx['template_id'], expected_revision=ctx['revision'])
         except ValueError as exc:
@@ -208,8 +213,11 @@ def _render_project_form(ctx):
         st.divider()
         if ctx['draft'] != ctx['initial']:
             st.caption('点击“停用项目”前，如需保留本次修改，请先点击“保存项目”。')
-        if st.button('停用项目', key='project_editor_disable'):
+        if st.button('停用项目', key='project_editor_disable', disabled=registration_open or relation_pending):
             _begin_project_status(ctx, disabled=True)
+    if switch_requested:
+        from ui.quick_project_setup import request_setup_mode
+        request_setup_mode(ctx, 'quick')
 
 
 def _render_disabled_project(ctx):
@@ -290,6 +298,8 @@ def _render_project_status_confirmation(ctx):
 
 def _render_item_form(ctx):
     from services.master_data_service import list_test_items, list_units, list_methods, list_reagents
+    from ui.project_dependencies import project_dependency_pending, render_project_dependencies
+    from ui.qc_product_choice import render_pending_product_relation_notice
     st.subheader('编辑检验项目' if ctx['item_id'] else '添加检验项目')
     st.caption(ctx['template_name'])
     _choice(ctx, 'test_item_id', '检验项目 *', list_test_items(include_disabled=True), ['chinese_name', 'abbreviation', 'aliases'])
@@ -307,7 +317,7 @@ def _render_item_form(ctx):
     ctx['draft']['qc_material_id'] = template['qc_material_id']
     render_product_choice(ctx, reagent_id=ctx['draft']['reagent_id'], lab_instrument_id=template['lab_instrument_id'],
         test_item_id=ctx['draft']['test_item_id'], method_id=ctx['draft']['method_id'], locked=True,
-        prefix='item_product_' + ctx['token'])
+        prefix='item_product_' + ctx['token'], allow_relation_edit=not project_dependency_pending(ctx))
     if ctx['draft']['qc_method'] == 'instant':
         ctx['draft']['target_n'] = 20
     else:
@@ -316,10 +326,12 @@ def _render_item_form(ctx):
         from ui.quality_applicability import render_draft_standard_preview
         render_draft_standard_preview(ctx['draft'])
     _text(ctx, 'notes', '备注', multiline=True)
+    registration_open = render_project_dependencies(ctx, kind='item')
+    relation_pending = render_pending_product_relation_notice(ctx)
     cancel, save = st.columns(2)
-    if cancel.button('取消', key='project_dialog_cancel'):
+    if cancel.button('取消', key='project_dialog_cancel', disabled=registration_open):
         _cancel(ctx)
-    if save.button('保存', type='primary', key='project_item_save'):
+    if save.button('保存', type='primary', key='project_item_save', disabled=registration_open or relation_pending):
         try:
             iid = save_single_test_item(ctx['template_id'], ctx['draft'], expected_revision=ctx['revision'], item_id=ctx['item_id'])
         except (ValueError, TypeError) as exc:
@@ -367,6 +379,9 @@ def _panel_values(ctx, template, options):
 def _render_panel_source(ctx, template, options):
     from services.project_config_service import list_project_templates, template_item_rows, preview_panel_items
     from services.master_data_service import list_test_items
+    source_key = 'panel_source_' + ctx['token']
+    if ctx.pop('panel_choose_tests', False):
+        st.session_state[source_key] = '选择检验项目'
     source = st.radio('怎样添加检验项目', ['已有项目', '质控品适用检验项目', '选择检验项目', '导入配置清单'],
                       horizontal=True, key='panel_source_' + ctx['token'],
                       format_func=lambda value: {'已有项目': '从已有项目复制', '质控品适用检验项目': '从质控品的项目清单选择',
@@ -377,6 +392,11 @@ def _render_panel_source(ctx, template, options):
         names = {int(r['id']): r['template_name'] for r in templates.to_dict('records') if int(r['id']) != ctx['template_id']}
         chosen = st.selectbox('从哪个项目复制', [None, *names], format_func=lambda value: '请选择' if value is None else names[value],
                               key='panel_source_template_' + ctx['token'])
+        if not names:
+            st.info('没有其他项目可复制。点击“自行选择检验项目”，从检验项目名录中选择。')
+            if st.button('自行选择检验项目', key='panel_no_source_choose_' + ctx['token']):
+                ctx['panel_choose_tests'] = True
+                st.rerun()
         if chosen:
             candidates = template_item_rows(chosen)
             st.caption('复制后可修改各项的检测方法、单位和结果类型。保存后，请分别设置质量要求。')
@@ -396,7 +416,10 @@ def _render_panel_source(ctx, template, options):
             ids = {int(row['test_item_id']) for row in coverage if not row.get('is_disabled')}
             tests = tests[tests.id.isin(ids)]
             if tests.empty:
-                st.info('此质控品还没有检验项目清单。请在“质控品管理”中登记，或选择“自行选择检验项目”。')
+                st.info('此质控品还没有已登记的检验项目清单。点击“自行选择检验项目”，再核对本次试剂和质控品是否适用。')
+                if st.button('自行选择检验项目', key='panel_no_coverage_choose_' + ctx['token']):
+                    ctx['panel_choose_tests'] = True
+                    st.rerun()
         names = {int(r['id']): str(r['chinese_name']) + ('｜' + str(r['standard_code']) if r.get('standard_code') else '')
                  for r in tests.to_dict('records')}
         selected = st.multiselect('本次检验项目', list(names), format_func=names.get,
@@ -413,9 +436,11 @@ def _render_panel_source(ctx, template, options):
             key='panel_candidate_selection_' + ctx['token'] + str(source) + str([r['test_item_id'] for r in candidates]))
         candidates = [candidates[i] for i in selected]
     cancel, preview = st.columns(2)
-    if cancel.button('取消', key='panel_source_cancel'):
+    from ui.project_dependencies import render_project_dependencies
+    registration_open = render_project_dependencies(ctx, kind='panel')
+    if cancel.button('取消', key='panel_source_cancel', disabled=registration_open):
         _finish()
-    if preview.button('预览整组带入', type='primary', disabled=not candidates, key='panel_source_preview'):
+    if preview.button('预览整组带入', type='primary', disabled=not candidates or registration_open, key='panel_source_preview'):
         try:
             prepared = preview_panel_items(ctx['template_id'], candidates, expected_revision=ctx['revision'])
             if prepared['errors']:
@@ -515,10 +540,12 @@ def _render_panel_form(ctx):
             if no.button('取消统一设置', key='panel_bulk_cancel'):
                 ctx.pop('bulk_preview', None)
                 st.rerun()
+    from ui.project_dependencies import render_project_dependencies
+    registration_open = render_project_dependencies(ctx, kind='panel')
     cancel, save = st.columns(2)
-    if cancel.button('取消', key='panel_edit_cancel'):
+    if cancel.button('取消', key='panel_edit_cancel', disabled=registration_open):
         _cancel(ctx)
-    if save.button('保存整组项目', type='primary', key='panel_save'):
+    if save.button('保存整组项目', type='primary', key='panel_save', disabled=registration_open):
         try:
             result = save_panel_items(ctx['template_id'], ctx['draft']['rows'], expected_revision=ctx['revision'])
         except (TypeError, ValueError) as exc:
@@ -557,6 +584,8 @@ def render_project_dialog():
     ctx = st.session_state.get(MODAL_KEY)
     if not ctx:
         return
+    from ui.project_dependencies import apply_project_dependency_saved
+    apply_project_dependency_saved(ctx)
     if ctx['discard']:
         _render_discard(ctx)
     elif ctx.get('setup_mode_switch'):

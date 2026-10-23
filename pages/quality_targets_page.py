@@ -19,16 +19,15 @@ def render_quality_targets_page():
         render_quality_catalog()
     with project:
         with get_connection() as c:
-            rows=c.execute('''SELECT i.id,t.template_name,m.chinese_name,i.qc_method FROM qc_project_template_items i
+            rows=c.execute('''SELECT i.id,i.template_id,t.template_name,m.chinese_name,i.qc_method FROM qc_project_template_items i
                 JOIN qc_project_templates t ON t.id=i.template_id JOIN md_test_items m ON m.id=i.test_item_id
                 WHERE i.is_disabled=0 AND t.is_disabled=0 ORDER BY t.id,i.id''').fetchall()
-        _selector(rows,'project')
+        selected_item=_selector(rows,'project')
         st.caption('设置或查看某个批次的质量要求，请进入“批次管理”，选择批次和检验项目后点击“质量目标”。')
         if st.button('前往批次管理',key='quality_open_lot_management'):
-            from ui.common import open_global_page
-            st.session_state['v11_management_tabs']='批次管理'
-            open_global_page('show_project_management_page')
-            st.rerun()
+            from ui.project_navigation import open_project_setup
+            selected=next((row for row in rows if row['id']==selected_item),None)
+            open_project_setup(selected['template_id'] if selected is not None else None)
     with custom:
         st.caption('单个项目的CV可在“质量目标设置”中直接填写。多套实验室要求可在这里集中登记；已确认批次继续保留原要求。')
         if st.button('新增实验室自定要求',key='quality_custom_open'):
@@ -48,12 +47,21 @@ def render_quality_targets_page():
 
 
 def _selector(rows,scope):
-    if not rows:st.info('还没有可设置的检验项目。请先在“新建项目”中添加检验项目。');return
+    if not rows:
+        st.info('还没有可设置的检验项目。请打开项目工作台，新建项目或在已有项目中添加检验项目。')
+        if st.button('打开项目工作台',key=f'quality_{scope}_empty_workspace'):
+            from ui.daily_navigation import return_to_project_workspace
+            return_to_project_workspace()
+        return None
     methods={'lj':'单水平（LJ）','zscore':'多水平法','instant':'即时法'}
     labels={r['id']:f"{r['chinese_name']}｜{r['template_name']}｜{methods.get(r['qc_method'],r['qc_method'])}" for r in rows}
-    selected=st.selectbox('选择检验项目',[None]+list(labels),format_func=lambda i:'请选择' if i is None else labels[i],key=f'quality_{scope}_selector')
+    key=f'quality_{scope}_selector'
+    if st.session_state.get(key) not in [None,*labels]:
+        st.session_state[key]=None
+    selected=st.selectbox('选择检验项目',[None]+list(labels),format_func=lambda i:'请选择' if i is None else labels[i],key=key)
     if selected and st.button('设置质量目标',key=f'quality_{scope}_open'):
         _adoption_dialog(scope,selected)
+    return selected
 
 
 @st.dialog('新增实验室自定要求',width='large',dismissible=False)

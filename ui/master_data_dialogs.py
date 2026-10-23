@@ -72,7 +72,8 @@ def _clear_widgets(prefix):
             st.session_state.pop(key, None)
 
 
-def open_master_data_dialog(entity_type, entity_id=None, *, kind='edit', parent_id=None, manufacturer_category=None):
+def create_master_data_draft(entity_type, entity_id=None, *, kind='edit', parent_id=None, manufacturer_category=None):
+    """Build the existing editor state for either a dialog or an inline entry."""
     from services.master_data_edit_service import get_master_record_context
     if entity_type not in ENTITY_LABELS or kind not in ('edit', 'status'):
         raise ValueError('请选择要维护的基础资料。')
@@ -102,12 +103,18 @@ def open_master_data_dialog(entity_type, entity_id=None, *, kind='edit', parent_
     if entity_type == 'alias':
         initial.update(entity_type='test_item', entity_id=int(parent_id))
         initial['alias_type'] = record.get('alias_type') or 'custom'
+    return dict(entity_type=entity_type, entity_id=entity_id, kind=kind,
+        token=uuid4().hex, context=context, parent=parent, initial=initial, draft=dict(initial),
+        fingerprint=context['fingerprint'] if context else None, discard=False, reason='')
+
+
+def open_master_data_dialog(entity_type, entity_id=None, *, kind='edit', parent_id=None, manufacturer_category=None):
+    state = create_master_data_draft(entity_type, entity_id, kind=kind, parent_id=parent_id,
+                                     manufacturer_category=manufacturer_category)
     previous = st.session_state.get(MODAL_KEY)
     if previous:
         st.session_state.setdefault(_CLEANUP_KEY, []).append(_prefix(previous))
-    st.session_state[MODAL_KEY] = dict(entity_type=entity_type, entity_id=entity_id, kind=kind,
-        token=uuid4().hex, context=context, parent=parent, initial=initial, draft=dict(initial),
-        fingerprint=context['fingerprint'] if context else None, discard=False, reason='')
+    st.session_state[MODAL_KEY] = state
     st.rerun(scope='app')
 
 
@@ -182,14 +189,14 @@ def _record_label(entity, record):
     return _text(record.get(field))
 
 
-def _cancel(state):
+def _cancel(state, on_cancel=None):
     if state['draft'] != state['initial']:
         state['discard'] = True
         st.rerun(scope='app')
-    _close()
+    (on_cancel or _close)()
 
 
-def _render_edit(state, current):
+def _render_edit(state, current, *, on_saved=None, on_cancel=None):
     from services.master_data_edit_service import save_master_record, save_lab_instrument_details
     entity, record_id = state['entity_type'], state['entity_id']
     if state['discard']:
@@ -199,7 +206,7 @@ def _render_edit(state, current):
             state['discard'] = False
             st.rerun(scope='app')
         if right.button('放弃修改', key='md_dialog_discard', width='stretch'):
-            _close()
+            (on_cancel or _close)()
         return
     readonly = bool(current and current['record']['is_disabled'])
     locked = set(current['locked_fields']) if current else set()
@@ -223,9 +230,23 @@ def _render_edit(state, current):
                 _render_field(state, field, readonly or field in locked)
     if 'notes' in _FIELDS[entity]:
         _render_field(state, 'notes', readonly or 'notes' in locked)
+    if not readonly:
+        category = {'instrument_model': 'instrument', 'lab_instrument': 'instrument', 'reagent': 'reagent'}.get(entity)
+        if category and 'manufacturer_id' not in locked:
+            options, _ = _relation_options('manufacturer_id', state['initial']['manufacturer_id'], category)
+            if len(options) == 1:
+                st.info('还没有可选的' + MANUFACTURER_CATEGORIES[category] + '。点击下方按钮登记，当前填写内容会保留。')
+            if st.button('新增' + MANUFACTURER_CATEGORIES[category], key=_prefix(state) + 'add_manufacturer'):
+                state['dependency'] = dict(field='manufacturer_id', category=category,
+                    state=create_master_data_draft('manufacturer', manufacturer_category=category))
+                st.rerun(scope='app')
+        elif entity == 'test_item' and 'default_unit_id' not in locked:
+            if st.button('新增默认单位', key=_prefix(state) + 'add_unit'):
+                state['dependency'] = dict(field='default_unit_id', state=create_master_data_draft('unit'))
+                st.rerun(scope='app')
     left, right = st.columns(2)
     if left.button('关闭' if readonly else '取消', key='md_dialog_cancel', width='stretch'):
-        _cancel(state)
+        _cancel(state, on_cancel)
     if readonly:
         if right.button('恢复', key='md_dialog_restore', type='primary', width='stretch'):
             open_master_data_dialog(entity, record_id, kind='status')
@@ -233,8 +254,11 @@ def _render_edit(state, current):
         try:
             if entity == 'manufacturer' and not state['draft']['categories']:
                 raise ValueError('请至少选择一类：仪器厂家、试剂厂家或质控品厂家。')
+            required_category = state.get('required_manufacturer_category')
+            if entity == 'manufacturer' and required_category and required_category not in state['draft']['categories']:
+                raise ValueError('请保留“' + MANUFACTURER_CATEGORIES[required_category] + '”类别，保存后才能继续当前登记。')
             if record_id is None and entity in ('instrument_model', 'lab_instrument', 'reagent') and state['draft']['manufacturer_id'] is None:
-                raise ValueError('请选择厂家；如列表中没有，请取消后到“资料与批次 → 厂家管理”中登记对应类别的厂家。')
+                raise ValueError('请选择厂家；如列表中没有，点击下方“新增' + MANUFACTURER_CATEGORIES[category] + '”，保存后继续填写。')
             values = {field: value for field, value in state['draft'].items()
                       if record_id is None or value != state['initial'][field]}
             if entity == 'lab_instrument':
@@ -246,7 +270,40 @@ def _render_edit(state, current):
         except ValueError as error:
             st.error(str(error))
         else:
-            _saved(state, saved_id, ENTITY_LABELS[entity] + '已保存。')
+            if on_saved is not None:
+                on_saved(saved_id)
+            else:
+                _saved(state, saved_id, ENTITY_LABELS[entity] + '已保存。')
+
+
+def render_master_data_editor(state, *, on_saved=None, on_cancel=None):
+    """Render the same form inline, retaining an unfinished parent dependency."""
+    dependency = state.get('dependency')
+    if dependency:
+        child = dependency['state']
+        child['required_manufacturer_category'] = dependency.get('category')
+        st.caption('保存或取消' + ENTITY_LABELS[child['entity_type']] + '后，继续填写' + ENTITY_LABELS[state['entity_type']] + '。此前填写内容会保留。')
+
+        def cancel_dependency():
+            state.pop('dependency', None)
+            st.rerun(scope='app')
+
+        def save_dependency(identifier):
+            field = dependency['field']
+            state['draft'][field] = int(identifier)
+            st.session_state[_key(state, field, identifier)] = int(identifier)
+            state['dependency_notice'] = ENTITY_LABELS[child['entity_type']] + '已保存并选中，请继续填写。'
+            cancel_dependency()
+
+        st.subheader('新增' + ENTITY_LABELS[child['entity_type']])
+        render_master_data_editor(child, on_saved=save_dependency, on_cancel=cancel_dependency)
+        return
+    notice = state.pop('dependency_notice', '')
+    if notice:
+        st.success(notice)
+    from services.master_data_edit_service import get_master_record_context
+    current = get_master_record_context(state['entity_type'], state['entity_id']) if state['entity_id'] is not None else None
+    _render_edit(state, current, on_saved=on_saved, on_cancel=on_cancel)
 
 
 def _render_status(state, current):
@@ -294,7 +351,7 @@ def _render_dialog():
     if state['kind'] == 'status':
         _render_status(state, current)
     else:
-        _render_edit(state, current)
+        render_master_data_editor(state)
 
 
 def render_pending_master_data_dialog():

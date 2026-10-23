@@ -115,14 +115,14 @@ def _render_materials(ready: dict) -> None:
             if st.button(button, key=key, width='stretch'):
                 _open_page('materials', 'show_qc_materials_page',
                            reference={'instrument': 'instrument', 'reagent_lot': 'reagent'}.get(flag, ''))
-    with st.expander('从Excel批量登记资料（选用）'):
-        st.caption('下载填写表，一次填写实验室、仪器、试剂和质控品，再上传保存。')
-        if st.button('下载填写表或导入Excel', key='onboarding_checklist', width='stretch'):
-            if _leave('materials'):
-                from ui.common import open_global_page
-                from ui.lab_preparation import open_lab_preparation_dialog
-                open_global_page('show_settings_page', rerun=False)
-                open_lab_preparation_dialog()
+    st.markdown('**单位资料准备（选用）**')
+    st.caption('也可下载填写表，一次填写实验室、仪器、试剂和质控品，再上传保存。')
+    if st.button('单位资料准备：下载填写表或导入Excel', key='onboarding_checklist', width='stretch'):
+        if _leave('materials'):
+            from ui.common import open_global_page
+            from ui.lab_preparation import open_lab_preparation_dialog
+            open_global_page('show_settings_page', rerun=False)
+            open_lab_preparation_dialog()
 
 
 def _render_project(ready: dict) -> None:

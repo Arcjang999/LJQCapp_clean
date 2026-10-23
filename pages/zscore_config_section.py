@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from pages.lj_config_section import _clean, _ensure_selected_id, _selector_index
+from pages.lj_config_section import _clean, _ensure_selected_id, _selector_index, _render_batch_setup_action
 from services.value_type_service import get_input_value_type_label
 from services.zscore_workbench_service import (
     list_zscore_workbench_batches, list_zscore_workbench_projects, sync_zscore_workbench_bindings,
@@ -33,6 +33,7 @@ def render_zscore_v12_configuration_selection(manage_tab, projects, project_id, 
                 st.dataframe(pd.DataFrame(issues).rename(columns={"config_name": "批次名称", "test_item_name": "检验项目", "lot_no": "质控品批号", "issue": "说明"}), hide_index=True)
         if projects.empty:
             st.info("尚无可用的多水平项目。请先添加检验项目、选择质控品批号并确认批次设置。")
+            _render_batch_setup_action('zscore_empty_setup')
             return
 
         project_map = {"请选择设置已确认的 Z-score 项目": None}
@@ -63,6 +64,8 @@ def render_zscore_v12_configuration_selection(manage_tab, projects, project_id, 
                 st.rerun()
         if batch_id is None:
             st.info("请选择批次后进入“当前批次”。")
+            if batches.empty and project_id is not None:
+                _render_batch_setup_action('zscore_missing_batch_setup')
         elif not batches.empty:
             st.dataframe(batches[["project_name", "v11_config_name", "lot_no", "level_count", "instrument", "reagent", "qc_material", "unit_symbol", "method_name", "target_n"]].rename(columns={
                 "project_name": "检验项目", "v11_config_name": "批次名称", "lot_no": "质控品批号", "level_count": "水平数",

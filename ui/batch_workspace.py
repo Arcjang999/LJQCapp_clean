@@ -197,10 +197,10 @@ def _render_creation_dialog():
         st.session_state['v11_copy_notice'] = '批次已建立。请选择检验项目，分别完成“编辑水平设置”和“质量目标”，再点击“确认批次设置”。'
         st.session_state['batch_table_version'] = st.session_state.get('batch_table_version', 0) + 1
         st.rerun(scope='app')
-    render_material_config_creation(ctx['template_id'], on_created=created)
+    registering = render_material_config_creation(ctx['template_id'], on_created=created)
     if 'initial' not in ctx:
         ctx['initial'] = _creation_values()
-    if st.button('取消', key='batch_create_cancel'):
+    if st.button('取消', key='batch_create_cancel', disabled=registering):
         if _creation_values() != ctx['initial']:
             ctx['draft'] = _creation_values()
             ctx['discard'] = True

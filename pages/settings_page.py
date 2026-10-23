@@ -145,10 +145,13 @@ def render_settings_page() -> None:
             st.write(f"复核员：{REPORT_SETTINGS_FALLBACKS['reviewer_name']}")
             st.write(f"报告声明：{REPORT_SETTINGS_FALLBACKS['report_statement']}")
 
-    with st.expander('从Excel批量登记资料（选用）', expanded=bool(
-            st.session_state.get('lab_preparation_dialog') or st.session_state.get('lab_preparation_receipt'))):
+    with st.container():
         from ui.lab_preparation import render_lab_preparation_entry
-        st.caption('下载填写表，一次填写实验室、仪器、试剂和质控品，再上传保存。')
+        render_section_intro(
+            title='单位资料准备',
+            caption='选用：下载填写表，一次填写实验室、仪器、试剂和质控品，再上传保存。也可到各管理页面逐项登记。',
+            tone='muted',
+        )
         render_lab_preparation_entry()
 
     with st.container():

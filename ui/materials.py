@@ -26,7 +26,7 @@ def select_item_materials(items,material_id,prefix,existing=None):
                 key=f'{prefix}_{item["id"]}_{position}')
             if lid is not None: values.append(lid)
         selections[item['id']]=values
-    if materials.empty:st.info('请到“质控品管理 → 管理批次”登记批号、效期和浓度水平，再回来选择。')
+    if materials.empty:st.info('此质控品还没有可选批号。点击下方“登记质控品批号”，填写批号、效期和浓度水平，保存后在这里选择。')
     st.caption('逐水平选择质控品，核对浓度编号、批号和效期。')
     return selections
 
@@ -50,7 +50,9 @@ def render_material_config_creation(template_id, *, on_created=None):
                 source=st.text_input('CV要求依据（选填）',value=item['quality_target_source_text'] or '',key=f'v12_create_cv_source_{template_id}_{item["id"]}')
                 requirements[item['id']]=dict(cv_limit=value,quality_target_source_text=source)
     name=st.text_input('批次名称（留空自动生成）',key='v11_create_config_name')
-    if st.button('保存批次设置',type='primary',key='v11_create_config_button',width='stretch'):
+    from ui.material_registration import render_material_registration_shortcut
+    registering=render_material_registration_shortcut(template['qc_material_id'],key=f'material_registration_create_{template_id}')
+    if st.button('保存批次设置',type='primary',key='v11_create_config_button',width='stretch',disabled=registering):
         try: config=create_material_config(template_id=template_id,selections=selections,config_name=name,quality_requirements=requirements)
         except ValueError as exc:st.error(str(exc))
         else:
@@ -59,13 +61,16 @@ def render_material_config_creation(template_id, *, on_created=None):
             if on_created is not None:
                 on_created(config)
             st.rerun()
+    return registering
 
 
 def render_material_replacement(configs):
     from services.project_config_service import get_lot_config,list_lot_config_items,list_lot_item_levels
     labels={r['id']:r['config_name'] for r in configs.to_dict('records')}
     with st.expander('选择各浓度水平的新批号（未换批的水平保留原批号）',expanded=True):
-        source_id=st.selectbox('原批次',[None]+list(labels),format_func=lambda k:'请选择' if k is None else labels[k],key='material_copy_source')
+        prior_source=st.session_state.get('material_copy_source')
+        registering=bool(st.session_state.get(f'material_registration_copy_{prior_source}_registration'))
+        source_id=st.selectbox('原批次',[None]+list(labels),format_func=lambda k:'请选择' if k is None else labels[k],key='material_copy_source',disabled=registering)
         if source_id is None:return
         source=get_lot_config(source_id);items=list_lot_config_items(source_id)
         selected=st.multiselect('需要换批的检验项目',items['id'].tolist(),default=items['id'].tolist(),
@@ -74,7 +79,9 @@ def render_material_replacement(configs):
         existing={r['id']:list_lot_item_levels(r['id'])['qc_level_id'].tolist() for r in items.to_dict('records')}
         selections=select_item_materials(items,source['qc_material_id'],f'copy_material_{source_id}',existing)
         name=st.text_input('新批次名称（选填）',key=f'material_copy_name_{source_id}')
-        if st.button('保存新批次',key='material_copy_save',disabled=items.empty,type='primary'):
+        from ui.material_registration import render_material_registration_shortcut
+        registering=render_material_registration_shortcut(source['qc_material_id'],key=f'material_registration_copy_{source_id}')
+        if st.button('保存新批次',key='material_copy_save',disabled=items.empty or registering,type='primary'):
             try: config=copy_material_config(source_config_id=source_id,selections=selections,config_name=name)
             except ValueError as exc:st.error(str(exc))
             else:

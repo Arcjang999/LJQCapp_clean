@@ -38,6 +38,9 @@ def render_quick_project_setup(ctx):
 
 
 def request_setup_mode(ctx, target):
+    if ctx.get('dependency_registration'):
+        st.warning('下方资料登记尚未完成。请先保存或取消，再切换设置方式。')
+        return
     if any(key.endswith('_editor') and value for key, value in ctx.items()):
         st.warning('下方还有未完成的试剂与质控品配套记录。请先保存或取消，再切换设置方式。')
         return
@@ -91,9 +94,14 @@ def _render_details(ctx):
     from services.material_workflow_service import available_materials, material_label
     from ui.project_dialogs import _choice, _text, _key, _qc_choices, _cancel
     from ui.qc_product_choice import render_product_choice
+    from ui.material_registration import render_material_registration_shortcut
+    from ui.project_dependencies import project_dependency_pending, render_project_dependencies
+    from ui.qc_product_choice import render_pending_product_relation_notice
     draft = ctx['draft']
-    if st.button('多个检验项目设置', key='quick_use_group'):
-        request_setup_mode(ctx, 'group')
+    registration_key = 'quick_' + ctx['token']
+    registration_pending = bool(st.session_state.get(registration_key + '_registration'))
+    dependency_pending = project_dependency_pending(ctx)
+    switch_requested = st.button('多个检验项目设置', key='quick_use_group', disabled=registration_pending or dependency_pending)
     tests = list_test_items(include_disabled=False)
     _choice(ctx, 'test_item_id', '检验项目 *', tests, ['chinese_name', 'abbreviation', 'aliases'])
     left, right = st.columns(2)
@@ -129,12 +137,15 @@ def _render_details(ctx):
             step=1, key=_key(ctx, 'target_n'))
     st.markdown('**试剂与质控品**')
     reviewed = render_product_choice(ctx, reagent_id=draft['reagent_id'], lab_instrument_id=draft['lab_instrument_id'],
-        test_item_id=draft['test_item_id'], method_id=draft['method_id'])
+        test_item_id=draft['test_item_id'], method_id=draft['method_id'], locked=registration_pending or dependency_pending,
+        allow_relation_edit=not dependency_pending)
+    materials_ready = False
+    registration_open = False
     if draft.get('qc_material_id') is not None:
         materials = available_materials(draft['qc_material_id'])
         options = {int(row['id']): row for row in materials.to_dict('records')}
         if not options:
-            st.info('此质控品还没有批号。请在“质控品管理”的“管理批次”中登记本次批号和各水平，再回到这里选择；也可使用“单位资料准备”登记。')
+            st.info('此质控品暂无可选的批号和浓度水平。点击“登记质控品批号”，按包装填写浓度水平、批号和效期；保存后在下方选择。')
         level_ids = []
         prior_levels = list(draft.get('level_ids', []))
         for order in range(1, draft['level_count'] + 1):
@@ -145,19 +156,29 @@ def _render_details(ctx):
             elif st.session_state.get(key) not in [None, *options]:
                 st.session_state[key] = None
             selected = st.selectbox(f'水平 {order} 的实际质控品 *', [None, *options], key=key,
+                disabled=not options,
                 format_func=lambda value: '请选择浓度水平、批号和效期' if value is None else material_label(options[value]))
             if selected is not None:
                 level_ids.append(selected)
         draft['level_ids'] = level_ids
+        materials_ready = len(level_ids) == draft['level_count'] and len(set(level_ids)) == len(level_ids)
         st.caption('为每个水平选择质控品批号和效期，各水平须使用不同的质控品记录。试剂批号在录入检测结果时选择。')
+        if options and not materials_ready:
+            st.caption('请为每个水平选择一条不同的记录；缺少本次批号或浓度水平时，点击“登记质控品批号”补充。')
+    if (draft.get('qc_material_id') is not None or registration_pending) and not dependency_pending:
+        registration_open = render_material_registration_shortcut(draft.get('qc_material_id'), key=registration_key)
+        st.session_state.pop(registration_key + '_registration_saved', None)
     _text(ctx, 'config_name', '批次名称（留空自动生成）')
     with st.expander('分组与项目备注'):
         _text(ctx, 'project_group', '分组')
         _text(ctx, 'notes', '项目备注', multiline=True)
+    dependency_open = render_project_dependencies(ctx, kind='quick', disabled=registration_open)
+    relation_pending = render_pending_product_relation_notice(ctx)
     cancel, forward = st.columns(2)
-    if cancel.button('取消', key='project_dialog_cancel'):
+    if cancel.button('取消', key='project_dialog_cancel', disabled=registration_open or dependency_open):
         _cancel(ctx)
-    if forward.button('下一步：设置质量要求', type='primary', key='quick_details_next', disabled=not reviewed):
+    if forward.button('下一步：设置质量要求', type='primary', key='quick_details_next',
+                      disabled=not reviewed or not materials_ready or registration_open or dependency_open or relation_pending):
         try:
             get_quick_setup_context(draft)
         except (ValueError, TypeError) as error:
@@ -171,6 +192,8 @@ def _render_details(ctx):
                 ctx['quick_quality_identity'] = identity
             ctx['quick_step'] = 'quality'
             st.rerun()
+    if switch_requested:
+        request_setup_mode(ctx, 'group')
 
 
 def _render_quality(ctx):

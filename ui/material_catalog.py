@@ -54,10 +54,11 @@ def _close_dialog(*, notice='', selected_id=None, product_id=None) -> None:
     st.rerun()
 
 
-def _cancel_controls(prefix: str, *, dirty: bool) -> bool:
+def _cancel_controls(prefix: str, *, dirty: bool, on_close=None) -> bool:
+    close = on_close or _close_dialog
     if st.button('取消', key=f'{prefix}_cancel', width='stretch'):
         if not dirty:
-            _close_dialog()
+            close()
         st.session_state[f'{prefix}_discard'] = True
     if st.session_state.get(f'{prefix}_discard'):
         st.warning('修改尚未保存，是否放弃？')
@@ -66,12 +67,12 @@ def _cancel_controls(prefix: str, *, dirty: bool) -> bool:
             st.session_state[f'{prefix}_discard'] = False
             st.rerun()
         if right.button('放弃修改', key=f'{prefix}_discard_confirm', width='stretch'):
-            _close_dialog()
+            close()
         return True
     return False
 
 
-def _material_editor(state: dict) -> None:
+def _material_editor(state: dict, *, on_saved=None, on_cancel=None) -> None:
     record = state['record'] or {}
     edit = bool(state['level_id'])
     prefix = f'material_edit_{state["nonce"]}'
@@ -110,7 +111,7 @@ def _material_editor(state: dict) -> None:
     draft = dict(level_name=name, level_code=code, catalog_no=catalog, lot_no=lot,
                  expiry_date=expiry, concentration_note=note)
     dirty = draft != defaults or bool(spec_id)
-    if _cancel_controls(prefix, dirty=dirty):
+    if _cancel_controls(prefix, dirty=dirty, on_close=on_cancel):
         return
     if st.button('保存修改' if edit else '保存', key=f'{prefix}_save', type='primary', width='stretch'):
         try:
@@ -122,14 +123,38 @@ def _material_editor(state: dict) -> None:
         except ValueError as exc:
             st.error(str(exc))
         else:
-            _close_dialog(notice='质控品批号已保存。', selected_id=level_id)
+            if on_saved is not None:
+                on_saved(level_id)
+            else:
+                _close_dialog(notice='质控品批号已保存。', selected_id=level_id)
 
 
-def _product_editor(state: dict) -> None:
+def _product_editor(state: dict, *, on_saved=None, on_cancel=None) -> None:
+    if state.get('manufacturer_editor'):
+        from ui.master_data_dialogs import render_master_data_editor
+        child = state['manufacturer_editor']
+        st.subheader('新增质控品厂家')
+        st.caption('保存或取消厂家后，继续填写质控品。此前填写内容会保留。')
+
+        def finish_manufacturer():
+            state.pop('manufacturer_editor', None)
+            state['restore_product_draft'] = True
+            st.rerun(scope='app')
+
+        def save_manufacturer(identifier):
+            state['product_draft']['manufacturer_id'] = int(identifier)
+            finish_manufacturer()
+
+        render_master_data_editor(child, on_saved=save_manufacturer, on_cancel=finish_manufacturer)
+        return
     record = state['record'] or {}
     edit = bool(state['product_id'])
     locked = bool(record.get('identity_locked'))
     prefix = f'product_edit_{state["nonce"]}'
+    if state.pop('restore_product_draft', False):
+        for field, value in state.get('product_draft', {}).items():
+            suffix = 'manufacturer' if field == 'manufacturer_id' else field
+            st.session_state[f'{prefix}_{suffix}'] = value
     all_manufacturers = list_manufacturers(include_disabled=edit).to_dict('records')
     manufacturers = {int(r['id']): r['display_name'] for r in all_manufacturers
                      if 'qc_material' in r['categories'] or r['id'] == record.get('manufacturer_id')}
@@ -148,8 +173,18 @@ def _product_editor(state: dict) -> None:
         values[key] = columns[position % 2].text_input(label, value=record.get(key, ''),
             max_chars=200, disabled=locked, key=f'{prefix}_{key}')
     values['notes'] = st.text_area('备注', value=record.get('notes', ''), key=f'{prefix}_notes')
+    state['product_draft'] = dict(values, manufacturer_id=manufacturer)
+    if not edit:
+        if not manufacturers:
+            st.info('还没有质控品厂家。点击“新增质控品厂家”，保存后继续填写当前质控品。')
+        if st.button('新增质控品厂家', key=f'{prefix}_add_manufacturer'):
+            from ui.master_data_dialogs import create_master_data_draft
+            child = create_master_data_draft('manufacturer', manufacturer_category='qc_material')
+            child['required_manufacturer_category'] = 'qc_material'
+            state['manufacturer_editor'] = child
+            st.rerun(scope='app')
     dirty = any(values[k] != record.get(k, '') for k in values) or (not edit and manufacturer is not None)
-    if _cancel_controls(prefix, dirty=dirty):
+    if _cancel_controls(prefix, dirty=dirty, on_close=on_cancel):
         return
     if st.button('保存修改' if edit else '保存', key=f'{prefix}_save', type='primary', width='stretch'):
         try:
@@ -158,12 +193,15 @@ def _product_editor(state: dict) -> None:
                 product_id = state['product_id']
             else:
                 if manufacturer is None:
-                    raise ValueError('请选择厂家；列表中没有时，先到“资料与批次 → 厂家管理”登记质控品厂家。')
+                    raise ValueError('请选择厂家；列表中没有时，点击“新增质控品厂家”，保存后继续填写。')
                 product_id = create_qc_material(manufacturer_id=manufacturer, **values)
         except ValueError as exc:
             st.error(str(exc))
         else:
-            _close_dialog(notice='质控品资料已保存。', product_id=product_id)
+            if on_saved is not None:
+                on_saved(product_id)
+            else:
+                _close_dialog(notice='质控品资料已保存。', product_id=product_id)
 
 
 def _status_confirmation(state: dict) -> None:

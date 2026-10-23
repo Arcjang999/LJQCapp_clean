@@ -16,6 +16,18 @@ PROJECT_PLACEHOLDER = "请选择设置已确认的 LJ 项目"
 BATCH_PLACEHOLDER = "请选择设置已确认的批次"
 
 
+def _render_batch_setup_action(key):
+    from services.project_config_service import get_project_template
+    template_id=st.session_state.get('workspace_project_id')
+    if template_id is not None:
+        try:get_project_template(template_id)
+        except ValueError:template_id=None
+    label='打开本项目批次设置' if template_id is not None else '打开项目与批次'
+    if st.button(label,key=key):
+        from ui.project_navigation import open_project_setup
+        open_project_setup(template_id)
+
+
 def _clean(value: object, fallback: str = "-") -> str:
     if value is None or pd.isna(value):
         return fallback
@@ -144,9 +156,10 @@ def render_lj_v12_configuration_selection(
 
         if projects.empty:
             st.info(
-                "当前没有可用的 LJ 项目。请先在顶部“资料与批次 → 项目/批次管理”中"
+                "当前没有可用的 LJ 项目。请先在“项目与批次”中"
                 "添加检验项目、选择一个水平的质控品并确认批次设置，或从即时法确认转入。"
             )
+            _render_batch_setup_action('lj_empty_setup')
             return
 
         project_map = _project_options(projects)
@@ -182,6 +195,8 @@ def render_lj_v12_configuration_selection(
 
         if selected_batch_id is None or batches.empty:
             st.info("请选择一个设置已确认的批次后进入“当前批次”。")
+            if batches.empty and selected_project_id is not None:
+                _render_batch_setup_action('lj_missing_batch_setup')
             return
 
         selected = batches[batches["id"].astype(int) == int(selected_batch_id)].iloc[0]

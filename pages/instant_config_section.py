@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from pages.lj_config_section import _clean, _ensure_selected_id, _selector_index
+from pages.lj_config_section import _clean, _ensure_selected_id, _selector_index, _render_batch_setup_action
 from services.value_type_service import get_input_value_type_label
 from services.instant_workbench_service import (
     list_instant_workbench_batches, list_instant_workbench_projects, sync_instant_workbench_bindings,
@@ -34,6 +34,7 @@ def render_instant_v12_configuration_selection(selection_area, projects, project
                 st.dataframe(pd.DataFrame(issues).rename(columns={"config_name": "批次名称", "test_item_name": "检验项目", "lot_no": "质控品批号", "issue": "说明"}), hide_index=True)
         if projects.empty:
             st.info("尚无可用的即时法项目。请先添加检验项目、选择质控品批号并确认批次设置。")
+            _render_batch_setup_action('instant_empty_setup')
             return
 
         project_map = {"请选择设置已确认的即时法项目": None}
@@ -64,6 +65,8 @@ def render_instant_v12_configuration_selection(selection_area, projects, project
                 st.rerun()
         if batch_id is None:
             st.info("请选择已确认的批次，继续录入和查看记录。")
+            if batches.empty and project_id is not None:
+                _render_batch_setup_action('instant_missing_batch_setup')
         elif not batches.empty:
             display = batches.copy()
             display["transfer_status"] = display["transfer_status"].map({"transferred": "已转入 LJ", "not_transferred": "未转入"}).fillna("未转入")

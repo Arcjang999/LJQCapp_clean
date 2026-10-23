@@ -49,6 +49,9 @@ class ProjectCataloguePickerTest(unittest.TestCase):
         self.healthy(app)
         app.button(key='home_create_project').click().run()
         self.healthy(app)
+        app.button(key='quick_use_group').click().run()
+        self.healthy(app)
+        self.assertEqual('project', app.session_state['project_workspace_dialog']['kind'])
         app.text_input(key=draft_key(app, 'template_name')).set_value('从名录创建的项目')
         for field, source in (('lab_instrument_id', 'lab_instrument_id'),
                               ('default_reagent_id', 'reagent_id'),
@@ -89,7 +92,7 @@ class ProjectCataloguePickerTest(unittest.TestCase):
         app.button(key='project_catalogue_use').click().run()
         self.healthy(app)
         self.assertEqual(app.session_state['project_workspace_dialog']['draft']['qc_material_id'], product_id)
-        self.assertEqual(app.selectbox(key=draft_key(app, 'qc_material_id')).value, product_id)
+        self.assertEqual(app.selectbox(key='project_product_' + token + '_product').value, product_id)
         return product_id
 
     def test_search_and_use_actual_product_id_then_save_one_project(self):
@@ -100,6 +103,10 @@ class ProjectCataloguePickerTest(unittest.TestCase):
             app = self.new_project(data)
             product_id = self.choose_catalogue_product(app, 'IQC-BI-05903')
             self.assertNotEqual(product_id, data['qc_material_id'])
+            prefix = 'project_product_' + app.session_state['project_workspace_dialog']['token']
+            app.text_input(key=prefix + '_person').set_value('名录产品适用核对人')
+            app.text_area(key=prefix + '_evidence').set_value('已核对本次仪器、试剂和方法可使用此产品')
+            app.button(key=prefix + '_confirm').click().run()
             app.button(key='project_dialog_save').click().run()
             self.healthy(app)
             projects = list_project_templates()
@@ -128,7 +135,8 @@ class ProjectCataloguePickerTest(unittest.TestCase):
                     original = dict(app.session_state['project_workspace_dialog']['draft'])
                     product_id = self.choose_catalogue_product(app, 'IQC-BI-05903')
                     actual = dict(app.session_state['project_workspace_dialog']['draft'])
-                    self.assertEqual(actual, {**original, 'qc_material_id': product_id})
+                    for field, value in original.items():
+                        self.assertEqual(actual[field], product_id if field == 'qc_material_id' else value, field)
                     self.assertEqual(self.dump(), before)
                     app.button(key='project_dialog_cancel').click().run()
                     self.healthy(app)

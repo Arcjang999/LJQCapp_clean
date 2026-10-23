@@ -249,14 +249,14 @@ def render_adoption(scope,item_id,*,embedded=False,expected_revision=None,on_sav
         with st.expander('查看已保存的质量要求和文件', expanded=False):
             saved_details()
     if frozen:
-        st.info('本批次继续使用已保存的质量要求。需要调整时，请在新批次设置。' if goal or review or item['cv_limit'] is not None else '本批次未设置质量目标，可继续录入和查看结果。新增批次时请设置质量目标。')
+        st.info('本批次继续使用已保存的质量要求。需要调整时，请在新批次设置。' if goal or review or item['cv_limit'] is not None else '本批次没有已保存的质量要求。请返回批次详情核对；需要补充或调整时，请在新批次设置。')
         return
     levels = []
     if scope == 'lot':
         from services.project_config_service import list_lot_item_levels
         levels = list_lot_item_levels(item_id).to_dict('records')
         if len(levels) != item['level_count']:
-            st.info('各水平的质控品还没有选齐。请先在“编辑水平设置”中选择并保存，再设置质量要求。')
+            st.info('各水平的质控品还没有选齐。请先返回批次详情，点击当前检验项目的“编辑水平设置”，选择并保存全部水平后，再设置质量要求。')
             return
     result = render_quality_setup(item, review, prefix, levels=levels, goal=goal)
     condition_args = {key: result[key] for key in ('context', 'search_record', 'adopted_standard_ids',

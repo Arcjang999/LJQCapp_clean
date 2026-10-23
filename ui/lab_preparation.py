@@ -13,10 +13,11 @@ from services.lab_preparation_service import (
 DIALOG_KEY = 'lab_preparation_dialog'
 
 
-def open_lab_preparation_dialog():
+def open_lab_preparation_dialog(*, rerun=True):
     st.session_state[DIALOG_KEY] = dict(token=uuid4().hex, request_key=uuid4().hex, data=b'',
                                       filename='', review=None, error='', discard=False, widget_had_upload=False)
-    st.rerun(scope='app')
+    if rerun:
+        st.rerun(scope='app')
 
 
 def _close():
@@ -24,7 +25,7 @@ def _close():
     st.rerun(scope='app')
 
 
-@st.dialog('从Excel批量登记资料', width='large', dismissible=False)
+@st.dialog('单位资料准备', width='large', dismissible=False)
 def _render_dialog():
     state = st.session_state[DIALOG_KEY]
     if state['discard']:
@@ -36,7 +37,7 @@ def _render_dialog():
         if discard.button('放弃本次准备', key='lab_prep_discard', width='stretch'):
             _close()
         return
-    st.caption('下载清单，填写实验室、人员、仪器、检验项目、计量单位、方法学、试剂和质控品批号，再上传检查。')
+    st.caption('从Excel批量登记资料（选用）：下载清单，填写实验室、人员、仪器、检验项目、计量单位、方法学、试剂和质控品批号，再上传检查。')
     st.info('保存后，到首页点击“新建项目”，选择仪器、试剂和质控品，填写质量要求并保存。')
     template, reference = st.columns(2)
     template.download_button('下载空白单位资料清单', build_lab_preparation_template(),

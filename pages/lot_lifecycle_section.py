@@ -1,14 +1,67 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 import pandas as pd
 import streamlit as st
 
 from database import get_connection
 from ui.traceability import evaluation_tables
 from services.lot_lifecycle_service import (
-    require_writable, result_lot_options, context_dataframe, workbench_systems,
+    require_writable, result_lot_options, context_dataframe, workbench_systems, source_context,
 )
+
+
+_ENTRY_FIELDS = {
+    'lj': ('entry_batch_id', 'entry_operator', 'entry_value', 'entry_reagent_changed', 'entry_test_time'),
+    'zscore': ('zscore_entry_batch_id', 'zscore_entry_operator', 'zscore_level1_value',
+               'zscore_level2_value', 'zscore_level3_value', 'zscore_entry_test_time'),
+    'instant': ('instant_entry_batch_id', 'instant_entry_operator', 'instant_entry_value', 'instant_entry_test_time'),
+}
+_ENTRY_RETURN_KEY = 'result_lot_preparation_return'
+
+
+def restore_result_lot_entry_draft(method, batch_id):
+    state = st.session_state.get(_ENTRY_RETURN_KEY)
+    if state and state['method'] == method and state['batch_id'] == batch_id:
+        for field, value in state['draft'].items():
+            st.session_state[field] = deepcopy(value)
+        st.session_state.pop(_ENTRY_RETURN_KEY, None)
+
+
+def render_result_lot_preparation(method, batch_id, key, *, in_form=False):
+    with get_connection() as connection:
+        binding = connection.execute('''SELECT b.*,c.template_id FROM qc_workbench_bindings b
+            JOIN qc_lot_configs c ON c.id=b.lot_config_id
+            WHERE b.qc_method=? AND b.runtime_batch_id=? AND b.binding_status='active' ''', (method, batch_id)).fetchone()
+    if binding is None:
+        return
+    button = st.form_submit_button if in_form else st.button
+    if button('登记或核对试剂批号', key=f'{key}_prepare_reagent_{batch_id}', width='stretch'):
+        from ui.project_navigation import open_project_setup
+        previous_return = st.session_state.get(_ENTRY_RETURN_KEY)
+        try:
+            with get_connection() as connection:
+                source, _, _ = source_context(connection, method, batch_id, read_only=True)
+            fields = (*_ENTRY_FIELDS[method], f'{key}_usage_revision_{batch_id}', f'{key}_actual_lot_{batch_id}')
+            st.session_state[_ENTRY_RETURN_KEY] = dict(method=method, batch_id=batch_id, binding=dict(binding),
+                draft={field: deepcopy(st.session_state[field]) for field in fields if field in st.session_state})
+            open_project_setup(binding['template_id'], config_id=binding['lot_config_id'],
+                lot_config_item_id=binding['lot_config_item_id'], settings_target='reagent',
+                system_id=source.get('system_id'), reagent_lot_id=st.session_state.get(f'{key}_actual_lot_{batch_id}'))
+        except ValueError as error:
+            if previous_return is None:
+                st.session_state.pop(_ENTRY_RETURN_KEY, None)
+            else:
+                st.session_state[_ENTRY_RETURN_KEY] = previous_return
+            st.error(str(error))
+
+
+def _render_result_lot_entry_return():
+    state = st.session_state.get(_ENTRY_RETURN_KEY)
+    if state and st.button('返回本次结果录入', key='result_lot_preparation_back'):
+        from ui.project_navigation import open_configured_batch
+        open_configured_batch(state['binding'])
 
 
 def render_result_lot_choice(method,batch_id,test_time,key):
@@ -21,9 +74,15 @@ def render_result_lot_choice(method,batch_id,test_time,key):
         st.warning('试剂资料或使用安排已更新，请重新选择本次批号。')
     st.session_state[revision_key]=options['revision']
     choices={row['id']:row for row in options['options']}
+    if st.session_state.get(choice_key) not in choices:
+        st.session_state[choice_key] = None
     if not choices and not options['revision']:
-        st.caption('本次试剂批号保存为“未记录”。补登记请到“试剂管理 → 管理批号”完成验证和使用安排。')
+        st.caption('当前没有可选的试剂批号，保存后本次批号为“未记录”。'
+                   '如需记录实际批号，请先登记试剂批号和验证，再返回选择。'
+                   '后续登记不会补改已保存的检测记录。')
         return {'expected_revision':options['revision']}
+    if not choices:
+        st.info('所填检测时间没有可选的试剂批号。请先核对批号验证的完成时间、结论和效期，再返回选择。')
     lot_id=st.selectbox('本次试剂批号',list(choices),index=None,key=choice_key,
         format_func=lambda i:f"{choices[i]['lot_no']}｜效期 {choices[i]['expiry_date']}",placeholder='请按本次检测实际使用批号选择')
     suggestion=choices.get(options['suggested_lot_id'])
@@ -85,6 +144,7 @@ def render_lot_management(*, render_dialogs=True):
     from services.instant_workbench_service import sync_instant_workbench_bindings
     sync_lj_workbench_bindings();sync_zscore_workbench_bindings();sync_instant_workbench_bindings()
     workbench_systems()
+    _render_result_lot_entry_return()
     st.caption('选择下方页签，登记批号验证、换批或均值和标准差；验证依据按实验室记录填写。')
     labels = ['试剂批号与换批','新旧批号比对','均值和标准差管理','历史记录']
     if 'lot_management_tabs' not in st.session_state and st.session_state.get('lot_management_active_tab') in labels:

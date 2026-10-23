@@ -187,8 +187,10 @@ def _render_dialog():
             if state['kind'] == 'register':
                 st.session_state['reagent_pending_registered'] = (saved, values['reagent_id'])
             st.session_state['reagent_table_version'] = st.session_state.get('reagent_table_version', 0) + 1
-            st.session_state['reagent_notice'] = {'register':'试剂批号已登记，请选择检验项目登记验证。',
-                'verify':'验证记录已保存。', 'switch':'试剂批号使用安排已保存，请在下方核对启用时间。'}[state['kind']]
+            verification_notice = ('验证通过记录已保存。请点击“切换到此试剂批号”，核对检验项目和启用时间，再确认使用安排。'
+                if values.get('conclusion') == 'pass' else '验证未通过记录已保存；此结论不能用于切换或录入。')
+            st.session_state['reagent_notice'] = {'register':'试剂批号已登记，请选中该批号，点击“登记批号验证”。',
+                'verify':verification_notice, 'switch':'试剂批号使用安排已保存，请在下方核对启用时间。'}[state['kind']]
             _close()
 
 
@@ -222,7 +224,7 @@ def _render_detail(context, lot, *, product_id=None):
     if not available:
         st.info('此试剂产品或批号已停用，仅供查询。')
     elif not active:
-        st.info('暂无使用此试剂的可用检验项目，请先核对项目和批次设置。')
+        st.info('此试剂尚未关联可用的项目批次。请在项目工作台选择或新建项目，核对所用试剂并确认项目和批次设置，再回到这里登记验证。')
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     lots = {row['id']: row for row in context['all_lots']}
     usage_rows = []

@@ -315,6 +315,22 @@ def test_empty_effective_time_renders_rejects_save_and_allows_cancel_without_los
         assert database_state() == before
 
 
+def test_filter_hiding_selected_event_clears_selection_before_returning_to_full_list():
+    with IsolatedDatabase():
+        fixture = seed()
+        before = database_state()
+        app = make_app(fixture['event'])
+        app.text_input(key='reagent_history_search').set_value('不存在的历史记录筛选').run()
+        assert not app.exception
+        assert app.session_state['reagent_history_selected_event'] is None
+        assert not [button for button in app.button if button.key == 'reagent_history_open']
+        app.text_input(key='reagent_history_search').set_value('').run()
+        assert not app.exception
+        assert app.session_state['reagent_history_selected_event'] is None
+        assert not [button for button in app.button if button.key == 'reagent_history_open']
+        assert database_state() == before
+
+
 if __name__ == '__main__':
     for name, function in list(globals().items()):
         if name.startswith('test_'):

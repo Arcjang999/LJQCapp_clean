@@ -328,9 +328,12 @@ def render_lj_entry_and_stats_section(
     context: dict[str, object],
     selected_batch_id: int,
 ) -> None:
-    from pages.lot_lifecycle_section import render_result_lot_choice,is_batch_writable
+    from pages.lot_lifecycle_section import (
+        render_result_lot_choice, is_batch_writable, render_result_lot_preparation, restore_result_lot_entry_draft,
+    )
     if not is_batch_writable("lj",selected_batch_id):
         return
+    restore_result_lot_entry_draft('lj', selected_batch_id)
     batch = context["batch"]
     input_value_type = context["input_value_type"]
     input_value_type_label = context["input_value_type_label"]
@@ -394,6 +397,7 @@ def render_lj_entry_and_stats_section(
         )
 
         lot_selection = render_result_lot_choice("lj",selected_batch_id,test_time,"lj_entry")
+        render_result_lot_preparation('lj', selected_batch_id, 'lj_entry')
 
         if st.button("保存检测结果", type="primary", width="stretch"):
             validation_errors: list[str] = []

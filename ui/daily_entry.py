@@ -14,6 +14,13 @@ from ui.common import open_global_page
 def _draft():return st.session_state.get('daily_draft')
 
 
+def _setup_action(template_id, key):
+    label='打开本项目批次设置' if template_id is not None else '打开项目与批次'
+    if st.button(label,key=key):
+        from ui.project_navigation import open_project_setup
+        open_project_setup(template_id)
+
+
 def _discard_controls(draft):
     if st.button('放弃本组草稿',key='entry_discard'):draft['confirm_discard']=True
     if not draft.get('confirm_discard'):return
@@ -117,8 +124,9 @@ def _render_selector():
         if 'entry_lot' not in st.session_state and _draft():
             st.session_state['entry_lot']=_draft()['context']['selection']['qc_material_lot_id']
     if not choices['instruments']:
-        st.info('请先建立仪器、项目和已确认批次，再录入日常结果。')
-        if st.button('打开项目与批次'):open_global_page('show_project_management_page')
+        st.info('此项目还没有选齐质控品水平的批次。请打开本项目批次设置，选择各水平的实际质控品并确认设置。'
+            if template_id is not None else '请先建立项目批次，选择各水平的实际质控品并确认设置，再录入日常结果。')
+        _setup_action(template_id,'entry_empty_setup')
         return
     if st.session_state.pop('daily_restore_selection',False) and _draft():
         sel=_draft()['context']['selection']
@@ -152,7 +160,9 @@ def _render_selector():
             context=get_daily_context(instrument,product,lot,when,template_id=template_id,lot_config_id=combination)
         if context.get('issues'):_errors(context['issues'])
         if not context['items']:
-            st.info('此批号还没有可录入的检验项目。请打开“项目与批次”，核对检验项目和各水平批号并确认批次。');return
+            st.info('此批号还没有可录入的检验项目。请核对检验项目和各水平批号并确认批次设置。')
+            _setup_action(template_id,'entry_unavailable_setup')
+            return
         st.caption(f"本组共 {len(context['items'])} 个检验项目。开始录入前，请逐水平核对实际使用的批号。")
         if st.button('展开本组录入',type='primary',key='entry_start'):
             if _draft():st.session_state['daily_pending_context']=context
@@ -235,7 +245,9 @@ def render_daily_entry():
     token=draft['draft_id'];items=draft['context']['items'];item_map={str(i['lot_config_item_id']):i for i in items}
     if not items:
         st.warning('此组目前没有可录入的检验项目，已保留之前的输入。请核对项目与批次资料后重新读取，或选择其他批次。')
-        _errors(draft['context'].get('issues',[]));_refresh_button(draft)
+        _errors(draft['context'].get('issues',[]))
+        _setup_action(draft['context']['selection'].get('template_id'),'entry_draft_empty_setup')
+        _refresh_button(draft)
         return
     st.markdown('**本组：'+str(items[0].get('instrument_name',''))+' · '+str(items[0].get('config_name',items[0].get('project_name','')))+'**')
     if _receipt(draft):return

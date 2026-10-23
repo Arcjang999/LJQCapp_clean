@@ -1171,9 +1171,12 @@ def render_zscore_entry_section(
     context: dict[str, object],
     selected_batch_id: int,
 ) -> None:
-    from pages.lot_lifecycle_section import render_result_lot_choice,is_batch_writable
+    from pages.lot_lifecycle_section import (
+        render_result_lot_choice, is_batch_writable, render_result_lot_preparation, restore_result_lot_entry_draft,
+    )
     if not is_batch_writable("zscore",selected_batch_id):
         return
+    restore_result_lot_entry_draft('zscore', selected_batch_id)
     template = context["template"]
     input_value_type = context["input_value_type"]
     input_value_type_label = context["input_value_type_label"]
@@ -1264,6 +1267,7 @@ def render_zscore_entry_section(
                     current_standard_sd_limit,
                 ),
             )
+            render_result_lot_preparation('zscore', selected_batch_id, 'zscore_entry', in_form=True)
 
         if submitted:
             current_level_results, input_errors, _ = build_zscore_current_level_results(

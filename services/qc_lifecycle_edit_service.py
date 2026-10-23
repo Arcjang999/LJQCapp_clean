@@ -57,6 +57,12 @@ def _fingerprint(scope):
     return hashlib.sha256(json.dumps(scope, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
+def _registration_context(scope):
+    return {'material_registration_guard': _fingerprint({
+        key: value for key, value in scope.items() if key not in ('lots', 'levels')}),
+        'material_registration_rows': {key: scope[key] for key in ('lots', 'levels')}}
+
+
 def list_qc_lifecycle_configs():
     with get_connection() as c:
         rows = _rows(c, '''SELECT q.*,t.template_name,m.generic_name AS material_name FROM qc_lot_configs q
@@ -74,7 +80,7 @@ def get_qc_config_context(config_id):
             JOIN md_test_items t ON t.id=i.test_item_id WHERE i.lot_config_id=? AND i.is_disabled=0 ORDER BY i.sort_order,i.id''', (config_id,))
         return {'config': config, 'items': items, 'lots': scope['lots'], 'levels': scope['levels'],
                 'configs': scope['configs'], 'all_items': scope['items'], 'bindings': scope['bindings'],
-                'fingerprint': _fingerprint(scope)}
+                'fingerprint': _fingerprint(scope), **_registration_context(scope)}
 
 
 def _binding_context(c, binding_id):
@@ -101,7 +107,8 @@ def _binding_context(c, binding_id):
             'lots': scope['lots'], 'levels': scope['levels'], 'verifications': verifications,
             'state': effective_qc_state(c, binding['lot_config_item_id']), 'state_plan': state,
             'profile': target_profile(binding['qc_method'], binding['runtime_batch_id']) if binding['qc_method'] != 'instant' else None,
-            'fingerprint': _fingerprint({**scope, 'binding_id': int(binding_id)})}
+            'fingerprint': _fingerprint({**scope, 'binding_id': int(binding_id)}),
+            **_registration_context({**scope, 'binding_id': int(binding_id)})}
 
 
 def get_qc_binding_context(binding_id):

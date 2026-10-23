@@ -1136,6 +1136,13 @@ def _open_management_page(page_key: str) -> None:
     open_global_page(page_key, rerun=False)
 
 
+def _open_lab_preparation_page() -> None:
+    from ui.lab_preparation import open_lab_preparation_dialog
+    st.session_state['global_management_menu'] = False
+    open_global_page('show_settings_page', rerun=False)
+    open_lab_preparation_dialog(rerun=False)
+
+
 def _open_user_guide_page(practical: bool = False) -> None:
     st.session_state["global_help_menu"] = False
     st.session_state["user_guide_practical"] = practical
@@ -1193,8 +1200,11 @@ def render_page_chrome() -> None:
                     if st.button("质控品管理", key="open_qc_materials_page", width="stretch"):
                         open_global_page("show_qc_materials_page")
                 with management_column:
+                    from ui.onboarding import onboarding_is_busy
                     with st.container(key="module_nav_materials"):
                         with st.popover("资料与批次", width="stretch", key="global_management_menu", on_change="rerun"):
+                            st.button("单位资料准备", key="open_lab_preparation", width="stretch",
+                                      disabled=onboarding_is_busy(), on_click=_open_lab_preparation_page)
                             st.button("厂家管理", key="open_manufacturer_management", width="stretch",
                                       on_click=open_reference_management, args=('manufacturer',), kwargs={'rerun': False})
                             st.button("仪器管理", key="open_instrument_management", width="stretch",

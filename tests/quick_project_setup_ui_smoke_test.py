@@ -16,6 +16,8 @@ from database import get_connection
 from pages.main_page import LJ_ENTRY_LABEL, ZSCORE_ENTRY_LABEL, INSTANT_ENTRY_LABEL
 from services.qc_product_recommendation_service import save_qc_product_relation
 from services.project_config_service import get_project_template
+from services.master_data_service import create_qc_material
+from services.material_workflow_service import available_materials
 from tests.instant_v12_integration_smoke_test import IsolatedDatabase
 from tests.project_workspace_smoke_test import workspace_page, draft_key, assert_clean
 from tests.quick_project_setup_smoke_test import metadata_values, database_contents
@@ -56,7 +58,7 @@ def open_details(values, *, candidate=False):
         app.text_area(key=prefix + '_evidence').set_value('已逐项核对仪器、试剂、项目、方法及质控品适用性。')
     app.button(key=prefix + '_confirm').click().run()
     assert_clean(app)
-    assert not app.button(key='quick_details_next').disabled
+    assert app.button(key='quick_details_next').disabled
     for index, level_id in enumerate(values['level_ids'], 1):
         app.selectbox(key=f"quick_material_{token}_{values['qc_material_id']}_{index}").set_value(level_id).run()
     app.text_input(key=draft_key(app, 'template_name')).set_value(values['template_name'])
@@ -119,6 +121,80 @@ def to_preview(app, values):
 
 
 class QuickProjectSetupUiTests(unittest.TestCase):
+    def test_register_missing_lots_in_place_keeps_draft_and_requires_distinct_levels(self):
+        from datetime import date
+        from services.material_catalog_service import get_material_product
+        with IsolatedDatabase():
+            values = metadata_values('zscore', 2)
+            maker = get_material_product(values['qc_material_id'])['manufacturer_id']
+            product = create_qc_material(manufacturer_id=maker, generic_name='尚未登记批号的质控品')
+            values.update(qc_material_id=product, level_ids=[])
+            app = open_details(values)
+            self.assertTrue(app.button(key='quick_details_next').disabled)
+            self.assertTrue(any('暂无可选的批号' in item.value for item in app.info))
+            self.assertTrue(all(widget.disabled for widget in app.selectbox if widget.key.startswith('quick_material_')))
+            original = deepcopy(app.session_state['project_workspace_dialog']['draft'])
+            token = app.session_state['project_workspace_dialog']['token']
+            registration_key = 'quick_' + token
+            recorded_ids = []
+            for name in ('低值', '高值'):
+                app.button(key=registration_key + '_register').click().run()
+                assert_clean(app)
+                state = app.session_state[registration_key + '_registration']
+                prefix = 'material_edit_' + state['nonce']
+                self.assertEqual(product, state['product_id'])
+                self.assertFalse(any(widget.key == product_prefix(app) + '_product' for widget in app.selectbox))
+                self.assertTrue(app.button(key='quick_details_next').disabled)
+                app.text_input(key=prefix + '_new_name').set_value(name)
+                app.text_input(key=prefix + '_lot').set_value('NEW-PACKAGE-01')
+                app.date_input(key=prefix + '_expiry').set_value(date(2028, 12, 31))
+                app.button(key=prefix + '_save').click().run()
+                assert_clean(app)
+                self.assertNotIn(registration_key + '_registration', app.session_state.filtered_state)
+                draft = app.session_state['project_workspace_dialog']['draft']
+                for field in ('template_name', 'config_name', 'notes', 'reagent_id', 'test_item_id', 'product_choice_review'):
+                    self.assertEqual(original[field], draft[field])
+                material_id = int(available_materials(product).loc[lambda frame: frame.level_name == name, 'id'].iloc[0])
+                recorded_ids.append(material_id)
+                self.assertTrue(app.button(key='quick_details_next').disabled)
+                app.selectbox(key=f'quick_material_{token}_{product}_{len(recorded_ids)}').set_value(material_id).run()
+            self.assertFalse(app.button(key='quick_details_next').disabled)
+            app.selectbox(key=f'quick_material_{token}_{product}_2').set_value(recorded_ids[0]).run()
+            self.assertTrue(app.button(key='quick_details_next').disabled)
+            app.selectbox(key=f'quick_material_{token}_{product}_2').set_value(recorded_ids[1]).run()
+            app.button(key='quick_details_next').click().run()
+            assert_clean(app)
+            self.assertEqual('quality', app.session_state['project_workspace_dialog']['quick_step'])
+            with get_connection() as connection:
+                self.assertEqual(0, connection.execute('SELECT COUNT(*) FROM qc_project_templates').fetchone()[0])
+
+    def test_cancel_registration_confirms_discard_and_keeps_project_without_writes(self):
+        with IsolatedDatabase():
+            values = metadata_values()
+            app = open_details(values)
+            before = database_contents()
+            original = deepcopy(app.session_state['project_workspace_dialog']['draft'])
+            key = 'quick_' + app.session_state['project_workspace_dialog']['token']
+            app.button(key=key + '_register').click().run()
+            state = app.session_state[key + '_registration']
+            prefix = 'material_edit_' + state['nonce']
+            app.text_input(key=prefix + '_new_name').set_value('尚未保存的水平').run()
+            self.assertEqual(before, database_contents())
+            app.button(key=prefix + '_save').click().run()
+            assert_clean(app)
+            self.assertTrue(any('效期' in item.value for item in app.error))
+            self.assertEqual(before, database_contents())
+            app.button(key=prefix + '_cancel').click().run()
+            app.button(key=prefix + '_continue').click().run()
+            self.assertEqual('尚未保存的水平', app.text_input(key=prefix + '_new_name').value)
+            app.button(key=prefix + '_cancel').click().run()
+            app.button(key=prefix + '_discard_confirm').click().run()
+            assert_clean(app)
+            self.assertNotIn(key + '_registration', app.session_state.filtered_state)
+            self.assertEqual(original, app.session_state['project_workspace_dialog']['draft'])
+            self.assertEqual(before, database_contents())
+            self.assertFalse(app.button(key='quick_details_next').disabled)
+
     def test_mode_switch_preserves_original_until_confirm_and_keeps_common_draft_without_writes(self):
         with IsolatedDatabase():
             values = metadata_values('zscore', 3)

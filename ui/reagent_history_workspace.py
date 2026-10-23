@@ -157,6 +157,9 @@ def render_reagent_history_workspace():
     visible = [row for row in rows if _matches(row, events[row['事件编号']], query, system_id)]
     ids = [row['事件编号'] for row in visible]
     selected = st.session_state.get('reagent_history_selected_event')
+    if selected not in ids:
+        selected = None
+        st.session_state['reagent_history_selected_event'] = None
     st.caption(f'共 {len(ids)} 条记录。选择一行查看详情；更正保存为新记录，原记录保留。')
     if visible:
         key = 'reagent_history_table_' + sha1(str((ids, st.session_state.get('reagent_history_table_version', 0))).encode()).hexdigest()[:12]

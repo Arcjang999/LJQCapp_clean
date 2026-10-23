@@ -187,7 +187,10 @@ def _render_instant_entry_and_summary_section(
     context: dict[str, object],
     selected_batch_id: int,
 ) -> None:
-    from pages.lot_lifecycle_section import render_result_lot_choice
+    from pages.lot_lifecycle_section import (
+        render_result_lot_choice, render_result_lot_preparation, restore_result_lot_entry_draft,
+    )
+    restore_result_lot_entry_draft('instant', selected_batch_id)
     batch = context["batch"]
     input_value_type = context["input_value_type"]
     input_value_type_label = context["input_value_type_label"]
@@ -239,6 +242,7 @@ def _render_instant_entry_and_summary_section(
             field_label=input_value_type_label,
         )
         lot_selection=render_result_lot_choice("instant",selected_batch_id,test_time,"instant_entry")
+        render_result_lot_preparation('instant', selected_batch_id, 'instant_entry')
         if st.button("保存检测结果", key="instant_entry_save_button", type="primary", width="stretch"):
             validation_errors: list[str] = []
             cleaned_operator = str(operator or "").strip()

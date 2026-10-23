@@ -29,6 +29,13 @@ def get_qc_replacement_context(config_id):
         levels = {int(item['id']): list_lot_item_levels(int(item['id'])).to_dict('records') for item in items}
         materials = available_materials(config['qc_material_id'], include_disabled=True).to_dict('records')
         enabled_materials = available_materials(config['qc_material_id']).to_dict('records')
+        registration_rows = {
+            'lots': _rows(connection, 'SELECT * FROM md_qc_material_lots WHERE qc_material_id=? ORDER BY id',
+                          (config['qc_material_id'],)),
+            'levels': _rows(connection, '''SELECT l.* FROM md_qc_levels l JOIN md_qc_material_lots q
+                ON q.id=l.qc_material_lot_id WHERE q.qc_material_id=? ORDER BY l.id''',
+                            (config['qc_material_id'],)),
+        }
         lots = list_qc_lots(config['qc_material_id']).to_dict('records')
         existing = _rows(connection, '''SELECT * FROM qc_lot_configs WHERE template_id=?
             AND is_disabled=0 ORDER BY id''', (config['template_id'],))
@@ -53,6 +60,9 @@ def get_qc_replacement_context(config_id):
         # The same context is rechecked inside the write transaction.
         state = [config, project, product, raw_items, raw_levels, materials, existing, bindings, references]
         fingerprint = hashlib.sha256(json.dumps(state, sort_keys=True, default=str).encode()).hexdigest()
+        registration_guard = hashlib.sha256(json.dumps(
+            [config, project, product, raw_items, raw_levels, existing, bindings, references],
+            sort_keys=True, default=str).encode()).hexdigest()
         reason = ''
         if config['is_disabled'] or project['is_disabled']:
             reason = '此项目或批次已停用，只能查看原有资料。'
@@ -63,6 +73,8 @@ def get_qc_replacement_context(config_id):
         return dict(config=config, items=items, levels=levels, materials=enabled_materials,
                     all_materials=materials, lots=lots, existing=existing,
                     references=references,
+                    material_registration_guard=registration_guard,
+                    material_registration_rows=registration_rows,
                     fingerprint=fingerprint, editable=not reason, read_only_reason=reason)
 
 

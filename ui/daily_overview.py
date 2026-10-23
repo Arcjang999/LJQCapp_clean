@@ -67,7 +67,9 @@ def render_daily_overview():
     _pending_events(result)
     if not bindings:
         st.info('尚无可用的项目批次，请先建立项目及批次资料。')
-        if st.button('建立项目与批次'):open_global_page('show_project_management_page')
+        if st.button('建立项目与批次'):
+            from ui.project_navigation import open_project_setup
+            open_project_setup()
         return
     items=result['items']; metrics=st.columns(3)
     metrics[0].metric('当日检测次数',result['count']);metrics[1].metric('当日曾失控项目',sum(i['ever_reject'] for i in items))
@@ -93,7 +95,8 @@ def render_daily_overview():
             remember_daily_return();open_configured_batch(item)
         if buttons[1].button('查看批次设置'):
             from ui.project_navigation import open_project_setup
-            open_project_setup(item['template_id'],config_id=item['lot_config_id'])
+            open_project_setup(item['template_id'],config_id=item['lot_config_id'],
+                lot_config_item_id=item['lot_config_item_id'])
         if buttons[2].button('查看报告历史'):
             open_global_page('show_report_history_page')
         for record in item['records']:

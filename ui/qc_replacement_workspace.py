@@ -43,7 +43,7 @@ def _capture_draft(state):
                 values[position] = st.session_state[key]
 
 
-def open_qc_replacement_dialog(config_id):
+def open_qc_replacement_dialog(config_id, *, register_material=False):
     context = get_qc_replacement_context(int(config_id))
     selections = {}
     for item in context['items']:
@@ -54,6 +54,10 @@ def open_qc_replacement_dialog(config_id):
                    selections=selections, target_lot=None, name='')
     st.session_state[MODAL_KEY] = dict(config_id=int(config_id), token=uuid4().hex, context=context,
         fingerprint=context['fingerprint'], draft=deepcopy(initial), initial=initial, discard=False, review_after_discard=None)
+    if register_material:
+        from ui.material_registration import open_material_registration
+        open_material_registration(context['config']['qc_material_id'],
+            key='qc_replace_register_' + st.session_state[MODAL_KEY]['token'], rerun=False)
     st.rerun(scope='app')
 
 
@@ -120,7 +124,7 @@ def _render_material_choice(state):
     if preview:
         st.dataframe(pd.DataFrame(preview), hide_index=True, width='stretch')
     if not active:
-        st.info('先到“质控品管理 → 管理批次”登记批号、效期和浓度水平，再回来选择。')
+        st.info('此质控品还没有可选批号。点击下方“登记质控品批号”，填写批号、效期和浓度水平，保存后在这里选择。')
     st.caption('未换批的水平可保留原批号；已有均值和标准差作为参考，保存后仍需核对。')
     return selections, None
 
@@ -136,7 +140,8 @@ def _render_lot_choice(state):
     existing = next((row for row in context['existing'] if row['qc_material_lot_id'] == draft['target_lot'] and not row['combination_key']), None)
     if existing:
         st.info('此批号已经建立批次，可直接打开继续核对或使用，原有检测记录保留。')
-        if st.button('打开已有新批次', key='qc_replace_open_existing'):
+        registering = bool(st.session_state.get('qc_replace_register_' + state['token'] + '_registration'))
+        if st.button('打开已有新批次', key='qc_replace_open_existing', disabled=registering):
             if draft != state['initial']:
                 state['discard'] = True
                 state['review_after_discard'] = existing['id']
@@ -147,7 +152,7 @@ def _render_lot_choice(state):
             '水平数': item['level_count'], '新批次参数': '参考值待核对' if any(level['target_source'] != 'building' for level in context['levels'][int(item['id'])])
                 else '重新收集数据建立均值和标准差'} for item in context['items']]), hide_index=True, width='stretch')
     if not lots:
-        st.info('先到“质控品管理 → 管理批次”登记新批号和浓度水平。')
+        st.info('还没有其他可选批号。点击下方“登记质控品批号”，登记新批号和浓度水平，保存后在这里选择。')
     return None, existing
 
 
@@ -170,6 +175,12 @@ def _render_dialog():
             _close()
         return
     current = get_qc_replacement_context(state['config_id'])
+    registration_key = 'qc_replace_register_' + state['token']
+    if st.session_state.pop(registration_key + '_registration_saved', None) is not None:
+        from services.material_registration_refresh_service import can_refresh_registered_materials
+        if can_refresh_registered_materials(context, current):
+            state['context'] = context = current
+            state['fingerprint'] = current['fingerprint']
     if not current['editable']:
         st.info(current['read_only_reason'])
         if st.button('关闭', key='qc_replace_close'):
@@ -179,17 +190,20 @@ def _render_dialog():
         st.warning('原批次或质控品资料已修改。当前输入仍保留，请关闭后重新打开，核对最新资料。')
     if not context['config']['material_selection_mode']:
         draft['mode'] = st.radio('更换方式', list(_MODE_LABELS), format_func=_MODE_LABELS.get,
-                                horizontal=True, key=_key(state, 'mode', draft['mode']))
+                                horizontal=True, key=_key(state, 'mode', draft['mode']),
+                                disabled=bool(st.session_state.get(registration_key + '_registration')))
     selections, existing = _render_material_choice(state) if draft['mode'] == 'materials' else _render_lot_choice(state)
     draft['name'] = st.text_input('新批次名称（选填）', key=_key(state, 'name', draft['name']))
     st.caption('单位、方法和试剂沿用原项目。保存新批次后，核对各水平的均值、标准差和质量目标，再点“确认批次设置”。新批次从首次检测开始记录。')
+    from ui.material_registration import render_material_registration_shortcut
+    registering = render_material_registration_shortcut(context['config']['qc_material_id'], key=registration_key)
     left, right = st.columns(2)
-    if left.button('取消', key='qc_replace_cancel', width='stretch'):
+    if left.button('取消', key='qc_replace_cancel', width='stretch', disabled=registering):
         if draft != state['initial']:
             state['discard'] = True
             st.rerun(scope='app')
         _close()
-    if right.button('保存新批次，继续设置', key='qc_replace_save', disabled=bool(existing), type='primary', width='stretch'):
+    if right.button('保存新批次，继续设置', key='qc_replace_save', disabled=bool(existing) or registering, type='primary', width='stretch'):
         try:
             new_id = save_qc_replacement(source_config_id=state['config_id'], expected_fingerprint=state['fingerprint'],
                 mode=draft['mode'], selections=selections, target_lot_id=draft['target_lot'], config_name=draft['name'])
@@ -232,13 +246,8 @@ def render_qc_replacement_workspace():
     if st.session_state.get('qc_replace_selected_config') not in ids:
         st.session_state['qc_replace_selected_config'] = None
     selected = st.session_state.get('qc_replace_selected_config')
-    create, register = st.columns(2)
-    if create.button('更换质控品批次', key='qc_replace_open', type='primary', disabled=selected is None, width='stretch'):
+    if st.button('更换质控品批次', key='qc_replace_open', type='primary', disabled=selected is None, width='stretch'):
         open_qc_replacement_dialog(selected)
-    if register.button('登记新质控品批号', key='qc_replace_register', width='stretch'):
-        from ui.common import open_global_page
-        st.session_state['md_category_tabs'] = '质控品与批号'
-        open_global_page('show_master_data_page')
     if configs.empty:
         st.info('没有符合条件的批次，请调整筛选；首次使用请先在“批次管理”建立批次。')
         return
@@ -258,3 +267,6 @@ def render_qc_replacement_workspace():
             st.dataframe(detail, hide_index=True, width='stretch')
         if not context['editable']:
             st.caption(context['read_only_reason'])
+        if st.button('登记质控品批号', key=f'qc_replace_list_register_{selected}_register',
+                     disabled=not context['editable']):
+            open_qc_replacement_dialog(selected, register_material=True)
