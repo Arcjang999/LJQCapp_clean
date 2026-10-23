@@ -10,6 +10,7 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import FixedLocator
 import pandas as pd
 from services.profiling import profile_timer
+from chart_layout import CHART_LEGEND_SIZE, finish_chart_layout, select_detection_ticks
 
 
 matplotlib.use("Agg")
@@ -124,7 +125,6 @@ def plot_lj_chart(
         plot_df = _filter_view_data(qc_df, view_mode)
 
         if plot_df.empty:
-            axis.set_title(title, pad=10)
             axis.text(
                 0.5,
                 0.5,
@@ -134,7 +134,7 @@ def plot_lj_chart(
                 transform=axis.transAxes,
             )
             axis.set_axis_off()
-            figure.tight_layout(pad=0.7)
+            finish_chart_layout(figure, axis, title)
             return figure
 
         y_limits = _get_y_limits(plot_df, stats, y_axis_mode, standard_sd_limit)
@@ -165,13 +165,12 @@ def plot_lj_chart(
             _plot_out_of_range_markers(axis, display_df, y_limits)
         _plot_manual_note_highlights(axis, display_df)
 
-        axis.set_title(title, pad=10)
         axis.set_xlabel("\u68c0\u6d4b\u5e8f\u53f7")
         axis.set_ylabel(y_axis_label)
         _configure_x_axis(axis, display_df)
         axis.grid(True, linestyle=":", alpha=0.35)
         _add_lj_legend(axis)
-        figure.tight_layout(pad=0.7)
+        finish_chart_layout(figure, axis, title)
         return figure
 
 
@@ -245,11 +244,7 @@ def _configure_x_axis(axis, plot_df: pd.DataFrame) -> None:
     if not sequences:
         return
 
-    max_labels = 8
-    step = max(1, math.ceil(len(sequences) / max_labels))
-    tick_positions = sequences[::step]
-    if sequences[-1] not in tick_positions:
-        tick_positions.append(sequences[-1])
+    tick_positions = select_detection_ticks(sequences)
 
     axis.xaxis.set_major_locator(FixedLocator(tick_positions))
     if "test_time" in plot_df.columns:
@@ -436,7 +431,7 @@ def _add_lj_legend(axis) -> None:
             continue
         unique_handles.append(handle)
         unique_labels.append(label)
-    axis.legend(unique_handles, unique_labels, loc="best")
+    axis.legend(unique_handles, unique_labels, loc="best", fontsize=CHART_LEGEND_SIZE)
 
 
 def plot_instant_chart(
@@ -448,7 +443,6 @@ def plot_instant_chart(
 ):
     figure, axis = plt.subplots(figsize=(9.2, 5.6), dpi=150)
     if analysis_df.empty:
-        axis.set_title(title, pad=10)
         axis.text(
             0.5,
             0.5,
@@ -458,13 +452,12 @@ def plot_instant_chart(
             transform=axis.transAxes,
         )
         axis.set_axis_off()
-        figure.tight_layout(pad=0.7)
+        finish_chart_layout(figure, axis, title)
         return figure
 
     plot_df = analysis_df[analysis_df["is_effective"] == 1].copy()
     plot_df = plot_df.sort_values(["test_time", "id"]).reset_index(drop=True)
     if plot_df.empty:
-        axis.set_title(title, pad=10)
         axis.text(
             0.5,
             0.5,
@@ -474,7 +467,7 @@ def plot_instant_chart(
             transform=axis.transAxes,
         )
         axis.set_axis_off()
-        figure.tight_layout(pad=0.7)
+        finish_chart_layout(figure, axis, title)
         return figure
 
     if "effective_sequence" not in plot_df.columns or plot_df["effective_sequence"].isna().all():
@@ -552,7 +545,6 @@ def plot_instant_chart(
             axis.axhline(lower, color="#76b7b2", linewidth=1.0, linestyle="--", label="-1SD")
 
     _configure_instant_x_axis(axis, plot_df)
-    axis.set_title(title, pad=10)
     axis.set_xlabel("有效点序号")
     axis.set_ylabel(y_axis_label)
     axis.grid(True, linestyle=":", alpha=0.35)
@@ -565,8 +557,8 @@ def plot_instant_chart(
             continue
         unique_handles.append(handle)
         unique_labels.append(label)
-    axis.legend(unique_handles, unique_labels, loc="best")
-    figure.tight_layout(pad=0.7)
+    axis.legend(unique_handles, unique_labels, loc="best", fontsize=CHART_LEGEND_SIZE)
+    finish_chart_layout(figure, axis, title)
     return figure
 
 
@@ -574,11 +566,7 @@ def _configure_instant_x_axis(axis, plot_df: pd.DataFrame) -> None:
     sequences = plot_df["effective_sequence"].dropna().astype(int).tolist()
     if not sequences:
         return
-    max_labels = 8
-    step = max(1, math.ceil(len(sequences) / max_labels))
-    tick_positions = sequences[::step]
-    if sequences[-1] not in tick_positions:
-        tick_positions.append(sequences[-1])
+    tick_positions = select_detection_ticks(sequences)
     axis.xaxis.set_major_locator(FixedLocator(tick_positions))
     tick_labels = []
     for sequence in tick_positions:

@@ -22,6 +22,7 @@ from ui.common import (
     format_optional_float,
     format_zscore_template_display_name,
 )
+from ui.chart_display import workbench_chart_columns
 from zscore_logic import (
     PHASE_FORMAL_QC,
     calculate_formal_realtime_stats,
@@ -227,7 +228,7 @@ def render_zscore_page() -> None:
             st.caption(f"规则组合：{format_zscore_template_display_name(template)}｜参数建立点数：{required_n}")
             from ui.quality_targets import render_batch_quality
             render_batch_quality("zscore", selected_batch_id)
-        entry_col, chart_col = st.columns([0.94, 1.24], gap="large")
+        entry_col, chart_col = workbench_chart_columns("zscore")
         with chart_col:
             st.markdown('**图表与最新结果分析**')
             phase_scope, view_mode, selected_level, y_axis_mode, standard_sd_limit = render_zscore_chart_controls(

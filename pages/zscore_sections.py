@@ -1402,7 +1402,7 @@ def render_zscore_chart_analysis_section(
         figure = plot_zscore_single_level(
             plot_df=plot_df,
             level_id=selected_level,
-            title=f"{phase_title} | {format_zscore_level_display(selected_level, level_label_map)[0]}",
+            title=f"{phase_title} · {format_level_id_display(selected_level)}",
             phase_scope=phase_scope,
             y_axis_mode=y_axis_mode,
             standard_sd_limit=standard_sd_limit,
@@ -1411,7 +1411,7 @@ def render_zscore_chart_analysis_section(
     else:
         figure = plot_zscore_overlay(
             plot_df=plot_df,
-            title=f"{phase_title} | {format_zscore_template_display_name(template)}",
+            title=f"{phase_title} · 多水平合并图",
             active_levels=required_level_ids,
             phase_scope=phase_scope,
             y_axis_mode=y_axis_mode,
@@ -1420,6 +1420,8 @@ def render_zscore_chart_analysis_section(
         )
     with st.container(border=True):
         st.markdown("**质控图**")
+        if view_mode == "单水平视图":
+            st.caption(format_zscore_level_display(selected_level, level_label_map)[0])
         st.pyplot(figure, clear_figure=False, width="stretch")
     with st.container(border=True):
         render_zscore_latest_analysis_panel(latest_run, overall_phase, formal_rules_enabled)

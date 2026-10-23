@@ -13,6 +13,7 @@ from services.report_service import (
     list_zscore_report_month_options,
 )
 from ui.common import render_compact_stat_metrics, render_section_intro
+from zscore_logic import format_level_id_display
 from zscore_plotting import plot_zscore_single_level
 
 
@@ -83,10 +84,11 @@ def _render_report_preview(package: ZScoreMonthlyReportPackage) -> None:
     level_label_map = {item.level_id: item.level_label for item in report.level_statistics}
     for level_id in package.active_levels:
         level_label = level_label_map.get(level_id, level_id)
+        st.caption(level_label)
         chart_figure = plot_zscore_single_level(
             plot_df=package.monthly_plot_df.copy(),
             level_id=level_id,
-            title=f"{level_label} 期间图",
+            title=f"{format_level_id_display(level_id)} · 期间质控图",
             phase_scope="formal",
             y_axis_mode="标准视图",
             standard_sd_limit=4.0,

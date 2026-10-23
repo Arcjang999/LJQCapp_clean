@@ -1486,14 +1486,17 @@ def test_overlay_manual_legend_keeps_status_phase_and_level_keys() -> None:
         standard_sd_limit=3.0,
     )
     legend_map = collect_legend_texts(figure)
-    legend_anchor_map = collect_legend_anchor_positions(figure)
 
     assert legend_map["状态"] == ["正常", "警告", "失控"]
     assert legend_map["阶段 / 样式"] == ["正式期（实线 / 圆形点）", "均值 / ±SD 控制线", "描边点=含手动备注"]
     assert legend_map["水平"] == ["水平 1", "水平 2"]
-    assert legend_anchor_map["状态"][0] >= 1.0
-    assert legend_anchor_map["阶段 / 样式"][0] >= 1.0
-    assert legend_anchor_map["水平"][0] >= 1.0
+    figure.canvas.draw()
+    renderer = figure.canvas.get_renderer()
+    axis = figure.axes[0]
+    for legend in (artist for artist in axis.artists if isinstance(artist, Legend)):
+        bounds = legend.get_window_extent(renderer)
+        assert 0 <= bounds.x0 < bounds.x1 <= figure.bbox.width
+        assert bounds.y1 < axis.xaxis.label.get_window_extent(renderer).y0
     plt.close(figure)
 
     # A single formal run must still include every outside legend in tight exports.

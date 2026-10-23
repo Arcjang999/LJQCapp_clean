@@ -27,6 +27,7 @@ from ui.common import (
     render_compact_stat_metrics,
     render_latest_analysis_card,
 )
+from ui.chart_display import workbench_chart_columns
 
 
 def _clean_instant_display_part(value: object) -> str:
@@ -360,7 +361,6 @@ def _render_instant_si_method_explanation(summary: dict[str, object]) -> None:
 
 
 def _render_instant_chart_analysis_section(context: dict[str, object]) -> object:
-    batch = context["batch"]
     analysis_df = context["analysis_df"]
     summary = context["summary"]
     latest_row = context["latest_row"]
@@ -368,9 +368,7 @@ def _render_instant_chart_analysis_section(context: dict[str, object]) -> object
     figure = plot_instant_chart(
         analysis_df,
         summary,
-        title=(
-            f"即时法趋势图 - {_build_instant_batch_summary(batch)}"
-        ),
+        title="即时法趋势图",
         y_axis_label=input_value_type_label,
     )
 
@@ -558,7 +556,7 @@ def render_instant_page() -> None:
 
     from ui.quality_targets import render_batch_quality
     render_batch_quality("instant", selected_batch_id)
-    entry_col, chart_col = st.columns([0.98, 1.12], gap="large")
+    entry_col, chart_col = workbench_chart_columns("instant")
     with entry_col:
         _render_instant_entry_and_summary_section(context, selected_batch_id)
     with chart_col:

@@ -571,7 +571,7 @@ def render_lj_chart_and_analysis_section(
         figure = plot_lj_chart(
             qc_df=qc_df,
             stats=stats,
-            title=_build_lj_chart_title(batch, chart_view_mode),
+            title=chart_view_mode,
             view_mode=chart_view_mode,
             y_axis_mode=chart_y_axis_mode,
             standard_sd_limit=chart_standard_sd_limit,

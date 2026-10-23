@@ -14,6 +14,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from services.profiling import profile_timer
+from chart_layout import CHART_LEGEND_SIZE, finish_chart_layout, select_detection_ticks
 from zscore_logic import format_level_id_display
 
 
@@ -210,12 +211,11 @@ def _plot_zscore_single_level_impl(
     plot_actual_lot_markers(axis,display_df,"run_index")
     _plot_manual_note_highlights(axis, display_df)
     _configure_x_axis(axis, display_df)
-    axis.set_title(title, pad=10)
     axis.set_xlabel("检测序号")
     axis.set_ylabel(y_axis_label)
     axis.grid(True, linestyle=":", alpha=0.3)
-    figure.tight_layout(pad=0.7)
     _add_manual_legends(axis, display_df, show_reference_lines=show_reference_lines)
+    finish_chart_layout(figure, axis, title)
     return figure
 
 
@@ -307,18 +307,17 @@ def _plot_zscore_overlay_impl(
     plot_actual_lot_markers(axis,display_df,"run_index")
     _plot_manual_note_highlights(axis, display_df)
     _configure_x_axis(axis, display_df)
-    axis.set_title(title, pad=10)
     axis.set_xlabel("检测序号")
     axis.set_ylabel(y_axis_label)
     axis.grid(True, linestyle=":", alpha=0.3)
-    figure.tight_layout(rect=(0.0, 0.0, 0.76, 1.0), pad=0.7)
-    _add_manual_legends(
+    legends = _add_manual_legends(
         axis,
         display_df,
         level_ids=display_df["level_id"].drop_duplicates().tolist(),
         show_reference_lines=show_reference_lines,
         place_outside=True,
     )
+    finish_chart_layout(figure, axis, title, bottom_legends=legends)
     return figure
 
 
@@ -559,11 +558,7 @@ def _configure_x_axis(axis, plot_df: pd.DataFrame) -> None:
     if not run_indices:
         return
 
-    max_labels = 8
-    step = max(1, math.ceil(len(run_indices) / max_labels))
-    tick_positions = run_indices[::step]
-    if run_indices[-1] not in tick_positions:
-        tick_positions.append(run_indices[-1])
+    tick_positions = select_detection_ticks(run_indices)
 
     axis.xaxis.set_major_locator(FixedLocator(tick_positions))
     tick_labels: list[str] = []
@@ -708,29 +703,31 @@ def _add_manual_legends(
     level_ids: list[str] | None = None,
     show_reference_lines: bool = True,
     place_outside: bool = False,
-) -> None:
+) -> list:
     visible_phases = _collect_visible_phases(display_df)
     legend_style = {
         "frameon": True,
         "framealpha": 0.94,
-        "borderpad": 0.7,
+        "borderpad": 0.5,
+        "fontsize": CHART_LEGEND_SIZE,
+        "title_fontsize": CHART_LEGEND_SIZE,
     }
     if place_outside:
         status_legend_loc = {
             "loc": "upper left",
-            "bbox_to_anchor": (1.01, 1.00),
+            "bbox_to_anchor": (0.0, 0.0),
             "borderaxespad": 0.0,
             "handlelength": 1.2,
         }
         phase_legend_loc = {
             "loc": "upper left",
-            "bbox_to_anchor": (1.01, 0.63),
+            "bbox_to_anchor": (0.0, 0.0),
             "borderaxespad": 0.0,
             "handlelength": 2.0,
         }
         level_legend_loc = {
             "loc": "upper left",
-            "bbox_to_anchor": (1.01, 0.30),
+            "bbox_to_anchor": (0.0, 0.0),
             "borderaxespad": 0.0,
             "handlelength": 2.0,
         }
@@ -748,6 +745,7 @@ def _add_manual_legends(
             "handlelength": 2.0,
         }
 
+    legends = []
     status_handles = _build_status_legend_handles(display_df, _has_out_of_range_points(display_df))
     if status_handles:
         status_legend = axis.legend(
@@ -758,6 +756,7 @@ def _add_manual_legends(
         )
         status_legend.set_clip_on(False)
         axis.add_artist(status_legend)
+        legends.append(status_legend)
 
     phase_handles = _build_phase_legend_handles(
         visible_phases=visible_phases,
@@ -772,6 +771,7 @@ def _add_manual_legends(
         )
         phase_legend.set_clip_on(False)
         axis.add_artist(phase_legend)
+        legends.append(phase_legend)
 
     resolved_level_ids = [level_id for level_id in (level_ids or []) if level_id]
     if len(resolved_level_ids) > 1:
@@ -780,10 +780,12 @@ def _add_manual_legends(
             title="水平",
             **legend_style,
             **level_legend_loc,
-            ncol=min(3, len(resolved_level_ids)),
+            ncol=1 if place_outside else min(3, len(resolved_level_ids)),
         )
         level_legend.set_clip_on(False)
         axis.add_artist(level_legend)
+        legends.append(level_legend)
+    return legends
 
 
 def _build_status_legend_handles(display_df: pd.DataFrame, has_out_of_range_points: bool) -> list[Line2D]:
@@ -965,7 +967,6 @@ def _can_plot_zscore_frame(plot_df: pd.DataFrame | None) -> bool:
 
 def _build_empty_zscore_figure(title: str, message: str, subtitle: str = ""):
     figure, axis = plt.subplots(figsize=(9.4, 5.9), dpi=150)
-    axis.set_title(title, pad=10)
     axis.text(0.5, 0.54, message, ha="center", va="center", transform=axis.transAxes, fontsize=12)
     if subtitle:
         axis.text(
@@ -979,7 +980,7 @@ def _build_empty_zscore_figure(title: str, message: str, subtitle: str = ""):
             color="#66768a",
         )
     axis.set_axis_off()
-    figure.tight_layout(pad=0.7)
+    finish_chart_layout(figure, axis, title)
     return figure
 
 

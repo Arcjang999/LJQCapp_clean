@@ -79,7 +79,7 @@ def _render_report_preview(package: LjMonthlyReportPackage) -> None:
     chart_figure = plot_lj_chart(
         qc_df=package.formal_df.copy(),
         stats=package.stats,
-        title=report.chart_title,
+        title="正式质控图",
         view_mode="正式质控图",
         y_axis_mode="标准视图",
         standard_sd_limit=4.0,

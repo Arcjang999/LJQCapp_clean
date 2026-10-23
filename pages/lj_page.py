@@ -22,6 +22,7 @@ from pages.management import (
     guard_work_tab_selection,
 )
 from ui.common import TEXT, render_compact_stat_metrics, render_section_intro
+from ui.chart_display import workbench_chart_columns
 
 
 def _clean_lj_display_part(value: object) -> str:
@@ -131,7 +132,7 @@ def render_lj_work_tab(
         if source_message:
             st.info(source_message)
 
-        entry_col, chart_col = st.columns([1.0, 1.18], gap="large")
+        entry_col, chart_col = workbench_chart_columns("lj")
         with entry_col:
             with st.container():
                 render_section_intro(
