@@ -118,14 +118,36 @@ def module_styles(tone: str = "projects") -> str:
     .st-key-open_out_of_control_page button {{ background:#FFF5EC !important; border-color:#EDCCAF !important; color:#A34C14 !important; }}
     .st-key-open_report_history_page button {{ background:#F5F0FB !important; border-color:#D8C9EA !important; color:#6945A5 !important; }}
     .st-key-open_system_settings button, .st-key-module_nav_help button {{ background:#F2F4F7 !important; border-color:#D3DAE3 !important; color:#526174 !important; }}
+    .st-key-global_return_home div.stButton > button,
     .st-key-open_onboarding div.stButton > button, .st-key-onboarding_continue div.stButton > button,
     .st-key-onboarding_step_unit div.stButton > button[kind="primary"],
     .st-key-onboarding_step_materials div.stButton > button[kind="primary"],
     .st-key-onboarding_step_project div.stButton > button[kind="primary"] {{ background:#2459A9 !important; border-color:#2459A9 !important; color:#FFF !important; }}
+    .st-key-global_return_home div.stButton > button:hover {{ background:#1B4789 !important; border-color:#1B4789 !important; }}
+    :is(.st-key-back_project_home, .st-key-workspace_back, .st-key-daily_return,
+        .st-key-entry_project_home, .st-key-entry_project_unavailable, .st-key-entry_overview,
+        .st-key-daily_home, .st-key-qc_materials_home, .st-key-quality_back,
+        .st-key-close_project_management_page, .st-key-close_master_data_page,
+        .st-key-ooc_list_back, .st-key-monthly_close, .st-key-close_report_history_page,
+        .st-key-close_settings_page, .st-key-user_guide_home,
+        .st-key-reagent_back_to_products, .st-key-reference_management_home) div.stButton > button[kind="secondary"] {{
+        background:#E8F0FD; border-color:#ABC4EB; color:#1B4789;
+    }}
+    :is(.st-key-back_project_home, .st-key-workspace_back, .st-key-daily_return,
+        .st-key-entry_project_home, .st-key-entry_project_unavailable, .st-key-entry_overview,
+        .st-key-daily_home, .st-key-qc_materials_home, .st-key-quality_back,
+        .st-key-close_project_management_page, .st-key-close_master_data_page,
+        .st-key-ooc_list_back, .st-key-monthly_close, .st-key-close_report_history_page,
+        .st-key-close_settings_page, .st-key-user_guide_home,
+        .st-key-reagent_back_to_products, .st-key-reference_management_home) div.stButton > button[kind="secondary"]:hover {{
+        background:#D8E6FC; border-color:#7DA5DE; color:#163D76;
+    }}
     .st-key-module_navigation button {{ font-size:13px; font-weight:650; white-space:normal; min-height:40px; }}
-    @media(max-width:900px) {{
-        .st-key-module_topbar > [data-testid="stHorizontalBlock"] {{ flex-wrap:wrap; }}
-        .st-key-module_topbar > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {{ flex:1 1 100% !important; width:100% !important; }}
+    @media(max-width:1200px) {{
+        .st-key-module_topbar > [data-testid="stHorizontalBlock"],
+        .st-key-module_topbar > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] {{ flex-wrap:wrap; }}
+        .st-key-module_topbar > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"],
+        .st-key-module_topbar > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {{ flex:1 1 100% !important; width:100% !important; }}
         .st-key-module_navigation [data-testid="stHorizontalBlock"] {{ flex-wrap:wrap; gap:8px; }}
         .st-key-module_navigation [data-testid="stColumn"] {{ flex:1 1 110px !important; width:auto !important; min-width:0; }}
     }}

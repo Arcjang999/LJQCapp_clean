@@ -1116,6 +1116,22 @@ GLOBAL_PAGE_SESSION_KEYS = (
 )
 
 
+def go_to_home_page(*, rerun: bool = True) -> None:
+    """Open the initial project list while retaining session drafts and filters."""
+    for session_key in GLOBAL_PAGE_SESSION_KEYS:
+        st.session_state[session_key] = False
+    st.session_state['top_level_method_selector'] = '主页'
+    st.session_state['pending_top_level_method'] = '主页'
+    st.session_state['onboarding_open'] = False
+    st.session_state['global_management_menu'] = False
+    st.session_state['global_help_menu'] = False
+    for key in ('workspace_project_id', 'daily_return_page',
+                'pending_navigation_source', 'pending_lj_project_id', 'pending_lj_batch_id'):
+        st.session_state.pop(key, None)
+    if rerun:
+        st.rerun()
+
+
 def open_global_page(page_key: str, *, rerun: bool = True) -> None:
     if page_key not in GLOBAL_PAGE_SESSION_KEYS:
         raise ValueError(f"未知全局页面：{page_key}")
@@ -1185,7 +1201,7 @@ def _active_module_tone() -> str:
 
 def render_page_chrome() -> None:
     with st.container(key="module_topbar"):
-        title_column, action_column = st.columns([0.32, 0.68], gap="medium", vertical_alignment="center")
+        title_column, action_column = st.columns([0.28, 0.72], gap="medium", vertical_alignment="center")
         with title_column:
             st.markdown(
                 '<div class="app-wordmark"><span class="app-wordmark-mark" aria-hidden="true">质控</span>'
@@ -1195,7 +1211,10 @@ def render_page_chrome() -> None:
             )
         with action_column:
             with st.container(key="module_navigation"):
-                qc_column, management_column, history_column, settings_column, onboarding_column, feedback_column = st.columns([1.15, 1.25, 1, 1, 1, 0.8], gap="small")
+                home_column, qc_column, management_column, history_column, settings_column, onboarding_column, feedback_column = st.columns([1.15, 1.25, 1.25, 1, 1, 1, 0.8], gap="small")
+                with home_column:
+                    st.button("返回主页", key="global_return_home", type="primary", width="stretch",
+                              on_click=go_to_home_page, kwargs={'rerun': False})
                 with qc_column:
                     if st.button("质控品管理", key="open_qc_materials_page", width="stretch"):
                         open_global_page("show_qc_materials_page")
