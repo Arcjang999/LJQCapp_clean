@@ -74,13 +74,151 @@ def render_review_summary(review, *, historical=False):
         st.caption(label+'：'+search.get('checked_on','')+'｜'+search.get('rationale',''))
 
 
-def render_quality_setup(item, prior, prefix, *, levels=None, goal=None, quick=False, actor=''):
+def _quality_settings_location(scope, item_id=None):
+    """Name the real editor reached from each quality window."""
+    project_dialog = st.session_state.get('project_workspace_dialog') or {}
+    if scope == 'project':
+        if project_dialog.get('kind') == 'quality' and project_dialog.get('item_id') == item_id:
+            action = '点击底部“返回项目”，在项目工作台选中本检验项目后点击“编辑检验项目”'
+        else:
+            action = '关闭质量目标窗口，点击顶部“返回主页”，打开对应项目，选中本检验项目后点击“编辑检验项目”'
+        return dict(target='编辑检验项目', action=action, note='')
+    batch_dialog = st.session_state.get('batch_item_dialog') or {}
+    leave = ('点击底部“取消”，按提示处理未保存内容' if
+             batch_dialog.get('kind') == 'quality' and batch_dialog.get('item_id') == item_id else
+             '关闭质量目标窗口')
+    return dict(target='编辑检验项目后新建批次',
+        action=leave + '，点击顶部“返回主页”，打开对应项目，选中本检验项目后点击“编辑检验项目”',
+        note='本批次的单位、方法学和输入值类型保持创建时的设置；修改项目并确认后，请新建批次采用更新后的设置。')
+
+
+def quality_validation_issues(item, result, plan, spec=None, *, quick=False, settings_location=None):
+    """Describe the existing validation rules at the fields that can resolve them."""
+    from services.quality_applicability_service import (
+        CONTEXT_LABELS, context_errors, missing_context_fields,
+        validate_registered_sources, validate_search_record,
+    )
+    from services.quality_target_service import select_rule
+
+    issues = []
+    def add(field, target, message):
+        if not any(row['message'] == message for row in issues):
+            issues.append(dict(field=field, target=target, message=message))
+    def settings(field, message):
+        location = (dict(target='返回检测设置', action='点击“返回检测设置”', note='') if quick else
+                    settings_location or _quality_settings_location('lot' if 'lot_config_id' in item else 'project', item.get('id')))
+        add(field, location['target'], message + f' 请{location["action"]}，核对“' +
+            {'unit_id': '单位', 'method_id': '方法学', 'input_value_type': '输入值类型'}.get(field, '检测设置') +
+            '”。' + location.get('note', ''))
+
+    context = result['context']
+    missing = missing_context_fields(context)
+    for field in missing:
+        add(field, '检测条件', '请在上方“检测条件”中' +
+            ('填写' if field == 'specimen' else '选择') + '“' + CONTEXT_LABELS[field] + '”。')
+    blank_errors = {'请补充' + CONTEXT_LABELS[field] + '。' for field in missing}
+    for message in context_errors(item, context):
+        if message in blank_errors:
+            continue
+        if '输入值类型' in message:
+            settings('input_value_type', message)
+        elif '方法学' in message:
+            settings('method_id', message)
+        else:
+            add('context', '检测条件', message + ' 请在上方“检测条件”核对结果性质、结果尺度和标本。')
+    pending = [row for row in plan['assessments'] if row['kind'] != 'process' and row['status'] == 'pending']
+    for row in pending:
+        message = row['reason']
+        if message == '待补充适用条件' and missing:
+            continue
+        if '单位' in message:
+            settings('unit_id', message)
+        elif '方法学' in message:
+            settings('method_id', message)
+        elif '输入值类型' in message:
+            settings('input_value_type', message)
+        else:
+            add('context', '检测条件', message + ' 请核对上方“检测条件”；条款在“查看标准及填写对照要求”中。')
+    if plan['state'] == 'blocked' and not missing and not pending and not context_errors(item, context):
+        add('context', '检测条件', plan['reason'] + ' 请核对上方“检测条件”和“查看标准及填写对照要求”。')
+    if not str(result.get('confirmed_by') or '').strip():
+        label = '质量要求确认人' if quick else '确认人'
+        add('confirmed_by', label, f'请填写“{label}”。')
+    if not result.get('checked'):
+        add('checked', '确认勾选', '请勾选上方“已确认检测方法、单位、各水平和以上质量要求填写正确”。')
+    mandatory = {row['id'] for row in plan['assessments']
+                 if row['kind'] not in ('numeric', 'process') and row['status'] == 'applicable'}
+    if not mandatory.issubset(set(result.get('adopted_standard_ids') or [])):
+        add('adopted_standard_ids', '同时采用的定性与信号精密度要求',
+            '请在“同时采用的定性与信号精密度要求”中选择本项目适用的全部要求。')
+    mode = result['mode']
+    if mode == 'source':
+        if spec is None:
+            add('requirement_id', '选择实验室自定要求', '请在“选择实验室自定要求”中选择一项要求。')
+        else:
+            try:
+                validate_spec_for_item(spec, item)
+            except ValueError as error:
+                if '单位' in str(error):
+                    settings('unit_id', str(error))
+                elif 'Ct' in str(error) or 'log' in str(error):
+                    settings('input_value_type', str(error))
+                else:
+                    add('requirement_id', '选择实验室自定要求', str(error) + ' 请在“选择实验室自定要求”中重新选择。')
+            rules = []
+            for level in result['levels']:
+                try:
+                    rule = select_rule(spec, level.get('concentration'), level.get('category', ''))
+                    if spec['id'] == 'wst406-2024-fib' and level.get('category') == '异常':
+                        value = level.get('concentration')
+                        if value is None or not (value > 6 or value < 1.5):
+                            raise ValueError('异常水平须填写浓度，且 >6 g/L 或 <1.5 g/L。')
+                    rules.append(rule)
+                except ValueError as error:
+                    fields = []
+                    if any('lower' in row or 'upper' in row for row in spec['imprecision']):
+                        fields.append('质控品浓度（按此浓度选择标准限值）')
+                    if any(row.get('category') for row in spec['imprecision']):
+                        fields.append('水平类别')
+                    if spec['id'] == 'wst406-2024-fib' and level.get('category') == '异常' and len(fields) == 1:
+                        fields.append('异常水平浓度（g/L）')
+                    labels = '、'.join('“'+field+'”' for field in fields) or '适用要求'
+                    add('levels', f'水平 {level["level_order"]}', f'请核对上方水平 {level["level_order"]} 的{labels}：{error}')
+            limit = result.get('supplemental_cv')
+            if limit is not None and (limit <= 0 or any(row['kind'] != 'cv' or limit >= row['value'] for row in (rules or spec['imprecision']))):
+                add('supplemental_cv', '选填：实验室更严CV要求', '请展开“选填：实验室更严CV要求”，填入大于0且小于各水平标准CV上限的数值，或清空此选填项。')
+    elif mode == 'sd_cv':
+        if result.get('cv_limit') is not None and result['cv_limit'] <= 0:
+            add('cv_limit', '实验室CV上限', '“实验室CV上限”须大于0；没有此项要求时请清空，保留为空。')
+        if not str(result.get('requirement_text') or '').strip():
+            add('requirement_text', '文字要求与依据', '请展开“文字要求与依据”，在“实验室实际要求”中保留SD控制说明或填写本实验室实际要求。')
+    elif mode == 'recorded':
+        for field, label in (('source_name', '使用的说明书或实验室文件名称'),
+                             ('source_version', '设置日期或文件版本'), ('requirement_text', '实验室实际要求')):
+            if not str(result.get(field) or '').strip():
+                add(field, '填写其他实验室要求', f'请在“填写其他实验室要求”中填写“{label}”。')
+    if mode != 'sd_cv' and not str(result.get('evidence') or '').strip():
+        add('evidence', '质量要求设置说明', '请展开“质量要求设置说明”，填写“说明此要求如何用于本次检测”。')
+    try:
+        registered = validate_registered_sources(result.get('registered_standards'), context)
+        if plan['state'] != 'blocked' and plan['state'] != 'standard':
+            search = validate_search_record(result.get('search_record'), confirmed_by=result.get('confirmed_by', ''),
+                has_process=any(row['kind'] != 'numeric' and row['status'] == 'applicable' for row in plan['assessments']),
+                item=item, context=context)
+            if search['conclusion'] == 'registered' and not registered:
+                raise ValueError('已选择“已找到新标准，并在下方登记”，请补充标准全文和核查记录。')
+    except ValueError as error:
+        add('standards', '高级：查找或补充标准', '请展开“高级：查找或补充标准”：' + str(error))
+    return issues
+
+
+def render_quality_setup(item, prior, prefix, *, levels=None, goal=None, quick=False, actor='', settings_location=None):
     """One quality form for quick creation, project settings and editable lots."""
     from services.quality_setup_service import SD_REQUIREMENT, quality_setup_plan, local_catalog_review
     from services.quality_catalog_service import browse_quality_catalog
     from ui.quality_applicability import render_conditions
 
-    condition_args, assessments = render_conditions(item, prior, prefix)
+    condition_args, assessments = render_conditions(item, prior, prefix, quick=quick, settings_location=settings_location)
     plan = quality_setup_plan(item, condition_args['context'])
     if plan['state'] == 'sd_cv' and not condition_args['search_record']:
         condition_args['search_record'] = local_catalog_review(item, condition_args['context'])
@@ -104,7 +242,8 @@ def render_quality_setup(item, prior, prefix, *, levels=None, goal=None, quick=F
         if plan['state'] == 'blocked':
             st.markdown('**请先完成检测条件**')
             st.warning(plan['reason'])
-            st.caption('可以先点击“保存，稍后继续”。填写完整后，再确认质量要求。')
+            st.caption('请按下方提示完成填写；需要修改方法学、单位或输入值类型时，点击底部“返回检测设置”。'
+                       if quick else '可以先点击“保存，稍后继续”。填写完整后，再确认质量要求。')
         else:
             st.markdown('**SD控制＋实验室CV**')
             st.caption('本批次按当前方法的质控规则判读；CV按正式期在控结果比较。')
@@ -200,7 +339,11 @@ def render_quality_setup(item, prior, prefix, *, levels=None, goal=None, quick=F
             if not simple:
                 st.caption('填写实验室执行的要求和文件名称。查到新的标准时，可在“高级：查找或补充标准”中登记。')
     person_label = '质量要求确认人' if quick else '确认人'
-    result['confirmed_by'] = st.text_input(person_label, value=prior.get('confirmed_by', actor), key=prefix+'_person', max_chars=80)
+    from ui.required_fields import required_field
+    with required_field(prefix+'_person',
+            missing=not str(st.session_state.get(prefix+'_person', prior.get('confirmed_by', actor)) or '').strip(),
+            message=f'请填写{person_label}。'):
+        result['confirmed_by'] = st.text_input(person_label, value=prior.get('confirmed_by', actor), key=prefix+'_person', max_chars=80)
     with st.expander('补充设置说明（选填）' if mode == 'sd_cv' else '质量要求设置说明', expanded=False):
         evidence = prior.get('evidence', '')
         if not evidence and spec:
@@ -210,9 +353,18 @@ def render_quality_setup(item, prior, prefix, *, levels=None, goal=None, quick=F
                 st.session_state[prefix+'_evidence'] = evidence
             st.session_state[prefix+'_auto_evidence'] = evidence
         result['evidence'] = st.text_area('说明此要求如何用于本次检测', value=evidence, key=prefix+'_evidence', max_chars=2000)
-    result['checked'] = st.checkbox('已确认检测方法、单位、各水平和以上质量要求填写正确',
-        value=bool(prior.get('checked')) if quick else False, key=prefix+('_checked' if quick else '_confirmed'))
+    checked_key = prefix+('_checked' if quick else '_confirmed')
+    with required_field(checked_key,
+            missing=not st.session_state.get(checked_key, bool(prior.get('checked')) if quick else False),
+            message='请核对本页设置后勾选确认。'):
+        result['checked'] = st.checkbox('已确认检测方法、单位、各水平和以上质量要求填写正确',
+            value=bool(prior.get('checked')) if quick else False, key=checked_key)
     result['blocked'] = plan['state'] == 'blocked'
+    result['validation_issues'] = quality_validation_issues(item, result, plan, spec, quick=quick,
+                                                        settings_location=settings_location)
+    if result['validation_issues']:
+        st.warning(('下一步前' if quick else '保存质量目标前') + '，请完成以下操作：\n\n' +
+                   '\n'.join('- ' + row['message'] for row in result['validation_issues']))
     return result
 
 
@@ -258,7 +410,8 @@ def render_adoption(scope,item_id,*,embedded=False,expected_revision=None,on_sav
         if len(levels) != item['level_count']:
             st.info('各水平的质控品还没有选齐。请先返回批次详情，点击当前检验项目的“编辑水平设置”，选择并保存全部水平后，再设置质量要求。')
             return
-    result = render_quality_setup(item, review, prefix, levels=levels, goal=goal)
+    result = render_quality_setup(item, review, prefix, levels=levels, goal=goal,
+                                  settings_location=_quality_settings_location(scope, item_id))
     condition_args = {key: result[key] for key in ('context', 'search_record', 'adopted_standard_ids',
                                                    'registered_standards', 'process_requirements')}
     def check_current():

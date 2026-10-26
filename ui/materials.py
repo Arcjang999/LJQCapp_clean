@@ -73,14 +73,17 @@ def render_material_replacement(configs):
         source_id=st.selectbox('原批次',[None]+list(labels),format_func=lambda k:'请选择' if k is None else labels[k],key='material_copy_source',disabled=registering)
         if source_id is None:return
         source=get_lot_config(source_id);items=list_lot_config_items(source_id)
-        selected=st.multiselect('需要换批的检验项目',items['id'].tolist(),default=items['id'].tolist(),
-            format_func=lambda k:items[items.id==k].iloc[0]['test_item_name'],key=f'material_copy_items_{source_id}')
+        item_names={int(row['id']):str(row['test_item_name']) for row in items.to_dict('records')}
+        selected=st.multiselect('需要换批的检验项目',list(item_names),default=list(item_names),
+            format_func=item_names.get,key=f'material_copy_items_{source_id}')
         items=items[items.id.isin(selected)]
         existing={r['id']:list_lot_item_levels(r['id'])['qc_level_id'].tolist() for r in items.to_dict('records')}
         selections=select_item_materials(items,source['qc_material_id'],f'copy_material_{source_id}',existing)
         name=st.text_input('新批次名称（选填）',key=f'material_copy_name_{source_id}')
         from ui.material_registration import render_material_registration_shortcut
         registering=render_material_registration_shortcut(source['qc_material_id'],key=f'material_registration_copy_{source_id}')
+        if items.empty:
+            st.info('“保存新批次”暂不可用。请在上方“需要换批的检验项目”中至少选择一项。')
         if st.button('保存新批次',key='material_copy_save',disabled=items.empty or registering,type='primary'):
             try: config=copy_material_config(source_config_id=source_id,selections=selections,config_name=name)
             except ValueError as exc:st.error(str(exc))

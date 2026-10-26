@@ -81,7 +81,7 @@ def _material_editor(state: dict, *, on_saved=None, on_cancel=None) -> None:
     product = get_material_product(product_id)
     st.caption(f'质控品：{product["generic_name"]}')
     if locked:
-        st.info('此批号已使用，可在这里补充备注。更改批号、效期或浓度水平时，点“新增质控品批号”登记，再设置项目批次。')
+        st.info('此批号已使用，可在这里补充备注。需要更改批号、效期或浓度水平时，先点击“保存修改”或“取消”返回批号列表，再点“新增质控品批号”登记，随后设置项目批次。')
     spec_id = None
     defaults = dict(level_name=record.get('level_name', ''), level_code=record.get('level_code', ''),
         catalog_no=record.get('specification_catalog_no', ''), lot_no=record.get('lot_no', ''),
@@ -94,15 +94,26 @@ def _material_editor(state: dict, *, on_saved=None, on_cancel=None) -> None:
             key=f'{prefix}_spec')
         if spec_id:
             defaults.update(level_name=specs[spec_id]['level_name'], level_code=specs[spec_id]['level_code'], catalog_no=specs[spec_id]['catalog_no'])
-    # Each specification keeps its own inputs; changing selection never writes catalogue data.
+    # Streamlit removes the inactive new-specification widgets after a selection
+    # change. Capture their latest event values before that cleanup happens.
+    identity_draft = state.setdefault('new_specification_draft', {})
+    for field, suffix in (('level_name', 'name'), ('level_code', 'code'), ('catalog_no', 'catalog')):
+        key = f'{prefix}_new_{suffix}'
+        if key in st.session_state:
+            identity_draft[field] = st.session_state[key]
+    identity_values = defaults if spec_id else {**defaults, **identity_draft}
+    if spec_id:
+        st.caption('浓度水平、浓度编号和货号沿用“已登记的浓度水平”所选记录。需要登记新水平时，在该下拉框选择“新增浓度水平”。')
     identity_prefix = f'{prefix}_{spec_id or "new"}'
     left, right = st.columns(2)
-    name = left.text_input('浓度水平 *', value=defaults['level_name'], max_chars=100,
+    name = left.text_input('浓度水平 *', value=identity_values['level_name'], max_chars=100,
         disabled=locked or bool(spec_id), key=f'{identity_prefix}_name', placeholder='例如：低值、高值或厂家 Level 2')
-    code = right.text_input('浓度编号', value=defaults['level_code'], max_chars=100,
+    code = right.text_input('浓度编号', value=identity_values['level_code'], max_chars=100,
         disabled=locked or bool(spec_id), key=f'{identity_prefix}_code', placeholder='例如：001、L02；保留原编号')
-    catalog = st.text_input('货号', value=defaults['catalog_no'], max_chars=100,
+    catalog = st.text_input('货号', value=identity_values['catalog_no'], max_chars=100,
         disabled=locked or bool(spec_id), key=f'{identity_prefix}_catalog')
+    if not spec_id:
+        state['new_specification_draft'] = dict(level_name=name, level_code=code, catalog_no=catalog)
     left, right = st.columns(2)
     lot = left.text_input('批号 *', value=defaults['lot_no'], max_chars=100, disabled=locked, key=f'{prefix}_lot')
     expiry = right.date_input('效期 *', value=defaults['expiry_date'], format='YYYY-MM-DD', disabled=locked, key=f'{prefix}_expiry')
@@ -164,7 +175,9 @@ def _product_editor(state: dict, *, on_saved=None, on_cancel=None) -> None:
         format_func=lambda value: '请选择厂家' if value is None else manufacturers[value],
         disabled=edit, key=f'{prefix}_manufacturer')
     if locked:
-        st.info('此质控品已登记批号或用于项目，可在这里补充备注。新的名称或货号请通过“新增质控品”登记。')
+        st.info('此质控品已登记批号或用于项目，可在这里补充备注。需要更换名称或货号时，先点击“保存修改”或“取消”返回质控品列表，再点“新增质控品”登记。')
+    elif edit:
+        st.caption('厂家沿用当前产品，不能在编辑时更换。需要登记其他厂家的产品时，点击“取消”返回列表，再点“新增质控品”。')
     labels = {'generic_name': '质控品名称 *', 'trade_name': '商品名称', 'matrix': '基质',
               'physical_form': '物理形态', 'catalog_no': '产品货号', 'registration_no': '注册证 / 备案编号'}
     values = {}

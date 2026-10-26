@@ -24,7 +24,7 @@ def has_pending_product_relation(ctx):
 def render_pending_product_relation_notice(ctx):
     pending = has_pending_product_relation(ctx)
     if pending:
-        st.info('下方配套记录尚未完成。请先保存或取消配套记录，再继续项目设置。')
+        st.info('“登记试剂配套的质控品”中有配套记录尚未完成。请先保存或取消这条记录，再继续项目设置。')
     return pending
 
 
@@ -93,7 +93,7 @@ def render_product_choice(ctx, *, reagent_id, lab_instrument_id, test_item_id=No
     if (draft.get('product_choice_review') or {}).get('qc_material_id') != current:
         draft.pop('product_choice_review', None)
     if candidates:
-        st.caption('已找到本次仪器、试剂和检验项目的配套记录。请选择产品并点击“确认所选质控品”。' if not locked else '下方列出此质控品的使用记录，请点击“确认所选质控品”。')
+        st.caption('已找到本次仪器、试剂和检验项目的配套记录。请选择产品并点击“确认所选质控品”。' if not locked else '此质控品已有配套使用记录，请点击“确认所选质控品”。')
     else:
         st.caption('还没有这套仪器和试剂的质控品使用记录。请填写确认人和使用说明。' if locked else '还没有这套仪器和试剂的质控品使用记录。请选择质控品，并填写确认人和使用说明。')
     candidate = candidates.get(current)
@@ -116,6 +116,12 @@ def render_product_choice(ctx, *, reagent_id, lab_instrument_id, test_item_id=No
             evidence=st.text_area('为什么选择此质控品', value=saved.get('evidence', ''), key=prefix + '_evidence', max_chars=2000,
                 placeholder='填写说明书名称或实验室使用记录，说明此质控品用于哪台仪器、哪种试剂和哪个检验项目。'))
         cache[identity] = manual_review
+        confirmed = draft.get('product_choice_review') or {}
+        if confirmed and (confirmed.get('basis') != 'manual' or any(
+                str(confirmed.get(name) or '').strip() != str(manual_review[name] or '').strip()
+                for name in ('confirmed_by', 'evidence'))):
+            draft.pop('product_choice_review', None)
+            st.info('质控品确认人或使用说明已修改。请点击“确认所选质控品”，重新确认本次填写。')
     if st.button('确认所选质控品', key=prefix + '_confirm', disabled=current is None):
         try:
             draft['product_choice_review'] = validate_qc_product_choice(qc_material_id=current,
@@ -134,6 +140,15 @@ def render_product_choice(ctx, *, reagent_id, lab_instrument_id, test_item_id=No
         else:
             valid = True
             st.caption('本次质控品已确认。')
+    if not valid:
+        if current is None:
+            st.info('请先在上方“质控品”中选择产品，再点击“确认所选质控品”。')
+        elif manual and not all(str(manual_review.get(name) or '').strip() for name in ('confirmed_by', 'evidence')):
+            missing = [label for name, label in (('confirmed_by', '质控品确认人'), ('evidence', '为什么选择此质控品'))
+                       if not str(manual_review.get(name) or '').strip()]
+            st.info('请填写上方的“' + '”、“'.join(missing) + '”，再点击“确认所选质控品”。')
+        else:
+            st.info('请点击上方“确认所选质控品”，确认完成后才能继续项目设置。')
     if allow_relation_edit:
         with st.expander('登记试剂配套的质控品'):
             st.caption('在这里记录这套仪器和试剂可使用哪些质控品，方便下次选择。质控品批号另行登记。')
@@ -171,6 +186,11 @@ def render_panel_product_review(ctx, template):
         person = st.text_input('质控品确认人', key=prefix + '_person', max_chars=80)
         evidence = st.text_area('各检验项目选择此质控品的原因', key=prefix + '_evidence', max_chars=2000)
         checked = st.checkbox('已确认此质控品可用于以上各项的试剂和检测方法', key=prefix + '_checked')
+        missing_reagents = [row.get('test_item_name', '') for row, scope, suggestions in unresolved if suggestions is None]
+        if missing_reagents:
+            st.info('请在上方表格的“试剂”列为以下项目选择试剂：' + '、'.join(missing_reagents) + '。')
+        if not checked:
+            st.info('请核对以上项目，并勾选“已确认此质控品可用于以上各项的试剂和检测方法”，再点击“确认以上项目的质控品”。')
         if st.button('确认以上项目的质控品', key=prefix + '_confirm', disabled=not checked):
             try:
                 proposed = []

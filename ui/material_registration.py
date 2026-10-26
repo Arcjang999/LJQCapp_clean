@@ -23,6 +23,8 @@ def render_material_registration_shortcut(product_id, *, key: str) -> bool:
     state = st.session_state.get(state_key)
     if st.button('登记质控品批号', key=key + '_register', disabled=product_id is None or bool(state)):
         open_material_registration(product_id, key=key)
+    if product_id is None:
+        st.caption('登记批号前，请先在上方选择质控品产品。')
     if not state:
         return False
 
@@ -37,6 +39,7 @@ def render_material_registration_shortcut(product_id, *, key: str) -> bool:
 
     with st.container(border=True):
         st.markdown('**登记质控品批号**')
+        st.info('请先在这里保存或取消批号登记，再继续项目或批次设置。')
         st.caption('按包装填写浓度水平、批号和效期，点击“保存”后继续当前设置。每个浓度水平分别登记，当前项目和批次填写内容会保留。')
         _material_editor(state, on_saved=saved, on_cancel=close)
     return True

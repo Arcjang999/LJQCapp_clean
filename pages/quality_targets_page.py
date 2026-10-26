@@ -1,5 +1,6 @@
 """Quality-target catalog and explicit application to saved projects / draft lots."""
 import csv
+import hashlib
 import io
 import streamlit as st
 from database import get_connection
@@ -34,12 +35,22 @@ def render_quality_targets_page():
             _custom_requirement_dialog()
         st.download_button('下载质量要求导入模板',custom_template_csv(),'质量要求导入模板.csv','text/csv')
         uploaded=st.file_uploader('上传质量要求 CSV',type=['csv'],key='quality_import')
+        content = uploaded.getvalue() if uploaded else b''
+        source = hashlib.sha256(content).hexdigest() if content else None
+        previous_source = st.session_state.get('quality_import_review_source')
+        if source != previous_source:
+            st.session_state['quality_import_confirm'] = False
+            st.session_state['quality_import_review_source'] = source
+            if previous_source and source:
+                st.info('上传的质量要求文件已更换，请重新核对本次预览并勾选确认。')
         if uploaded:
-            try:preview=preview_custom_csv(uploaded.getvalue())
+            try:preview=preview_custom_csv(content)
             except ValueError as e:st.error(str(e))
             else:
                 st.dataframe(catalog_table(preview),hide_index=True,width='stretch')
                 checked=st.checkbox('已检查预览中的要求、文件名称和确认人',key='quality_import_confirm')
+                if not checked:
+                    st.info('请核对上方预览，并勾选“已检查预览中的要求、文件名称和确认人”，再点击“确认导入质量要求”。')
                 if st.button('确认导入质量要求',disabled=not checked):
                     try:n=import_custom_csv(uploaded.getvalue())
                     except ValueError as e:st.error(str(e))

@@ -298,6 +298,10 @@ def render_reagent_lifecycle_workspace(*, product_id=None):
                                 key='reagent_show_disabled')
     settings.update(reagent_search=query,reagent_product_filter=product,reagent_show_disabled=show_disabled)
     can_register = bool(context['products']) if bound_product_id is None else bound_product_id in {row['id'] for row in context['products']}
+    if not can_register:
+        st.info('请点击顶部“资料与批次 → 试剂管理”，新增或恢复试剂产品，再进入“管理批号”登记实际批号。'
+                if bound_product_id is None else
+                '请点击“返回试剂列表”，新增试剂或恢复此试剂产品，再进入“管理批号”登记实际批号。')
     if st.button('登记试剂批号', key='reagent_register', type='primary', disabled=not can_register):
         open_reagent_lifecycle_dialog('register', st.session_state.get('reagent_selected_lot'), product_id=bound_product_id)
     rows = [row for row in context['all_lots'] if (show_disabled or row['id'] in {x['id'] for x in context['lots']})
@@ -310,7 +314,8 @@ def render_reagent_lifecycle_workspace(*, product_id=None):
         st.session_state['reagent_selected_lot'] = None
     selected = st.session_state.get('reagent_selected_lot')
     if not rows:
-        st.info('没有符合条件的试剂批号，请登记批号或调整筛选。')
+        st.info('没有符合条件的试剂批号，请登记批号或调整筛选。' if can_register
+                else '当前没有可用的试剂产品，暂时不能登记批号。请先按上方提示完善产品资料。')
         return
     enabled = {row['id'] for row in context['lots']}
     frame = pd.DataFrame([{'厂家':_text(row.get('manufacturer_name')),'试剂产品':row['reagent_name'],

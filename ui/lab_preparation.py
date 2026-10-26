@@ -58,6 +58,8 @@ def _render_dialog():
         state.update(data=b'', filename='', review=None, error='', widget_had_upload=False, request_key=uuid4().hex)
     if state['data']:
         st.caption('当前文件：' + state['filename'])
+    else:
+        st.caption('“审查单位资料”暂不可用：请先在上方上传填写后的单位资料清单。')
     if st.button('审查单位资料', key='lab_prep_review', disabled=not state['data'], width='stretch'):
         try:
             state['review'] = prepare_lab_preparation(state['data'])

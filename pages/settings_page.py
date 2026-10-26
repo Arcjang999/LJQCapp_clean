@@ -261,6 +261,8 @@ def _render_storage_section() -> None:
                 migration_ready = True
             else:
                 st.warning(storage_message(migration_validation[1]))
+        else:
+            st.info('请先点击“选择新文件夹”，选择可写的数据文件夹，再确认更改保存位置。')
         if st.button(
             "确认更改保存位置",
             key="confirm_storage_migration",
@@ -344,6 +346,10 @@ def _render_storage_section() -> None:
         disabled=selected_restore_file is None,
     )
     restore_confirmed = bool(st.session_state.get(STORAGE_SESSION_KEYS["restore_confirmed"], False))
+    if selected_restore_file is None:
+        st.info('请先点击“选择备份文件”，通过检查后勾选上方确认项，再点击“确认恢复数据”。')
+    elif restore_ready and not restore_confirmed:
+        st.info('备份文件已通过检查。请勾选上方确认项，再点击“确认恢复数据”。')
     if st.button(
         "确认恢复数据",
         key="confirm_restore_database",
@@ -391,6 +397,7 @@ def _render_cloud_storage_section() -> None:
         st.session_state["settings_cloud_restore_confirmed"] = False
 
     if uploaded is None:
+        st.info('请先在“选择备份文件”中上传备份，通过检查后勾选确认项，再点击“确认恢复数据”。')
         st.checkbox("我确认用此备份替换当前数据。", key="settings_cloud_restore_confirmed", disabled=True)
         st.button("确认恢复数据", key="cloud_confirm_restore", type="primary",
                   use_container_width=True, disabled=True)
@@ -407,6 +414,8 @@ def _render_cloud_storage_section() -> None:
                 st.warning(storage_message(message))
             confirmed = st.checkbox("我确认用此备份替换当前数据。", key="settings_cloud_restore_confirmed",
                                     disabled=not restore_ready)
+            if restore_ready and not confirmed:
+                st.info('备份文件已通过检查。请勾选上方“我确认用此备份替换当前数据”，再点击“确认恢复数据”。')
             if st.button("确认恢复数据", key="cloud_confirm_restore", type="primary",
                          use_container_width=True, disabled=not (restore_ready and confirmed)):
                 try:

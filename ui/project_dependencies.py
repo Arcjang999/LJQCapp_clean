@@ -61,6 +61,12 @@ def render_project_dependencies(ctx, *, kind=None, disabled=False, locked_identi
     prefix = 'project_dependency_' + ctx['token']
     with st.expander('补充基础资料', expanded=bool(state) or bool(missing)):
         st.caption('列表中没有本次使用的资料时，在这里登记。保存或取消后可继续当前项目，已填写内容会保留。')
+        if state:
+            st.info('正在登记' + _LABELS[state['entity']] + '。请先在本区域点击“保存”或“取消”，再继续项目设置；上方已填内容会保留。')
+        elif disabled:
+            st.info('请先在“登记质控品批号”中保存或取消当前登记，再补充其他资料。')
+        elif has_pending_product_relation(ctx):
+            st.info('请先在“登记试剂配套的质控品”中保存或取消当前配套记录，再登记其他资料。')
         selected = st.selectbox('要补充的资料', list(fields), format_func=_LABELS.get,
             key=prefix + '_type', disabled=bool(state) or disabled)
         if st.button('登记' + _LABELS[selected], key=prefix + '_open',

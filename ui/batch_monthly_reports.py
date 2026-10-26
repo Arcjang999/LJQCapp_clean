@@ -49,6 +49,8 @@ def _render_job(job_id):
         chosen = st.multiselect('本次继续生成的报告', list(retryable), default=list(retryable),
             format_func=lambda value: retryable[value]['selection']['project_name'] + '｜' + retryable[value]['selection']['lot_no'],
             key='monthly_retry_' + str(job_id))
+        if not chosen:
+            st.info('请在“本次继续生成的报告”中至少选择一份，再点击继续或重试。')
         if st.button('继续未完成或重试所选报告', type='primary', disabled=not chosen, key='monthly_retry_run'):
             _run_selected(job, chosen)
             st.rerun()
@@ -123,6 +125,8 @@ def render_batch_monthly_reports_page():
         format_func=lambda value: '全部项目' if value is None else choices['templates'][value], key='monthly_template')
     methods = st.multiselect('质控方法', list(METHOD_LABELS), default=list(METHOD_LABELS),
                             format_func=METHOD_LABELS.get, key='monthly_methods')
+    if not methods:
+        st.info('请在上方“质控方法”中至少选择一种，再点击“核对待生成清单”。')
     if st.button('核对待生成清单', type='primary', disabled=not methods or period is None, key='monthly_preview'):
         try:
             previous = st.session_state.get('monthly_prepared') or {}
@@ -145,7 +149,7 @@ def render_batch_monthly_reports_page():
             report_month=period.report_month, period_start=period.start_date, period_end=period.end_date,
             lab_instrument_id=instrument, template_id=template, methods=sorted(methods)).items())
         if not valid_scope:
-            st.info('日期、仪器或项目已换，请重新点“核对待生成清单”。')
+            st.info('日期、仪器、项目或质控方法已变更，请重新点“核对待生成清单”。')
         else:
             st.subheader('待生成清单')
             if preview['items']:
@@ -161,6 +165,8 @@ def render_batch_monthly_reports_page():
                 chosen = st.multiselect('选择本次生成的报告', list(candidates), default=list(candidates),
                     format_func=lambda key: candidates[key]['project_name'] + '｜' + candidates[key]['lot_no'],
                     key='monthly_selection_' + st.session_state['monthly_request_id'])
+                if not chosen:
+                    st.info('请在“选择本次生成的报告”中至少选择一份，再点击“生成并保存所选报告”。')
                 if st.button('生成并保存所选报告', type='primary', disabled=not chosen or handling_changed, key='monthly_generate'):
                     try:
                         job_id = create_monthly_report_job(preview, chosen, st.session_state['monthly_request_id'])

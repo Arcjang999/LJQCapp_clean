@@ -58,7 +58,7 @@ def render_draft_standard_preview(draft):
         st.caption('点击“保存”后进入质量目标设置。设置完成后，再确认项目设置。')
 
 
-def render_conditions(item, review, prefix):
+def render_conditions(item, review, prefix, *, quick=False, settings_location=None):
     saved = review.get('context') or default_context(item)
     inferred = infer_technique(item)
     # Widget values arrive before a rerun, while saved may still be an older
@@ -120,8 +120,15 @@ def render_conditions(item, review, prefix):
     search = None
     registered = []
     if not any(r['kind'] == 'numeric' and r['status'] == 'applicable' for r in rows):
-        if any(r['kind'] == 'numeric' and r['status'] == 'pending' for r in rows):
-            st.warning('找到了此项目的数值标准，请先检查检测方法、结果尺度和单位。具体缺项见上方提示。')
+        pending_numeric = [r for r in rows if r['kind'] == 'numeric' and r['status'] == 'pending']
+        if pending_numeric:
+            reasons = list(dict.fromkeys(r['reason'] for r in pending_numeric))
+            st.warning('此项目的数值标准还不能采用：' + '；'.join(reasons) + '。')
+            st.caption('检测条件在本页上方填写；需改方法学或单位时，点击底部“返回检测设置”。'
+                       if quick else '检测条件在本页上方填写；需改方法学或单位时，请' +
+                       ((settings_location or {}).get('action') or
+                        '关闭质量目标窗口，点击顶部“返回主页”，打开对应项目，选中本检验项目后点击“编辑检验项目”') +
+                       '。' + (settings_location or {}).get('note', ''))
         prior = review.get('search_record') or {}
         candidate_search = {}
         with st.expander('高级：查找或补充标准', expanded=False):
@@ -204,14 +211,20 @@ def render_registered_sources(prior, prefix):
             for key,label in labels.items():
                 row[key]=st.text_input(label,value=old.get(key,''),key=f'{prefix}_registered_{i}_{key}',max_chars=2000)
             uploaded = st.file_uploader('标准全文文件（PDF）', type=['pdf'], key=f'{prefix}_registered_{i}_file')
+            upload_error_key = f'{prefix}_registered_{i}_upload_error'
             row['sha256'] = old.get('sha256', '')
             if uploaded is not None:
                 contents = uploaded.getvalue()
                 if not contents.startswith(b'%PDF-'):
-                    st.error('请上传可打开的标准全文 PDF 文件。')
+                    st.session_state[upload_error_key] = '请上传可打开的标准全文 PDF 文件。'
+                    st.error(st.session_state[upload_error_key])
                     row['sha256'] = ''
                 else:
+                    st.session_state[upload_error_key] = ''
                     row['sha256'] = hashlib.sha256(contents).hexdigest()
+            elif st.session_state.get(upload_error_key):
+                st.error(st.session_state[upload_error_key])
+                row['sha256'] = ''
             elif row['sha256']:
                 st.caption('已保留上次上传的标准全文。更换标准版本时，请上传新全文。')
             kinds={'process':'对照与质控要求','qualitative':'定性要求','numeric_record':'数值指标（人工检查）'}

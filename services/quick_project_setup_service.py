@@ -15,6 +15,10 @@ _QUALITY_ARGS = ('confirmed_by', 'evidence', 'context', 'search_record',
                  'adopted_standard_ids', 'registered_standards', 'process_requirements')
 
 
+class QuickSetupDetailsError(ValueError):
+    """A setup issue belonging to the detection-settings step."""
+
+
 def _json(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, allow_nan=False,
                       separators=(',', ':'), default=str)
@@ -95,16 +99,30 @@ def prepare_quick_project_setup(values):
         return _prepare(connection, values)
 
 
+def prepare_quick_project_details(values):
+    """Validate the first step with the same checks used by preview and save."""
+    with read_snapshot() as connection:
+        return _prepare_details(connection, values)[1]
+
+
+def _prepare_details(connection, values):
+    try:
+        name = str(values.get('template_name') or '').strip()
+        if not name:
+            raise ValueError('请填写项目名称。')
+        if connection.execute('SELECT 1 FROM qc_project_templates WHERE template_name=? AND is_disabled=0', (name,)).fetchone():
+            raise ValueError('已存在同名项目，请打开原项目或修改名称。')
+        context = _context(connection, values)
+        choice = _product_review(values)
+    except (ValueError, TypeError) as error:
+        raise QuickSetupDetailsError(str(error)) from error
+    return name, context, choice
+
+
 def _prepare(connection, values):
     from services.quality_review_service import build_review
     from services.quality_target_service import get_requirement, validate_spec_for_item, select_rule, finite_number
-    name = str(values.get('template_name') or '').strip()
-    if not name:
-        raise ValueError('请填写项目名称。')
-    if connection.execute('SELECT 1 FROM qc_project_templates WHERE template_name=? AND is_disabled=0', (name,)).fetchone():
-        raise ValueError('已存在同名项目，请打开原项目或修改名称。')
-    context = _context(connection, values)
-    choice = _product_review(values)
+    name, context, choice = _prepare_details(connection, values)
     quality = dict(values.get('quality') or {})
     if not quality.get('checked'):
         raise ValueError('请核对并确认质量要求与全部浓度水平。')

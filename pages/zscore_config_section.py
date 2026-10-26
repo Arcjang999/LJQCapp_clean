@@ -28,8 +28,9 @@ def render_zscore_v12_configuration_selection(manage_tab, projects, project_id, 
             badges=["多水平", "均值和标准差"], tone="accent",
         )
         if issues:
-            st.warning(f"有 {len(issues)} 项批次设置需要检查，暂不能录入。")
-            with st.expander("查看待检查项目"):
+            st.warning(f"有 {len(issues)} 项批次设置需要检查，请按下方清单到“资料与批次 → 项目/批次管理”核对。"
+                + ("设置已确认的其他批次仍可选择。" if not projects.empty else "请先完成并确认所需批次，再回到这里选择。"))
+            with st.expander("查看待检查项目", expanded=projects.empty):
                 st.dataframe(pd.DataFrame(issues).rename(columns={"config_name": "批次名称", "test_item_name": "检验项目", "lot_no": "质控品批号", "issue": "说明"}), hide_index=True)
         if projects.empty:
             st.info("尚无可用的多水平项目。请先添加检验项目、选择质控品批号并确认批次设置。")

@@ -17,6 +17,8 @@ def render_daily_result_files(draft):
             if st.button('预览结果文件'):
                 draft['file_preview']=preview_daily_workbook(data,draft)
             preview=draft.get('file_preview')
+            if preview and preview['file_hash']!=digest:
+                st.info('上传的文件已更换，请重新点击“预览结果文件”，核对后再带入结果草稿。')
             if preview and preview['file_hash']==digest:
                 for error in preview['errors']:st.error(error)
                 st.dataframe(pd.DataFrame([{'文件行号':r['line'],'检验项目':r['test_item_name'],'水平':r['level_name'],'检测值':r['value']} for r in preview['rows']]),hide_index=True,width='stretch')

@@ -323,8 +323,9 @@ def _render_instant_transfer_section(context: dict[str, object]) -> None:
         st.rerun()
     blockers = list(transfer_state.get("blockers", []))
     if blockers:
-        with st.expander("查看转入条件"):
-            st.caption("\n".join(f"- {reason}" for reason in blockers))
+        st.info("暂时不能转入 LJ 法，请先完成：\n\n" + "\n".join(f"- {reason}" for reason in blockers))
+    if st.session_state.get("qc_record_dialog") or st.session_state.get("qc_transfer_dialog"):
+        st.info("请先完成或取消当前打开的记录、导入或导出窗口，再点击“确认转入 LJ 法”。")
 
 
 def _resolve_instant_tone_key(status: str) -> str | None:

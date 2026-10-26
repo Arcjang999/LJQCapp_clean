@@ -195,6 +195,8 @@ def _render_project_form(ctx):
     _text(ctx, 'notes', '项目备注', multiline=True)
     registration_open = render_project_dependencies(ctx, kind='project', locked_identity=locked)
     relation_pending = render_pending_product_relation_notice(ctx)
+    if ctx['template_id'] is None and not reviewed:
+        st.info('“保存项目”暂不可用。请按上方质控品区域的提示完成选择，并点击“确认所选质控品”。')
     cancel, save = st.columns(2)
     if cancel.button('取消', key='project_dialog_cancel', disabled=registration_open):
         _cancel(ctx)
@@ -438,6 +440,14 @@ def _render_panel_source(ctx, template, options):
     cancel, preview = st.columns(2)
     from ui.project_dependencies import render_project_dependencies
     registration_open = render_project_dependencies(ctx, kind='panel')
+    if not candidates:
+        instruction = {
+            '已有项目': '请在“从哪个项目复制”选择来源项目，并在“本次带入项目”中至少选择一项。',
+            '导入配置清单': '请在“项目配置 XLSX”上传有效配置文件，并在“本次带入项目”中至少选择一项。',
+            '质控品适用检验项目': '请在“本次检验项目”中至少选择一项；没有清单时，点击“自行选择检验项目”。',
+            '选择检验项目': '请在“本次检验项目”中至少选择一项。',
+        }[source]
+        st.info('“预览整组带入”暂不可用。' + instruction)
     if cancel.button('取消', key='panel_source_cancel', disabled=registration_open):
         _finish()
     if preview.button('预览整组带入', type='primary', disabled=not candidates or registration_open, key='panel_source_preview'):
@@ -516,6 +526,13 @@ def _render_panel_form(ctx):
         fields = st.multiselect('选择需要统一修改的内容', list(_PANEL_FIELDS), format_func=_PANEL_FIELDS.get, key='panel_bulk_fields_' + ctx['token'])
         values = _panel_values(ctx, template, options)
         overwrite = st.checkbox('同时替换所选内容的原填写', key='panel_bulk_overwrite_' + ctx['token'])
+        if not selected or not fields:
+            missing = []
+            if not selected:
+                missing.append('在“选择项目”中至少选择一项')
+            if not fields:
+                missing.append('在“选择需要统一修改的内容”中至少选择一项')
+            st.caption('点击“预览统一设置”前，请先' + '，并'.join(missing) + '。')
         if st.button('预览统一设置', disabled=not selected or not fields, key='panel_bulk_preview'):
             ctx['bulk_preview'] = preview_panel_defaults(ctx['draft']['rows'], values,
                 selected_row_keys=selected, fields=fields, overwrite=overwrite)

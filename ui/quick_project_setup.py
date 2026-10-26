@@ -11,7 +11,8 @@ import pandas as pd
 import streamlit as st
 
 from services.quick_project_setup_service import (
-    get_quick_setup_context, prepare_quick_project_setup, save_quick_project_setup,
+    QuickSetupDetailsError, prepare_quick_project_details,
+    prepare_quick_project_setup, save_quick_project_setup,
 )
 
 
@@ -83,7 +84,7 @@ def _convert_setup_mode(ctx, target):
     if old.get('manual_choice_drafts'):
         draft['manual_choice_drafts'] = deepcopy(old['manual_choice_drafts'])
     ctx.update(kind=kind, draft=draft, token=uuid4().hex, quick_step='details')
-    for key in ('setup_mode_switch', 'quick_preview', 'quick_quality_identity', 'quick_auto_name_item'):
+    for key in ('setup_mode_switch', 'quick_preview', 'quick_quality_identity', 'quick_quality_inputs', 'quick_auto_name_item'):
         ctx.pop(key, None)
 
 
@@ -140,6 +141,8 @@ def _render_details(ctx):
         test_item_id=draft['test_item_id'], method_id=draft['method_id'], locked=registration_pending or dependency_pending,
         allow_relation_edit=not dependency_pending)
     materials_ready = False
+    missing_levels = []
+    duplicate_levels = False
     registration_open = False
     if draft.get('qc_material_id') is not None:
         materials = available_materials(draft['qc_material_id'])
@@ -160,7 +163,10 @@ def _render_details(ctx):
                 format_func=lambda value: '请选择浓度水平、批号和效期' if value is None else material_label(options[value]))
             if selected is not None:
                 level_ids.append(selected)
+            else:
+                missing_levels.append(str(order))
         draft['level_ids'] = level_ids
+        duplicate_levels = len(set(level_ids)) != len(level_ids)
         materials_ready = len(level_ids) == draft['level_count'] and len(set(level_ids)) == len(level_ids)
         st.caption('为每个水平选择质控品批号和效期，各水平须使用不同的质控品记录。试剂批号在录入检测结果时选择。')
         if options and not materials_ready:
@@ -174,13 +180,34 @@ def _render_details(ctx):
         _text(ctx, 'notes', '项目备注', multiline=True)
     dependency_open = render_project_dependencies(ctx, kind='quick', disabled=registration_open)
     relation_pending = render_pending_product_relation_notice(ctx)
+    requirements = []
+    for field, label in (('test_item_id', '检验项目'), ('lab_instrument_id', '仪器'),
+                         ('reagent_id', '试剂'), ('method_id', '方法学'), ('unit_id', '单位')):
+        if draft.get(field) is None:
+            requirements.append('在本页选择“' + label + '”。')
+    if not str(draft.get('template_name') or '').strip():
+        requirements.append('填写本页的“项目名称”。')
+    if not reviewed:
+        requirements.append('在“试剂与质控品”中选择并确认本次使用的质控品。')
+    if missing_levels:
+        requirements.append('选择水平 ' + '、'.join(missing_levels) + ' 的实际质控品；缺少记录时点击“登记质控品批号”。')
+    if duplicate_levels:
+        requirements.append('各水平不能选择同一条质控品记录，请调整上方“水平 N 的实际质控品”。')
+    if registration_open:
+        requirements.append('先保存或取消当前的质控品批号登记，再继续项目设置。')
+    if dependency_open:
+        requirements.append('先保存或取消“补充基础资料”中正在填写的记录。')
+    if relation_pending:
+        requirements.append('先保存或取消尚未完成的试剂与质控品配套记录。')
+    if requirements:
+        st.warning('继续前请先完成：\n\n' + '\n'.join('- ' + message for message in requirements))
     cancel, forward = st.columns(2)
     if cancel.button('取消', key='project_dialog_cancel', disabled=registration_open or dependency_open):
         _cancel(ctx)
     if forward.button('下一步：设置质量要求', type='primary', key='quick_details_next',
                       disabled=not reviewed or not materials_ready or registration_open or dependency_open or relation_pending):
         try:
-            get_quick_setup_context(draft)
+            prepare_quick_project_details(draft)
         except (ValueError, TypeError) as error:
             st.error(str(error))
         else:
@@ -189,6 +216,7 @@ def _render_details(ctx):
                 sort_keys=True).encode()).hexdigest()[:12]
             if ctx.get('quick_quality_identity') != identity:
                 draft['quality'] = {}
+                ctx.pop('quick_quality_inputs', None)
                 ctx['quick_quality_identity'] = identity
             ctx['quick_step'] = 'quality'
             st.rerun()
@@ -196,19 +224,70 @@ def _render_details(ctx):
         request_setup_mode(ctx, 'group')
 
 
+def _remember_quality_inputs(ctx):
+    """Keep current widget input even when an upstream reference becomes invalid."""
+    import re
+    identity = ctx.get('quick_quality_identity')
+    if not identity:
+        return
+    prefix = 'quick_quality_' + ctx['token'] + '_' + identity + '_'
+    saved = ctx.get('quick_quality_inputs') or {}
+    same_draft = saved.get('identity') == identity and saved.get('token') == ctx['token']
+    registering_sources = (bool(st.session_state.get(prefix+'advanced_search')) and
+                           st.session_state.get(prefix+'search_conclusion') == 'registered')
+    registered_count = st.session_state.get(prefix+'registered_count', 0)
+    def active_input(key):
+        row = re.match(re.escape(prefix) + r'registered_(\d+)_', key)
+        return not row or (registering_sources and int(row.group(1)) < registered_count)
+    values = {key: deepcopy(value) for key, value in saved.get('values', {}).items()
+              if key.startswith(prefix) and active_input(key)} if same_draft else {}
+    upload_errors = {}
+    for key, value in list(st.session_state.items()):
+        if not key.startswith(prefix) or not active_input(key):
+            continue
+        upload = re.fullmatch(re.escape(prefix) + r'registered_(\d+)_file', key)
+        if upload and value is not None:
+            # File-upload widgets cannot be assigned on a later rerun. Retain
+            # the same PDF identity used by the existing standard form instead.
+            index = int(upload.group(1))
+            quality = ctx['draft'].setdefault('quality', {})
+            sources = quality.setdefault('registered_standards', [])
+            while len(sources) <= index:
+                sources.append({})
+            contents = value.getvalue()
+            valid = isinstance(contents, bytes) and contents.startswith(b'%PDF-')
+            sources[index]['sha256'] = sha256(contents).hexdigest() if valid else ''
+            error_key = prefix + 'registered_' + str(index) + '_upload_error'
+            upload_errors[error_key] = '' if valid else '请上传可打开的标准全文 PDF 文件。'
+        elif not key.endswith(('_file', '_process_reset')):
+            values[key] = deepcopy(value)
+    for key, message in upload_errors.items():
+        st.session_state[key] = message
+        values[key] = message
+    ctx['quick_quality_inputs'] = dict(identity=identity, token=ctx['token'], values=values)
+
+
 def _render_quality(ctx):
     from ui.project_dialogs import _cancel
+    _remember_quality_inputs(ctx)
     try:
-        context = get_quick_setup_context(ctx['draft'])
+        context = prepare_quick_project_details(ctx['draft'])
     except (ValueError, TypeError) as error:
         st.error(str(error))
+        st.info('请点击“返回检测设置”，在上一步修改上述项目、资料或实际批号，再回来核对质量要求。')
         if st.button('返回检测设置', key='quick_invalid_back'):
             ctx['quick_step'] = 'details'
             st.rerun()
         if st.button('取消', key='project_dialog_cancel'):
             _cancel(ctx)
         return
+    saved = ctx.get('quick_quality_inputs') or {}
+    if saved.get('identity') == ctx.get('quick_quality_identity'):
+        for key, value in saved.get('values', {}).items():
+            if key not in st.session_state:
+                st.session_state[key] = deepcopy(value)
     ctx['draft']['quality'] = _quality_form(context, ctx)
+    _remember_quality_inputs(ctx)
     back, cancel, forward = st.columns(3)
     if back.button('返回检测设置', key='quick_quality_back'):
         ctx['quick_step'] = 'details'
@@ -219,8 +298,12 @@ def _render_quality(ctx):
                       disabled=not ctx['draft']['quality'].get('checked') or ctx['draft']['quality'].get('blocked', False)):
         try:
             ctx['quick_preview'] = prepare_quick_project_setup(ctx['draft'])
+        except QuickSetupDetailsError as error:
+            st.error(str(error))
+            st.info('上述内容在上一步填写。请点击“返回检测设置”修改，再回来核对质量要求。')
         except (ValueError, TypeError) as error:
             st.error(str(error))
+            st.info('请按上述提示修改本页的质量要求，再点击“下一步：查看设置”。')
         else:
             ctx['quick_step'] = 'preview'
             st.rerun()
@@ -245,7 +328,10 @@ def _render_preview(ctx):
     quality = ctx['draft']['quality']
     st.caption('质量要求确认人：' + quality['confirmed_by'])
     st.caption('请查看以上检验项目、仪器、试剂、质控品和质量要求。点击“确认保存并进入录入”后，即可开始输入检测结果。')
-    back, cancel, save = st.columns(3)
+    details, back, cancel, save = st.columns([1, 1, 0.7, 1.6])
+    if details.button('返回检测设置', key='quick_preview_details'):
+        ctx['quick_step'] = 'details'
+        st.rerun()
     if back.button('返回质量要求', key='quick_preview_back'):
         ctx['quick_step'] = 'quality'
         st.rerun()
@@ -255,8 +341,12 @@ def _render_preview(ctx):
         try:
             receipt = save_quick_project_setup(deepcopy(ctx['draft']),
                 expected_preview_hash=preview['preview_hash'], request_key=ctx['token'])
+        except QuickSetupDetailsError as error:
+            st.error(str(error))
+            st.info('请点击“返回检测设置”修改上述内容，再重新查看设置并保存。')
         except (ValueError, TypeError) as error:
             st.error(str(error))
+            st.info('请点击“返回质量要求”核对上述内容，再重新查看设置并保存；项目、单位或实际批号需要修改时，点击“返回检测设置”。')
         except (sqlite3.Error, OSError):
             logging.exception('Quick project setup failed')
             st.error('项目尚未保存，全部填写内容仍保留。请检查保存位置后重试。')

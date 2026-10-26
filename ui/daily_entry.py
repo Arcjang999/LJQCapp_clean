@@ -276,6 +276,8 @@ def render_daily_entry():
         if preview:
             _errors(preview['errors'])
             st.dataframe(pd.DataFrame([{'行号':r['line'],'检测值':r['value'],'备注':r['note'] or ''} for r in preview['rows']]),hide_index=True,width='stretch')
+            if text!=draft.get('paste_text'):
+                st.info('粘贴区域的内容已修改，请重新点击“预览粘贴内容”，再确认带入本组。')
             if st.button('确认带入本组',disabled=not preview['valid'] or text!=draft.get('paste_text')):
                 apply_paste(draft,preview);draft.pop('paste_preview',None)
                 for key in list(st.session_state):
@@ -316,6 +318,8 @@ def render_daily_entry():
     if sk not in st.session_state:st.session_state[sk]=draft['allow_same_time']
     st.checkbox('已核对：相同检测时间的记录属于另一次检测',key=sk,on_change=_field,args=('allow_same_time',sk))
     _errors(draft.get('errors',[]))
+    if not rows:
+        st.info('请在上方“本次录入项目”中至少选择一个检验项目，再检查本组结果。')
     left,right=st.columns(2)
     if left.button('检查本组结果',key='entry_validate',type='primary',disabled=not rows):
         from services.daily_entry_service import validate_submission

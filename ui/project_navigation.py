@@ -280,6 +280,8 @@ def _render_workspace(template_id):
             config = choices[cid]
             from services.material_workflow_service import config_material_summary
             st.caption(config_material_summary(config['lot_config_id']))
+            if config['status'] != 'active':
+                st.info('“进入当前批次”暂不可用：此批次尚未确认。请点击“批次设置”，核对各水平、质量目标和实际批号，再点击“确认批次设置”。')
             go, settings = st.columns(2)
             if go.button('进入当前批次', type='primary', key='home_open_batch', disabled=config['status']!='active', width='stretch'):
                 try:
@@ -290,6 +292,8 @@ def _render_workspace(template_id):
                     open_configured_batch(binding)
             if settings.button('批次设置', key='workspace_batch_settings', width='stretch'):
                 open_project_setup(template_id, config_id=config['lot_config_id'], lot_config_item_id=cid)
+        if template['status'] != 'active':
+            st.caption('“新增批次”暂不可用：请按本页提示补齐检验项目和质量目标，再点击上方“确认项目设置”。')
         if st.button('新增批次', key='workspace_create_batch', disabled=template['status']!='active'):
             st.session_state['workspace_create_batch_for'] = template_id
             st.rerun()

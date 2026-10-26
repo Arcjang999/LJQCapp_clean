@@ -789,6 +789,8 @@ def _render_import_export_tab() -> None:
         if len(uploaded_bytes) > 10 * 1024 * 1024:
             st.error('上传文件超过 10 MB，无法导入。')
         else:
+            if target_template_id is None:
+                st.info('请先在上方“导入到项目”中选择一个项目，再点击“查看导入预览”。')
             if st.button('查看导入预览', disabled=target_template_id is None, key='v11_prepare_project_import'):
                 try:
                     st.session_state['v11_import_prepared'] = prepare_project_template_import(
@@ -826,6 +828,8 @@ def _render_import_export_tab() -> None:
                         confirmed = st.checkbox('已查看以上清单，确认移除这些项目并使用文件中的设置',
                             key='v11_import_replace_' + str(prepared['template_id']) + '_' +
                             str(prepared['expected_revision']) + '_' + prepared['file_sha256'])
+                        if not confirmed and not prepared['errors'] and fresh:
+                            st.info('请先核对移除清单并勾选上方确认项，再点击“确认批量导入”。')
                     apply, cancel = st.columns(2)
                     if cancel.button('取消本次导入', key='v11_cancel_project_import'):
                         st.session_state.pop('v11_import_prepared', None)

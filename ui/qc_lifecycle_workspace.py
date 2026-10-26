@@ -91,6 +91,8 @@ def _verification_label(row):
 
 def _verification_choice(state, field, label, rows):
     choices = {row['id']: _verification_label(row) for row in sorted(rows, key=lambda row: (row['confirmed_at'], row['id']), reverse=True)}
+    if not choices:
+        st.info(label.rstrip(' *') + '还没有验证记录。请先取消本次操作，在“登记批号验证”中登记该批号的检查结论和依据，再重新打开并选择记录。')
     return _field(state, field, label, 'selectbox', options=[None] + list(choices),
                   format_func=lambda value: '请选择验证记录' if value is None else choices[value])
 
@@ -283,6 +285,13 @@ def _render_binding_detail(context):
         disabled = kind == 'combination' and (binding['qc_method'] != 'zscore' or binding['binding_status'] != 'active')
         if column.button(label, key='qc_lifecycle_' + kind, disabled=disabled, width='stretch'):
             open_qc_lifecycle_dialog(kind, binding['id'])
+    if binding['qc_method'] != 'zscore':
+        st.caption('“部分水平换批”用于多水平法。当前为单水平检测，需要换批时请使用“更换质控品批次”。')
+    elif binding['binding_status'] != 'active':
+        if context['config']['status'] == 'draft':
+            st.info('请点击上方“打开批次设置”，完成各水平设置并点击“确认批次设置”，再进行“部分水平换批”。')
+        else:
+            st.info('“部分水平换批”暂不可用。请点击上方“打开批次设置”查看具体原因，并按提示核对项目、仪器和质控品状态；已被替代的批次请改选当前批次。')
     if context['verifications']:
         lot_names = {lot['id']: lot['lot_no'] for lot in context['lots']}
         history = [{'批号': lot_names.get(v['qc_lot_id'], '未记录'), '结论': '通过' if v['conclusion'] == 'pass' else '未通过',

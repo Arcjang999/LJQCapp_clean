@@ -381,6 +381,8 @@ def render_event_detail(selection):
     for field in ('effect_description', 'effect_evidence'):
         _text(ctx, field, multiline=True, disabled=disabled)
     if event['status'] in ('pending', 'in_progress'):
+        if event['status'] == 'pending' and not stale:
+            st.info('请先点击“保存处理草稿”，再点击“提交效果确认”。')
         a, b = st.columns(2)
         if a.button('保存处理草稿', type='primary', disabled=stale): _save(event, ctx, 'save_draft')
         if b.button('提交效果确认', disabled=stale or event['status'] == 'pending',

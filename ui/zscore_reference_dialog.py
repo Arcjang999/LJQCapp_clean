@@ -132,9 +132,12 @@ def render_zscore_reference_summary(batch_id, template_id, required_n, profiles,
             with read_snapshot() as connection:
                 require_writable(connection, 'zscore', batch_id, read_only=True)
             writable = True
-        except ValueError:
+        except ValueError as error:
             writable = False
+            st.info('厂家参考值当前仅供查看：' + str(error))
         busy = any(st.session_state.get(key) for key in ('qc_record_dialog', 'qc_transfer_dialog', REFERENCE_DIALOG_KEY))
+        if writable and busy:
+            st.info('请先完成或取消当前打开的记录、导入或导出窗口，再编辑厂家参考值。')
         if st.button('编辑厂家参考值', key=f'zscore_reference_open_{batch_id}', disabled=not writable or busy):
             open_zscore_reference_dialog(batch_id, template_id, required_n, level_ids, labels)
 

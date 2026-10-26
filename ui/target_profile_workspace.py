@@ -110,8 +110,10 @@ def _render_detail(context):
     st.markdown('**当前生效的均值和标准差**')
     if current:
         _render_profile(current, context)
-    else:
+    elif context['editable']:
         st.info('点击“确认均值和标准差”填写各水平参数；用本批结果建立时，可回质控工作台查看采集进度。')
+    else:
+        st.caption('当前尚未确认均值和标准差。')
     if not context['editable']:
         st.info(context['read_only_reason'])
     action = '调整均值和标准差' if current else '确认均值和标准差'

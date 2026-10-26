@@ -273,7 +273,7 @@ def _render_editor(state, current):
     if draft['verification_id'] in verifications:
         _verification_detail(verifications[draft['verification_id']])
     elif draft['reagent_lot_id'] is not None and not verifications and _effective_time(draft['effective_at']) is not None:
-        st.info('所选批号在该生效时间没有可采用的通过验证，请核对验证结论和时间。')
+        st.info('所选批号在该生效时间没有可采用的通过验证，请核对验证结论和时间。需要补登记时，先点击“取消”退出更正，再在此试剂批号的“登记批号验证”中填写并保存，重新打开更正记录。')
     draft['operator'] = st.text_input('操作者', key=_key(state, 'operator', draft['operator']))
     draft['reason'] = st.text_area('更正原因', key=_key(state, 'reason', draft['reason']))
     draft['confirmed'] = st.checkbox('已核对原使用记录、试剂批号、验证记录和生效时间',

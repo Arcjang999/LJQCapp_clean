@@ -321,6 +321,8 @@ def _render_import_dialog(state):
     data = state.get("upload", b"")
     if data:
         st.caption("当前文件：" + state["upload_name"])
+    elif not locked:
+        st.info('请先在“上传检测数据”中选择填写好的文件，再点击“检查文件并预览”。')
     signature = _import_source_signature(method, current)
     if state.get("review") and state.get("source_signature") != signature:
         state.update(review=None, source_signature=None)
@@ -350,6 +352,10 @@ def _render_import_dialog(state):
         _cancel_import(state)
     allowed = bool(review and not review["summary"]["has_blocking_errors"] and review["normalized_rows"]
                    and not locked and (phase == "building" or _ready(method, current)))
+    if data and not review and not locked:
+        st.info('请先点击“检查文件并预览”，核对文件内容后再点击“确认导入”。')
+    elif review and not review['summary']['has_blocking_errors'] and not review['normalized_rows']:
+        st.info('文件中没有可导入的检测结果。请按“下载导入模板”填写检测时间和检测值，重新上传并检查。')
     if confirm.button("确认导入", type="primary", disabled=not allowed, key=f"qc_transfer_confirm_{nonce}", width="stretch"):
         try:
             count = commit_data_import(method, batch_id, phase, review, state["source_signature"])
@@ -386,7 +392,10 @@ def _render_export_dialog(state, context):
                    "重新导入时请按所需阶段下载导入模板并整理原始数据，不能直接上传全部阶段的导出文件。"
                    + ("每行是一整次检测，各水平完整列出。" if method == "zscore" else ""))
         if frame.empty:
-            st.info("所选范围内暂无检测记录。")
+            if dates == '按月或自选日期' and period is None:
+                st.info('请先修正上方报告期间的开始日期和结束日期，再下载检测数据。')
+            else:
+                st.info("所选范围内暂无检测记录。请调整“检测范围”或“数据日期”，再下载。")
         else:
             st.caption(f"共{len(frame)}次检测。")
             excel = export_format == "Excel (.xlsx)"

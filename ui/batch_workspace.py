@@ -60,7 +60,10 @@ def render_batch_item_detail(item_id):
             '浓度编号': level.get('level_code') or '', '批号': level.get('lot_no') or '',
             '效期': level.get('expiry_date') or ''} for level in levels]), hide_index=True, width='stretch')
     else:
-        st.info('尚未选择质控品水平，请点击“编辑水平设置”。')
+        if ctx['editable']:
+            st.info('尚未选择质控品水平，请点击“编辑水平设置”。')
+        else:
+            st.info('尚未选择质控品水平。当前批次仅供查看，不能在这里补填；请核对批次状态后再设置可编辑的批次。')
     profile = None
     if binding and binding['qc_method'] != 'instant':
         from services.lot_lifecycle_service import target_profile
@@ -133,6 +136,9 @@ def render_batch_detail(config_id):
         if config['status'] == 'draft':
             if errors:
                 st.warning('请完成以下设置：\n\n' + '\n'.join(f'- {error}' for error in errors))
+                st.info('请先在上方列表选择对应检验项目：水平选择、均值和标准差在“编辑水平设置”中修改；质控品适用性和质量要求在“质量目标”中核对。保存后再点击“确认批次设置”。')
+                if any('效期' in error for error in errors):
+                    st.info('质控品批号或效期需要修改时，点击顶部“质控品管理”，选择产品后打开“管理批次”修改，再回到本批次核对。')
             if st.button('确认批次设置', key=f'v11_activate_lot_config_{config_id}', type='primary', disabled=bool(errors)):
                 try:
                     with atomic_write():
@@ -238,7 +244,12 @@ def render_batch_workspace():
     if st.button('新增批次', type='primary', key='batch_create', disabled=not can_create):
         _begin_create(project)
     if not can_create:
-        st.caption('请先在上方“项目”中选择一个设置已确认的项目，再点击“新增批次”。')
+        if project is None:
+            st.caption('请先在上方“项目”中选择一个设置已确认的项目，再点击“新增批次”。')
+        elif projects[project]['is_disabled']:
+            st.info('“新增批次”暂不可用：所选项目已停用。请点击顶部“返回主页”，打开该项目，在“编辑项目”中恢复，再确认项目设置。')
+        else:
+            st.info('“新增批次”暂不可用：所选项目的设置尚未确认。请点击顶部“返回主页”，打开该项目，按页面提示补齐后点击“确认项目设置”。')
     configs = list_lot_configs(template_id=project, include_disabled=include)
     if not configs.empty:
         from services.material_workflow_service import config_material_summary
