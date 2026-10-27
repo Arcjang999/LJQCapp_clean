@@ -1,4 +1,6 @@
 """Display confirmed catalogue concentration text without assigning project levels."""
+from string import punctuation
+
 from services.product_directory_service import list_catalog_product_choices
 
 
@@ -29,3 +31,9 @@ def product_concentration_summary(row):
     return '｜'.join(label + '：' + _text(row.get(field)) for field, label in
                     (('concentration', '浓度'), ('concentration_code', '浓度编号'))
                     if _text(row.get(field)) not in ('', '/'))
+
+
+def product_concentration_caption(row):
+    """Keep source punctuation literal when Streamlit renders the caption."""
+    return product_concentration_summary(row).translate(str.maketrans(
+        {character: '\\' + character for character in punctuation}))

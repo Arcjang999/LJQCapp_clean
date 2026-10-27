@@ -14,7 +14,9 @@ from database import atomic_write
 
 from services.master_data_service import list_qc_materials
 from services.product_directory_service import ensure_builtin_bondson_directory, list_catalog_product_choices
-from services.qc_product_display_service import product_choice_label, product_concentration_summary, product_display_rows
+from services.qc_product_display_service import (
+    product_choice_label, product_concentration_summary, product_concentration_caption, product_display_rows,
+)
 from services.qc_product_recommendation_service import (
     get_qc_product_recommendations, save_qc_product_relation, validate_qc_product_choice, validate_choice_review,
 )
@@ -69,8 +71,7 @@ class ProductLevelDisplayTests(unittest.TestCase):
                 ('reagent_id', 'lab_instrument_id', 'test_item_id', 'method_id')})['candidates'][0]
             self.assertIn('｜S3｜', candidate['label'])
             self.assertIn(candidate['label'], app.selectbox(key='choice_product').options)
-            self.assertTrue(any(selected['concentration'] in item.value and '浓度编号：S3' in item.value
-                                for item in app.caption))
+            self.assertIn(product_concentration_caption(selected), [item.value for item in app.caption])
             app.button(key='choice_confirm').click().run()
             self.assertTrue(app.session_state['choice_context']['choice_valid'])
             app.radio(key='choice_mode').set_value('人工选品').run()
@@ -89,7 +90,7 @@ class ProductLevelDisplayTests(unittest.TestCase):
             app = self.open(values, locked=True)
             captions = '\n'.join(item.value for item in app.caption)
             self.assertIn('｜S3｜', captions)
-            self.assertIn(selected['concentration'], captions)
+            self.assertIn(product_concentration_caption(selected), captions)
             draft = app.session_state['choice_context']['draft']
             self.assertEqual(values['level_ids'], draft['level_ids'])
             self.assertEqual(1, draft['level_count'])
@@ -105,6 +106,55 @@ class ProductLevelDisplayTests(unittest.TestCase):
             label = product_choice_label(row)
             self.assertNotIn('S1', label)
             self.assertEqual('', product_concentration_summary(row))
+            self.assertEqual(before, database_contents())
+
+    def test_caption_preserves_markdown_punctuation_without_changing_source_or_choice_label(self):
+        row = dict(manufacturer_name='厂家', product_code='QC_[03]', product_name='质控品',
+                   concentration=r'1.00*10^5～1.00*10^6 IU/mL _低值_ [水平](原始记录) \\ **确认** $10^5$ <S3>',
+                   concentration_code='S_3[原编号]')
+        original = deepcopy(row)
+        source = product_concentration_summary(row)
+        app = AppTest.from_string(
+            'import streamlit as st\n'
+            'from services.qc_product_display_service import product_concentration_caption\n'
+            'st.caption(product_concentration_caption(st.session_state["row"]))')
+        app.session_state['row'] = row
+        app.run()
+        self.assertFalse(list(app.exception))
+        self.assertEqual(product_concentration_caption(row), app.caption[0].value)
+        self.assertIn(r'1\.00\*10\^5～1\.00\*10\^6', app.caption[0].value)
+        self.assertIn(r'\_低值\_', app.caption[0].value)
+        self.assertIn(r'\[水平\]\(原始记录\)', app.caption[0].value)
+        self.assertIn(r'S\_3\[原编号\]', app.caption[0].value)
+        self.assertEqual('浓度：' + row['concentration'] + '｜浓度编号：' + row['concentration_code'], source)
+        self.assertEqual('厂家｜QC_[03]｜S_3[原编号]｜质控品', product_choice_label(row))
+        self.assertEqual(original, row)
+        self.assertEqual('', product_concentration_caption({}))
+
+    def test_all_three_caption_entry_points_escape_the_source_summary(self):
+        from tests.material_catalog_smoke_test import catalogue_page
+
+        with IsolatedDatabase():
+            values, selected = self.fixture()
+            before = database_contents()
+            raw = '浓度：1.00*10^5～1.00*10^6 IU/mL _低值_ [水平](原始记录)｜浓度编号：S3'
+            with patch('services.qc_product_display_service.product_concentration_summary', return_value=raw):
+                expected = product_concentration_caption(selected)
+                choice = self.open(values)
+                catalogue = AppTest.from_string(
+                    'import streamlit as st\nfrom ui.project_dialogs import _render_catalogue_picker\n'
+                    '_render_catalogue_picker(st.session_state["ctx"])', default_timeout=20)
+                catalogue.session_state['ctx'] = dict(token='caption', catalogue_open=True, draft={})
+                catalogue.session_state['project_catalogue_product_caption'] = values['qc_material_id']
+                catalogue.run()
+                material = AppTest.from_function(catalogue_page, default_timeout=20)
+                material.session_state['material_catalog_product_id'] = values['qc_material_id']
+                material.run()
+                for name, app in (('choice', choice), ('catalogue', catalogue), ('material', material)):
+                    with self.subTest(entry=name):
+                        self.assertFalse(list(app.exception), list(app.exception))
+                        self.assertIn(expected, [item.value for item in app.caption])
+                        self.assertNotIn(raw, [item.value for item in app.caption])
             self.assertEqual(before, database_contents())
 
     def test_source_identifiers_and_combination_text_are_preserved(self):

@@ -12,7 +12,7 @@ import streamlit as st
 
 from services.master_data_service import list_qc_materials
 from services.qc_product_display_service import (
-    product_choice_label, product_concentration_summary, product_display_rows,
+    product_choice_label, product_concentration_caption, product_display_rows,
 )
 from services.qc_product_recommendation_service import (
     get_qc_product_recommendations, validate_qc_product_choice, validate_choice_review,
@@ -93,7 +93,7 @@ def render_product_choice(ctx, *, reagent_id, lab_instrument_id, test_item_id=No
         current = draft[field]
         ctx[prefix + '_last_product'] = current
     if current in products:
-        concentration = product_concentration_summary(products[current])
+        concentration = product_concentration_caption(products[current])
         if concentration:
             st.caption(concentration)
     if (draft.get('product_choice_review') or {}).get('qc_material_id') != current:

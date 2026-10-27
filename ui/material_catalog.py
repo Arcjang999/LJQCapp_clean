@@ -15,7 +15,7 @@ from services.material_catalog_service import (
     update_control_material, update_material_product,
 )
 from services.material_workflow_service import concentration_label, list_material_specs, material_label, register_control_material
-from services.qc_product_display_service import product_choice_label, product_concentration_summary, product_display_rows
+from services.qc_product_display_service import product_choice_label, product_concentration_caption, product_display_rows
 
 
 def _open_dialog(kind: str, *, product_id=None, level_id=None) -> None:
@@ -370,7 +370,7 @@ def render_material_catalog(*, render_dialog: bool = True, include_directory: bo
         st.info('先选择或新增质控品，再在下方登记批号、效期和浓度水平。')
     else:
         product = get_material_product(product_id)
-        concentration = product_concentration_summary(products[product_id])
+        concentration = product_concentration_caption(products[product_id])
         if concentration:
             st.caption(concentration)
         product_info, product_edit, product_status = st.columns([0.5, 0.25, 0.25], vertical_alignment='bottom')

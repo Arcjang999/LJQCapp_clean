@@ -136,7 +136,7 @@ def _render_discard(ctx):
 
 def _render_catalogue_picker(ctx):
     from services.product_directory_service import list_catalog_product_choices, PRODUCT_LABELS
-    from services.qc_product_display_service import product_choice_label, product_concentration_summary
+    from services.qc_product_display_service import product_choice_label, product_concentration_caption
     if st.button('从产品名录选择', key='project_catalogue_open'):
         ctx['catalogue_open'] = not ctx.get('catalogue_open', False)
     if not ctx.get('catalogue_open'):
@@ -157,7 +157,7 @@ def _render_catalogue_picker(ctx):
         selected = st.selectbox('选择目录产品', [None, *choices], key=key, filter_mode='fuzzy',
             format_func=lambda value: '请选择' if value is None else product_choice_label(choices[value]))
         if selected is not None:
-            concentration = product_concentration_summary(choices[selected])
+            concentration = product_concentration_caption(choices[selected])
             if concentration:
                 st.caption(concentration)
         if st.button('使用此目录产品', key='project_catalogue_use', disabled=selected is None):
