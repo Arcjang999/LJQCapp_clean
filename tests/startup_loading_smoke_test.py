@@ -53,7 +53,7 @@ with TemporaryDirectory() as folder:
         assert not app.exception
         assert any(button.key == 'home_create_project' for button in app.button)
 
-    for label, module in [('单水平（LJ）', 'lj'), ('多水平法', 'zscore'), ('即时法', 'instant')]:
+    for label, module in [('单水平（L-J）', 'lj'), ('多水平法', 'zscore'), ('即时法', 'instant')]:
         app.session_state['top_level_method_selector'] = label
         app.run()
         assert not app.exception, [e.message for e in app.exception]

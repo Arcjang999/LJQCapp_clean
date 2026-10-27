@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime
 import json
 import sqlite3
 
 import database
 from services.daily_context_service import get_daily_context, issue, _positive, _digest, _json
-from services.lot_lifecycle_service import timestamp
+from services.time_service import local_now, validate_detection_time
 from services.value_type_service import parse_project_input_value
 
 
@@ -39,9 +38,9 @@ def _normalize(request):
     if not str(payload.get('test_time') or '').strip():
         raise DailyEntryError([issue('请填写本次检测时间。', field='test_time')])
     try:
-        payload['test_time'] = timestamp(payload['test_time'])
-    except (ValueError, TypeError):
-        raise DailyEntryError([issue('请填写有效的本次检测时间。', field='test_time')]) from None
+        payload['test_time'] = validate_detection_time(payload['test_time'])
+    except (ValueError, TypeError) as exc:
+        raise DailyEntryError([issue(str(exc) if isinstance(exc, ValueError) else '请填写有效的本次检测时间。', field='test_time')]) from None
     for row in payload['items']:
         if not isinstance(row, dict):
             raise DailyEntryError([issue('项目录入格式无效，请重新核对。')])
@@ -258,7 +257,7 @@ def submit_daily(request):
                 active_key = row['item']['row_key']
                 ids.append(_save_item(payload, row))
             receipts = [_receipt_item(c, row, identifier) for row, identifier in zip(prepared, ids)]
-            saved_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            saved_at = local_now().strftime('%Y-%m-%d %H:%M:%S')
             receipt = dict(submission_id=payload['submission_id'], saved_at=saved_at, operator=payload['operator'],
                 test_time=payload['test_time'], purpose='routine', items=receipts, count=len(receipts), status='saved')
             c.execute('''INSERT INTO qc_daily_submissions(submission_id,payload_hash,request_json,receipt_json,saved_at,operator)

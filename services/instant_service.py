@@ -376,7 +376,7 @@ def analyze_instant_results(results_df: pd.DataFrame) -> tuple[pd.DataFrame, dic
         latest_message = accumulation_message
     elif effective_count > INSTANT_TRANSFER_READY_COUNT:
         over_limit_message = (
-            "当前有效点已超过 20 个，即刻法 SI 表不再继续判定；请确认转入 LJ 法或在 LJ 法中继续质控。"
+            "当前有效点已超过 20 个，即刻法 SI 表不再继续判定；请确认转入 L-J 法或在 L-J 法中继续质控。"
         )
         analysis_df.loc[analysis_df["is_effective"] == 1, "status"] = "有效点"
         analysis_df.loc[analysis_df["is_effective"] == 1, "analysis_prompt"] = over_limit_message
@@ -553,7 +553,7 @@ def analyze_instant_results(results_df: pd.DataFrame) -> tuple[pd.DataFrame, dic
             "grubbs_suspected_effective_sequence": suspected_effective_sequence,
             "grubbs_suspected_value": suspected_value,
             "transfer_ready": transfer_ready,
-            "transfer_message": "已达到 20 个有效点，可确认转入 LJ 法。" if transfer_ready else "",
+            "transfer_message": "已达到 20 个有效点，可确认转入 L-J 法。" if transfer_ready else "",
             "transfer_status": INSTANT_TRANSFER_STATUS_NOT_TRANSFERRED,
             "transfer_action_enabled": False,
             "transfer_blockers": [],
@@ -734,7 +734,7 @@ def _build_instant_transfer_blockers(
     blockers: list[str] = []
     transfer_status = normalize_instant_transfer_status(batch["transfer_status"])
     if transfer_status == INSTANT_TRANSFER_STATUS_TRANSFERRED:
-        blockers.append("该批次已转入 LJ 法")
+        blockers.append("该批次已转入 L-J 法")
     if int(summary["effective_count"]) < INSTANT_TRANSFER_READY_COUNT:
         blockers.append(f"有效点不足 {INSTANT_TRANSFER_READY_COUNT} 个")
     pending_count = int(summary.get("pending_outlier_review_count", 0) or 0)
@@ -948,8 +948,11 @@ def confirm_instant_transfer_to_lj(batch_id: int) -> dict[str, object]:
         )
         transferred_effective_count = int(len(effective_df))
         if transferred_effective_count < INSTANT_TRANSFER_READY_COUNT:
-            raise ValueError(f"有效点不足 {INSTANT_TRANSFER_READY_COUNT} 个，不能确认转入 LJ 法。")
+            raise ValueError(f"有效点不足 {INSTANT_TRANSFER_READY_COUNT} 个，不能确认转入 L-J 法。")
 
+        from services.time_service import validate_detection_time
+        transfer_times = {int(row['id']): validate_detection_time(row['test_time'])
+                          for _, row in effective_df.iterrows()}
         project_plan = _resolve_transfer_project_plan(connection, batch)
         target_project_id = project_plan["project_id"]
         target_project_name = str(project_plan["project_name"])
@@ -1028,7 +1031,7 @@ def confirm_instant_transfer_to_lj(batch_id: int) -> dict[str, object]:
                 """,
                 (
                     target_batch_id,
-                    pd.Timestamp(row["test_time"]).strftime("%Y-%m-%d %H:%M:%S"),
+                    transfer_times[int(row['id'])],
                     str(row.get("operator", "") or ""),
                     float(row["value"]),
                     None if pd.isna(log_value) else float(log_value),

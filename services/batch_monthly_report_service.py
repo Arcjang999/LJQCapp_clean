@@ -17,7 +17,7 @@ from services.report_service import (
 )
 
 logger = logging.getLogger(__name__)
-METHOD_LABELS = {'lj': '单水平（LJ）', 'zscore': '多水平法', 'instant': '即时法'}
+METHOD_LABELS = {'lj': '单水平（L-J）', 'zscore': '多水平法', 'instant': '即时法'}
 STATUS_LABELS = {'pending': '待生成', 'generating': '处理中', 'succeeded': '已生成', 'failed': '未生成'}
 
 
@@ -111,7 +111,7 @@ def _preview_item(row, period, handling_versions=None):
     if row['batch_id'] is None:
         return dict(item, eligible=False, unit_key=f"config:{row['lot_config_item_id']}:{period.key}", reason='批次配置尚未确认并开始使用，不能生成正式期报告。')
     if row['qc_method'] not in ('lj', 'zscore'):
-        return dict(item, eligible=False, reason='即时法不直接生成正式期报告；转入 LJ 后，在对应 LJ 批次生成报告。')
+        return dict(item, eligible=False, reason='即时法不直接生成正式期报告；转入 L-J 后，在对应 L-J 批次生成报告。')
     try:
         from services.report_archive_service import list_report_handling_versions
         package = _build(row['qc_method'], row['batch_id'], period=period)

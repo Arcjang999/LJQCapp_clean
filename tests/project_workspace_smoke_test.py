@@ -255,7 +255,7 @@ def test_project_selection_uses_id_and_filter_clears_hidden_selection():
         assert app.session_state['workspace_project_id'] == first
         shown = app.dataframe[0].value
         assert len(shown) == 3
-        assert dict(zip(shown['质控方法'], shown['水平数'])) == {'单水平（LJ）': 1, '多水平法': 3, '即时法': 1}
+        assert dict(zip(shown['质控方法'], shown['水平数'])) == {'单水平（L-J）': 1, '多水平法': 3, '即时法': 1}
         assert set(shown['方法学']) == {'V11 方法'}
         app.button(key='workspace_back').click().run()
         assert app.selectbox(key='home_project_filter_instrument').value == data['lab_instrument_id']

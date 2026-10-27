@@ -18,6 +18,7 @@ from services.storage_service import (
     create_database_backup,
     migrate_database_to_directory,
     restore_database_from_backup_file,
+    validate_backup_file,
     validate_sqlite_database,
 )
 
@@ -149,10 +150,28 @@ def test_restore_creates_protection_backup_and_restores_previous_snapshot() -> N
         assert not list(at.exception)
 
 
+def test_sqlite_header_does_not_allow_a_damaged_database_restore() -> None:
+    with TemporaryStorageContext() as context:
+        init_db()
+        create_project('保留当前项目', input_value_type='raw')
+        invalid = context.root / 'damaged.db'
+        invalid.write_bytes(b'SQLite format 3\x00' + b'broken database content' * 20)
+        assert not validate_backup_file(invalid)[0]
+        try:
+            restore_database_from_backup_file(invalid)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError('A file header cannot replace SQLite integrity validation.')
+        with get_connection() as connection:
+            assert [row['name'] for row in connection.execute('SELECT name FROM projects')] == ['保留当前项目']
+
+
 if __name__ == "__main__":
     test_default_storage_stays_beside_source_or_packaged_application()
     test_default_path_startup_without_external_config()
     test_database_migration_updates_external_path_config_and_survives_restart()
     test_manual_backup_creates_valid_timestamped_database_file()
     test_restore_creates_protection_backup_and_restores_previous_snapshot()
+    test_sqlite_header_does_not_allow_a_damaged_database_restore()
     print("storage_smoke_test passed")

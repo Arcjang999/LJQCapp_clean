@@ -101,10 +101,12 @@ def ensure_builtin_bondson_directory():
                     manufacturer_id=manufacturer_id)
 
 
-def list_catalog_product_choices(query=''):
+def list_catalog_product_choices(query='', *, connection=None, include_disabled=False):
     """Current enabled directory products, with reviewed text and stable product IDs."""
-    with read_snapshot() as connection:
-        frame = pd.read_sql_query('''SELECT i.product_code,i.product_name,i.concentration,
+    if connection is None:
+        with read_snapshot() as connection:
+            return list_catalog_product_choices(query, connection=connection, include_disabled=include_disabled)
+    frame = pd.read_sql_query('''SELECT i.product_code,i.product_name,i.concentration,
             i.concentration_code,k.product_id,m.display_name AS manufacturer_name
             FROM md_product_directory_keys k
             JOIN md_product_directory_items i ON i.release_id=k.current_release_id
@@ -113,13 +115,14 @@ def list_catalog_product_choices(query=''):
                 AND r.source_code=k.source_code
             JOIN md_qc_materials p ON p.id=k.product_id
             JOIN md_manufacturers m ON m.id=p.manufacturer_id
-            WHERE r.is_test=0 AND i.excluded_reason='' AND p.is_disabled=0 AND m.is_disabled=0
+            WHERE r.is_test=0 AND i.excluded_reason=''
+                AND (? OR (p.is_disabled=0 AND m.is_disabled=0))
                 AND EXISTS(SELECT 1 FROM md_manufacturer_categories c
                     WHERE c.manufacturer_id=m.id AND c.category='qc_material')
                 AND r.id=(SELECT latest.id FROM md_product_directory_releases latest
                     WHERE latest.source_code=r.source_code AND latest.is_test=0
                     ORDER BY latest.id DESC LIMIT 1)
-            ORDER BY m.display_name,i.product_code''', connection)
+            ORDER BY m.display_name,i.product_code''', connection, params=(int(include_disabled),))
     return filter_frame(frame, query, [*PRODUCT_FIELDS, 'manufacturer_name'])
 
 

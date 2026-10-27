@@ -181,7 +181,7 @@ class RecordMaintenanceTransactionTests(unittest.TestCase):
                 self.assertEqual(first_id, second_id)
                 self.assertEqual(after, dump_database())
                 self.assertEqual(1, len(audit_rows()))
-                with self.assertRaisesRegex(ValueError, "维护对象已变化"):
+                with self.assertRaisesRegex(ValueError, "当前选择的检测记录已改变"):
                     save_record_action(method, batch_id, ids[2], "disable", **arguments)
                 self.assertEqual(after, dump_database())
 

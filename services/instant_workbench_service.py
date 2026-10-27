@@ -47,7 +47,7 @@ def _configuration_sources(connection: sqlite3.Connection) -> tuple[list[dict], 
             reject("即时法必须配置 1 个有效水平，参数建立有效点数固定为 20。")
             continue
         if any(level["target_source"] != "building" for level in levels):
-            reject("即时法用于本批次均值和标准差建立，需逐步积累检测数据。使用已确认的人工或厂家靶值时，请选择单水平 LJ 法。")
+            reject("即时法用于本批次均值和标准差建立，需逐步积累检测数据。使用已确认的人工或厂家靶值时，请选择单水平 L-J 法。")
             continue
         snapshot = connection.execute("""
             SELECT id, snapshot_json FROM qc_config_snapshots

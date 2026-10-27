@@ -26,7 +26,7 @@ def render_instant_v12_configuration_selection(selection_area, projects, project
         render_section_intro(
             title="选择即时法批次",
             caption="请返回项目工作台进入已确认的批次，或在此选择后继续。",
-            badges=["单水平", "3 点开始检验", "20 点后可转 LJ"], tone="accent",
+            badges=["单水平", "3 点开始检验", "20 点后可转 L-J"], tone="accent",
         )
         if issues:
             st.warning(f"有 {len(issues)} 项批次设置需要检查，请按下方清单到“资料与批次 → 项目/批次管理”核对。"
@@ -70,7 +70,7 @@ def render_instant_v12_configuration_selection(selection_area, projects, project
                 _render_batch_setup_action('instant_missing_batch_setup')
         elif not batches.empty:
             display = batches.copy()
-            display["transfer_status"] = display["transfer_status"].map({"transferred": "已转入 LJ", "not_transferred": "未转入"}).fillna("未转入")
+            display["transfer_status"] = display["transfer_status"].map({"transferred": "已转入 L-J", "not_transferred": "未转入"}).fillna("未转入")
             st.dataframe(display[["project_name", "v11_config_name", "lot_no", "instrument", "reagent", "qc_material", "unit_symbol", "method_name", "target_n", "transfer_status"]].rename(columns={
                 "project_name": "检验项目", "v11_config_name": "批次名称", "lot_no": "质控品批号",
                 "instrument": "仪器", "reagent": "试剂", "qc_material": "质控品", "unit_symbol": "单位", "method_name": "检测方法", "target_n": "转入所需有效点数", "transfer_status": "转入状态",

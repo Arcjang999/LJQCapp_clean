@@ -3,11 +3,11 @@ from __future__ import annotations
 from services.terminology_service import display_generated_text
 
 
-from datetime import datetime
 import math
 from typing import Any
 
 import pandas as pd
+from services.time_service import local_now, detection_input_max
 import streamlit as st
 
 from services.value_type_service import (
@@ -1103,7 +1103,7 @@ def _ensure_download_payload(
 
 def _ensure_zscore_workbench_session_defaults() -> None:
     if "zscore_entry_test_time" not in st.session_state:
-        st.session_state["zscore_entry_test_time"] = datetime.now()
+        st.session_state["zscore_entry_test_time"] = local_now()
     if "zscore_entry_operator" not in st.session_state:
         st.session_state["zscore_entry_operator"] = ""
     if "zscore_level1_value" not in st.session_state:
@@ -1195,13 +1195,13 @@ def render_zscore_entry_section(
         st.session_state["zscore_level1_value"] = ""
         st.session_state["zscore_level2_value"] = ""
         st.session_state["zscore_level3_value"] = ""
-        st.session_state["zscore_entry_test_time"] = datetime.now()
+        st.session_state["zscore_entry_test_time"] = local_now()
     if st.session_state.get("zscore_reset_entry_form", False):
         st.session_state["zscore_entry_operator"] = str(st.session_state.get("zscore_entry_operator", "") or "").strip()
         st.session_state["zscore_level1_value"] = ""
         st.session_state["zscore_level2_value"] = ""
         st.session_state["zscore_level3_value"] = ""
-        st.session_state["zscore_entry_test_time"] = datetime.now()
+        st.session_state["zscore_entry_test_time"] = local_now()
         st.session_state["zscore_reset_entry_form"] = False
 
     notice_message = str(st.session_state.pop("zscore_notice", "") or "")
@@ -1232,7 +1232,8 @@ def render_zscore_entry_section(
             current_standard_sd_limit = 4.0
         # Keep entry widgets inside a form so Tab focus changes do not trigger reruns.
         with st.form("zscore_entry_form"):
-            test_time = st.datetime_input("检测时间", key="zscore_entry_test_time")
+            test_time = st.datetime_input("检测时间", key="zscore_entry_test_time",
+                max_value=detection_input_max(st.session_state.get("zscore_entry_test_time")))
             operator = st.selectbox(
                 "检测人",
                 options=operator_options,

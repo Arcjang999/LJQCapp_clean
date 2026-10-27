@@ -1085,7 +1085,7 @@ def test_delete_saved_run_rebuilds_batch_and_plot_points() -> None:
         try:
             delete_saved_zscore_run(delete_run_id)
         except ValueError as exc:
-            assert "保留追溯" in str(exc)
+            assert "保留原始记录" in str(exc) and "禁用" in str(exc)
         else:
             raise AssertionError("Original results must not be deleted")
         assert get_zscore_runs_with_levels_for_batch(batch_id) == before
@@ -1188,7 +1188,7 @@ def test_saved_run_maintenance_respects_level_count_for_two_and_three_level_batc
             assert '\n'.join(connection.iterdump()) == original_database
         try:
             delete_saved_zscore_run(int(runs_before_delete[6]["run_id"]))
-        except ValueError as exc:assert '保留追溯' in str(exc)
+        except ValueError as exc:assert '保留原始记录' in str(exc) and '禁用' in str(exc)
         else:raise AssertionError('Deletion must preserve originals')
         rebuild_state = rebuild_zscore_batch_state(batch_id_3)
         saved_runs = get_zscore_runs(batch_id_3, "3_level_threes")
@@ -1383,7 +1383,7 @@ def test_test_sequence_keeps_incrementing_and_feeds_plot_axis() -> None:
 
         try:
             delete_saved_zscore_run(int(initial_runs[1]["run_id"]))
-        except ValueError as exc:assert '保留追溯' in str(exc)
+        except ValueError as exc:assert '保留原始记录' in str(exc) and '禁用' in str(exc)
         else:raise AssertionError('Deletion must preserve originals')
         create_zscore_run(
             batch_id=batch_id,

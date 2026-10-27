@@ -78,7 +78,7 @@ def test_name_candidate_requires_adoption_or_specific_exclusion_and_cannot_clear
         fixture, project_item = draft_fixture(candidate=True)
         candidates = standard_candidates(item_context('project', project_item))
         assert [row['id'] for row in candidates] == ['wst403-2024-047']
-        rejected(lambda: record('project', project_item), '必须采用')
+        rejected(lambda: record('project', project_item), '已有适用标准')
         goal = adopt_requirement('project', project_item, 'wst403-2024-047',
                                 confirmed_by='验收', evidence='CRP，免疫比浊，mg/L；按适用范围采用。')
         assert goal['spec']['standard'] == 'WS/T 403—2024'
@@ -87,7 +87,7 @@ def test_name_candidate_requires_adoption_or_specific_exclusion_and_cannot_clear
         assert not validate_project_quality(project_item)
         clear_requirement('project', project_item)
         rejected(lambda: activate_project_template(fixture['template_id']), '质量目标待确认')
-        rejected(lambda:record('project',project_item,exclusions={'wst403-2024-047':'不想采用'}),'必须采用')
+        rejected(lambda:record('project',project_item,exclusions={'wst403-2024-047':'不想采用'}),'已有适用标准')
         # An explicitly different use requires structured conditions and a search record.
         record('project',project_item,**fixture_conditions(item_context('project',project_item),clinical=False))
         assert not validate_project_quality(project_item)
@@ -158,6 +158,7 @@ def test_record_only_form_retains_invalid_submission_then_saves():
         fixture, project_item = draft_fixture('ct')
         app = AppTest.from_string(f"from ui.quality_targets import render_adoption\nrender_adoption('project', {project_item})", default_timeout=30).run()
         prefix = f'quality_project_{project_item}'
+        app.radio(key=prefix+'_mode').set_value('记录实验室要求').run()
         app.selectbox(key=prefix+'_context_technique').set_value('clinical_chemistry')
         app.selectbox(key=prefix+'_context_result_kind').set_value('quantitative')
         app.selectbox(key=prefix+'_context_purpose').set_value('research')
@@ -171,12 +172,17 @@ def test_record_only_form_retains_invalid_submission_then_saves():
         app.text_area(key=prefix+'_recorded_text').set_value('Ct尺度试剂说明书要求')
         app.text_input(key=prefix+'_person').set_value('页面验收人')
         app.checkbox(key=prefix+'_confirmed').check().run()
+        assert not app.exception
+        assert any('说明此要求如何用于本次检测' in warning.value for warning in app.warning)
+        before = item_context('project', project_item)['quality_review_json']
         app.button(key=prefix+'_adopt').click().run()
         assert not app.exception and app.error
+        assert item_context('project', project_item)['quality_review_json'] == before
         assert app.text_input(key=prefix+'_source_name').value == '页面验收 SOP'
         app.text_area(key=prefix+'_evidence').set_value('目录浓度尺度不适用于本Ct配置；已核对说明书。')
         app.button(key=prefix+'_adopt').click().run()
         assert not app.exception and not validate_project_quality(project_item)
+        assert decode(item_context('project', project_item)['quality_review_json'])['decision'] == 'record_only'
 
 
 def test_quality_page_uses_dialogs_and_cancel_does_not_write():

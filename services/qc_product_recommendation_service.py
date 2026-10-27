@@ -4,6 +4,7 @@ import json
 import sqlite3
 
 from database import atomic_write, read_snapshot
+from services.qc_product_display_service import product_choice_label, product_display_rows
 
 SCOPE_FIELDS = ('reagent_id', 'lab_instrument_id', 'test_item_id', 'method_id')
 REFERENCE_TABLES = {'reagent_id': 'md_reagents', 'qc_material_id': 'md_qc_materials',
@@ -74,13 +75,14 @@ def _context(connection, identity):
         ORDER BY r.qc_material_id,r.id''', tuple(identity[key] for key in SCOPE_FIELDS))]
     products = {row['qc_material_id']: _reference_state(connection, {'qc_material_id': row['qc_material_id']}) for row in rows}
     revision = sha256(_json({'context': identity, 'references': reference_state, 'products': products, 'relations': rows}).encode()).hexdigest()
+    rows = product_display_rows(rows, product_id_field='qc_material_id', connection=connection)
     grouped = {}
     for row in rows:
         if unavailable or products[row['qc_material_id']][1] or row['is_disabled'] or row['product_disabled'] or any(row.get(key) for key in ('instrument_disabled', 'test_disabled', 'method_disabled')):
             continue
         candidate = grouped.setdefault(row['qc_material_id'], {
             'qc_material_id': row['qc_material_id'],
-            'label': '｜'.join(str(row.get(key) or '') for key in ('manufacturer_name', 'catalog_no', 'generic_name') if row.get(key)),
+            'label': product_choice_label(row),
             'relation_ids': [], 'evidence': [], 'confirmed_by': [], 'scope_notes': []})
         for field, value in (('relation_ids', row['id']), ('evidence', row['evidence']),
                              ('confirmed_by', row['confirmed_by']), ('scope_notes', row['scope_note'])):
@@ -256,12 +258,15 @@ def save_draft_product_choice(scope, item_id, review, *, expected_revision):
 
 def list_qc_product_relations(*, include_disabled=False):
     with read_snapshot() as connection:
-        return [dict(row) for row in connection.execute('''SELECT r.*,p.generic_name AS qc_material_name,
+        rows = [dict(row) for row in connection.execute('''SELECT r.*,p.generic_name AS qc_material_name,
+            p.catalog_no,maker.display_name AS manufacturer_name,
             x.generic_name AS reagent_name,n.display_name AS instrument_name,t.chinese_name AS test_item_name,
             m.method_name FROM qc_product_recommendations r
             JOIN md_qc_materials p ON p.id=r.qc_material_id JOIN md_reagents x ON x.id=r.reagent_id
+            LEFT JOIN md_manufacturers maker ON maker.id=p.manufacturer_id
             LEFT JOIN lab_instruments n ON n.id=r.lab_instrument_id LEFT JOIN md_test_items t ON t.id=r.test_item_id
             LEFT JOIN md_methods m ON m.id=r.method_id''' + ('' if include_disabled else ' WHERE r.is_disabled=0') + ' ORDER BY r.id')]
+        return product_display_rows(rows, product_id_field='qc_material_id', connection=connection)
 
 
 def _audit(connection, relation_id, action, before, after, actor, reason):

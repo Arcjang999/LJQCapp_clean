@@ -15,6 +15,7 @@ from services.quality_target_service import item_context, adopt_requirement, dec
 from services.quality_review_service import standard_candidates, validate_project_quality
 from tests.project_management_v11_smoke_test import TemporaryDatabaseContext, _seed_v11_configuration_dependencies
 from tests.instant_v12_integration_smoke_test import rejected
+from tests.quality_review_fixtures import confirm_fixture_product_choice
 
 
 # Assertions are independent of the identity mapping data file.
@@ -69,6 +70,7 @@ def test_select_real_items_adopt_and_confirm_project_and_batch():
         save_template_items(project, rows)
         rejected(lambda: activate_project_template(project), '质量目标待确认')
         for row in list_template_items(project).to_dict('records'):
+            confirm_fixture_product_choice('project', row['id'])
             case = by_item[row['test_item_id']]
             item = item_context('project', row['id'])
             assert item['test_item_name'] == case[1] and item['standard_code'] == case[0]
@@ -110,6 +112,7 @@ def test_real_urine_igg_cannot_adopt_the_blood_item_by_name():
         save_template_items(project, [dict(test_item_id=urine_id, qc_method='lj', input_value_type='raw',
             unit_id=unit_id, method_id=method_id, reagent_id=dependencies['reagent_id'], level_count=1, target_n=20)])
         item_id = int(list_template_items(project).iloc[0]['id'])
+        confirm_fixture_product_choice('project', item_id)
         assert not standard_candidates(item_context('project', item_id))
         rejected(lambda: adopt_requirement('project', item_id, 'wst403-2024-042',
             confirmed_by='隔离服务验收', evidence='尿液项目必须另核对适用依据。',

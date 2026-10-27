@@ -1,6 +1,9 @@
 """Display names for system-generated text; never rewrite saved evidence or user notes."""
 from __future__ import annotations
 
+LJ_ENTRY_LABEL = "单水平（L-J）"
+LJ_METHOD_LABEL = "单水平（L-J法）"
+
 
 QC_USAGE_LABELS = {
     "parallel": "新旧批同时使用",

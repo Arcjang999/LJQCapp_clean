@@ -81,7 +81,7 @@ class HandlingSearchFilterTest(unittest.TestCase):
         self.assertEqual(3, len(options))
         project_id = self.event['origin_snapshot']['project_id']
         before = self.dump()
-        for method, label in [('lj', '单水平（LJ）'), ('zscore', '多水平法')]:
+        for method, label in [('lj', '单水平（L-J）'), ('zscore', '多水平法')]:
             app.selectbox(key='ooc_project_filter').set_value(f'{method}:{project_id}').run()
             self.assertFalse(list(app.exception), str(list(app.exception)))
             frames = [widget.value for widget in app.dataframe if '质控方法' in widget.value.columns]

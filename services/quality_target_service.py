@@ -1,6 +1,8 @@
 """Versioned analytical specifications, explicit adoption, and non-destructive CV evaluation."""
 from __future__ import annotations
 
+from services.time_service import local_today
+
 import csv
 import hashlib
 import io
@@ -103,7 +105,7 @@ def validate_spec_for_item(spec, item):
     if not item['unit_symbol']: raise ValueError('请先设置测量单位。')
     if spec.get('measurement_unit') and normalize_unit(spec['measurement_unit']) != normalize_unit(item['unit_symbol']):
         raise ValueError(f"单位不匹配：要求使用 {spec['measurement_unit']}，当前为 {item['unit_symbol']}；本版不自动换算。")
-    if date.fromisoformat(spec['effective_date']) > date.today():
+    if date.fromisoformat(spec['effective_date']) > local_today():
         raise ValueError('该标准或实验室要求尚未到实施日期，暂不能采用。')
 
 

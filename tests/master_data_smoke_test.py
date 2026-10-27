@@ -186,10 +186,13 @@ def test_master_data_page_starts_from_new_navigation() -> None:
         assert not any(r.key == "top_level_method_selector" for r in at.radio)
         at.button(key="open_master_data_page").click().run()
         assert not list(at.exception)
-        subtabs = {'已登记仪器', '仪器型号', '方法学', '单位'}
+        subtabs = {'方法学', '单位'}
         labels = [tab.label for tab in at.tabs]
         assert [label for label in labels if label not in subtabs] == ['厂家', '检验项目', '仪器', '试剂', '质控品与批号', '方法学与单位']
         assert subtabs <= set(labels)
+        assert not {'已登记仪器', '仪器型号'} & set(labels)
+        assert at.button(key='md_create_lab_instrument').label == '新增仪器'
+        assert not any(button.key == 'md_create_instrument_model' for button in at.button)
         assert any(button.key == "close_master_data_page" for button in at.button)
 
 
@@ -214,6 +217,8 @@ def test_filtered_manufacturer_edit_and_status_require_explicit_save() -> None:
         first_before, selected_before = stored(first_id), stored(selected_id)
         at = AppTest.from_file(APP_FILE_PATH, default_timeout=15).run()
         at.button(key='open_master_data_page').click().run()
+        initial_ids = set(list_manufacturers(include_disabled=True)['id'].astype(int))
+        assert {first_id, selected_id} <= initial_ids
         at.text_input(key='md_search_manufacturer').set_value('Beta').run()
         select_filtered_row()
         at.button(key='md_edit_manufacturer').click().run()
@@ -259,7 +264,7 @@ def test_filtered_manufacturer_edit_and_status_require_explicit_save() -> None:
         at.button(key='md_status_confirm').click().run()
         assert not at.exception and stored(selected_id)['is_disabled'] == 0
         assert stored(first_id) == first_before
-        assert len(list_manufacturers(include_disabled=True)) == 2
+        assert set(list_manufacturers(include_disabled=True)['id'].astype(int)) == initial_ids
         at.button(key='close_master_data_page').click().run()
         assert not at.exception and not at.session_state['show_master_data_page']
         at.button(key='open_master_data_page').click().run()

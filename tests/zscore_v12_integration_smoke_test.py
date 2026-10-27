@@ -201,7 +201,7 @@ def test_page_selection_and_disabled_selection_are_consistent():
         assert not list(at.exception)
         assert at.session_state["zscore_selected_batch_id"] == fixture["batch_id"]
         assert not any(selector.key in ("v12_zscore_project_selector", "v12_zscore_batch_selector") for selector in at.selectbox)
-        assert [tab.label for tab in at.tabs] == ["当前批次", "月度报告"]
+        assert [tab.label for tab in at.tabs] == ["当前批次", "质控报告"]
         text = " ".join(str(item.value) for item in [*at.markdown, *at.caption]) + " " + " ".join(item.proto.body for item in at.get("html"))
         assert "mg/L" in text and "V12 Z-score 检测法" in text
         assert any("V12 Z-score" in item.value and "V12-ZS-LOT" in item.value for item in at.caption)

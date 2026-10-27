@@ -426,7 +426,10 @@ def _prepare_complete_snapshot(destination: Path, *, allow_missing: bool = False
 
 def _read_backup_into(backup_path: Path, destination: Path) -> tuple[dict, bool]:
     destination.mkdir(parents=True, exist_ok=True)
-    if not zipfile.is_zipfile(backup_path):
+    with backup_path.open('rb') as source:
+        is_sqlite = source.read(16) == b'SQLite format 3\x00'
+    # Report ZIPs stored as SQLite BLOBs can also satisfy is_zipfile().
+    if is_sqlite or not zipfile.is_zipfile(backup_path):
         validation = validate_sqlite_database(backup_path)
         if not validation[0]:
             raise RuntimeError(validation[1])

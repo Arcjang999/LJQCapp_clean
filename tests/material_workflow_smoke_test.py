@@ -120,7 +120,7 @@ def test_stale_material_mapping_rejects_atomically_and_replacement_is_separate()
             c.execute('UPDATE qc_lot_config_item_levels SET qc_level_id=? WHERE lot_config_item_id=?',
                 (f['levels'][0], binding['lot_config_item_id']))
             context_count = c.execute('SELECT COUNT(*) FROM qc_result_contexts').fetchone()[0]
-        rejected(lambda: add_result(batch, '2026-09-03 08:01', 101, operator='材料链回归'), '实际质控材料')
+        rejected(lambda: add_result(batch, '2026-09-03 08:01', 101, operator='材料链回归'), '质控品或浓度水平顺序已修改')
         assert get_results(batch).to_dict('records') == before
         with get_connection() as c:
             assert c.execute('SELECT COUNT(*) FROM qc_result_contexts').fetchone()[0] == context_count
@@ -192,7 +192,10 @@ def test_three_point_twenty_point_transfer_retains_material_and_values():
         assert destination['runtime_project_id'] == transfer['target_project_id']
         for result in result_rows.to_dict('records'):
             assert_materials(context_levels('lj', result['id']), [f['expected'][1]])
-        rejected(lambda: instant_entry(batch, 22), '只读')
+        rejected(lambda: instant_entry(batch, 22), '已转入')
+        assert get_results(transfer['target_batch_id']).equals(result_rows)
+        with get_connection() as c:
+            assert c.execute('SELECT COUNT(*) FROM instant_results WHERE batch_id=?', (batch,)).fetchone()[0] == len(values)
         init_db()
         with get_connection() as c:
             assert c.execute('PRAGMA foreign_key_check').fetchall() == []

@@ -11,6 +11,7 @@ from contextvars import ContextVar
 from contextlib import contextmanager
 
 import pandas as pd
+from services.time_service import validate_detection_time
 
 from services.outlier_service import (
     OUTLIER_MANUAL_STATUS_NORMAL,
@@ -1631,7 +1632,7 @@ def create_batch(
         if project_row is None:
             raise ValueError("请先选择项目")
         if _normalize_project_method_type(project_row["method_type"]) != PROJECT_METHOD_LJ:
-            raise ValueError("所选项目不是 LJ 项目")
+            raise ValueError("所选项目不是 L-J 项目")
         if _batch_lot_exists(connection, table_name="batches", project_id=project_id, lot_no=lot_no):
             raise ValueError("当前项目下已存在相同的质控品批号。")
         cursor = connection.execute(
@@ -2356,6 +2357,7 @@ def add_result(
     lot_selection: dict | None = None,
 ) -> int:
     from services.lot_lifecycle_service import record_result_context, prepare_lj_target
+    test_time = validate_detection_time(test_time)
     with atomic_write() as connection:
         lot_selection = prepare_lj_target(batch_id,test_time,lot_selection)
         if log_value is _UNSET:
@@ -2394,6 +2396,7 @@ def update_result(
     manual_note: str | None = None,
 ) -> None:
     from services.lot_lifecycle_service import validate_result_edit
+    test_time = validate_detection_time(test_time)
     with atomic_write() as connection:
         original=validate_result_edit(connection,"lj",result_id,test_time)
         if log_value is _UNSET:
@@ -2736,6 +2739,7 @@ def add_instant_result(
     lot_selection: dict | None = None,
 ) -> int:
     from services.lot_lifecycle_service import record_result_context
+    test_time = validate_detection_time(test_time)
     with atomic_write() as connection:
         if not connection.in_transaction:
             connection.execute("BEGIN IMMEDIATE")
@@ -2752,7 +2756,7 @@ def add_instant_result(
         if batch_row is None:
             raise ValueError(f"未找到即时法批次 {batch_id}")
         if str(batch_row["transfer_status"] or "not_transferred").strip().lower() == "transferred":
-            raise ValueError("该批次已转入 LJ 法，原即时法记录可查看。请到对应 LJ 批次录入新结果。")
+            raise ValueError("该批次已转入 L-J 法，原即时法记录可查看。请到对应 L-J 批次录入新结果。")
         if log_value is _UNSET:
             log_value = _safe_log10(value)
         cursor = connection.execute(
@@ -2817,7 +2821,7 @@ def set_instant_result_effective_state(
         from services.lot_lifecycle_service import require_writable
         require_writable(connection,"instant",int(result_row["batch_id"]))
         if str(result_row["transfer_status"] or "not_transferred").strip().lower() == "transferred":
-            raise ValueError("该批次已转入 LJ 法，原即时法记录可查看。请到对应 LJ 批次录入新结果。")
+            raise ValueError("该批次已转入 L-J 法，原即时法记录可查看。请到对应 L-J 批次录入新结果。")
         cursor = connection.execute(
             """
             UPDATE instant_results
@@ -3090,7 +3094,7 @@ def update_zscore_run(
         values.append(int(test_sequence))
     if test_time is not None:
         assignments.append("test_time = ?")
-        values.append(test_time)
+        values.append(validate_detection_time(test_time))
     if operator is not None:
         assignments.append("operator = ?")
         values.append(str(operator))
@@ -3922,6 +3926,7 @@ def add_zscore_run(
     manual_note: str = "",
     lot_selection: dict | None = None,
 ) -> int:
+    test_time = validate_detection_time(test_time)
     normalized_level_count = int(level_count)
     if normalized_level_count not in {2, 3}:
         raise ValueError("Z-score 检测记录的水平数只能是 2 或 3。")

@@ -136,7 +136,7 @@ def preview(start,end,**kwargs):
  return {'scope':dict(report_month=kwargs.get('report_month'),period_start=start,period_end=end,
   lab_instrument_id=kwargs['lab_instrument_id'],template_id=kwargs['template_id'],methods=sorted(kwargs['methods'])),
  'items':[dict(unit_key='one',project_name='项目甲',instrument_name='仪器甲',lot_no='LOT-A',
-  report_month=kwargs.get('report_month'),method_label='单水平（LJ）',formal_count=20)],'exclusions':[]}
+  report_month=kwargs.get('report_month'),method_label='单水平（L-J）',formal_count=20)],'exclusions':[]}
 with patch('ui.batch_monthly_reports.list_monthly_report_choices',return_value={'months':['2026-09'],'instruments':{},'templates':{}}), \
  patch('ui.batch_monthly_reports.list_monthly_report_jobs',return_value=[]), \
  patch('ui.batch_monthly_reports.preview_period_reports',side_effect=preview):

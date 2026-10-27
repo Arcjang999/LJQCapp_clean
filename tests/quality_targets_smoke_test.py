@@ -9,7 +9,7 @@ from tests.lot_lifecycle_smoke_test import IsolatedDatabase,lj,rejected
 from tests.zscore_v12_fixtures import seed_zscore_configuration
 from tests.instant_v12_fixtures import seed_instant_configuration
 from services.quality_target_service import *
-from services.project_config_service import (copy_lot_config,activate_lot_config,activate_project_template,list_lot_config_items,create_lot_config_from_template,save_lot_item_cv_requirement)
+from services.project_config_service import (copy_lot_config,activate_lot_config,activate_project_template,list_lot_config_items,create_lot_config_from_template,save_lot_item_cv_requirement,get_lot_config)
 from services.master_data_service import create_qc_lot,create_qc_level,list_units
 from services.workbench_config_service import sync_lj_workbench_bindings
 from services.zscore_workbench_service import sync_zscore_workbench_bindings
@@ -18,6 +18,7 @@ from services.report_service import build_lj_monthly_report_package,build_zscore
 from zscore_logic import create_zscore_run
 from tests.quality_review_fixtures import fixture_conditions, confirm_fixture_product_choice
 from services.quality_review_service import runtime_review
+from tests.project_workspace_smoke_test import select_table_row
 ROOT=Path(__file__).resolve().parents[1]
 
 
@@ -254,12 +255,16 @@ def test_page_catalog_and_adoption_existing_batch_readonly():
         assert not at.exception
         assert [tab.label for tab in at.tabs]==['质量目标设置','标准参考（高级）','自定要求目录（高级）']
         assert at.selectbox(key='quality_project_selector').label=='选择检验项目'
-        at.session_state['v11_selected_lot_config_id']=config
         at.button(key='quality_open_lot_management').click().run()
         assert not at.exception
         assert at.session_state['show_project_management_page']
         assert at.session_state['v11_management_tabs']=='批次管理'
         assert not any(b.key==f'quality_lot_{item}_adopt' for b in at.button)
+        config_table = next(index for index, table in enumerate(at.dataframe) if 'batch_configs_' in table.proto.id)
+        names = at.dataframe[config_table].value['批次名称'].tolist()
+        select_table_row(at, names.index(get_lot_config(config)['config_name']), index=config_table)
+        assert at.session_state['v11_selected_lot_config_id'] == config
+        assert at.session_state[f'batch_selected_item_{config}'] == item
         at.button(key=f'batch_edit_quality_{item}').click().run()
         assert not at.exception
         at.selectbox(key=f'quality_lot_{item}_context_purpose').set_value('clinical').run()

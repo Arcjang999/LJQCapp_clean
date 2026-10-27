@@ -99,7 +99,7 @@ else:
             app.run()
             self.assertFalse(list(app.exception), str(list(app.exception)))
             self.assertEqual(3, len(app.selectbox(key='daily_selected').options))
-            next(button for button in app.button if button.label == '查看质控图与单份月报').click().run()
+            next(button for button in app.button if button.label == '查看质控图与单份报告').click().run()
             self.assertFalse(list(app.exception), str(list(app.exception)))
             self.assertEqual(converted['target_batch_id'], app.session_state['selected_batch_id'])
             self.assertTrue(app.get('image'))

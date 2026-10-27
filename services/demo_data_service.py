@@ -290,6 +290,26 @@ def seed_demo_data(
     )
 
 
+def _delete_demo_report_records(connection, project_ids):
+    if not project_ids:
+        return
+    placeholders = ','.join('?' for _ in project_ids)
+    batches = f'SELECT id FROM batches WHERE project_id IN ({placeholders})'
+    jobs = [row[0] for row in connection.execute(
+        f'SELECT DISTINCT job_id FROM qc_monthly_report_job_items WHERE batch_id IN ({batches})',
+        tuple(project_ids))]
+    connection.execute(f'DELETE FROM qc_monthly_report_job_items WHERE batch_id IN ({batches})',
+                       tuple(project_ids))
+    if jobs:
+        job_placeholders = ','.join('?' for _ in jobs)
+        connection.execute(f'''DELETE FROM qc_monthly_report_jobs WHERE id IN ({job_placeholders})
+            AND NOT EXISTS (SELECT 1 FROM qc_monthly_report_job_items i WHERE i.job_id=qc_monthly_report_jobs.id)''',
+            tuple(jobs))
+    reports = f'SELECT id FROM report_exports WHERE project_id IN ({placeholders})'
+    for table in ('qc_report_archive_files', 'report_export_files'):
+        connection.execute(f'DELETE FROM {table} WHERE export_id IN ({reports})', tuple(project_ids))
+
+
 def delete_demo_data(dry_run: bool = False) -> DemoDeleteResult:
     database.init_db()
     like_pattern = f"{DEMO_PREFIX}%"
@@ -315,6 +335,7 @@ def delete_demo_data(dry_run: bool = False) -> DemoDeleteResult:
         if not dry_run:
             from services.lot_lifecycle_service import purge_demo_provenance
             purge_demo_provenance(connection,project_ids,instant_project_ids)
+            _delete_demo_report_records(connection, project_ids)
             if project_ids:
                 placeholders = ", ".join("?" for _ in project_ids)
                 connection.execute(

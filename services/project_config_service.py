@@ -10,17 +10,22 @@ import pandas as pd
 
 from database import atomic_write, get_connection
 from services.cv_service import normalize_cv_limit
+from services.terminology_service import LJ_ENTRY_LABEL
 
 
 QC_METHOD_LABELS = {
-    "lj": "单水平（LJ）",
+    "lj": LJ_ENTRY_LABEL,
     "zscore": "多水平法",
     "instant": "即时法",
 }
 
 # Existing spreadsheets and in-progress editor rows may still contain these labels.
 QC_METHOD_LEGACY_LABELS = {
+    "单水平（LJ）": "lj",
     "单水平（LJ法）": "lj",
+    "单水平（L-J法）": "lj",
+    "单水平 L-J": "lj",
+    "L-J": "lj",
     "多水平（Z-score法）": "zscore",
     "单水平 LJ": "lj",
     "多水平 Z-score": "zscore",
@@ -276,7 +281,7 @@ def list_template_items(template_id: int, include_disabled: bool = False) -> pd.
 def _normalize_template_item(row: dict[str, object], sort_order: int) -> dict[str, object]:
     qc_method = str(row.get("qc_method") or "").strip().lower()
     if qc_method not in QC_METHOD_LABELS:
-        raise ValueError("质控方法必须为 LJ、Z-score 或即时法。")
+        raise ValueError("质控方法必须为 L-J、Z-score 或即时法。")
     input_value_type = str(row.get("input_value_type") or "").strip().lower()
     if input_value_type not in INPUT_VALUE_TYPE_LABELS:
         raise ValueError("输入值类型必须为真实检测值、Ct值或log值。")
@@ -300,7 +305,7 @@ def _normalize_template_item(row: dict[str, object], sort_order: int) -> dict[st
     if qc_method == "instant":
         target_n = 20
     elif not 5 <= target_n <= 20:
-        raise ValueError("LJ 和 Z-score 参数建立有效点数必须在 5 至 20 之间。")
+        raise ValueError("L-J 和 Z-score 参数建立有效点数必须在 5 至 20 之间。")
 
     cv_limit = normalize_cv_limit(row.get("cv_limit"))
 

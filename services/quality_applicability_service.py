@@ -1,6 +1,8 @@
 """Structured standard applicability. This module never evaluates QC results."""
 from __future__ import annotations
 
+from services.time_service import local_today
+
 import json
 import re
 from datetime import date
@@ -29,7 +31,7 @@ def catalog_index():
 
 
 def source_status(source, on_date=None):
-    today = (on_date or date.today()).isoformat()
+    today = (on_date or local_today()).isoformat()
     if source.get('withdrawn_on') and today >= source['withdrawn_on']:
         return 'withdrawn'
     if source.get('effective_date', '9999') > today:
@@ -204,7 +206,7 @@ def validate_search_record(record, *, confirmed_by, has_process, item=None, cont
             checked = date.fromisoformat(record.get('checked_on', ''))
         except (TypeError, ValueError):
             raise ValueError('核对日期不完整，请重新确认质量要求。') from None
-        if checked > date.today() or record.get('conclusion') != 'no_numeric':
+        if checked > local_today() or record.get('conclusion') != 'no_numeric':
             raise ValueError('请重新核对当前已收录数值标准。')
         return {**current, 'checked_on': checked.isoformat(), 'confirmed_by': confirmed_by}
     required = ('query', 'official_url', 'checked_on', 'conclusion', 'rationale')
@@ -217,7 +219,7 @@ def validate_search_record(record, *, confirmed_by, has_process, item=None, cont
         checked = date.fromisoformat(record['checked_on'])
     except (TypeError, ValueError):
         raise ValueError('标准核查日期格式应为 YYYY-MM-DD。') from None
-    if checked > date.today():
+    if checked > local_today():
         raise ValueError('标准核查日期不能晚于今天。')
     if record['conclusion'] not in ('no_applicable', 'no_numeric', 'registered'):
         raise ValueError('软件尚未收录所需标准。请填写标准查找记录和核查结论，再确认质量要求。')
@@ -262,7 +264,7 @@ def validate_registered_sources(records, context):
                 value = date.fromisoformat(row[key])
             except (TypeError, ValueError):
                 raise ValueError('补充标准日期格式错误。') from None
-            if value > date.today():
+            if value > local_today():
                 raise ValueError('补充标准尚未生效或核查日期晚于今天。')
         if row.get('withdrawn_on'):
             try:
@@ -271,7 +273,7 @@ def validate_registered_sources(records, context):
                 raise ValueError('补充标准废止日期格式错误。') from None
             if withdrawn <= date.fromisoformat(row['effective_date']):
                 raise ValueError('补充标准废止日期须晚于实施日期。')
-            if withdrawn <= date.today():
+            if withdrawn <= local_today():
                 raise ValueError('补充标准已废止，不能用于新配置。')
         if any(len(str(row[k])) > 2000 for k in required):
             raise ValueError('补充标准单项不能超过 2000 字。')

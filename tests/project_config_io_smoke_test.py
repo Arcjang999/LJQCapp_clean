@@ -235,12 +235,14 @@ def test_renamed_qc_labels_keep_old_imports_and_editor_rows_compatible() -> None
         template_id = create_project_template(template_name='质控名称兼容验证',
             lab_instrument_id=int(seeded['lab_instrument_id']), qc_material_id=int(seeded['qc_material_id']))
         for labels in [('单水平（LJ法）', '多水平（Z-score法）'),
-                       ('单水平 LJ', '多水平 Z-score'), ('单水平（LJ）', '多水平法')]:
+                       ('单水平 LJ', '多水平 Z-score'), ('单水平（LJ）', '多水平法'),
+                       ('单水平（L-J）', '多水平法'), ('单水平（L-J法）', '多水平（Z-score法）'),
+                       ('L-J', 'Z-score'), ('L-J法', 'Z-score法')]:
             sheets = xlsx_bytes_to_dataframes(_import_workbook())
             sheets['项目配置']['质控方法*'] = list(labels)
             payload = dataframes_to_xlsx_bytes(sheets)
             preview, errors = preview_project_template_xlsx(payload)
-            assert not errors and preview['质控方法'].tolist() == ['单水平（LJ）', '多水平法']
+            assert not errors and preview['质控方法'].tolist() == ['单水平（L-J）', '多水平法']
             import_project_template_xlsx(template_id, payload, mode='replace')
             assert list_template_items(template_id)['qc_method'].tolist() == ['lj', 'zscore']
         lookups = _build_editor_lookup_options()

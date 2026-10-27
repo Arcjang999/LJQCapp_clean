@@ -70,7 +70,7 @@ def preview_daily_workbook(data,draft):
                 if str(values[index] or '')!=str(expected[index] or ''):errors.append(f'第{line}行{COLUMNS[index]}不一致，请在原配置入口核对。')
             reagent=[r for r in item.get('reagent_options',[]) if r['lot_no']==str(values[5] or '')]
             if len(reagent)!=1:errors.append(f'第{line}行实际试剂批号无法唯一对应可用批号。')
-            when=values[6].strftime('%Y-%m-%d %H:%M:%S') if hasattr(values[6],'strftime') else str(values[6] or '')
+            when=str(values[6] or '')
             operator=str(values[7] or '').strip();times.add(when);operators.add(operator)
             note=str(values[11] or '');ik=str(item['lot_config_item_id'])
             if ik in item_notes and item_notes[ik]!=note:errors.append(f'第{line}行同一多水平检测的备注不一致。')
@@ -88,9 +88,13 @@ def preview_daily_workbook(data,draft):
         if seen!=set(by_key):errors.append('文件缺少完整项目或质控水平。')
         if len(times)!=1 or not next(iter(times),''):errors.append('本次整组须填写同一有效检测时间。')
         if len(times)==1:
-            from services.lot_lifecycle_service import timestamp
-            try:timestamp(next(iter(times)))
-            except (ValueError,TypeError):errors.append('检测时间格式无效，请按年-月-日 时:分:秒填写。')
+            from services.time_service import validate_detection_time
+            try:
+                when = validate_detection_time(next(iter(times)))
+                times = {when}
+            except (ValueError,TypeError) as exc:
+                for row in changes:
+                    errors.append(f"第{row['line']}行：" + (str(exc) if isinstance(exc,ValueError) else '检测时间格式无效，请按年-月-日 时:分:秒填写。'))
         if len(operators)!=1 or not next(iter(operators),''):errors.append('本次整组须填写同一检测人。')
         return {'valid':not errors,'errors':errors,'rows':changes,'file_hash':digest,
                 'context_revision':draft['context']['context_revision'],'selected':list(draft['selected']),
@@ -103,6 +107,8 @@ def apply_daily_workbook(draft,preview):
     if not preview['valid']:raise ValueError('请修正文件问题后重新预览。')
     if preview.get('context_revision')!=draft['context']['context_revision'] or preview.get('selected')!=draft['selected']:
         raise ValueError('本组项目或材料已变化，请重新预览结果文件。')
+    from services.time_service import validate_detection_time
+    validate_detection_time(preview['test_time'])
     for row in preview['rows']:
         draft['values'][row['key']]=row['value'];key=row['key'].split(':')[0]
         draft['notes'][key]=row['note'];draft['reagents'][key]=row['reagent_lot_id']

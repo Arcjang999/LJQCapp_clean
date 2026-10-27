@@ -67,7 +67,7 @@ class ChinesePdfFontTests(unittest.TestCase):
         with TemporaryDatabaseContext():
             for seed, builder, renderer, expected in (
                 (seed_lj_batch_with_formal_monthly_data, build_lj_monthly_report_package,
-                 build_lj_monthly_report_pdf, '单水平（LJ法）月度质控报告'),
+                 build_lj_monthly_report_pdf, '单水平（L-J法）月度质控报告'),
                 (seed_zscore_batch_with_formal_monthly_data, build_zscore_monthly_report_package,
                  build_zscore_monthly_report_pdf, '多水平（Z-score法）月度质控报告'),
             ):

@@ -239,7 +239,7 @@ def _render_template_creation() -> None:
                 format_func=lambda value: QC_METHOD_LABELS['lj' if value=='单水平' else 'zscore'])
             default_qc='zscore' if default_kind=='多水平联合' else 'lj'
             if default_kind=='单水平':
-                approach=st.selectbox('单水平参数建立流程',['常规 LJ（建立参数或使用已确认参数）','即时法积累，满足条件后人工转入 LJ'],key='create_building_approach')
+                approach=st.selectbox('单水平参数建立流程',['常规 L-J（建立参数或使用已确认参数）','即时法积累，满足条件后人工转入 L-J'],key='create_building_approach')
                 if approach.startswith('即时法'): default_qc='instant'
             methods=list_methods()
             method_ids=[None]+methods['id'].tolist()

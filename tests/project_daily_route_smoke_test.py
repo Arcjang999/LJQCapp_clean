@@ -167,7 +167,7 @@ class ProjectDailyRouteTest(unittest.TestCase):
         app.button(key='home_open_project').click().run()
         self.healthy(app)
         self.assertEqual(len(app.dataframe[0].value), 20)
-        self.assertEqual(set(app.dataframe[0].value['质控方法']), {'单水平（LJ）', '多水平法', '即时法'})
+        self.assertEqual(set(app.dataframe[0].value['质控方法']), {'单水平（L-J）', '多水平法', '即时法'})
         app.button(key='workspace_back').click().run()
         self.healthy(app)
         self.assertEqual(before, self.dump())
@@ -181,7 +181,7 @@ class ProjectDailyRouteTest(unittest.TestCase):
         self.assertEqual(before, self.dump())
         # Method workbenches retain their existing explicit binding preparation;
         # the no-business-write contract above covers home/help navigation.
-        for method in ('单水平（LJ）', '多水平法', '即时法'):
+        for method in ('单水平（L-J）', '多水平法', '即时法'):
             app.session_state['pending_top_level_method'] = method
             app.run()
             self.healthy(app)

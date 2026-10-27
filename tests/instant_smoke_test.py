@@ -284,7 +284,7 @@ def test_disable_restore_and_transfer_hint() -> None:
         context = build_instant_workbench_context(batch_id)
         assert context["summary"]["effective_count"] == 20
         assert context["summary"]["transfer_ready"] is True
-        assert context["summary"]["transfer_message"] == "已达到 20 个有效点，可确认转入 LJ 法。"
+        assert context["summary"]["transfer_message"] == "已达到 20 个有效点，可确认转入 L-J 法。"
 
         target_result_id = int(context["analysis_df"].iloc[0]["id"])
         disable_instant_result(target_result_id)
@@ -453,7 +453,7 @@ def test_confirm_transfer_to_lj_with_exactly_twenty_effective_points() -> None:
         try:
             confirm_instant_transfer_to_lj(batch_id)
         except ValueError as exc:
-            assert "已转入 LJ 法" in str(exc)
+            assert "已转入 L-J 法" in str(exc)
         else:
             raise AssertionError("同一即时法批次转入成功后，不应允许再次转入。")
 
@@ -605,7 +605,7 @@ def test_transferred_instant_page_is_read_only_and_lj_page_shows_source() -> Non
 
         button_keys = [button.key for button in instant_at.button]
         assert "instant_entry_save_button" not in button_keys
-        assert any("已转入 LJ 法" in str(item.value) for item in instant_at.success)
+        assert any("已转入 L-J 法" in str(item.value) for item in instant_at.success)
         assert any(button.key == "instant_go_to_transferred_lj_batch" for button in instant_at.button)
 
         lj_at = AppTest.from_string(LJ_PAGE_APPTEST_SCRIPT)
@@ -631,7 +631,7 @@ def test_instant_transfer_navigation_uses_pending_intent_and_opens_target_lj_bat
 
         at.button(key="instant_go_to_transferred_lj_batch").click().run()
         assert not list(at.exception)
-        assert at.session_state["top_level_method_selector"] == "单水平（LJ）"
+        assert at.session_state["top_level_method_selector"] == "单水平（L-J）"
         assert int(at.session_state["selected_project_id"]) == transfer_result["target_project_id"]
         assert int(at.session_state["selected_batch_id"]) == transfer_result["target_batch_id"]
         filtered_state = at.session_state.filtered_state
@@ -646,7 +646,7 @@ def test_instant_transfer_navigation_uses_pending_intent_and_opens_target_lj_bat
         reopened_at.session_state["selected_batch_id"] = transfer_result["target_batch_id"]
         reopened_at.run()
         assert not list(reopened_at.exception)
-        assert reopened_at.session_state["top_level_method_selector"] == "单水平（LJ）"
+        assert reopened_at.session_state["top_level_method_selector"] == "单水平（L-J）"
         assert int(reopened_at.session_state["selected_project_id"]) == transfer_result["target_project_id"]
         assert int(reopened_at.session_state["selected_batch_id"]) == transfer_result["target_batch_id"]
         assert reopened_at.session_state.filtered_state.get("pending_navigation_source") in (None, "")

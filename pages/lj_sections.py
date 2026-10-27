@@ -3,9 +3,9 @@ from __future__ import annotations
 from services.cv_service import calculate_cv_percent
 from services.lot_lifecycle_service import save_lj_result_manual_note
 
-from datetime import datetime
 
 import pandas as pd
+from services.time_service import local_now, detection_input_max
 import streamlit as st
 
 from database import add_result, get_batch, get_results
@@ -349,9 +349,9 @@ def render_lj_entry_and_stats_section(
         st.session_state["entry_operator"] = operator_options[0] if operator_options else ""
         st.session_state["entry_value"] = ""
         st.session_state["entry_reagent_changed"] = False
-        st.session_state["entry_test_time"] = datetime.now()
+        st.session_state["entry_test_time"] = local_now()
     if "entry_test_time" not in st.session_state:
-        st.session_state["entry_test_time"] = datetime.now()
+        st.session_state["entry_test_time"] = local_now()
     if "entry_operator" not in st.session_state:
         st.session_state["entry_operator"] = ""
     if "entry_value" not in st.session_state:
@@ -364,7 +364,7 @@ def render_lj_entry_and_stats_section(
         st.session_state["entry_operator"] = last_operator.strip()
         st.session_state["entry_value"] = ""
         st.session_state["entry_reagent_changed"] = False
-        st.session_state["entry_test_time"] = datetime.now()
+        st.session_state["entry_test_time"] = local_now()
         st.session_state["reset_entry_form"] = False
 
     with st.container(border=True):
@@ -372,6 +372,7 @@ def render_lj_entry_and_stats_section(
         test_time = st.datetime_input(
             "检测时间",
             key="entry_test_time",
+            max_value=detection_input_max(st.session_state.get("entry_test_time")),
         )
         operator = st.selectbox(
             "检测人",

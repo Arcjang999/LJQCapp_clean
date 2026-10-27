@@ -293,7 +293,7 @@ def test_dictionary_reagent_survives_editor_save_and_invalid_choice_is_rejected(
         try:
             _save_editor_rows(template_id, rows, lookups)
         except ValueError as exc:
-            assert "试剂已不在可选字典" in str(exc)
+            assert '试剂已停用或删除' in str(exc) and '重新选择并保存' in str(exc)
         else:
             raise AssertionError("Invalid dictionary selection must not silently clear the saved reagent")
         assert list_template_items(template_id)["reagent_id"].tolist() == [data["reagent_id"]] * 2
@@ -304,7 +304,8 @@ def test_empty_product_dictionaries_offer_a_working_maintenance_entry() -> None:
         at = AppTest.from_file(APP_FILE_PATH, default_timeout=10)
         at.run()
         at.button(key="open_project_management_page").click().run()
-        assert any("尚未内置仪器、试剂及质控品产品目录" in warning.value for warning in at.warning)
+        assert any(all(text in warning.value for text in ('仪器', '试剂', '暂无可选资料'))
+                   for warning in at.warning)
         at.button(key="v11_open_product_dictionaries").click().run()
         assert not list(at.exception)
         assert at.session_state["show_master_data_page"]
@@ -317,22 +318,27 @@ def test_creation_requires_three_dictionaries_and_prefills_selected_reagent() ->
         alternate_id = create_reagent(manufacturer_id=data['manufacturer_id'], generic_name="另一项目试剂")
         at = AppTest.from_file(APP_FILE_PATH, default_timeout=15).run()
         at.button(key="home_create_project").click().run()
+        at.button(key='quick_use_group').click().run()
 
         def key(field):
             return 'project_draft_' + at.session_state['project_workspace_dialog']['token'] + '_' + field
 
-        def fill_creation():
-            at.text_input(key=key('template_name')).set_value("三字典模板")
-            at.selectbox(key=key('lab_instrument_id')).set_value(data['lab_instrument_id'])
-            at.selectbox(key=key('qc_material_id')).set_value(data['qc_material_id'])
+        def confirm_product(prefix):
+            at.text_input(key=prefix + '_person').set_value('隔离适用核对人')
+            at.text_area(key=prefix + '_evidence').set_value('已核对本合成项目的仪器、试剂、检测方法与质控品。')
+            at.button(key=prefix + '_confirm').click().run()
+            assert not list(at.exception)
 
-        fill_creation()
-        at.button(key='project_dialog_save').click().run()
+        at.text_input(key=key('template_name')).set_value("三字典模板")
+        at.selectbox(key=key('lab_instrument_id')).set_value(data['lab_instrument_id']).run()
         assert list_project_templates().empty
-        assert any("请选择仪器、默认试剂和质控品" in error.value for error in at.error)
-        fill_creation()
+        assert at.button(key='project_dialog_save').disabled
         at.selectbox(key=key('default_reagent_id')).set_value(alternate_id)
-        at.selectbox(key=key('default_method_id')).set_value(data['method_id'])
+        at.selectbox(key=key('default_method_id')).set_value(data['method_id']).run()
+        prefix = 'project_product_' + at.session_state['project_workspace_dialog']['token']
+        at.selectbox(key=prefix + '_product').set_value(data['qc_material_id']).run()
+        assert at.button(key='project_dialog_save').disabled
+        confirm_product(prefix)
         at.button(key='project_dialog_save').click().run()
         assert not list(at.exception)
         template_id = int(list_project_templates().iloc[0]["id"])
@@ -342,7 +348,8 @@ def test_creation_requires_three_dictionaries_and_prefills_selected_reagent() ->
         assert at.selectbox(key=key('reagent_id')).value == alternate_id
         assert at.selectbox(key=key('method_id')).value == data['method_id']
         at.selectbox(key=key('test_item_id')).set_value(data['lj_item_id'])
-        at.selectbox(key=key('unit_id')).set_value(data['unit_id'])
+        at.selectbox(key=key('unit_id')).set_value(data['unit_id']).run()
+        confirm_product('item_product_' + at.session_state['project_workspace_dialog']['token'])
         at.button(key='project_item_save').click().run()
         assert not list(at.exception)
         at.button(key='project_quality_close').click().run()
@@ -352,7 +359,8 @@ def test_creation_requires_three_dictionaries_and_prefills_selected_reagent() ->
         assert at.selectbox(key=key('reagent_id')).value == alternate_id
         at.selectbox(key=key('reagent_id')).set_value(data['reagent_id'])
         at.selectbox(key=key('test_item_id')).set_value(data['zscore_item_id'])
-        at.selectbox(key=key('unit_id')).set_value(data['unit_id'])
+        at.selectbox(key=key('unit_id')).set_value(data['unit_id']).run()
+        confirm_product('item_product_' + at.session_state['project_workspace_dialog']['token'])
         at.button(key='project_item_save').click().run()
         assert not list(at.exception)
         at.button(key='project_quality_close').click().run()

@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+from services.time_service import local_today
 from datetime import date
 import pandas as pd
 import streamlit as st
@@ -37,7 +39,7 @@ def _current_source(source):
     from services.quality_applicability_service import source_status
     if source.get('verification'):
         return source_status(source) == 'current'
-    today = date.today().isoformat()
+    today = local_today().isoformat()
     return source.get('effective_date', '') <= today and not (
         source.get('withdrawn_on') and source['withdrawn_on'] <= today)
 
@@ -327,7 +329,7 @@ def render_quality_setup(item, prior, prefix, *, levels=None, goal=None, quick=F
             result['source_name'] = st.text_input('使用的说明书或实验室文件名称',
                 value=recorded.get('source_name') or ('本实验室SD质控方案' if simple else ''), key=prefix+'_source_name', max_chars=200)
             result['source_version'] = st.text_input('设置日期或文件版本',
-                value=recorded.get('source_version') or (date.today().isoformat() if simple else ''), key=prefix+'_source_version', max_chars=200)
+                value=recorded.get('source_version') or (local_today().isoformat() if simple else ''), key=prefix+'_source_version', max_chars=200)
             text = recorded.get('requirement_text') or (SD_REQUIREMENT if simple else '')
             # The service appends the current structured CV; old generated CV text
             # must not survive a change to that limit or become its input source.

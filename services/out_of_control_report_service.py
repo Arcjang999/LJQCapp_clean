@@ -27,7 +27,9 @@ STATUS_LABELS = {
     "pending_confirmation": "待确认", "completed": "已完成",
 }
 CLASSIFICATION_LABELS = {"reject": "失控", "warning": "警告", "accept": "在控", "pending": "待判读"}
-METHOD_LABELS = {"lj": "单水平（LJ法）", "zscore": "多水平（Z-score法）"}
+from services.terminology_service import LJ_METHOD_LABEL
+
+METHOD_LABELS = {"lj": LJ_METHOD_LABEL, "zscore": "多水平（Z-score法）"}
 MISSING = "未记录"
 
 

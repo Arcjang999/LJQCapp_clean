@@ -1,6 +1,6 @@
 from __future__ import annotations
 from copy import deepcopy
-from datetime import datetime
+from services.time_service import local_now, validate_detection_time, FUTURE_DETECTION_MESSAGE
 import logging
 import pandas as pd
 import streamlit as st
@@ -38,9 +38,10 @@ def _discard_controls(draft):
 
 
 def _entry_time(value):
-    from services.lot_lifecycle_service import timestamp
-    try:return timestamp(value)
+    try:return validate_detection_time(value)
     except (ValueError,TypeError,OverflowError) as exc:
+        if str(exc) == FUTURE_DETECTION_MESSAGE:
+            raise
         raise ValueError('检测时间无效，请按年-月-日 时:分:秒填写，并核对日期。') from exc
 
 
@@ -144,7 +145,7 @@ def _render_selector():
         if st.session_state.get('entry_lot') not in lots:st.session_state['entry_lot']=None
         lot=c[2].selectbox('本次主批号',[None,*lots],key='entry_lot',format_func=lambda i:'请选择明确的实际批号' if i is None else lots[i]['lot_no'])
         if None in (instrument,product,lot):return
-        when=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        when=local_now().strftime('%Y-%m-%d %H:%M:%S')
         context=get_daily_context(instrument,product,lot,when,template_id=template_id)
         if context.get('requires_combination'):
             combinations={i['lot_config_id']:i for i in context['combinations']}
@@ -203,7 +204,7 @@ def _receipt(draft):
     st.download_button('导出本次已保存结果',export_daily_workbook(draft),'常规质控已保存结果.xlsx',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     if st.button('再次检测，开始新一组',type='primary'):
         from services.daily_context_service import get_daily_context
-        sel=draft['context']['selection'];when=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        sel=draft['context']['selection'];when=local_now().strftime('%Y-%m-%d %H:%M:%S')
         context=get_daily_context(test_time=when,**sel)
         st.session_state['daily_draft']=new_draft(context,operator=draft['operator'],test_time=when);st.rerun()
     return True

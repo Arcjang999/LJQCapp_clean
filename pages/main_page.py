@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import streamlit as st
+from services.terminology_service import LJ_ENTRY_LABEL
 
 
 MAIN_ENTRY_LABEL = "主页"
 MASTER_DATA_ENTRY_LABEL = "基础资料"
 PROJECT_MANAGEMENT_ENTRY_LABEL = "项目/批次管理"
-LJ_ENTRY_LABEL = "单水平（LJ）"
 ZSCORE_ENTRY_LABEL = "多水平法"
 INSTANT_ENTRY_LABEL = "即时法"
 
@@ -25,6 +25,9 @@ LEGACY_METHOD_ENTRY_MAP = {
     "项目管理": PROJECT_MANAGEMENT_ENTRY_LABEL,
     "项目/批次管理": PROJECT_MANAGEMENT_ENTRY_LABEL,
     "LJ": LJ_ENTRY_LABEL,
+    "L-J": LJ_ENTRY_LABEL,
+    "单水平（L-J法）": LJ_ENTRY_LABEL,
+    "单水平（L-J）": LJ_ENTRY_LABEL,
     "单水平（LJ法）": LJ_ENTRY_LABEL,
     "单水平（LJ）": LJ_ENTRY_LABEL,
     "单水平 LJ": LJ_ENTRY_LABEL,

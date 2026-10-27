@@ -1,4 +1,6 @@
 """Shared condition and provenance form for project and batch dialogs."""
+
+from services.time_service import local_today
 from datetime import date
 import hashlib
 
@@ -137,7 +139,7 @@ def render_conditions(item, review, prefix, *, quick=False, settings_location=No
             st.caption('需要保存官方查询结果或新增标准时，勾选上方选项，再填写下列资料。')
             candidate_search['query'] = st.text_input('查找词（检测项、方法及用途）',value=prior.get('query',''),key=prefix+'_search_query',max_chars=500)
             candidate_search['official_url'] = st.text_input('官方查询结果或标准链接',value=prior.get('official_url',''),key=prefix+'_search_url',max_chars=2000)
-            candidate_search['checked_on'] = str(st.date_input('核查日期',value=date.fromisoformat(prior['checked_on']) if prior.get('checked_on') else date.today(),max_value=date.today(),key=prefix+'_search_date'))
+            candidate_search['checked_on'] = str(st.date_input('核查日期',value=date.fromisoformat(prior['checked_on']) if prior.get('checked_on') else local_today(),max_value=local_today(),key=prefix+'_search_date'))
             choices = {'': '请选择查询结果', 'no_applicable': '已查询，没有本次检测的分析质量标准',
                        'no_numeric': '已找到参考标准，但未规定本次结果尺度的数值限值', 'registered': '已找到新标准，并在下方登记'}
             keys=list(choices)

@@ -11,7 +11,7 @@ from services.search_service import fuzzy_match
 from services.quality_target_service import batch_quality_summary
 from services.out_of_control_service import list_pending
 
-METHOD_LABELS = {'lj':'单水平（LJ）', 'zscore':'多水平法', 'instant':'即时法'}
+METHOD_LABELS = {'lj':'单水平（L-J）', 'zscore':'多水平法', 'instant':'即时法'}
 CLASS_LABELS = {'accept':'在控','normal':'在控','warning':'警告','reject':'失控','pending':'尚待判读',None:'尚待判读'}
 TABLES = {'lj':('results','lj_result_id','lj_result'), 'zscore':('zscore_runs','zscore_run_id','zscore_run'),
           'instant':('instant_results','instant_result_id','instant_result')}
@@ -44,7 +44,7 @@ def list_overview_bindings(*,include_disabled=False):
                 (row['runtime_batch_id'], int(include_disabled))):
                 transferred.append(dict(row, qc_method='lj', runtime_batch_id=target['id'],
                     runtime_project_id=target['project_id'], transfer_source_batch_id=row['runtime_batch_id'],
-                    config_name=row['config_name']+' · 转入单水平（LJ）'))
+                    config_name=row['config_name']+' · 转入单水平（L-J）'))
         for row in rows + transferred:
             row['overview_key'] = f"{row['qc_method']}:{row['runtime_batch_id']}:{row['lot_config_item_id']}"
         return rows + transferred

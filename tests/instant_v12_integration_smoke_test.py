@@ -85,9 +85,11 @@ def test_value_types_three_point_rule_and_manual_transfer():
             assert target["input_value_type"] == mode
             source_values = get_instant_results(f["batch_id"])["value"].tolist()
             assert get_results(target["id"])["value"].tolist() == source_values
-            rejected(lambda: entry(f, 22, base), "只读")
+            source_records = get_instant_results(f["batch_id"]).to_dict('records')
+            rejected(lambda: entry(f, 22, base), "原即时法记录可查看")
             rejected(lambda: disable_instant_result(int(get_instant_results(f["batch_id"]).iloc[0]["id"])), "只读")
             rejected(lambda: confirm_instant_transfer_to_lj(f["batch_id"]), "已转入")
+            assert get_instant_results(f["batch_id"]).to_dict('records') == source_records
 
 
 def test_ineligible_configs_and_legacy_data_are_preserved():
@@ -282,8 +284,12 @@ def test_page_selection_changes_clear_batch_and_disabled_actions():
         selector = at.selectbox(key="v12_instant_batch_selector")
         selector.set_value(selector.options[1]).run()
         assert at.session_state["instant_selected_batch_id"] == f["batch_id"]
-        text = " ".join(item.proto.body for item in at.get("html"))
-        assert "mg/L" in text and "V12 即时法 检测法" in text
+        details = next(table.value for table in at.dataframe if list(table.value.columns) == ['项目', '内容'])
+        details = details.set_index('项目')['内容'].to_dict()
+        assert details['单位'] == 'mg/L' and details['检测方法'] == 'V12 即时法 检测法'
+        assert 'v12_instant_project_selector' not in [widget.key for widget in at.selectbox]
+        at.session_state['instant_selected_batch_id'] = None
+        at.run()
         selector = at.selectbox(key="v12_instant_project_selector")
         selector.set_value(next(option for option in selector.options if "第二项目" in option)).run()
         assert at.session_state["instant_selected_project_id"] == second["project_id"]

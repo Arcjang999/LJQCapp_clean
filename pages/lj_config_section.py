@@ -12,7 +12,7 @@ from services.workbench_config_service import (
 from ui.common import render_section_intro, render_workbench_context_bar
 
 
-PROJECT_PLACEHOLDER = "请选择设置已确认的 LJ 项目"
+PROJECT_PLACEHOLDER = "请选择设置已确认的 L-J 项目"
 BATCH_PLACEHOLDER = "请选择设置已确认的批次"
 
 
@@ -126,7 +126,7 @@ def render_lj_v12_configuration_selection(
 ) -> None:
     with manage_tab:
         render_section_intro(
-            title="LJ 项目与批次选择",
+            title="L-J 项目与批次选择",
             caption=(
                 "选择设置已确认的单水平项目与批次。支持本批次均值和标准差建立、已确认的人工或厂家参数，以及即时法转入的批次。"
             ),
@@ -156,7 +156,7 @@ def render_lj_v12_configuration_selection(
 
         if projects.empty:
             st.info(
-                "当前没有可用的 LJ 项目。请先在“资料与批次 → 项目/批次管理”中"
+                "当前没有可用的 L-J 项目。请先在“资料与批次 → 项目/批次管理”中"
                 "添加检验项目、选择一个水平的质控品并确认批次设置，或从即时法确认转入。"
             )
             _render_batch_setup_action('lj_empty_setup')
@@ -204,7 +204,7 @@ def render_lj_v12_configuration_selection(
         render_workbench_context_bar(
             title="当前即时法转入批次" if is_from_instant else "当前项目与批次",
             caption=(
-                "这是从即时法转入的LJ批次。可在批次资料中查看原即时法项目、批号和转入时间。"
+                "这是从即时法转入的L-J批次。可在批次资料中查看原即时法项目、批号和转入时间。"
                 if is_from_instant
                 else "以下是确认使用本批次时保存的资料，供查看；需要调整设置时，请到“资料与批次 → 项目/批次管理”。"
             ),
@@ -224,7 +224,7 @@ def render_lj_v12_configuration_selection(
             ],
             badges=[
                 "由即时法转入" if is_from_instant else "设置已确认",
-                "LJ",
+                "L-J",
                 f"批号 {selected['lot_no']}",
             ],
         )

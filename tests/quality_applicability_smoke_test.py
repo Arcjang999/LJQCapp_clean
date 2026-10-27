@@ -78,14 +78,14 @@ def test_drafts_and_free_text_cannot_bypass_applicable_standard():
         f,iid=draft()
         save_pending_review('project',iid,context={'specimen':'血清'})
         rejected(lambda:activate_project_template(f['template_id']),'质量目标待确认')
-        rejected(lambda:record(iid,context(),exclusions={'wst403-2024-047':'不采用'}),'必须采用')
+        rejected(lambda:record(iid,context(),exclusions={'wst403-2024-047':'不采用'}),'已有适用标准')
         custom=copy.deepcopy(get_requirement('wst403-2024-047'))
         custom.update(id='custom-loose',origin='custom',standard='测试实验室要求')
         custom['imprecision'][0]['value']=99
         with get_connection() as c:
             c.execute('INSERT INTO qc_quality_catalog(id,origin,payload_json) VALUES (?,?,?)',
                       (custom['id'],'custom',json.dumps(custom)))
-        rejected(lambda:adopt(iid,'custom-loose'),'必须采用')
+        rejected(lambda:adopt(iid,'custom-loose'),'已有适用标准')
         rejected(lambda:adopt(iid,supplemental_cv=99),'严于')
         goal=adopt(iid,supplemental_cv=3)
         assert goal['spec']['imprecision'][0]['value']==7.5 and goal['supplement']['cv']==3
@@ -99,7 +99,7 @@ def test_realtime_pcr_ct_log_and_concentration_reference_process_requirements():
         with IsolatedDatabase():
             f,iid=draft('HBV DNA',mode=mode,unit='Ct' if mode=='ct' else 'IU/mL',method='实时荧光 PCR')
             ctx=context(technique='realtime_pcr',result_scale=scale)
-            rejected(lambda:record(iid,ctx,search_record=search('no_applicable')),'已有适用')
+            rejected(lambda:record(iid,ctx,search_record=search('no_applicable')),'已找到对照、操作或定性要求')
             reviewed=record(iid,ctx,search_record=search())
             assert any(r['id']=='wst230-2024-iqc' and r['disposition']=='referenced' for r in reviewed['candidates'])
             reviewed=record(iid,ctx,search_record=search(),

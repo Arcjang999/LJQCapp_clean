@@ -83,7 +83,7 @@ class QualityProcessRequirementsTest(unittest.TestCase):
         with IsolatedDatabase():
             _, identifier = draft()
             before = self.dump()
-            with self.assertRaisesRegex(ValueError, '必须采用'):
+            with self.assertRaisesRegex(ValueError, '已有适用标准'):
                 record(identifier, context(), search_record=search(), process_requirements=empty)
             self.assertEqual(before, self.dump())
             goal = adopt(identifier, process_requirements=empty)

@@ -17,6 +17,7 @@ from matplotlib.backends.backend_agg import RendererAgg
 from matplotlib.font_manager import FontProperties
 from matplotlib.lines import Line2D
 from matplotlib.legend import Legend
+from chart_layout import arrange_control_line_labels
 
 from plotting import CONFIGURED_FONT_FALLBACKS as PLOT_CONFIGURED_FONT_FALLBACKS, plot_lj_chart
 from zscore_logic import format_level_id_display
@@ -912,6 +913,7 @@ def _decorate_chart_page(
     )
     if figure.axes:
         figure.axes[0].set_position(CHART_AXES_RECT)
+        arrange_control_line_labels(figure.axes[0])
 def _apply_page_footer(
     *,
     figure,
@@ -1033,8 +1035,9 @@ def _build_lot_trace_pages(report):
         points=[r for r in rows if r['reagent_lot_no']==lot]
         usage.append(f"试剂批号 {lot}：{len(points)} 条记录；{points[0]['test_time']} 至 {points[-1]['test_time']}。质控品批号：{' / '.join(dict.fromkeys(r['qc_lot_no'] for r in points))}。")
     events=[f"事件 #{e['id']}，{e['effective_at']}，类型 {event_labels.get(e['event_type'],e['event_type'])}；操作人 {e['operator']}；依据：{e['reason']}。更正来源：{e['corrects_event_id'] or '-'}。" for e in trace.get('events',[])]
+    basis_lines = _wrap_measured_text(trace['basis'], A4_PAGE_SIZE[0] * 72 * PAGE_WIDTH * .98, 9.3).splitlines()
     return _build_text_pages(report_title=report.title,page_title='实际批号与控制参数追溯',
-        subtitle_lines=[f"项目：{report.basic_info.project_name}  /  {report.report_month_label}",trace['basis']],
+        subtitle_lines=[f"项目：{report.basic_info.project_name}  /  {report.report_month_label}", *basis_lines],
         sections=[_TextSectionSpec('报告期实际使用批号',usage),_TextSectionSpec('按控制参数版本分组统计',parameters),_TextSectionSpec('换批及参数事件',events or ['报告期无已登记的换批或参数变更事件。'])])
 
 

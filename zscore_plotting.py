@@ -14,7 +14,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from services.profiling import profile_timer
-from chart_layout import CHART_LEGEND_SIZE, finish_chart_layout, select_detection_ticks
+from chart_layout import (
+    CHART_LEGEND_SIZE, CONTROL_LINE_COLORS, add_control_line_labels,
+    control_parameter_segments, finish_chart_layout, mark_control_parameter_change,
+    select_detection_ticks,
+)
 from zscore_logic import format_level_id_display
 
 
@@ -60,12 +64,7 @@ STATUS_POINT_STYLES = {
     PHASE_TARGET_BUILDING: {"color": "#4e79a7", "marker": "s", "size": 48},
 }
 
-REFERENCE_LINE_COLORS = {
-    0: "#222222",
-    1: "#76b7b2",
-    2: "#edc948",
-    3: "#ff9da7",
-}
+REFERENCE_LINE_COLORS = CONTROL_LINE_COLORS
 
 MANUAL_NOTE_EDGE_COLOR = "#2f4858"
 
@@ -190,7 +189,7 @@ def _plot_zscore_single_level_impl(
     display_level = format_level_id_display(level_id)
 
     if normalized_scope == "all":
-        _plot_reference_lines(axis, display_df, reference_mode)
+        _plot_reference_lines(axis, display_df, reference_mode, show_labels=True)
         _plot_continuous_trajectory(axis, display_df, level_color)
         _plot_phase_separator(axis, display_df)
         for phase in [PHASE_TARGET_BUILDING, PHASE_FORMAL_QC]:
@@ -200,7 +199,7 @@ def _plot_zscore_single_level_impl(
             _plot_phase_line(axis, phase_df, level_color, f"{display_level} | {_phase_label(phase)}")
             _plot_status_points(axis, phase_df, level_color)
     else:
-        _plot_reference_lines(axis, display_df, reference_mode)
+        _plot_reference_lines(axis, display_df, reference_mode, show_labels=True)
         _plot_phase_line(axis, display_df, level_color, display_level)
         _plot_status_points(axis, display_df, level_color)
 
@@ -397,54 +396,27 @@ def _ensure_plot_columns(plot_df: pd.DataFrame) -> pd.DataFrame:
     return prepared_df
 
 
-def _plot_reference_lines(axis, plot_df: pd.DataFrame, reference_mode: str) -> None:
-    if 'target_profile_id' in plot_df and plot_df.target_profile_id.fillna(-1).nunique()>1:
-        for _,group in plot_df.groupby('target_profile_id',dropna=False,sort=False):
-            _plot_reference_lines(axis,group,reference_mode)
-        return
+def _plot_reference_lines(axis, plot_df: pd.DataFrame, reference_mode: str, *, show_labels=False) -> None:
     reference_profile = _resolve_reference_profile(plot_df, reference_mode)
-    if plot_df.empty or reference_profile is None:
+    if plot_df.empty or reference_profile is None or "run_index" not in plot_df.columns:
         return
-    if "run_index" not in plot_df.columns:
-        return
-
-    x_min = float(plot_df["run_index"].min()) - .35
-    x_max = float(plot_df["run_index"].max()) + .35
-    mean_value = float(reference_profile["mean"])
-    axis.plot(
-        [x_min, x_max],
-        [mean_value, mean_value],
-        color=REFERENCE_LINE_COLORS[0],
-        linewidth=1.1,
-        linestyle="-",
-        alpha=0.8,
-        zorder=1,
-    )
-    sd_value = reference_profile.get("sd")
-    if sd_value is None or math.isclose(float(sd_value), 0.0, abs_tol=1e-12):
-        return
-
-    for multiplier in (1, 2, 3):
-        upper = mean_value + multiplier * float(sd_value)
-        lower = mean_value - multiplier * float(sd_value)
-        axis.plot(
-            [x_min, x_max],
-            [upper, upper],
-            color=REFERENCE_LINE_COLORS[multiplier],
-            linewidth=0.95,
-            linestyle="--",
-            alpha=0.85,
-            zorder=1,
-        )
-        axis.plot(
-            [x_min, x_max],
-            [lower, lower],
-            color=REFERENCE_LINE_COLORS[multiplier],
-            linewidth=0.95,
-            linestyle="--",
-            alpha=0.85,
-            zorder=1,
-        )
+    segments = control_parameter_segments(plot_df, 'run_index', 'formal_reference_mean', 'formal_reference_sd')
+    for index, segment in enumerate(segments):
+        x_min, x_max = segment['left'] - .35, segment['right'] + .35
+        mean, sd = segment['mean'], segment['sd']
+        multiples = range(-3, 4) if sd is not None else (0,)
+        for multiple in multiples:
+            value = mean + multiple * (sd or 0)
+            axis.plot([x_min, x_max], [value] * 2, color=REFERENCE_LINE_COLORS[abs(multiple)],
+                      linewidth=1.1 if multiple == 0 else .95,
+                      linestyle='-' if multiple == 0 else '--', alpha=.8 if multiple == 0 else .85,
+                      zorder=1)
+        if show_labels and index:
+            mark_control_parameter_change(axis, x_min)
+    if show_labels and segments:
+        latest = segments[-1]
+        add_control_line_labels(axis, latest['mean'], latest['sd'],
+                                mean_label='均值（末段）' if len(segments) > 1 else '均值')
 
 
 def _plot_phase_line(axis, phase_df: pd.DataFrame, level_color: str, label: str) -> None:

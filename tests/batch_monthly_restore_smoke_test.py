@@ -4,6 +4,7 @@ from hashlib import sha256
 import argparse
 import json
 import sys
+import zipfile
 
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
@@ -33,6 +34,12 @@ def run(output):
                     for table in ('results','zscore_runs','zscore_level_results','qc_result_contexts',
                         'qc_result_context_levels','qc_result_evaluations','qc_target_profiles')}
         original_sources=source_rows()
+        def report_rows():
+            with db.read_snapshot() as connection:
+                return {table:[tuple(row) for row in connection.execute(f'SELECT * FROM {table} ORDER BY export_id')]
+                    for table in ('report_export_files','qc_report_archive_files')}
+        original_reports=report_rows()
+        assert all(len(rows)==3 for rows in original_reports.values())
         def verify():
             assert job == svc.get_monthly_report_job(job_id)
             assert summary == svc.monthly_job_summary(job_id)
@@ -40,12 +47,18 @@ def run(output):
             for item_id,pdf in pdfs.items():
                 assert pdf == svc.read_monthly_report_item(job_id,item_id)['pdf_bytes']
             assert original_sources == source_rows()
+            assert original_reports == report_rows()
             with db.read_snapshot() as connection:
                 assert connection.execute('SELECT COUNT(*) FROM report_exports').fetchone()[0] == 3
                 assert connection.execute('SELECT COUNT(*) FROM report_export_files').fetchone()[0] == 3
                 assert connection.execute('PRAGMA quick_check').fetchone()[0] == 'ok'
         backup=storage.create_database_backup(output/'backups')
-        assert storage.validate_backup_file(backup.target_path)[0]
+        assert backup.target_path.suffix == '.db'
+        with backup.target_path.open('rb') as source:
+            assert source.read(16) == b'SQLite format 3\x00'
+        assert zipfile.is_zipfile(backup.target_path), 'Fixture must contain a detectable report ZIP inside SQLite.'
+        valid,message=storage.validate_backup_file(backup.target_path)
+        assert valid,message
         # A complete restore replaces a deliberately different test setting,
         # while result and report originals are never edited for this test.
         db.save_app_settings({'lab_name':'恢复前独立测试标记'})
@@ -68,6 +81,7 @@ def run(output):
             pdf_exact=True,zip_exact=True,zip_sha256=sha256(archive).hexdigest(),
             pdf_sha256={key:sha256(value).hexdigest() for key,value in pdfs.items()},
             source_records_unchanged=True,retry_no_duplicate=True,backup=str(backup.target_path),
+            report_blob_rows_exact=True,sqlite_backup_with_embedded_zip=True,
             final_database=str(db.get_db_path()))
         (output/'verification.json').write_text(json.dumps(result,ensure_ascii=False,indent=2))
         print(json.dumps(result,ensure_ascii=False,indent=2))

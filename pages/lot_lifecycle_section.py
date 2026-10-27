@@ -127,7 +127,7 @@ def render_result_provenance(method,batch_id):
             saved_source=json.loads(c.execute('SELECT config_snapshot_json FROM qc_result_contexts WHERE id=?',(selected,)).fetchone()[0])
         if not evaluations.empty:
             st.caption('选择判读记录，查看检测时及之后的复核结果；历史记录按已保存的资料显示。')
-            reasons={'recorded':'首次判定','current_review':'数据复核','maintenance_review':'维护后复核','migration_review':'历史数据复核','instant_transfer_review':'转入 LJ 后复核'}
+            reasons={'recorded':'首次判定','current_review':'数据复核','maintenance_review':'维护后复核','migration_review':'历史数据复核','instant_transfer_review':'转入 L-J 后复核'}
             labels={r['id']:f"{reasons.get(r['reason'],'复核记录')}｜{r['created_at']}｜编号 {r['id']}" for r in evaluations.to_dict('records')}
             which=st.selectbox('判定记录',evaluations.id.tolist(),format_func=labels.get,key=f'{method}_evaluation_{batch_id}')
             summary,levels=evaluation_tables(json.loads(evaluations.loc[evaluations.id==which,'evaluation_json'].iloc[0]),

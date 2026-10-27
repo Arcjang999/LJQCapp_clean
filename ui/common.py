@@ -1194,7 +1194,7 @@ def _active_module_tone() -> str:
     for flag, tone in routes:
         if st.session_state.get(flag):
             return tone
-    if st.session_state.get("top_level_method_selector") in ("单水平（LJ）", "多水平法", "即时法"):
+    if st.session_state.get("top_level_method_selector") in ("单水平（L-J）", "多水平法", "即时法"):
         return "daily"
     return "projects"
 

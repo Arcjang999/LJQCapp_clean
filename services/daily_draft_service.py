@@ -1,6 +1,6 @@
 """Session drafts and strict rectangular paste mapping; never writes business data."""
 from copy import deepcopy
-from datetime import datetime
+from services.time_service import local_now
 from uuid import uuid4
 import csv
 import io
@@ -8,7 +8,7 @@ import io
 
 def new_draft(context, *, operator='', test_time=None):
     return {'draft_id':uuid4().hex,'submission_id':uuid4().hex,'context':deepcopy(context),
-            'test_time':test_time or context.get('test_time') or datetime.now().strftime('%Y-%m-%d %H:%M:%S'),'operator':operator,
+            'test_time':test_time or context.get('test_time') or local_now().strftime('%Y-%m-%d %H:%M:%S'),'operator':operator,
             'selected':[str(i['lot_config_item_id']) for i in context['items']],
             'values':{row_key(i,l):'' for i in context['items'] for l in i['levels']},
             'notes':{str(i['lot_config_item_id']):'' for i in context['items']},

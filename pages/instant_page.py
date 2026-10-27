@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
 
 import pandas as pd
+from services.time_service import local_now, detection_input_max
 import streamlit as st
 
 from pages.instant_config_section import (
@@ -84,7 +84,7 @@ def _close_instant_transfer_dialog() -> None:
     st.session_state.pop('instant_transfer_dialog_batch_id', None)
 
 
-@st.dialog("确认转入 LJ 法", width="large", on_dismiss=_close_instant_transfer_dialog)
+@st.dialog("确认转入 L-J 法", width="large", on_dismiss=_close_instant_transfer_dialog)
 def _render_instant_transfer_dialog(batch_id: int) -> None:
     preview = build_instant_transfer_preview(batch_id)
     batch = preview["batch"]
@@ -97,21 +97,21 @@ def _render_instant_transfer_dialog(batch_id: int) -> None:
         if target_project_action == "create"
         else str(transfer_state["target_project_name"])
     )
-    target_batch_summary = str(transfer_state.get("target_batch_lot_no") or "").strip() or "系统将新建 LJ 批次"
+    target_batch_summary = str(transfer_state.get("target_batch_lot_no") or "").strip() or "系统将新建 L-J 批次"
 
     st.caption(
-        "确认后会新建一个LJ批次，并带入本批次的有效检测值。"
-        "今后请在新LJ批次继续录入；原即时法记录保留供查看。"
+        "确认后会新建一个L-J批次，并带入本批次的有效检测值。"
+        "今后请在新L-J批次继续录入；原即时法记录保留供查看。"
     )
 
     if transfer_state.get("is_transferred"):
-        st.success("本批次已转入LJ法。请到下方显示的LJ项目和批次继续检测。")
+        st.success("本批次已转入L-J法。请到下方显示的L-J项目和批次继续检测。")
         render_compact_stat_metrics(
             [
-                ("当前状态", "已转入 LJ 法"),
+                ("当前状态", "已转入 L-J 法"),
                 ("转入时间", _format_instant_datetime_text(transfer_state.get("transferred_at"))),
-                ("去向 LJ 项目", str(transfer_state.get("transferred_to_lj_project_name") or "-")),
-                ("去向 LJ 批次", str(transfer_state.get("transferred_to_lj_batch_display") or "-")),
+                ("去向 L-J 项目", str(transfer_state.get("transferred_to_lj_project_name") or "-")),
+                ("去向 L-J 批次", str(transfer_state.get("transferred_to_lj_batch_display") or "-")),
             ]
         )
         if st.button("关闭", key=f"close_instant_transfer_dialog_{batch_id}", width="stretch"):
@@ -121,7 +121,7 @@ def _render_instant_transfer_dialog(batch_id: int) -> None:
 
     blockers = list(transfer_state.get("blockers", []))
     if blockers:
-        st.warning("当前批次暂不可确认转入 LJ 法。")
+        st.warning("当前批次暂不可确认转入 L-J 法。")
         st.markdown("\n".join(f"- {reason}" for reason in blockers))
     render_compact_stat_metrics(
         [
@@ -138,24 +138,24 @@ def _render_instant_transfer_dialog(batch_id: int) -> None:
             ("均值", format_optional_float(summary["mean"])),
             ("SD", format_optional_float(summary["sd"])),
             ("实测变异系数（%）", format_optional_float(summary["cv"], digits=2, suffix="%")),
-            ("目标 LJ 项目", target_project_summary),
-            ("将新建的 LJ 批次", f"质控品批号：{target_batch_summary}"),
+            ("目标 L-J 项目", target_project_summary),
+            ("将新建的 L-J 批次", f"质控品批号：{target_batch_summary}"),
             ("参数建立有效点数", str(INSTANT_TRANSFER_READY_COUNT)),
         ]
     )
     st.markdown(
         "\n".join(
             [
-                "- 前 20 个有效点将作为 LJ 参数建立数据。",
-                "- 第 21 个及之后的有效点将作为 LJ 正式期数据。",
-                "- 今后在新LJ批次继续录入；原即时法记录保留供查看。",
+                "- 前 20 个有效点将作为 L-J 参数建立数据。",
+                "- 第 21 个及之后的有效点将作为 L-J 正式期数据。",
+                "- 今后在新L-J批次继续录入；原即时法记录保留供查看。",
             ]
         )
     )
 
     action_col, cancel_col = st.columns([1, 1])
     if action_col.button(
-        "确认转入 LJ 法",
+        "确认转入 L-J 法",
         key=f"confirm_instant_transfer_dialog_{batch_id}",
         type="primary",
         disabled=bool(blockers),
@@ -167,8 +167,8 @@ def _render_instant_transfer_dialog(batch_id: int) -> None:
             st.error(str(exc))
         else:
             st.session_state["instant_transfer_notice"] = (
-                f"即时法批次“{result['source_batch_lot_no']}”已转入 LJ 法，"
-                f"已生成“由即时法转入”的 LJ 批次“{result['target_batch_lot_no']}”。"
+                f"即时法批次“{result['source_batch_lot_no']}”已转入 L-J 法，"
+                f"已生成“由即时法转入”的 L-J 批次“{result['target_batch_lot_no']}”。"
             )
             st.session_state["instant_transfer_target_project_id"] = result["target_project_id"]
             st.session_state["instant_transfer_target_batch_id"] = result["target_batch_id"]
@@ -210,18 +210,19 @@ def _render_instant_entry_and_summary_section(
             st.session_state["instant_entry_batch_id"] = selected_batch_id
             st.session_state["instant_entry_operator"] = operator_options[0] if operator_options else ""
             st.session_state["instant_entry_value"] = ""
-            st.session_state["instant_entry_test_time"] = datetime.now()
+            st.session_state["instant_entry_test_time"] = local_now()
         if st.session_state.get("instant_reset_entry_form", False):
             last_operator = str(st.session_state.get("instant_entry_operator", "") or "").strip()
             st.session_state["instant_entry_operator"] = last_operator
             st.session_state["instant_entry_value"] = ""
-            st.session_state["instant_entry_test_time"] = datetime.now()
+            st.session_state["instant_entry_test_time"] = local_now()
             st.session_state["instant_reset_entry_form"] = False
 
         st.caption("填写检测时间、检测人和本次检测值。")
         test_time = st.datetime_input(
             "检测时间",
             key="instant_entry_test_time",
+            max_value=detection_input_max(st.session_state.get("instant_entry_test_time")),
         )
         operator = st.selectbox(
             "检测人",
@@ -288,9 +289,9 @@ def _render_instant_transfer_section(context: dict[str, object]) -> None:
     is_transferred = bool(transfer_state.get("is_transferred"))
 
     if is_transferred:
-        st.success("已转入 LJ 法；原记录仅供查询，请在对应 LJ 批次继续录入。")
+        st.success("已转入 L-J 法；原记录仅供查询，请在对应 L-J 批次继续录入。")
         if st.button(
-            "前往对应 LJ 批次",
+            "前往对应 L-J 批次",
             key="instant_go_to_transferred_lj_batch",
             type="primary",
             width="stretch",
@@ -310,7 +311,7 @@ def _render_instant_transfer_section(context: dict[str, object]) -> None:
         f"已禁用 {summary['disabled_count']} · 待核对疑似离群 {pending_count}"
     )
     if action.button(
-        "确认转入 LJ 法",
+        "确认转入 L-J 法",
         key="open_instant_transfer_dialog",
         type="primary",
         disabled=(not bool(transfer_state.get("eligible"))
@@ -323,9 +324,9 @@ def _render_instant_transfer_section(context: dict[str, object]) -> None:
         st.rerun()
     blockers = list(transfer_state.get("blockers", []))
     if blockers:
-        st.info("暂时不能转入 LJ 法，请先完成：\n\n" + "\n".join(f"- {reason}" for reason in blockers))
+        st.info("暂时不能转入 L-J 法，请先完成：\n\n" + "\n".join(f"- {reason}" for reason in blockers))
     if st.session_state.get("qc_record_dialog") or st.session_state.get("qc_transfer_dialog"):
-        st.info("请先完成或取消当前打开的记录、导入或导出窗口，再点击“确认转入 LJ 法”。")
+        st.info("请先完成或取消当前打开的记录、导入或导出窗口，再点击“确认转入 L-J 法”。")
 
 
 def _resolve_instant_tone_key(status: str) -> str | None:
@@ -356,7 +357,7 @@ def _render_instant_si_method_explanation(summary: dict[str, object]) -> None:
                     f"- 当前采用：`{method_label}`。",
                     "- 使用同一批质控品中尚未禁用的检测值进行判定。",
                     "- 起判条件：有效点数 `n < 3` 时不判定，`n >= 3` 时开始判定。",
-                    "- 使用范围：即刻法 SI 表仅用于前 20 个有效点，超过后应转入 LJ 法。",
+                    "- 使用范围：即刻法 SI 表仅用于前 20 个有效点，超过后应转入 L-J 法。",
                     f"- 公式：`{formula}`，其中 `s` 使用样本标准差。",
                     "- 判定阈值：SI上限和 SI下限均不超过 n2s 为在控；超过 n2s 但不超过 n3s 为警告；超过 n3s 为疑似离群。",
                     "- 疑似离群结果由您核对。可在“检测记录”中选中一条，再点保留、禁用或恢复。",
@@ -531,8 +532,8 @@ def _render_instant_context(context: dict[str, object]) -> None:
             items.extend([
                 ("转入时间", _format_instant_datetime_text(transfer_state.get("transferred_at"))),
                 ("转入有效点数", str(transfer_state.get("transferred_effective_count") or 0)),
-                ("去向 LJ 项目", transfer_state.get("transferred_to_lj_project_name") or "-"),
-                ("去向 LJ 批次", transfer_state.get("transferred_to_lj_batch_display") or "-"),
+                ("去向 L-J 项目", transfer_state.get("transferred_to_lj_project_name") or "-"),
+                ("去向 L-J 批次", transfer_state.get("transferred_to_lj_batch_display") or "-"),
             ])
         st.dataframe(pd.DataFrame(items, columns=["项目", "内容"]), hide_index=True, width="stretch")
 

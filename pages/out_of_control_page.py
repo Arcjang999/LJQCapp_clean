@@ -121,5 +121,5 @@ def _rows(items, prefix):
 
 
 def _method_label(row):
-    if row.get('qc_method') == 'lj': return '单水平（LJ）'
+    if row.get('qc_method') == 'lj': return '单水平（L-J）'
     return f"多水平法（{len(row.get('origin_snapshot', {}).get('levels', []))}水平）"

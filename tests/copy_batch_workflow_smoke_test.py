@@ -66,10 +66,12 @@ def test_ui_guides_to_new_draft_and_preserves_old_results():
         batch_table = next(table.value for table in app.dataframe if 'batch_configs_' in table.proto.id)
         assert new['config_name'] in batch_table['批次名称'].tolist()
         assert any('V11-LOT-002' in str(table.value.to_dict()) for table in app.dataframe)
-        assert any('核对各水平批号、均值和标准差' in item.value for item in app.success)
+        assert any(all(text in item.value for text in
+                       ('已建立新批次', new['config_name'], '编辑水平设置', '确认批次设置'))
+                   for item in app.success)
         assert 'qc_replace_save' not in [button.key for button in app.button]
         assert 'qc_replacement_dialog' not in app.session_state
-        assert any(button.key == 'qc_replace_register' for button in app.button)
+        assert any(button.key == f'qc_replace_list_register_{source_id}_register' for button in app.button)
         items = list_lot_config_items(new_id)
         lj_item = items[items.qc_method == 'lj'].iloc[0]
         assert lj_item.cv_limit == 5

@@ -245,7 +245,7 @@ def test_concurrent_same_item_saves_once_and_long_names_unpack():
         job=job_for(preview)
         item=svc.get_monthly_report_job(job)['items'][0]
         pdf=svc.build_lj_monthly_report_pdf(svc._build('lj',item['batch_id'],'2026-04'))
-        with patch.object(svc,'build_lj_monthly_report_pdf',return_value=pdf) as renderer:
+        with patch.object(svc,'build_lj_monthly_report_pdf',wraps=svc.build_lj_monthly_report_pdf) as renderer:
             with ThreadPoolExecutor(2) as pool:
                 results=list(pool.map(lambda _:svc.run_monthly_report_item(job,item['id']),range(2)))
             assert all(r['status']=='succeeded' for r in results)

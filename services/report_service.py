@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from services.cv_service import calculate_cv_percent
+from services.terminology_service import LJ_METHOD_LABEL
 
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
@@ -53,8 +54,7 @@ from zscore_plotting import CONFIGURED_FONT_FALLBACKS as ZSCORE_CONFIGURED_FONT_
 
 
 REPORT_TYPE_LJ_MONTHLY = "lj_monthly_report"
-LJ_METHOD_LABEL = "单水平（LJ法）"
-LJ_REPORT_TITLE = "单水平（LJ法）月度质控报告"
+LJ_REPORT_TITLE = f"{LJ_METHOD_LABEL}月度质控报告"
 DEFAULT_DECLARATION = DEFAULT_REPORT_STATEMENT
 PDF_FONT_CANDIDATES = [
     "WenQuanYi Micro Hei",
@@ -492,7 +492,7 @@ def _build_lj_report_package(batch_id, period, *, monthly=False, handling_versio
     qc_df, stats = calculate_qc_results(get_results(batch_id, include_manual_note=True), int(batch['target_n']))
     formal_df = filter_frame_to_period(qc_df[qc_df['phase'] == LJ_FORMAL_PHASE_LABEL], period)
     if formal_df.empty:
-        raise ValueError("所选月份无正式期数据，无法生成单水平（LJ法）月报。" if monthly else "所选报告期间无正式期数据，无法生成单水平（LJ法）质控报告。")
+        raise ValueError("所选月份无正式期数据，无法生成单水平（L-J法）月报。" if monthly else "所选报告期间无正式期数据，无法生成单水平（L-J法）质控报告。")
 
     input_value_type = normalize_input_value_type(batch["input_value_type"])
     input_value_type_label = get_input_value_type_label(input_value_type)
@@ -516,7 +516,7 @@ def _build_lj_report_package(batch_id, period, *, monthly=False, handling_versio
     ) if monthly else _build_period_file_name(str(batch['project_name']), str(batch['lot_no']), period, '单水平')
     report = LjMonthlyReportData(
         report_type=REPORT_TYPE_LJ_MONTHLY if monthly else REPORT_TYPE_LJ_PERIOD,
-        title=LJ_REPORT_TITLE if monthly else '单水平（LJ法）质控报告',
+        title=LJ_REPORT_TITLE if monthly else '单水平（L-J法）质控报告',
         method_label=LJ_METHOD_LABEL,
         report_month=normalized_month,
         report_month_label=report_month_label,
@@ -1265,6 +1265,8 @@ def _resolve_report_history_method_label(
         or basic_info.get("method_label")
         or ""
     ).strip()
+    if report_type in (REPORT_TYPE_LJ_MONTHLY, REPORT_TYPE_LJ_PERIOD):
+        return LJ_METHOD_LABEL
     if candidate:
         return candidate
     if report_type in (REPORT_TYPE_ZSCORE_MONTHLY, REPORT_TYPE_ZSCORE_PERIOD):
@@ -1355,15 +1357,15 @@ def _validate_lj_report_history_source(record: ReportHistoryRecord) -> None:
     try:
         project = get_project(record.project_id)
     except ValueError as exc:
-        raise ValueError("原始 LJ 项目不存在，无法按当前数据重新生成报告。") from exc
+        raise ValueError("原始 L-J 项目不存在，无法按当前数据重新生成报告。") from exc
 
     try:
         batch = get_batch(record.batch_id)
     except ValueError as exc:
-        raise ValueError("原始 LJ 批次不存在，无法按当前数据重新生成报告。") from exc
+        raise ValueError("原始 L-J 批次不存在，无法按当前数据重新生成报告。") from exc
 
     if int(batch["project_id"]) != int(project["id"]):
-        raise ValueError("原始 LJ 批次已不再属于该历史项目，无法按原参数重新生成。")
+        raise ValueError("原始 L-J 批次已不再属于该历史项目，无法按原参数重新生成。")
 
 
 def _validate_zscore_report_history_source(record: ReportHistoryRecord) -> None:
@@ -1512,7 +1514,7 @@ def _resolve_target_source(batch) -> tuple[str, str]:
         config_name = str(dict(batch).get("v11_config_name") or "").strip()
         config_detail = f"；上游配置：{config_name}" if config_name else ""
         return (
-            "即时法转入后形成的 LJ 靶值",
+            "即时法转入后形成的 L-J 靶值",
             f"该批次由即时法转入形成；来源项目：{source_project}；来源批次：{source_batch}；转入时间：{transfer_time}{config_detail}",
         )
     return ("本批次数据计算", "基于本批次参数建立期有效建立点计算。")
@@ -1523,7 +1525,7 @@ def _build_monthly_overview(
     batch,
 ) -> str:
     summary = (
-        f"本月该 LJ 批次正式期共纳入 {statistics.formal_count} 条记录，"
+        f"本月该 L-J 批次正式期共纳入 {statistics.formal_count} 条记录，"
         f"其中在控 {statistics.in_control_count} 条、警告 {statistics.warning_count} 条、"
         f"失控 {statistics.out_of_control_count} 条。"
     )

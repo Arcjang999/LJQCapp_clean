@@ -67,6 +67,7 @@ _QC_METHOD_BY_TEXT = {
     **{label.casefold(): code for code, label in QC_METHOD_LABELS.items()},
     **{label.casefold(): code for label, code in QC_METHOD_LEGACY_LABELS.items()},
     "lj法": "lj",
+    "l-j法": "lj",
     "z-score": "zscore",
     "z-score法": "zscore",
     "z score": "zscore",
@@ -117,10 +118,10 @@ def _instructions_dataframe() -> pd.DataFrame:
     return pd.DataFrame(
         [
             ["用途", "在“项目配置”工作表批量维护项目中的检验项目；星号列为必填。"],
-            ["质控方法", "填写 LJ、Z-score 或 即时法。"],
+            ["质控方法", "填写 L-J、Z-score 或 即时法。"],
             ["输入值类型", "填写 真实检测值、Ct值 或 log值；检验项目、质控方法和输入值类型的组合不得重复。"],
-            ["水平数", "LJ/即时法固定 1；Z-score 填 2 或 3。"],
-            ["参数建立点数", "LJ/Z-score 填 5–20；即时法固定按 20 个有效点。"],
+            ["水平数", "L-J/即时法固定 1；Z-score 填 2 或 3。"],
+            ["参数建立点数", "L-J/Z-score 填 5–20；即时法固定按 20 个有效点。"],
             ["新增资料", "未登记的检验项目、单位、方法学、试剂及厂家会新增到基础资料中，请先核对名称，避免重复登记。"],
             ["导入方式", "合并会保留未出现在文件中的原检验项目；替换会以文件内容作为完整的检验项目表。"],
             ["设置确认", "导入后项目保持待确认。请回到项目设置，逐项核对后确认。"],
@@ -139,7 +140,7 @@ def build_project_import_template_xlsx() -> bytes:
                 "示例项目（导入前请替换或删除）",
                 "EXAMPLE",
                 "",
-                "LJ",
+                "L-J",
                 "真实检测值",
                 "mmol/L",
                 "比色法",
@@ -468,7 +469,7 @@ def preview_project_template_xlsx(data: bytes) -> tuple[pd.DataFrame, list[str]]
                 raise ValueError("检验项目不能为空。")
             qc_method = _QC_METHOD_BY_TEXT.get(_key(row["质控方法*"]))
             if qc_method is None:
-                raise ValueError("质控方法必须为 LJ、Z-score 或 即时法。")
+                raise ValueError("质控方法必须为 L-J、Z-score 或 即时法。")
             input_value_type = _INPUT_VALUE_TYPE_BY_TEXT.get(_key(row["输入值类型*"]))
             if input_value_type is None:
                 raise ValueError("输入值类型必须为真实检测值、Ct值或log值。")
@@ -485,13 +486,13 @@ def preview_project_template_xlsx(data: bytes) -> tuple[pd.DataFrame, list[str]]
             level_count = _required_integer(row["水平数*"], "水平数")
             target_n = _required_integer(row["参数建立点数*"], "参数建立点数")
             if qc_method in {"lj", "instant"} and level_count != 1:
-                raise ValueError("LJ 和即时法只能配置 1 个水平。")
+                raise ValueError("L-J 和即时法只能配置 1 个水平。")
             if qc_method == "zscore" and level_count not in {2, 3}:
                 raise ValueError("Z-score 只能配置 2 或 3 个水平。")
             if qc_method == "instant":
                 target_n = 20
             elif not 5 <= target_n <= 20:
-                raise ValueError("LJ 和 Z-score 参数建立点数必须在 5 至 20 之间。")
+                raise ValueError("L-J 和 Z-score 参数建立点数必须在 5 至 20 之间。")
             cv_limit = _optional_float(row["允许不精密度(CV%)"])
             if cv_limit is not None and (not math.isfinite(cv_limit) or cv_limit <= 0):
                 raise ValueError("允许不精密度（CV）必须大于 0。")

@@ -64,7 +64,7 @@ def _selector(rows,scope):
             from ui.daily_navigation import return_to_project_workspace
             return_to_project_workspace()
         return None
-    methods={'lj':'单水平（LJ）','zscore':'多水平法','instant':'即时法'}
+    methods={'lj':'单水平（L-J）','zscore':'多水平法','instant':'即时法'}
     labels={r['id']:f"{r['chinese_name']}｜{r['template_name']}｜{methods.get(r['qc_method'],r['qc_method'])}" for r in rows}
     key=f'quality_{scope}_selector'
     if st.session_state.get(key) not in [None,*labels]:

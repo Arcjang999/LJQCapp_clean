@@ -11,6 +11,9 @@ import pandas as pd
 import streamlit as st
 
 from services.master_data_service import list_qc_materials
+from services.qc_product_display_service import (
+    product_choice_label, product_concentration_summary, product_display_rows,
+)
 from services.qc_product_recommendation_service import (
     get_qc_product_recommendations, validate_qc_product_choice, validate_choice_review,
     list_qc_product_relations, save_qc_product_relation, set_qc_product_relation_disabled,
@@ -59,13 +62,14 @@ def render_product_choice(ctx, *, reagent_id, lab_instrument_id, test_item_id=No
         draft.pop('product_choice_review', None)
         st.warning('试剂与质控品的使用记录已更新，请重新选择并点击“确认所选质控品”。')
     candidates = {int(row['qc_material_id']): row for row in suggestions['candidates']}
-    products = {int(row['id']): row for row in list_qc_materials(include_disabled=False).to_dict('records')}
+    products = {int(row['id']): row for row in product_display_rows(
+        list_qc_materials(include_disabled=False).to_dict('records'))}
     if not products and not locked:
         st.info('还没有可选的质控品产品。展开“补充基础资料”，选择“质控品产品”并登记；保存后再选择本次批号。')
     current = draft.get(field)
     if locked:
         row = products.get(current)
-        st.caption('质控品：' + (str(row['generic_name']) if row else '当前项目所选产品'))
+        st.caption('质控品：' + (product_choice_label(row) if row else '当前项目所选产品'))
     else:
         modes = ['已核对的候选', '人工选品'] if candidates else ['人工选品']
         mode_key = prefix + '_mode'
@@ -85,11 +89,13 @@ def render_product_choice(ctx, *, reagent_id, lab_instrument_id, test_item_id=No
             st.session_state[key] = current if current in choices else None
         draft[field] = st.selectbox('质控品 *', [None, *choices], key=key, filter_mode='fuzzy',
             format_func=lambda value: '请选择' if value is None else (
-                candidates[value]['label'] if mode == '已核对的候选' else '｜'.join(
-                    str(products[value].get(name) or '') for name in ('manufacturer_name', 'catalog_no', 'generic_name')
-                    if products[value].get(name))))
+                candidates[value]['label'] if mode == '已核对的候选' else product_choice_label(products[value])))
         current = draft[field]
         ctx[prefix + '_last_product'] = current
+    if current in products:
+        concentration = product_concentration_summary(products[current])
+        if concentration:
+            st.caption(concentration)
     if (draft.get('product_choice_review') or {}).get('qc_material_id') != current:
         draft.pop('product_choice_review', None)
     if candidates:
@@ -216,7 +222,7 @@ def _render_relation_editor(ctx, scope, current_product, prefix):
     selected = None
     if rows:
         from ui.record_workspace import render_record_selection
-        frame = pd.DataFrame([{'质控品': row['qc_material_name'], '仪器': row['instrument_name'] or '全部仪器',
+        frame = pd.DataFrame([{'质控品': product_choice_label(row), '仪器': row['instrument_name'] or '全部仪器',
             '检验项目': row['test_item_name'] or '全部检验项目', '方法学': row['method_name'] or '全部方法学',
             '范围说明': row['scope_note'], '状态': '已停用' if row['is_disabled'] else '在用'} for row in rows])
         selected_id = render_record_selection(frame, [row['id'] for row in rows], scope=prefix + '_relations')
@@ -259,8 +265,12 @@ def _render_relation_editor(ctx, scope, current_product, prefix):
         ('test_item_id', '检验项目', list_test_items(include_disabled=True), 'chinese_name'),
         ('method_id', '方法学', list_methods(include_disabled=True), 'method_name'),
     ):
-        row = next((row for row in frame.to_dict('records') if row['id'] == values.get(field)), None)
-        summaries.append(label + '：' + (str(row[name]) if row else '全部'))
+        records = frame.to_dict('records')
+        if field == 'qc_material_id':
+            records = product_display_rows(records)
+        row = next((row for row in records if row['id'] == values.get(field)), None)
+        text = product_choice_label(row) if row and field == 'qc_material_id' else str(row[name]) if row else '全部'
+        summaries.append(label + '：' + text)
     st.caption('｜'.join(summaries))
     st.caption('上方列出这条记录使用的仪器、检验项目和方法。“全部”表示没有限制，请在下方说明。')
     # Identity is frozen for this form, so changing the surrounding project cannot rebind it.

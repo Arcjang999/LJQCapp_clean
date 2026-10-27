@@ -57,7 +57,8 @@ def status(kind, identifier, disabled, reason='资料核对'):
 
 
 def seed_records():
-    manufacturer = save_master_record('manufacturer', {'display_name': '目录测试厂家', 'legal_name': '目录测试有限公司'})
+    manufacturer = save_master_record('manufacturer', {'display_name': '目录测试厂家', 'legal_name': '目录测试有限公司',
+        'categories': ['instrument', 'reagent', 'qc_material']})
     unit = save_master_record('unit', {'symbol': 'test-unit', 'quantity_kind': '质量浓度'})
     method = save_master_record('method', {'method_name': '目录测试方法', 'method_code': 'M001'})
     item = save_master_record('test_item', {'chinese_name': '目录测试项目', 'default_unit_id': unit})
@@ -146,7 +147,7 @@ def test_default_fields_materials_and_new_references_lock():
     with TemporaryDatabaseContext():
         ids = seed_records()
         stale_context = context('method', ids['method'])
-        material = create_qc_material(generic_name='默认资料引用质控品')
+        material = create_qc_material(generic_name='默认资料引用质控品', manufacturer_id=ids['manufacturer'])
         template = create_project_template(template_name='默认资料引用', lab_instrument_id=ids['lab_instrument'], qc_material_id=material,
             default_reagent_id=ids['reagent'])
         with get_connection() as connection:
@@ -156,10 +157,12 @@ def test_default_fields_materials_and_new_references_lock():
             entity_id=ids['method'], expected_fingerprint=stale_context['fingerprint']), '已用于项目')
         assert context('reagent', ids['reagent'])['referenced']
         assert context('unit', ids['unit'])['referenced'], 'Test default unit also preserves unit identity'
-        only_material_manufacturer = save_master_record('manufacturer', {'display_name': '仅供质控品厂家'})
+        only_material_manufacturer = save_master_record('manufacturer', {'display_name': '仅供质控品厂家',
+            'categories': ['qc_material']})
         create_qc_material(generic_name='质控品引用保护', manufacturer_id=only_material_manufacturer)
         assert context('manufacturer', only_material_manufacturer)['referenced']
-        reagent_lot_only = save_master_record('reagent', {'generic_name': '已有批号的试剂'})
+        reagent_lot_only = save_master_record('reagent', {'generic_name': '已有批号的试剂',
+            'manufacturer_id': ids['manufacturer']})
         with get_connection() as connection:
             connection.execute("INSERT INTO md_reagent_lots(reagent_id,lot_no,expiry_date) VALUES (?,'R-001','2028-12-31')", (reagent_lot_only,))
         assert context('reagent', reagent_lot_only)['referenced']
@@ -176,7 +179,8 @@ def test_default_fields_materials_and_new_references_lock():
 def test_foreign_keys_missing_disabled_and_retained():
     with TemporaryDatabaseContext():
         ids = seed_records()
-        other_manufacturer = save_master_record('manufacturer', {'display_name': '另一个停用厂家'})
+        other_manufacturer = save_master_record('manufacturer', {'display_name': '另一个停用厂家',
+            'categories': ['reagent']})
         status('manufacturer', ids['manufacturer'], True)
         status('manufacturer', other_manufacturer, True)
         # Existing relationships survive notes edits, but cannot be newly chosen.

@@ -21,7 +21,7 @@ def render_lj_monthly_report_section(selected_batch_id: int) -> None:
     batch = get_batch(selected_batch_id)
     months = list_lj_report_month_options(selected_batch_id)
     with st.container(border=True):
-        render_section_intro(title="单水平（LJ）质控报告", caption="选择日期，核对报告后生成PDF。报告、处理记录和附件一同保存，可分别下载。", tone="accent")
+        render_section_intro(title="单水平（L-J）质控报告", caption="选择日期，核对报告后生成PDF。报告、处理记录和附件一同保存，可分别下载。", tone="accent")
         st.caption(f"{batch['project_name']} · {_build_batch_display(batch)} · 正式期")
         if not months:
             st.info("当前批次暂无正式期检测记录。进入正式期并录入结果后，可生成质控报告。")

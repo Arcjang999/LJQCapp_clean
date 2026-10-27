@@ -97,7 +97,8 @@ def test_stale_revision_cannot_disable():
         app.text_input(key=f'batch_status_reason_{config_id}_True').set_value('陈旧表单不应成功')
         app.button(key='batch_status_confirm').click().run()
         assert_clean(app)
-        assert any('批次设置已修改' in message.value for message in app.error)
+        assert any('已在别处修改' in message.value and '重新打开批次' in message.value
+                   for message in app.error)
         assert dict(get_lot_config(config_id)) == changed
         assert len(list_config_snapshots(config_id)) == snapshot_count
 

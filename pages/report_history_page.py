@@ -81,7 +81,7 @@ def render_report_history_page() -> None:
         items=[
             ("历史报告数", len(records)),
             ("涉及项目数", len({record.project_name for record in records})),
-            ("单水平（LJ）", sum(1 for record in records if record.report_type in (REPORT_TYPE_LJ_MONTHLY, "lj_period_report"))),
+            ("单水平（L-J）", sum(1 for record in records if record.report_type in (REPORT_TYPE_LJ_MONTHLY, "lj_period_report"))),
             ("多水平法", sum(1 for record in records if record.report_type in (REPORT_TYPE_ZSCORE_MONTHLY, "zscore_period_report"))),
             ("失控处理报告", sum(1 for record in records if record.report_type == REPORT_TYPE_EVENT)),
         ],

@@ -7,6 +7,7 @@ from textwrap import dedent
 from typing import Any
 
 import pandas as pd
+from services.time_service import detection_input_max
 import streamlit as st
 
 from database import delete_result, update_result
@@ -110,6 +111,7 @@ def render_record_maintenance_dialog(
                     edit_test_time = st.datetime_input(
                         "检测时间",
                         value=pd.Timestamp(selected_result["test_time"]).to_pydatetime(),
+                        max_value=detection_input_max(selected_result["test_time"]),
                         disabled=edit_locked,
                     )
                     edit_operator = st.text_input(
@@ -314,6 +316,7 @@ def render_zscore_record_maintenance_dialog(
                         edit_test_time = st.datetime_input(
                             "检测时间",
                             value=pd.Timestamp(selected_run["test_time"]).to_pydatetime(),
+                            max_value=detection_input_max(selected_run["test_time"]),
                         )
                         edit_operator = st.text_input(
                             "检测人",

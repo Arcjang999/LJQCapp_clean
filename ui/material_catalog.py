@@ -15,6 +15,7 @@ from services.material_catalog_service import (
     update_control_material, update_material_product,
 )
 from services.material_workflow_service import concentration_label, list_material_specs, material_label, register_control_material
+from services.qc_product_display_service import product_choice_label, product_concentration_summary, product_display_rows
 
 
 def _open_dialog(kind: str, *, product_id=None, level_id=None) -> None:
@@ -342,7 +343,8 @@ def render_material_catalog(*, render_dialog: bool = True, include_directory: bo
     if st.session_state.pop('material_catalog_pending_show_disabled', False):
         st.session_state['md_show_disabled_qc'] = True
     show_disabled = st.checkbox('显示已停用记录', key='md_show_disabled_qc')
-    products = {int(r['id']): r for r in list_qc_materials(include_disabled=show_disabled).to_dict('records')}
+    products = {int(r['id']): r for r in product_display_rows(
+        list_qc_materials(include_disabled=show_disabled).to_dict('records'))}
     if pending in products:
         previous = st.session_state.get('material_catalog_product_id', st.session_state.get('material_catalog_saved_product_id'))
         if pending != previous:
@@ -357,7 +359,9 @@ def render_material_catalog(*, render_dialog: bool = True, include_directory: bo
     choose, add = st.columns([0.75, 0.25], vertical_alignment='bottom')
     product_id = choose.selectbox('质控品', [None] + list(products),
         format_func=lambda value: '请选择质控品' if value is None else
-            f'{products[value]["manufacturer_name"] or "未填写厂家"}｜{products[value]["catalog_no"] or "未填写产品编号"}｜{products[value]["generic_name"]}' +
+            product_choice_label(dict(products[value],
+                manufacturer_name=products[value]['manufacturer_name'] or '未填写厂家',
+                catalog_no=products[value]['catalog_no'] or '未填写产品编号')) +
             ('（已停用）' if products[value]['is_disabled'] else ''), key='material_catalog_product_id')
     st.session_state['material_catalog_saved_product_id'] = product_id
     if add.button('新增质控品', key='material_catalog_add_product', width='stretch'):
@@ -366,6 +370,9 @@ def render_material_catalog(*, render_dialog: bool = True, include_directory: bo
         st.info('先选择或新增质控品，再在下方登记批号、效期和浓度水平。')
     else:
         product = get_material_product(product_id)
+        concentration = product_concentration_summary(products[product_id])
+        if concentration:
+            st.caption(concentration)
         product_info, product_edit, product_status = st.columns([0.5, 0.25, 0.25], vertical_alignment='bottom')
         product_info.caption(f'基质：{product["matrix"] or "未填写"}｜产品货号：{product["catalog_no"] or "未填写"}')
         if product_edit.button('编辑质控品', key='material_catalog_edit_product', disabled=bool(product['is_disabled']), width='stretch'):

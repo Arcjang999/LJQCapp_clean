@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from services.cv_service import calculate_cv_percent
+from services.time_service import validate_detection_time
 
 import json
 import math
@@ -69,9 +70,11 @@ def source_context(connection, method, batch_id, *, read_only=False):
 
 
 def require_writable(connection, method, batch_id, test_time=None, *, read_only=False):
+    if test_time is not None:
+        test_time = validate_detection_time(test_time)
     source,binding,batch = source_context(connection,method,batch_id,read_only=read_only)
     if batch['is_disabled'] or (method=='instant' and batch['transfer_status']=='transferred'):
-        raise ValueError('该批次已停用或已转入 LJ 法，当前为只读。')
+        raise ValueError('该批次已停用或已转入 L-J 法，当前为只读。')
     if binding is not None:
         row = connection.execute('''SELECT c.status,c.is_disabled,t.status AS template_status,t.is_disabled AS template_disabled,
             i.is_enabled,i.is_disabled AS item_disabled,l.state,l.effective_at FROM qc_lot_configs c
@@ -631,6 +634,8 @@ def resolve_import_lot(method,batch_id,test_time,lot_no):
 def review_import_lots(review,method,batch_id):
     """Freeze matching and optimistic revision at preview, never again at submit."""
     from import_review import _make_issue,_build_review_result
+    if review['summary']['has_blocking_errors']:
+        return review
     issues=list(review['issues']);rows=[]
     for index,row in enumerate(review['normalized_rows'],2):
         row=dict(row)
@@ -647,6 +652,7 @@ def import_reviewed_results(method,batch_id,rows,*,template_id=None,required_n=N
     from zscore_logic import create_zscore_run
     with atomic_write():
         for row in rows:
+            validate_detection_time(row['test_time'])
             selection=row.get('lot_selection')
             if selection is None:
                 raise ValueError('缺少批号匹配预览，请重新审查文件。')

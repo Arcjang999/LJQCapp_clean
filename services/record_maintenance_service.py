@@ -123,9 +123,8 @@ def _edit_record(method, record_id, changes):
     context = get_record_context(method, record_id)
     if not context['edit_allowed']:
         raise ValueError(context['edit_reason'])
-    time = pd.Timestamp(changes.get('test_time'))
-    if pd.isna(time):
-        raise ValueError('请填写检测时间。')
+    from services.time_service import validate_detection_time
+    time = pd.Timestamp(validate_detection_time(changes.get('test_time')))
     operator = str(changes.get('operator') or '').strip()
     if not operator:
         raise ValueError('请填写检测人。')

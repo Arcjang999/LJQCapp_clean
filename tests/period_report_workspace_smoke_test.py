@@ -1,5 +1,5 @@
 """Calendar report previews, exports, retryable archives and stable history UI."""
-from datetime import date
+from datetime import date, datetime
 from io import BytesIO
 import json
 from pathlib import Path
@@ -74,7 +74,7 @@ class PeriodReportWorkspaceTests(unittest.TestCase):
         from zscore_logic import create_zscore_run, get_template_id_for_level_count, build_zscore_plot_dataframe
         from pages.lj_sections import build_monthly_export_dataframe
         from pages.zscore_sections import build_zscore_monthly_export_plot_dataframe
-        with TemporaryDatabaseContext():
+        with patch('services.time_service.local_now', return_value=datetime(2027, 1, 2)), TemporaryDatabaseContext():
             _, lj = seed_lj_batch_with_formal_monthly_data()
             _, z2 = seed_zscore_batch_with_formal_monthly_data()
             _, z3 = seed_three_level_zscore_batch_without_abnormal()

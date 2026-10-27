@@ -1065,6 +1065,8 @@ def _create_zscore_run_impl(
     manual_note: str = "",
     lot_selection: dict | None = None,
 ) -> dict[str, Any]:
+    from services.time_service import validate_detection_time
+    test_time = validate_detection_time(test_time)
     batch_context = resolve_zscore_batch_context(batch_id)
     batch = batch_context["batch"]
     expected_template_id = str(batch_context["template_id"])
@@ -1474,6 +1476,8 @@ def _update_saved_zscore_run_impl(
     level_results: list[dict[str, Any]],
     manual_note: str | None = None,
 ) -> dict[str, Any]:
+    from services.time_service import validate_detection_time
+    test_time = validate_detection_time(test_time)
     existing_run = _get_zscore_run_for_maintenance(run_id)
     from database import get_connection
     from services.lot_lifecycle_service import require_writable

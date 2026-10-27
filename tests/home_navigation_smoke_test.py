@@ -103,7 +103,7 @@ class HomeNavigationTest(unittest.TestCase):
             with self.subTest(page=page):
                 app.session_state['workspace_project_id'] = self.fixture['template_id']
                 app.session_state['daily_entry_template_id'] = self.fixture['template_id']
-                app.session_state['pending_top_level_method'] = '单水平（LJ）'
+                app.session_state['pending_top_level_method'] = '单水平（L-J）'
                 app.session_state['daily_return_page'] = 'show_daily_overview_page'
                 app.session_state[page] = True
                 app.run()
@@ -121,7 +121,7 @@ class HomeNavigationTest(unittest.TestCase):
 
     def test_all_configured_method_workbenches_return_in_one_click(self):
         app = self.app()
-        for method, label, prefix in (('lj', '单水平（LJ）', ''),
+        for method, label, prefix in (('lj', '单水平（L-J）', ''),
                                       ('zscore', '多水平法', 'zscore_'),
                                       ('instant', '即时法', 'instant_')):
             with self.subTest(method=method):

@@ -4,6 +4,7 @@ from io import BytesIO
 from typing import Any
 
 import pandas as pd
+from services.time_service import validate_detection_time
 
 from services.value_type_service import (
     DEFAULT_INPUT_VALUE_TYPE,
@@ -780,7 +781,10 @@ def _parse_test_time(raw_value: Any) -> tuple[pd.Timestamp | None, str | None]:
     parsed_time = pd.to_datetime(text, errors="coerce")
     if pd.isna(parsed_time):
         return None, "检测时间无法解析，请使用标准日期时间格式。"
-    return pd.Timestamp(parsed_time), None
+    try:
+        return pd.Timestamp(validate_detection_time(parsed_time)), None
+    except ValueError as exc:
+        return None, str(exc)
 
 
 def _normalize_lj_building_column_name(

@@ -10,7 +10,11 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import FixedLocator
 import pandas as pd
 from services.profiling import profile_timer
-from chart_layout import CHART_LEGEND_SIZE, finish_chart_layout, select_detection_ticks
+from chart_layout import (
+    CHART_LEGEND_SIZE, CONTROL_LINE_COLORS, add_control_line_labels,
+    control_parameter_segments, finish_chart_layout, mark_control_parameter_change,
+    select_detection_ticks, usable_control_sd,
+)
 
 
 matplotlib.use("Agg")
@@ -207,19 +211,19 @@ def _plot_status_points(axis, formal_df: pd.DataFrame) -> None:
 
 
 def _plot_control_lines(axis, mean: float, sd: float | None) -> None:
-    axis.axhline(mean, color="#222222", linewidth=1.2, linestyle="-", label="均值")
-    axis.text(1.01, mean, "均值", transform=axis.get_yaxis_transform(), fontsize=8, va="center")
-    if sd is None:
+    if mean is None or not math.isfinite(float(mean)):
+        return
+    axis.axhline(mean, color=CONTROL_LINE_COLORS[0], linewidth=1.2, linestyle="-", label="均值")
+    resolved_sd = usable_control_sd(sd)
+    add_control_line_labels(axis, mean, resolved_sd)
+    if resolved_sd is None:
         return
 
-    colors = {1: "#76b7b2", 2: "#edc948", 3: "#ff9da7"}
     for multiplier in (1, 2, 3):
-        upper = mean + multiplier * sd
-        lower = mean - multiplier * sd
-        axis.axhline(upper, color=colors[multiplier], linewidth=1, linestyle="--")
-        axis.axhline(lower, color=colors[multiplier], linewidth=1, linestyle="--")
-        axis.text(1.01, upper, f"+{multiplier}SD", transform=axis.get_yaxis_transform(), fontsize=8, va="center")
-        axis.text(1.01, lower, f"-{multiplier}SD", transform=axis.get_yaxis_transform(), fontsize=8, va="center")
+        upper = mean + multiplier * resolved_sd
+        lower = mean - multiplier * resolved_sd
+        axis.axhline(upper, color=CONTROL_LINE_COLORS[multiplier], linewidth=1, linestyle="--")
+        axis.axhline(lower, color=CONTROL_LINE_COLORS[multiplier], linewidth=1, linestyle="--")
 
 
 def _plot_reagent_change_lines(axis, plot_df: pd.DataFrame) -> None:
@@ -309,8 +313,8 @@ def _get_y_limits(plot_df: pd.DataFrame, stats: dict, y_axis_mode: str, standard
     if deviations.nunique()>1:
         return None
     mean = float(means.iloc[0]) if not means.empty else float(stats["mean"])
-    sd = float(deviations.iloc[0]) if not deviations.empty else float(stats["sd"])
-    if math.isclose(sd, 0.0, abs_tol=1e-12):
+    sd = usable_control_sd(deviations.iloc[0] if not deviations.empty else stats["sd"])
+    if not math.isfinite(mean) or sd is None:
         return None
 
     padding = max(sd * 0.25, abs(mean) * 0.01, 1e-6)
@@ -596,16 +600,25 @@ def close_figure(figure) -> None:
 
 
 def _plot_versioned_control_lines(axis, frame, stats):
-    if 'target_mean_used' not in frame or frame['target_mean_used'].notna().sum()==0:
-        _plot_control_lines(axis,stats['mean'],stats['sd']);return
-    for index,(_,group) in enumerate(frame.dropna(subset=['target_mean_used']).groupby('target_profile_id',dropna=False,sort=False)):
-        left,right=float(group.sequence.min())-.4,float(group.sequence.max())+.4
-        mean,sd=float(group.target_mean_used.iloc[0]),float(group.target_sd_used.iloc[0])
-        for multiple in range(-3,4):
-            axis.plot([left,right],[mean+multiple*sd]*2,color='#222222' if multiple==0 else '#76b7b2',
-                linestyle='-' if multiple==0 else '--',linewidth=1,label='版本设定均值' if index==0 and multiple==0 else None)
+    if 'target_mean_used' not in frame or frame['target_mean_used'].notna().sum() == 0:
+        _plot_control_lines(axis, stats.get('mean'), stats.get('sd'))
+        return
+    segments = control_parameter_segments(frame, 'sequence', 'target_mean_used', 'target_sd_used')
+    for index, segment in enumerate(segments):
+        left, right = segment['left'] - .4, segment['right'] + .4
+        mean, sd = segment['mean'], segment['sd']
+        multiples = range(-3, 4) if sd is not None else (0,)
+        for multiple in multiples:
+            value = mean + multiple * (sd or 0)
+            axis.plot([left, right], [value] * 2, color=CONTROL_LINE_COLORS[abs(multiple)],
+                      linestyle='-' if multiple == 0 else '--', linewidth=1,
+                      label='版本设定均值' if index == 0 and multiple == 0 else None)
         if index:
-            axis.axvline(left,color='#7d5ba6',linestyle=':',linewidth=1)
+            mark_control_parameter_change(axis, left)
+    if segments:
+        latest = segments[-1]
+        add_control_line_labels(axis, latest['mean'], latest['sd'],
+                                mean_label='均值（末段）' if len(segments) > 1 else '均值')
 
 
 def plot_actual_lot_markers(axis,frame,x_column):

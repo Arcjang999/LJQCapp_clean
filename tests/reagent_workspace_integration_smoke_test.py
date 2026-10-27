@@ -182,7 +182,8 @@ def test_real_switch_and_history_correction_preserve_original_results_and_parame
             original_event = dict(connection.execute("SELECT * FROM qc_lot_change_events WHERE event_type='reagent' ORDER BY id DESC").fetchone())
         app.session_state['lot_management_tabs'] = '历史记录'
         app.run()
-        choose_row(app, 'reagent_history_table_', '事件编号', original_event['id'])
+        choose_row(app, 'reagent_history_table_', '记录编号', original_event['id'])
+        assert app.session_state['reagent_history_selected_event'] == original_event['id']
         app.button(key='reagent_history_open').click().run()
         prefix = 'reagent_history_' + app.session_state['reagent_history_dialog']['token'] + '_'
         app.selectbox(key=prefix + 'reagent_lot_id').set_value(f['alpha']).run()

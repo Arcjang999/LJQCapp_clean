@@ -93,7 +93,7 @@ def _qc_choices(ctx, *, defaults=False):
     if kind_key not in st.session_state:
         st.session_state[kind_key] = '多水平' if draft[field] == 'zscore' else '单水平'
     kind = st.radio('默认质控方法' if defaults else '质控方法', ['单水平', '多水平'],
-        format_func=lambda value: '单水平（LJ）' if value == '单水平' else '多水平法',
+        format_func=lambda value: '单水平（L-J）' if value == '单水平' else '多水平法',
         horizontal=True, key=kind_key)
     if kind == '多水平':
         draft[field] = 'zscore'
@@ -110,7 +110,7 @@ def _qc_choices(ctx, *, defaults=False):
         draft[field] = 'instant' if use_instant else 'lj'
         draft[count_field] = 1
         if draft[field] == 'instant':
-            st.caption('累计 3 个有效结果后开始即时法判断；达到 20 个后，可确认转入 LJ法。')
+            st.caption('累计 3 个有效结果后开始即时法判断；达到 20 个后，可确认转入 L-J法。')
         else:
             st.caption('可用本批质控结果建立均值和标准差，也可使用经确认的均值和标准差。')
 
@@ -136,6 +136,7 @@ def _render_discard(ctx):
 
 def _render_catalogue_picker(ctx):
     from services.product_directory_service import list_catalog_product_choices, PRODUCT_LABELS
+    from services.qc_product_display_service import product_choice_label, product_concentration_summary
     if st.button('从产品名录选择', key='project_catalogue_open'):
         ctx['catalogue_open'] = not ctx.get('catalogue_open', False)
     if not ctx.get('catalogue_open'):
@@ -154,8 +155,11 @@ def _render_catalogue_picker(ctx):
         if st.session_state.get(key) not in choices:
             st.session_state[key] = None
         selected = st.selectbox('选择目录产品', [None, *choices], key=key, filter_mode='fuzzy',
-            format_func=lambda value: '请选择' if value is None else '｜'.join(
-                str(choices[value].get(field) or '') for field in ['manufacturer_name', *PRODUCT_LABELS]))
+            format_func=lambda value: '请选择' if value is None else product_choice_label(choices[value]))
+        if selected is not None:
+            concentration = product_concentration_summary(choices[selected])
+            if concentration:
+                st.caption(concentration)
         if st.button('使用此目录产品', key='project_catalogue_use', disabled=selected is None):
             ctx['draft']['qc_material_id'] = selected
             st.session_state[_key(ctx, 'qc_material_id')] = selected
@@ -374,7 +378,7 @@ def _panel_values(ctx, template, options):
         else:
             values[field] = st.number_input(label, min_value=1 if field == 'level_count' else 5,
                 max_value=3 if field == 'level_count' else 20, value=int(values[field]), step=1, key=key)
-    st.caption('请为各检验项目选择质控方法。使用即时法时，累计20个有效结果后可点击转入LJ。')
+    st.caption('请为各检验项目选择质控方法。使用即时法时，累计20个有效结果后可点击转入L-J。')
     return dict(values)
 
 

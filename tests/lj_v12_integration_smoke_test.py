@@ -236,7 +236,7 @@ def test_v12_lj_page_uses_global_configuration_selection() -> None:
         assert not list(app.exception)
         assert app.session_state["selected_batch_id"] == expected_batch_id
         assert not any(selectbox.key in ("v12_lj_project_selector", "v12_lj_batch_selector") for selectbox in app.selectbox)
-        assert [tab.label for tab in app.tabs] == ["当前批次", "月度报告"]
+        assert [tab.label for tab in app.tabs] == ["当前批次", "质控报告"]
         assert any("V12 C反应蛋白" in item.value and "V12-LJ-LOT-001" in item.value for item in app.caption)
         assert not any(button.key == "lj_open_v11_project_management" for button in app.button)
         app.button(key="open_project_management_page").click().run()

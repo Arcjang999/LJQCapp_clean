@@ -1,6 +1,8 @@
 """A short setup path using the existing applicability and immutable goals."""
 from __future__ import annotations
 
+from services.time_service import local_today
+
 import hashlib
 import json
 import re
@@ -12,7 +14,7 @@ from services.quality_target_service import finite_number
 
 
 SD_REQUIREMENT = ('按本批次确认的均值和标准差，使用所选质控方法的现有规则判断结果；'
-                  'LJ及多水平按SD位置和连续规则判读，即时法使用格拉布斯检验。'
+                  'L-J及多水平按SD位置和连续规则判读，即时法使用格拉布斯检验。'
                   'SD控制不代表长期精密度达标。')
 
 
@@ -47,7 +49,7 @@ def local_catalog_review(item, context):
     if plan['state'] != 'sd_cv':
         raise ValueError(plan['reason'] if plan['state'] == 'blocked' else '已有明确适用数值标准，请直接引用。')
     return dict(scope='local_catalog', query=str(item.get('test_item_name') or ''),
-                checked_on=date.today().isoformat(), conclusion='no_numeric',
+                checked_on=local_today().isoformat(), conclusion='no_numeric',
                 rationale='已核对当前软件收录的项目、方法、尺度和单位；未匹配适用数值限值。此记录不表示已查询全部国家标准。',
                 catalog_fingerprint=catalog_fingerprint())
 
@@ -83,7 +85,7 @@ def simple_quality_payload(item, condition_args, *, cv_limit=None, confirmed_by=
             f"{item.get('unit_symbol', '')}及所选水平；采用本实验室SD控制" +
             (f'和CV≤{limit:g}%。' if limit is not None else '，未设置CV上限。')),
         source_name=str(source_name or '本实验室SD质控方案'),
-        source_version=str(source_version or date.today().isoformat()),
+        source_version=str(source_version or local_today().isoformat()),
         requirement_text=text, levels=list(levels or []))
 
 
@@ -106,7 +108,7 @@ def simple_cv_spec(item, payload):
     try:
         date.fromisoformat(spec['effective_date'])
     except (TypeError, ValueError):
-        spec['effective_date'] = date.today().isoformat()
+        spec['effective_date'] = local_today().isoformat()
     spec['id'] = 'custom-simple-' + hashlib.sha256(
         json.dumps(spec, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:24]
     return spec

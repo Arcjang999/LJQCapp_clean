@@ -55,7 +55,7 @@ def _build_lj_source_message(batch) -> str:
 
 
 def render_lj_page() -> None:
-    st.subheader("单水平（LJ）")
+    st.subheader("单水平（L-J）")
     projects_df, selected_project_id, batches_df, selected_batch_id = prepare_lj_v12_project_batch_context()
     if selected_batch_id is None:
         render_lj_v12_configuration_selection(st.container(), projects_df, selected_project_id, batches_df, selected_batch_id)

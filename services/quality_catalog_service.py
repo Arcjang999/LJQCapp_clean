@@ -1,4 +1,6 @@
 """Current quality requirements, browsed by test item or general QC procedure."""
+
+from services.time_service import local_today
 from datetime import date
 
 from services.quality_applicability_service import catalog_index, source_status, CONTEXT_OPTIONS
@@ -23,7 +25,7 @@ def _numeric_category(spec):
 
 def browse_quality_catalog(query='', *, kind='', category='', section='projects', status='', on_date=None):
     """Inactive editions and reference intervals never enter the working catalog."""
-    today = (on_date or date.today()).isoformat()
+    today = (on_date or local_today()).isoformat()
     index = catalog_index()
     sources = {s['id']: s for s in index['sources']}
     rows = []

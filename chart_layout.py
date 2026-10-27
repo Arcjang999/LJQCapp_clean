@@ -12,6 +12,96 @@ CHART_LABEL_SIZE = 12
 CHART_TICK_SIZE = 11
 CHART_ANNOTATION_MIN_SIZE = 9
 CHART_LEGEND_SIZE = 10
+CONTROL_LINE_COLORS = {
+    0: "#222222",
+    1: "#76b7b2",
+    2: "#edc948",
+    3: "#ff9da7",
+}
+
+
+def usable_control_sd(value) -> float | None:
+    try:
+        resolved = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(resolved) or resolved <= 0 or math.isclose(resolved, 0.0, abs_tol=1e-12):
+        return None
+    return resolved
+
+
+def add_control_line_labels(axis, mean: float, sd, *, mean_label: str = "均值") -> None:
+    """Label the visible rightmost reference without changing its parameters."""
+    labels = [(mean, mean_label, 0)]
+    resolved_sd = usable_control_sd(sd)
+    if resolved_sd is not None:
+        for multiple in (1, 2, 3):
+            labels.extend(((mean + multiple * resolved_sd, f"+{multiple}SD", multiple),
+                           (mean - multiple * resolved_sd, f"-{multiple}SD", multiple)))
+    for value, label, multiple in labels:
+        axis.annotate(label, (1, value), xycoords=axis.get_yaxis_transform(),
+                      xytext=(4, 0), textcoords="offset points",
+                      fontsize=CHART_ANNOTATION_MIN_SIZE, va="center",
+                      color=CONTROL_LINE_COLORS[multiple], clip_on=False,
+                      arrowprops={"arrowstyle": "-", "linewidth": .6,
+                                  "color": CONTROL_LINE_COLORS[multiple]},
+                      gid="qc-control-label")
+
+
+def arrange_control_line_labels(axis) -> None:
+    """Keep small-SD labels readable when a chart spans distant parameters."""
+    labels = sorted((text for text in axis.texts if text.get_gid() == 'qc-control-label'),
+                    key=lambda text: text.xy[1])
+    if not labels:
+        return
+    dpi = axis.figure.dpi
+    bounds = axis.get_window_extent()
+    gap = CHART_ANNOTATION_MIN_SIZE * dpi / 72 * 1.35
+    bottom, top = bounds.y0 + gap / 2, bounds.y1 - gap / 2
+    originals = [axis.transData.transform((0, text.xy[1]))[1] for text in labels]
+    positions = []
+    for value in originals:
+        positions.append(max(bottom, value, positions[-1] + gap if positions else bottom))
+    if positions[-1] > top:
+        positions[-1] = top
+        for index in range(len(positions) - 2, -1, -1):
+            positions[index] = min(positions[index], positions[index + 1] - gap)
+    for text, original, position in zip(labels, originals, positions):
+        text.set_position((4, (position - original) * 72 / dpi))
+
+
+def control_parameter_segments(frame, x_column: str, mean_column: str, sd_column: str):
+    """Keep adjacent parameter ranges separate, including repeated versions."""
+    segments = []
+    current = None
+    for _, row in frame.sort_values(x_column, kind='stable').iterrows():
+        try:
+            mean = float(row.get(mean_column))
+            x = float(row[x_column])
+        except (TypeError, ValueError):
+            current = None
+            continue
+        if not math.isfinite(mean) or not math.isfinite(x):
+            current = None
+            continue
+        sd = usable_control_sd(row.get(sd_column))
+        profile = row.get("target_profile_id")
+        if isinstance(profile, float) and math.isnan(profile):
+            profile = None
+        key = (None if profile is None else str(profile), mean, sd)
+        if current is None or current["key"] != key:
+            current = {"key": key, "left": x, "right": x, "mean": mean, "sd": sd}
+            segments.append(current)
+        else:
+            current["right"] = x
+    return segments
+
+
+def mark_control_parameter_change(axis, x: float) -> None:
+    axis.axvline(x, color="#7d5ba6", linestyle=":", linewidth=1)
+    axis.annotate("参数调整", (x, 1), xycoords=("data", "axes fraction"),
+                  xytext=(3, -5), textcoords="offset points", rotation=90,
+                  va="top", fontsize=CHART_ANNOTATION_MIN_SIZE, color="#6a4c93")
 
 
 def select_detection_ticks(sequences, max_labels: int = 8) -> list[int]:
@@ -87,6 +177,7 @@ def finish_chart_layout(figure, axis, title: str, *, bottom_legends=()) -> None:
     legends = tuple(bottom_legends)
     if not legends:
         figure.tight_layout(pad=0.8)
+        arrange_control_line_labels(axis)
         return
 
     renderer = figure.canvas.get_renderer()
@@ -112,3 +203,4 @@ def finish_chart_layout(figure, axis, title: str, *, bottom_legends=()) -> None:
         )
         legend.set_in_layout(True)
         left += legend_width + gap_inches
+    arrange_control_line_labels(axis)
