@@ -17,7 +17,7 @@ from services.profiling import profile_timer
 from chart_layout import (
     CHART_LEGEND_SIZE, CONTROL_LINE_COLORS, add_control_line_labels,
     control_parameter_segments, finish_chart_layout, mark_control_parameter_change,
-    select_detection_ticks,
+    scatter_chart_points, select_detection_ticks,
 )
 from zscore_logic import format_level_id_display
 
@@ -487,7 +487,7 @@ def _plot_status_points(axis, plot_df: pd.DataFrame, level_color: str) -> None:
         point_y = point["display_value"]
 
         if status == PHASE_TARGET_BUILDING:
-            axis.scatter(
+            scatter_chart_points(axis,
                 [point["run_index"]],
                 [point_y],
                 s=size,
@@ -510,7 +510,7 @@ def _plot_status_points(axis, plot_df: pd.DataFrame, level_color: str) -> None:
         }
         if marker != "x":
             scatter_kwargs["edgecolors"] = "#ffffff"
-        axis.scatter(
+        scatter_chart_points(axis,
             [point["run_index"]],
             [point_y],
             **scatter_kwargs,
@@ -607,7 +607,7 @@ def _plot_out_of_range_markers(axis, display_df: pd.DataFrame, y_limits: tuple[f
     below_df = display_df[display_df["is_below_limit"]]
 
     if not above_df.empty:
-        axis.scatter(
+        scatter_chart_points(axis,
             above_df["run_index"],
             [upper] * len(above_df),
             marker="^",
@@ -628,7 +628,7 @@ def _plot_out_of_range_markers(axis, display_df: pd.DataFrame, y_limits: tuple[f
             )
 
     if not below_df.empty:
-        axis.scatter(
+        scatter_chart_points(axis,
             below_df["run_index"],
             [lower] * len(below_df),
             marker="v",
@@ -657,7 +657,7 @@ def _plot_manual_note_highlights(axis, display_df: pd.DataFrame) -> None:
     if note_df.empty:
         return
 
-    axis.scatter(
+    scatter_chart_points(axis,
         note_df["run_index"],
         note_df["display_value"],
         s=118,

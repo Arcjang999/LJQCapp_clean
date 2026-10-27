@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import math
 
+from matplotlib.transforms import BboxBase
+
 CHART_TITLE_SIZE = 13
 CHART_LABEL_SIZE = 12
 CHART_TICK_SIZE = 11
@@ -18,6 +20,37 @@ CONTROL_LINE_COLORS = {
     2: "#edc948",
     3: "#ff9da7",
 }
+
+
+class _MarkerClipBox(BboxBase):
+    """Follow the axes at draw time, with only a marker-sized physical margin."""
+
+    def __init__(self, axis, padding_points):
+        super().__init__()
+        self.axis = axis
+        self.padding_points = padding_points
+        self.set_children(axis.bbox, axis.figure.dpi_scale_trans)
+
+    def get_points(self):
+        points = self.axis.bbox.get_points().copy()
+        x_pad, y_pad = (value * self.axis.figure.dpi / 72 for value in self.padding_points)
+        points[0] -= (x_pad, y_pad)
+        points[1] += (x_pad, y_pad)
+        return points
+
+
+def scatter_chart_points(axis, *args, **kwargs):
+    """Keep edge markers whole while still clipping points outside the view."""
+    collection = axis.scatter(*args, **kwargs)
+    radius = math.sqrt(max(collection.get_sizes(), default=0))
+    stroke = max(collection.get_linewidths(), default=0) / 2 + .75
+    paths = [path.get_extents() for path in collection.get_paths()]
+    x_pad = max((max(abs(box.x0), abs(box.x1)) for box in paths), default=.5) * radius + stroke
+    y_pad = max((max(abs(box.y0), abs(box.y1)) for box in paths), default=.5) * radius + stroke
+    collection.set_clip_path(None)
+    collection.set_clip_box(_MarkerClipBox(axis, (x_pad, y_pad)))
+    collection.set_clip_on(True)
+    return collection
 
 
 def usable_control_sd(value) -> float | None:

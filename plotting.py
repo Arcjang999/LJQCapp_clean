@@ -13,7 +13,7 @@ from services.profiling import profile_timer
 from chart_layout import (
     CHART_LEGEND_SIZE, CONTROL_LINE_COLORS, add_control_line_labels,
     control_parameter_segments, finish_chart_layout, mark_control_parameter_change,
-    select_detection_ticks, usable_control_sd,
+    scatter_chart_points, select_detection_ticks, usable_control_sd,
 )
 
 
@@ -149,7 +149,7 @@ def plot_lj_chart(
 
         target_df = display_df[display_df["phase"] == "\u5efa\u9776\u6570\u636e"]
         if not target_df.empty:
-            axis.scatter(
+            scatter_chart_points(axis,
                 target_df["sequence"],
                 target_df["display_value"],
                 color="#4e79a7",
@@ -197,7 +197,7 @@ def _plot_status_points(axis, formal_df: pd.DataFrame) -> None:
         points = formal_df[formal_df["status"] == status]
         if points.empty:
             continue
-        axis.scatter(
+        scatter_chart_points(axis,
             points["sequence"],
             points["display_value"],
             color=style["color"],
@@ -347,7 +347,7 @@ def _plot_out_of_range_markers(axis, display_df: pd.DataFrame, y_limits: tuple[f
     below_df = display_df[display_df["is_below_limit"]]
 
     if not above_df.empty:
-        axis.scatter(
+        scatter_chart_points(axis,
             above_df["sequence"],
             [upper] * len(above_df),
             marker="^",
@@ -369,7 +369,7 @@ def _plot_out_of_range_markers(axis, display_df: pd.DataFrame, y_limits: tuple[f
             )
 
     if not below_df.empty:
-        axis.scatter(
+        scatter_chart_points(axis,
             below_df["sequence"],
             [lower] * len(below_df),
             marker="v",
@@ -399,7 +399,7 @@ def _plot_manual_note_highlights(axis, display_df: pd.DataFrame) -> None:
     if note_df.empty:
         return
 
-    axis.scatter(
+    scatter_chart_points(axis,
         note_df["sequence"],
         note_df["display_value"],
         s=118,
