@@ -8,7 +8,7 @@ import sqlite3
 import pandas as pd
 
 from database import atomic_write, get_connection
-from services.master_data_service import _date_text, create_qc_lot, set_master_entity_disabled
+from services.master_data_service import _clean_product_attribute, _date_text, create_qc_lot, set_master_entity_disabled
 from services.material_workflow_service import create_material_spec
 
 
@@ -171,28 +171,47 @@ def get_material_product(product_id: int) -> dict:
         row['identity_locked'] = bool(row['lot_count'] or row['project_count'])
         row['directory_managed'] = bool(c.execute('SELECT 1 FROM md_product_directory_keys WHERE product_id=?',(product_id,)).fetchone())
         row['identity_locked'] = row['identity_locked'] or row['directory_managed']
+        if row['directory_managed']:
+            source = c.execute('''SELECT i.concentration_code,i.concentration,k.current_release_id
+                FROM md_product_directory_keys k JOIN md_product_directory_items i
+                    ON i.release_id=k.current_release_id AND i.product_code=k.product_code
+                    AND i.product_id=k.product_id
+                WHERE k.product_id=?''', (product_id,)).fetchone()
+            if source is not None:
+                row.update(dict(source))
         row['edit_version'] = _version(row)
         return row
 
 
 def update_material_product(product_id: int, *, expected_version: str, **fields) -> None:
-    keys = ('generic_name', 'trade_name', 'matrix', 'physical_form', 'catalog_no', 'registration_no')
+    keys = ('generic_name', 'trade_name', 'matrix', 'physical_form', 'catalog_no', 'registration_no',
+            'concentration_code', 'concentration')
     with atomic_write() as c:
         row = get_material_product(product_id)
         _check_version(row, expected_version)
         if row['is_disabled']:
             raise ValueError('请先恢复质控品，再编辑资料。')
-        changed = any(str(fields.get(k, row[k]) or '').strip() != str(row[k] or '') for k in keys)
+        changed = any(('' if fields.get(k, row[k]) is None else str(fields.get(k, row[k])).strip())
+                      != str(row[k] or '') for k in keys)
         if row['identity_locked'] and changed:
             raise ValueError('此质控品已登记批号或用于项目，不能直接修改名称、货号等资料；更换时请新增质控品。')
+        if row['identity_locked']:
+            # Imported source values are read for display; saving notes cannot
+            # copy them into local identity fields or rewrite frozen products.
+            c.execute('UPDATE md_qc_materials SET notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?',
+                      (str(fields.get('notes', row['notes']) or '').strip(), int(product_id)))
+            return
         values = {k: str(fields.get(k, row[k]) or '').strip() for k in keys}
+        for field, label in (('concentration_code', '浓度编号'), ('concentration', '实际浓度')):
+            values[field] = _clean_product_attribute(fields.get(field, row[field]), label)
         if not values['generic_name']:
             raise ValueError('请填写质控品名称。')
         if any(len(v) > 200 for v in values.values()):
             raise ValueError('每项质控品资料不能超过 200 字，请缩短填写内容。')
         try:
             c.execute('''UPDATE md_qc_materials SET generic_name=?,trade_name=?,matrix=?,physical_form=?,
-                catalog_no=?,registration_no=?,notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?''',
+                catalog_no=?,registration_no=?,concentration_code=?,concentration=?,
+                notes=?,updated_at=CURRENT_TIMESTAMP WHERE id=?''',
                 (*[values[k] for k in keys], str(fields.get('notes', row['notes']) or '').strip(), int(product_id)))
         except sqlite3.IntegrityError as exc:
             raise ValueError('此厂家下已登记同名质控品，请选择已有质控品。') from exc

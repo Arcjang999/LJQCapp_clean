@@ -176,11 +176,13 @@ def _product_editor(state: dict, *, on_saved=None, on_cancel=None) -> None:
         format_func=lambda value: '请选择厂家' if value is None else manufacturers[value],
         disabled=edit, key=f'{prefix}_manufacturer')
     if locked:
-        st.info('此质控品已登记批号或用于项目，可在这里补充备注。需要更换名称或货号时，先点击“保存修改”或“取消”返回质控品列表，再点“新增质控品”登记。')
+        st.info('此质控品已登记批号或用于项目，可在这里补充备注。需要更换名称、货号或浓度资料时，先点击“保存修改”或“取消”返回质控品列表，再点“新增质控品”登记。')
     elif edit:
         st.caption('厂家沿用当前产品，不能在编辑时更换。需要登记其他厂家的产品时，点击“取消”返回列表，再点“新增质控品”。')
-    labels = {'generic_name': '质控品名称 *', 'trade_name': '商品名称', 'matrix': '基质',
-              'physical_form': '物理形态', 'catalog_no': '产品货号', 'registration_no': '注册证 / 备案编号'}
+    labels = {'generic_name': '质控品名称 *', 'catalog_no': '产品货号',
+              'concentration_code': '浓度编号', 'concentration': '实际浓度',
+              'trade_name': '商品名称', 'matrix': '基质', 'physical_form': '物理形态',
+              'registration_no': '注册证 / 备案编号'}
     values = {}
     columns = st.columns(2)
     for position, (key, label) in enumerate(labels.items()):

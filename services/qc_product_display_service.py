@@ -1,4 +1,4 @@
-"""Display confirmed catalogue concentration text without assigning project levels."""
+"""Display saved product attributes without assigning project levels."""
 from string import punctuation
 
 from services.product_directory_service import list_catalog_product_choices
@@ -20,9 +20,10 @@ def product_choice_label(row):
     row = dict(row)
     code = _text(row.get('concentration_code'))
     concentration = _text(row.get('concentration'))
-    level = code if code not in ('', '/') else concentration if concentration != '/' else ''
-    parts = (row.get('manufacturer_name'), row.get('product_code') or row.get('catalog_no'),
-             level, row.get('product_name') or row.get('generic_name') or row.get('qc_material_name'))
+    parts = (row.get('product_code') or row.get('catalog_no'),
+             row.get('product_name') or row.get('generic_name') or row.get('qc_material_name'),
+             code if code != '/' else '', concentration if concentration != '/' else '',
+             row.get('manufacturer_name'))
     return '｜'.join(_text(part) for part in parts if _text(part))
 
 

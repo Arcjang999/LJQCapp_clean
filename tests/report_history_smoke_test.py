@@ -221,12 +221,15 @@ def test_report_history_sanitizes_legacy_generated_summary_text() -> None:
         record = next(item for item in records if item.export_id == export_id)
 
         assert record.summary_text == "建议查看本次检测规则触发证据。"
-        assert record.overview_text == "本次检测触发拒绝规则，建议查看本次检测规则判定依据。"
-        assert record.conclusion_text == "本次检测结论需结合各水平触发证据复核。"
+        assert record.overview_text == "本次检测 触发拒绝规则，建议查看本次检测规则判定依据。"
+        assert record.conclusion_text == "本次检测结论需结合 各水平触发证据 复核。"
         assert "run" not in record.summary_text.lower()
         assert "run" not in record.overview_text.lower()
         assert "run" not in record.conclusion_text.lower()
         assert "level" not in record.conclusion_text.lower()
+        with sqlite3.connect(database.DB_PATH) as connection:
+            stored = connection.execute("SELECT summary_json FROM report_exports WHERE id = ?", (export_id,)).fetchone()
+        assert json.loads(stored[0]) == summary_json
 
 
 def test_report_history_regenerates_lj_and_zscore_reports() -> None:
@@ -308,6 +311,7 @@ def test_report_history_handles_missing_batch_gracefully() -> None:
 
 if __name__ == "__main__":
     test_report_history_lists_mixed_records_and_filters()
+    test_report_history_sanitizes_legacy_generated_summary_text()
     test_report_history_regenerates_lj_and_zscore_reports()
     test_report_history_page_renders_from_global_entry()
     test_report_history_handles_missing_batch_gracefully()

@@ -38,7 +38,7 @@ def tables():
         '仪器': [['I1', '', '准备仪器1', '准备厂家', 'MODEL-1', '分析仪', '准备科室', 'ASSET-1', 'SERIAL-1', '准备位置']],
         '试剂产品': [['R1', '', '准备厂家', '准备试剂', '准备商品名', 'R-001']],
         '试剂批号': [['RL1', 'R1', '000123', '2028-12-31', '包装资料']],
-        '质控品产品': [['Q1', '', '准备厂家', '准备质控品', '', 'QC-001', '2']],
+        '质控品产品': [['Q1', '', '准备厂家', '准备质控品', '', 'QC-001', '2', '', '']],
         '质控材料': [['C1', 'Q1', '000456', '2028-12-31', '低值', 'L1', '低值说明', ''],
                     ['C2', 'Q1', '000456', '2028-12-31', '高值', 'L2', '高值说明', '']],
     }
@@ -215,7 +215,7 @@ class LabPreparationTests(unittest.TestCase):
             self.assertTrue(bad['summary']['has_blocking_errors'])
             self.assertEqual(before, dump())
             sheets['试剂产品'] = pd.DataFrame(columns=PREPARATION_SHEETS['试剂产品'])
-            sheets['质控品产品'] = pd.DataFrame([['Q2', '', '准备厂家', '准备质控品', '', '', '']],
+            sheets['质控品产品'] = pd.DataFrame([['Q2', '', '准备厂家', '准备质控品', '', '', '', '', '']],
                                               columns=PREPARATION_SHEETS['质控品产品'])
             without_number = prepare_lab_preparation(dataframes_to_xlsx_bytes(sheets))
             self.assertFalse(without_number['summary']['has_blocking_errors'], without_number['issues'])

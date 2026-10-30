@@ -135,7 +135,8 @@ def _render_discard(ctx):
 
 
 def _render_catalogue_picker(ctx):
-    from services.product_directory_service import list_catalog_product_choices, PRODUCT_LABELS
+    from services.product_directory_service import list_catalog_product_choices
+    from ui.product_directory import _product_table
     from services.qc_product_display_service import product_choice_label, product_concentration_caption
     if st.button('从产品名录选择', key='project_catalogue_open'):
         ctx['catalogue_open'] = not ctx.get('catalogue_open', False)
@@ -148,7 +149,7 @@ def _render_catalogue_picker(ctx):
         if matches.empty:
             st.info('没有找到产品，请换名称或编号搜索。也可展开下方“补充基础资料”，选择“质控品产品”登记。')
             return
-        st.dataframe(matches[['manufacturer_name', *PRODUCT_LABELS]].rename(columns={'manufacturer_name':'厂商', **PRODUCT_LABELS}), hide_index=True,
+        st.dataframe(_product_table(matches), hide_index=True,
                      width='stretch', height=210)
         choices = {int(row['product_id']): row for row in matches.to_dict('records')}
         key = 'project_catalogue_product_' + ctx['token']

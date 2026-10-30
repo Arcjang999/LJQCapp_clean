@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta
 from html import escape as html_escape
 from io import BytesIO
@@ -184,7 +184,9 @@ def _xlsx_cell_value(value: object) -> object:
     return value
 
 
-def dataframes_to_xlsx_bytes(sheets: Mapping[str, pd.DataFrame]) -> bytes:
+def dataframes_to_xlsx_bytes(
+    sheets: Mapping[str, pd.DataFrame], *, text_columns: Mapping[str, Iterable[str]] | None = None,
+) -> bytes:
     """Create a small styled multi-sheet XLSX without an optional Excel dependency."""
     if not sheets:
         raise ValueError("至少需要一个工作表。")
@@ -192,6 +194,10 @@ def dataframes_to_xlsx_bytes(sheets: Mapping[str, pd.DataFrame]) -> bytes:
     output = BytesIO()
     raw_names = [str(name) for name in sheets]
     sheet_names = _normalize_sheet_names(raw_names)
+    text_columns = text_columns or {}
+    if set(text_columns) - set(raw_names):
+        raise ValueError('指定文本列的工作表不存在。')
+    has_text_columns = any(text_columns.values())
     shared_strings: list[str] = []
     shared_lookup: dict[str, int] = {}
     worksheet_xml_by_index: dict[int, str] = {}
@@ -202,11 +208,16 @@ def dataframes_to_xlsx_bytes(sheets: Mapping[str, pd.DataFrame]) -> bytes:
             shared_strings.append(text)
         return shared_lookup[text]
 
-    for sheet_index, ((_, dataframe), sheet_name) in enumerate(
+    for sheet_index, ((raw_name, dataframe), sheet_name) in enumerate(
         zip(sheets.items(), sheet_names),
         start=1,
     ):
         safe_frame = dataframe.copy()
+        selected_text_columns = set(text_columns.get(str(raw_name), ()))
+        if selected_text_columns - set(safe_frame.columns):
+            raise ValueError('指定的文本列不存在，请核对列名。')
+        text_indexes = {index for index, name in enumerate(safe_frame.columns, 1)
+                        if name in selected_text_columns}
         rows = [list(safe_frame.columns)] + safe_frame.astype(object).values.tolist()
         worksheet_rows: list[str] = []
         widths: list[float] = [max(10.0, min(42.0, len(str(column)) * 2.0 + 2.0)) for column in safe_frame.columns]
@@ -220,7 +231,7 @@ def dataframes_to_xlsx_bytes(sheets: Mapping[str, pd.DataFrame]) -> bytes:
                         min(42.0, len(str(value)) * 1.45 + 2.0),
                     )
                 cell_reference = f"{_excel_column_name(column_index)}{row_index}"
-                style = ' s="1"' if row_index == 1 else ""
+                style = ' s="1"' if row_index == 1 else ' s="2"' if column_index in text_indexes else ""
                 if isinstance(value, bool):
                     cells.append(
                         f'<c r="{cell_reference}" t="b"{style}><v>{int(value)}</v></c>'
@@ -237,7 +248,8 @@ def dataframes_to_xlsx_bytes(sheets: Mapping[str, pd.DataFrame]) -> bytes:
             worksheet_rows.append(f'<row r="{row_index}">{"".join(cells)}</row>')
 
         column_xml = "".join(
-            f'<col min="{index}" max="{index}" width="{width:.2f}" customWidth="1"/>'
+            f'<col min="{index}" max="{index}" width="{width:.2f}" customWidth="1"'
+            + (' style="2"' if index in text_indexes else '') + '/>'
             for index, width in enumerate(widths, start=1)
         )
         last_column = _excel_column_name(max(1, len(safe_frame.columns)))
@@ -306,13 +318,15 @@ def dataframes_to_xlsx_bytes(sheets: Mapping[str, pd.DataFrame]) -> bytes:
   <Relationship Id="rId3" Type="{_RELATIONSHIP_NS}/extended-properties" Target="docProps/app.xml"/>
 </Relationships>
 """
+    text_style_xml = ('<xf numFmtId="49" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'
+                      if has_text_columns else '')
     styles_xml = f"""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="{_SPREADSHEET_NS}">
   <fonts count="2"><font><sz val="11"/><name val="Microsoft YaHei"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Microsoft YaHei"/></font></fonts>
   <fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF184D8D"/><bgColor indexed="64"/></patternFill></fill></fills>
   <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
   <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-  <cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/></cellXfs>
+  <cellXfs count="{3 if has_text_columns else 2}"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>{text_style_xml}</cellXfs>
   <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>
 """

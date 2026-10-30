@@ -31,7 +31,7 @@ PREPARATION_SHEETS = OrderedDict((
     ('仪器', ['清单编号', '已登记标识', '仪器名称', '厂家', '型号', '仪器通用名', '所属科室', '资产编号', '序列号', '位置']),
     ('试剂产品', ['清单编号', '已登记标识', '厂家', '试剂名称', '商品名', '货号']),
     ('试剂批号', ['清单编号', '试剂产品编号或标识', '批号', '效期', '参考资料']),
-    ('质控品产品', ['清单编号', '已登记标识', '厂家', '质控品名称', '商品名', '货号', '标称水平数']),
+    ('质控品产品', ['清单编号', '已登记标识', '厂家', '质控品名称', '商品名', '货号', '标称水平数', '浓度编号', '实际浓度']),
     ('质控材料', ['清单编号', '质控品产品编号或标识', '批号', '效期', '浓度水平', '浓度编号', '浓度说明', '水平货号']),
 ))
 TABLES = OrderedDict((
@@ -71,6 +71,16 @@ def _norm(value):
 def _snapshot(connection):
     records = {entity: [dict(row) for row in connection.execute(f'SELECT * FROM {table} ORDER BY id')]
                for entity, table in TABLES.items()}
+    # Published product text remains the source for imported products. Reading
+    # these fields never rewrites a directory product or its material levels.
+    from services.product_directory_service import list_catalog_product_choices
+    products = {int(row['product_id']): row for row in list_catalog_product_choices(
+        connection=connection, include_disabled=True).to_dict('records')}
+    for product in records['qc_material']:
+        source = products.get(product['id'])
+        if source:
+            product.update(concentration_code=source['concentration_code'],
+                           concentration=source['concentration'])
     categories = [dict(row) for row in connection.execute(
         'SELECT manufacturer_id,category FROM md_manufacturer_categories ORDER BY manufacturer_id,category')]
     settings = [dict(row) for row in connection.execute('SELECT key,value FROM app_settings ORDER BY key')]
@@ -87,7 +97,7 @@ def build_lab_preparation_template():
         ['单位信息', '填写已核对的实验室、科室及报告默认人员；空白保留原设置。未准备项会在审查中提示。'],
         ['清单编号', '每个填写的资料行需要本表内唯一的清单编号；在批号、材料或检验项目表中用它引用产品或单位。'],
         ['引用已有资料', '下载已登记资料清单，把对应资料的标识复制到“已登记标识”；留空时按各列填写的内容查找相同资料。'],
-        ['新资料', '新增单位填单位符号；新增方法填名称；新增检验项目填名称。新增仪器填名称、厂家、型号、通用名；新增产品填厂家和名称。'],
+        ['新资料', '新增单位填单位符号；新增方法填名称；新增检验项目填名称。新增仪器填名称、厂家、型号、通用名；新增产品填厂家和名称，质控品的浓度编号和实际浓度照产品资料填写。'],
         ['实际批号', '试剂批号填写产品编号或已有标识、批号和效期。质控材料还填写浓度水平，可补浓度编号和说明；每行是一份实际批号水平。'],
         ['已有资料', '本文件只引用已有资料，不覆盖名称、资产编号、效期或材料关系。有冲突时请先到相应资料管理入口核对。'],
         ['填写格式', '标识、批号、编号使用文本格式，保留前导零；效期填YYYY-MM-DD。不要填写未核实的人名、批号或参数。'],
@@ -96,7 +106,9 @@ def build_lab_preparation_template():
     sheets['单位信息'] = pd.DataFrame([[label, ''] for label in UNIT_FIELDS], columns=['资料项目', '填写内容'])
     for name, columns in PREPARATION_SHEETS.items():
         sheets[name] = pd.DataFrame(columns=columns)
-    return dataframes_to_xlsx_bytes(sheets)
+    return dataframes_to_xlsx_bytes(sheets, text_columns={
+        '质控品产品': ['浓度编号'], '质控材料': ['浓度编号'],
+    })
 
 
 def build_lab_preparation_reference_xlsx():
@@ -115,9 +127,11 @@ def build_lab_preparation_reference_xlsx():
                                      if item['id'] == model['manufacturer_id']), '')
             rows.append({'资料类型': LABELS[entity], '已登记标识': row['uid'],
                 '名称': next((row[key] for key in ('symbol', 'method_name', 'chinese_name', 'display_name', 'generic_name') if key in row), ''),
-                '厂家': manufacturer, '商品名': row.get('trade_name', ''), '货号': row.get('catalog_no', '')})
+                '厂家': manufacturer, '商品名': row.get('trade_name', ''), '货号': row.get('catalog_no', ''),
+                '浓度编号': row.get('concentration_code', ''), '实际浓度': row.get('concentration', '')})
     return dataframes_to_xlsx_bytes({'已登记资料': pd.DataFrame(rows,
-        columns=['资料类型', '已登记标识', '名称', '厂家', '商品名', '货号'])})
+        columns=['资料类型', '已登记标识', '名称', '厂家', '商品名', '货号', '浓度编号', '实际浓度'])},
+        text_columns={'已登记资料': ['浓度编号']})
 
 
 class _Planner:
@@ -164,7 +178,8 @@ class _Planner:
         else:
             record = self._record(entity, identifier)
         values = [record.get(key) for key in ('symbol', 'method_name', 'chinese_name', 'display_name',
-                                             'generic_name', 'trade_name', 'catalog_no', 'lot_no', 'level_name', 'level_code')]
+                                             'generic_name', 'trade_name', 'catalog_no', 'concentration_code',
+                                             'concentration', 'lot_no', 'level_name', 'level_code')]
         if entity == 'lab_instrument' and isinstance(record['instrument_model_id'], int):
             model = self._record('instrument_model', record['instrument_model_id'])
             values.append(model['model'])
@@ -297,6 +312,8 @@ class _Planner:
             entity = 'reagent' if sheet == '试剂产品' else 'qc_material'
             name = '试剂名称' if entity == 'reagent' else '质控品名称'
             payload = self._payload(row, {name: 'generic_name', '商品名': 'trade_name', '货号': 'catalog_no'})
+            if entity == 'qc_material':
+                payload.update(self._payload(row, {'浓度编号': 'concentration_code', '实际浓度': 'concentration'}))
             if entity == 'qc_material' and row['标称水平数']:
                 try:
                     number = float(row['标称水平数'])
@@ -413,12 +430,14 @@ def prepare_lab_preparation(data):
             frame = sheets.get(sheet)
             if frame is None:
                 continue
-            if list(frame.columns) != columns:
+            supplied_columns = list(frame.columns)
+            legacy_columns = columns[:-2] if sheet == '质控品产品' else columns
+            if supplied_columns not in (columns, legacy_columns):
                 planner.current_row = 0
                 planner.issue('列名或顺序与模板不符，请使用本工作表模板。')
                 continue
             for number, values in enumerate(frame.to_dict('records'), 2):
-                row = {label: _text(values[label]) for label in columns}
+                row = {label: _text(values.get(label)) for label in columns}
                 if not any(row.values()):
                     continue
                 row_count += 1

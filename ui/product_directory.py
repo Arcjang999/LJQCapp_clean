@@ -26,11 +26,14 @@ def _directory_source(uploaded, manufacturer_id):
 
 
 def _product_table(records, *, include_excluded=False):
-    columns = (['manufacturer_name'] if 'manufacturer_name' in records else []) + [*PRODUCT_LABELS]
+    columns = ['product_code', 'product_name', 'concentration_code', 'concentration']
+    if 'manufacturer_name' in records:
+        columns.append('manufacturer_name')
     if include_excluded:
         columns.append('excluded_reason')
     return records.reindex(columns=columns).rename(
-        columns={'manufacturer_name': '厂商', **PRODUCT_LABELS, 'excluded_reason': '排除原因'})
+        columns={**PRODUCT_LABELS, 'concentration': '实际浓度',
+                 'manufacturer_name': '厂家', 'excluded_reason': '排除原因'})
 
 
 def _render_published_directory():
@@ -173,8 +176,10 @@ def render_directory_import(*, show_published=True, expander_label='产品目录
             st.caption(f"核查人：{package['verified_by']}｜保留{preview['included_count']}项，排除{preview['excluded_count']}项")
             if preview['is_test']:
                 st.warning('此目录的产品仅供查看。建立检测项目时，请换用可用于检测的产品目录。')
-            display = pd.DataFrame(preview['records'])
-            st.dataframe(display[['action',*PRODUCT_LABELS,'excluded_reason']].rename(columns={**PRODUCT_LABELS,'action':'本次处理','excluded_reason':'排除原因'}),hide_index=True,width='stretch')
+            records = pd.DataFrame(preview['records'])
+            display = _product_table(records, include_excluded=True)
+            display.insert(0, '本次处理', records['action'])
+            st.dataframe(display, hide_index=True, width='stretch')
             if preview['issues']:
                 st.error('请按下表修正目录资料，再预览保存。')
                 st.dataframe(pd.DataFrame(preview['issues']).rename(columns={'row':'原行号','product_code':'产品编号','field':'资料','message':'需要核对'}),hide_index=True,width='stretch')
@@ -277,7 +282,8 @@ def render_product_relationships(product_id):
     relationship=get_product_relationships(product_id)
     catalogue=export_material_catalog_context(product_id)
     if catalogue['product'].get('source_code'):
-        st.dataframe(pd.DataFrame([{PRODUCT_LABELS[key]:catalogue['product'][key] for key in PRODUCT_LABELS}]),hide_index=True,width='stretch')
+        product = dict(catalogue['product'], manufacturer_name=catalogue['manufacturer'].get('display_name', ''))
+        st.dataframe(_product_table(pd.DataFrame([product])), hide_index=True, width='stretch')
     with st.expander('适用检验项目', expanded=True):
         active=[row for row in relationship['coverage'] if not row['is_disabled']]
         st.caption('点击“选择检验项目”，按产品说明书勾选适用项目，再填写核对人和参考资料，点击“保存适用项目”。')

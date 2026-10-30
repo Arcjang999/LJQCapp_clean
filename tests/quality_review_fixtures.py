@@ -6,7 +6,7 @@ from services.quality_review_service import save_recorded_requirement, standard_
 def fixture_conditions(item, *, clinical=False):
     """Explicit synthetic conditions; no production policy exceptions."""
     from services.quality_applicability_service import infer_technique
-    from datetime import date
+    from services.time_service import local_today
     technique = infer_technique(item) or 'clinical_chemistry'
     specimen = item.get('specimen_type') or (
         '全血' if technique == 'hematology' or '血糖仪' in str(item.get('method_name', ''))
@@ -16,7 +16,7 @@ def fixture_conditions(item, *, clinical=False):
         result_scale=item['input_value_type'] if item['input_value_type'] in ('ct','log') else 'concentration',
         purpose='clinical' if clinical else 'research')
     search_record=dict(query='合成软件回归项目，非临床检测用途',
-        official_url='https://www.nhc.gov.cn/wjw/s9492/wsbz.shtml', checked_on=date.today().isoformat(),
+        official_url='https://www.nhc.gov.cn/wjw/s9492/wsbz.shtml', checked_on=local_today().isoformat(),
         conclusion='no_applicable',rationale='仅验证软件流程的合成数据，不代表真实临床项目查找结果。')
     return dict(context=context,search_record=search_record)
 

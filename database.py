@@ -250,6 +250,8 @@ def init_db() -> None:
         ensure_report_periods_schema(connection)
         _ensure_app_settings_table(connection)
         ensure_v11_schema(connection)
+        from migrations.product_attributes import ensure_product_attributes_schema
+        ensure_product_attributes_schema(connection)
         ensure_template_reagent_schema(connection)
         ensure_v12_workbench_schema(connection)
         ensure_lot_lifecycle_schema(connection)

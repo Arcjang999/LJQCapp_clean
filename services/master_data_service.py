@@ -41,6 +41,13 @@ def _clean_optional(value: object) -> str:
     return " ".join(str(value or "").split()).strip()
 
 
+def _clean_product_attribute(value: object, label: str) -> str:
+    text = '' if value is None else str(value).strip()
+    if len(text) > 200:
+        raise ValueError(f'{label}不能超过 200 字，请缩短填写内容。')
+    return text
+
+
 def _normalize_alias(value: object) -> str:
     cleaned = _clean_required(value, "别名")
     return re.sub(r"[\s_\-（）()]+", "", cleaned).casefold()
@@ -477,6 +484,8 @@ def create_qc_material(
     physical_form: str = "",
     catalog_no: str = "",
     registration_no: str = "",
+    concentration_code: str = "",
+    concentration: str = "",
     nominal_level_count: int | None = None,
     notes: str = "",
 ) -> int:
@@ -490,9 +499,9 @@ def create_qc_material(
         INSERT INTO md_qc_materials (
             uid, origin_type, manufacturer_id, generic_name, trade_name,
             matrix, physical_form, catalog_no, registration_no,
-            nominal_level_count, notes
+            concentration_code, concentration, nominal_level_count, notes
         )
-        VALUES (?, 'hospital', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, 'hospital', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             _new_uid(),
@@ -503,6 +512,8 @@ def create_qc_material(
             _clean_optional(physical_form),
             _clean_optional(catalog_no),
             _clean_optional(registration_no),
+            _clean_product_attribute(concentration_code, '浓度编号'),
+            _clean_product_attribute(concentration, '实际浓度'),
             normalized_level_count,
             _clean_optional(notes),
         ),
@@ -524,6 +535,8 @@ def list_qc_materials(include_disabled: bool = False) -> pd.DataFrame:
             materials.physical_form,
             materials.catalog_no,
             materials.registration_no,
+            materials.concentration_code,
+            materials.concentration,
             materials.nominal_level_count,
             materials.origin_type,
             materials.is_disabled,

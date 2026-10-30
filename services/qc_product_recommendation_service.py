@@ -41,6 +41,11 @@ def _reference_state(connection, values):
             continue
         record = connection.execute('SELECT * FROM ' + table + ' WHERE id=?', (int(values[key]),)).fetchone()
         row = dict(record) if record is not None else None
+        if key == 'qc_material_id' and row is not None and not any(
+                str(row.get(field) or '').strip() for field in ('concentration', 'concentration_code')):
+            # Adding empty optional fields must preserve saved selection reviews.
+            row = {field: value for field, value in row.items()
+                   if field not in ('concentration', 'concentration_code')}
         details = {'record': row}
         invalid = invalid or row is None or bool(row.get('is_disabled'))
         if row is not None:
@@ -64,6 +69,7 @@ def _reference_state(connection, values):
 def _context(connection, identity):
     reference_state, unavailable = _reference_state(connection, identity)
     rows = [dict(row) for row in connection.execute('''SELECT r.*,p.generic_name,p.trade_name,p.catalog_no,
+        p.concentration,p.concentration_code,
         p.is_disabled AS product_disabled,m.display_name AS manufacturer_name,
         n.is_disabled AS instrument_disabled,t.is_disabled AS test_disabled,x.is_disabled AS method_disabled
         FROM qc_product_recommendations r JOIN md_qc_materials p ON p.id=r.qc_material_id
@@ -74,7 +80,9 @@ def _context(connection, identity):
         AND (r.test_item_id IS NULL OR r.test_item_id=?) AND (r.method_id IS NULL OR r.method_id=?)
         ORDER BY r.qc_material_id,r.id''', tuple(identity[key] for key in SCOPE_FIELDS))]
     products = {row['qc_material_id']: _reference_state(connection, {'qc_material_id': row['qc_material_id']}) for row in rows}
-    revision = sha256(_json({'context': identity, 'references': reference_state, 'products': products, 'relations': rows}).encode()).hexdigest()
+    revision_rows = [{key: value for key, value in row.items()
+                      if key not in ('concentration', 'concentration_code')} for row in rows]
+    revision = sha256(_json({'context': identity, 'references': reference_state, 'products': products, 'relations': revision_rows}).encode()).hexdigest()
     rows = product_display_rows(rows, product_id_field='qc_material_id', connection=connection)
     grouped = {}
     for row in rows:
@@ -259,7 +267,7 @@ def save_draft_product_choice(scope, item_id, review, *, expected_revision):
 def list_qc_product_relations(*, include_disabled=False):
     with read_snapshot() as connection:
         rows = [dict(row) for row in connection.execute('''SELECT r.*,p.generic_name AS qc_material_name,
-            p.catalog_no,maker.display_name AS manufacturer_name,
+            p.catalog_no,p.concentration,p.concentration_code,maker.display_name AS manufacturer_name,
             x.generic_name AS reagent_name,n.display_name AS instrument_name,t.chinese_name AS test_item_name,
             m.method_name FROM qc_product_recommendations r
             JOIN md_qc_materials p ON p.id=r.qc_material_id JOIN md_reagents x ON x.id=r.reagent_id

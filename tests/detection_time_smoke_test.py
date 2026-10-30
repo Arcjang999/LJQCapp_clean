@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 import pandas as pd
+import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,6 +39,19 @@ def dump():
 
 
 class DetectionTimeTests(unittest.TestCase):
+    def setUp(self):
+        datetime_input = st.datetime_input
+
+        def laboratory_datetime_input(*args, **kwargs):
+            # The real widget's default clock must follow the frozen test clock.
+            if len(args) < 2 and 'value' not in kwargs:
+                kwargs['value'] = clock.local_now()
+            return datetime_input(*args, **kwargs)
+
+        replacement = patch.object(st, 'datetime_input', new=laboratory_datetime_input)
+        replacement.start()
+        self.addCleanup(replacement.stop)
+
     def test_current_past_future_and_timezone_boundaries(self):
         self.assertEqual('2026-10-27 09:00:00', clock.validate_detection_time(NOW, now=NOW))
         self.assertEqual('2026-09-01 08:00:00', clock.validate_detection_time('2026-09-01 08:00:00', now=NOW))
@@ -230,9 +244,11 @@ else:
                         level_results=[{'level_id':f'Level {level}', 'raw_value':100*level} for level in (1, 2)])
                 app = AppTest.from_string(script, default_timeout=25)
                 app.session_state['method'], app.session_state['batch'] = method, batch
+                prefix = {'lj':'', 'zscore':'zscore_', 'instant':'instant_'}[method]
+                app.session_state[prefix+'entry_batch_id'] = batch
+                app.session_state[prefix+'entry_test_time'] = NOW
                 app.run()
                 self.assertFalse(app.exception, [error.message for error in app.exception])
-                prefix = {'lj':'', 'zscore':'zscore_', 'instant':'instant_'}[method]
                 time_key, operator_key = prefix+'entry_test_time', prefix+'entry_operator'
                 app.selectbox(key=operator_key).set_value('检验员')
                 value_keys = ['zscore_level1_value', 'zscore_level2_value'] if method == 'zscore' else [prefix+'entry_value']

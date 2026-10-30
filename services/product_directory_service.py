@@ -138,8 +138,8 @@ def list_managed_material_products(query='', include_disabled=False):
         frame = pd.read_sql_query('''SELECT
             COALESCE(i.product_code,p.catalog_no,'') AS product_code,
             COALESCE(i.product_name,p.generic_name) AS product_name,
-            COALESCE(i.concentration,'') AS concentration,
-            COALESCE(i.concentration_code,'') AS concentration_code,
+            COALESCE(i.concentration,p.concentration,'') AS concentration,
+            COALESCE(i.concentration_code,p.concentration_code,'') AS concentration_code,
             p.id AS product_id,COALESCE(m.display_name,'') AS manufacturer_name,
             p.is_disabled
             FROM md_qc_materials p
@@ -423,7 +423,8 @@ def _export_context(connection,material_id):
         JOIN md_product_directory_items i ON i.release_id=k.current_release_id AND i.product_code=k.product_code
         JOIN md_product_directory_releases r ON r.id=i.release_id WHERE k.product_id=?''',(material_id,)).fetchone()
     product = {key:row[key] for key in (*PRODUCT_FIELDS,'source_code','version_label','source_sha256')} if row else dict(
-        product_code=raw['catalog_no'],product_name=raw['generic_name'],concentration='',concentration_code='',
+        product_code=raw['catalog_no'],product_name=raw['generic_name'],
+        concentration=raw['concentration'],concentration_code=raw['concentration_code'],
         source_code='',version_label='',source_sha256='',uid=raw['uid'])
     product['external_key'] = product['source_code'] + ':' + product['product_code'] if row else raw['uid']
     manufacturer = connection.execute('SELECT uid,display_name FROM md_manufacturers WHERE id=?',(raw['manufacturer_id'],)).fetchone()

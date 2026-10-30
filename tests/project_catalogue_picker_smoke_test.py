@@ -83,7 +83,7 @@ class ProjectCataloguePickerTest(unittest.TestCase):
         self.assertEqual(len(tables), 1)
         self.assertIn(product_code, tables[0]['产品编号'].tolist())
         self.assertLess(len(tables[0]), 1054)
-        self.assertEqual(tables[0].columns.tolist(), ['厂商', '产品编号', '产品名称', '浓度', '浓度编号'])
+        self.assertEqual(tables[0].columns.tolist(), ['产品编号', '产品名称', '浓度编号', '实际浓度', '厂家'])
         app.selectbox(key='project_catalogue_product_' + token).set_value(product_id).run()
         self.healthy(app)
         # Choosing a search result alone does not apply it to the project.
@@ -172,7 +172,7 @@ class ProjectCataloguePickerTest(unittest.TestCase):
                 if 'product_catalogue_table_' in table.proto.id)
             main = app.dataframe[table_index].value
             self.assertEqual(len(main), 1054)
-            self.assertEqual(main.columns.tolist(), ['厂商', '产品编号', '产品名称', '浓度', '浓度编号', '状态'])
+            self.assertEqual(main.columns.tolist(), ['产品编号', '产品名称', '浓度编号', '实际浓度', '厂家', '状态'])
             self.assertTrue(excluded_codes.isdisjoint(main['产品编号']))
             self.assertFalse(any(widget.key == 'product_catalogue_product_id' for widget in app.selectbox))
             self.assertFalse(any(widget.key == 'material_catalog_product_id' for widget in app.selectbox))

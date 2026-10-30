@@ -54,7 +54,8 @@ class ProductLevelDisplayTests(unittest.TestCase):
                 row = products['IQC-CM-021' + suffix]
                 label = product_choice_label(row)
                 self.assertIn('｜' + code + '｜', label)
-                self.assertLess(label.index(code), label.index(row['generic_name']))
+                self.assertLess(label.index(row['generic_name']), label.index(code))
+                self.assertIn(row['concentration'], label)
                 labels.append(label)
             self.assertEqual(len(set(labels)), 3)
             self.assertEqual(selected['concentration'], products['IQC-CM-02103']['concentration'])
@@ -127,7 +128,7 @@ class ProductLevelDisplayTests(unittest.TestCase):
         self.assertIn(r'\[水平\]\(原始记录\)', app.caption[0].value)
         self.assertIn(r'S\_3\[原编号\]', app.caption[0].value)
         self.assertEqual('浓度：' + row['concentration'] + '｜浓度编号：' + row['concentration_code'], source)
-        self.assertEqual('厂家｜QC_[03]｜S_3[原编号]｜质控品', product_choice_label(row))
+        self.assertEqual('QC_[03]｜质控品｜S_3[原编号]｜' + row['concentration'] + '｜厂家', product_choice_label(row))
         self.assertEqual(original, row)
         self.assertEqual('', product_concentration_caption({}))
 
@@ -162,9 +163,9 @@ class ProductLevelDisplayTests(unittest.TestCase):
             with self.subTest(code=code):
                 row = dict(manufacturer_name='厂家', product_code='KNOWN-01', product_name='质控品',
                            concentration='原始浓度文本', concentration_code=code)
-                self.assertEqual('厂家｜KNOWN-01｜' + code + '｜质控品', product_choice_label(row))
+                self.assertEqual('KNOWN-01｜质控品｜' + code + '｜原始浓度文本｜厂家', product_choice_label(row))
                 self.assertEqual('浓度：原始浓度文本｜浓度编号：' + code, product_concentration_summary(row))
-        self.assertEqual('厂家｜KNOWN-01｜阴性｜质控品', product_choice_label(dict(
+        self.assertEqual('KNOWN-01｜质控品｜阴性｜厂家', product_choice_label(dict(
             manufacturer_name='厂家', product_code='KNOWN-01', product_name='质控品',
             concentration='阴性', concentration_code='/')))
 
