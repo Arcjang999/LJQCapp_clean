@@ -79,7 +79,9 @@ def render_product_catalogue():
         if notice:
             st.success(notice)
     search, manufacturer_filter, status_filter = st.columns([2, 1, 1], vertical_alignment='bottom')
-    query = search.text_input('查找产品', placeholder='输入厂商、产品编号、名称、浓度或浓度编号',
+    query = search.text_input('查找产品',
+        placeholder='输入产品名称、产品编号、浓度编号、实际浓度或厂家',
+        help='支持部分名称或编号。多个关键词用空格分开，例如：EBV S3。',
         key='product_catalogue_search')
     all_products = list_managed_material_products(include_disabled=True)
     manufacturers = sorted(all_products['manufacturer_name'].dropna().unique().tolist())
