@@ -1251,7 +1251,6 @@ def render_page_chrome() -> None:
                 with feedback_column:
                     with st.container(key="module_nav_help"):
                         with st.popover("帮助", width="stretch", key="global_help_menu", on_change="rerun"):
-                            st.caption("查看资料准备、日常录入、异常处理和报告操作说明。")
                             st.button("使用说明", key="open_user_guide_page", width="stretch", on_click=_open_user_guide_page)
                             st.button("操作说明", key="open_operation_guide_page", width="stretch",
                                       on_click=_open_user_guide_page, args=(True,))
@@ -2149,7 +2148,6 @@ def render_import_review_summary(review_summary: dict[str, Any]) -> None:
 
     row_warning_groups = list(review_summary.get("row_warning_groups") or [])
     if row_warning_groups:
-        st.caption("请按以下提示核对相应数据行：")
         for group in row_warning_groups:
             st.markdown(f"- {group['label']}：{group['row_count']} 行")
 

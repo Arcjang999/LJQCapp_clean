@@ -77,7 +77,7 @@ def render_out_of_control_page():
         st.markdown('**其他日期尚未完成**')
         _rows(result['cross_day'], 'cross_day')
     if result.get('verification_gaps'):
-        st.info(f"另有 {len(result['verification_gaps'])} 条检测未保存完整的正式质控判读资料，请查阅原始检测记录并核对。")
+        st.info(f"另有 {len(result['verification_gaps'])} 条检测缺少完整判读资料，请核对原始检测记录。")
 
 
 def _select_row(table_key, identities, prefix):
@@ -99,7 +99,7 @@ def _rows(items, prefix):
         return
     fingerprint = hashlib.sha256(repr(identities).encode()).hexdigest()[:12]
     table_key = f'ooc_list_table_{prefix}_{fingerprint}'
-    st.caption(f'共 {len(items)} 项。单击行首选择框选中记录，再点下方“处理”。多水平检测按一整次列出。')
+    st.caption(f'共 {len(items)} 项。勾选记录后点“处理”；多水平按整次检测列出。')
     st.dataframe(pd.DataFrame([{'检测时间': r.get('test_time'), '项目': r.get('project_name'),
         '仪器': r.get('instrument_name'), '质控方法': _method_label(r), '原检测结论': display(r.get('original_classification', r.get('classification'))),
         '处理状态': STATUS_LABELS.get(r.get('status'), '待处理'), '最近处理时间': r.get('last_handled_at') or '未处理'}

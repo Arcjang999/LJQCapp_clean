@@ -49,6 +49,7 @@ def metadata_values(method='lj', levels=1, *, numeric=False):
         qc_material_id=material, reagent_id=reagent, method_id=principle, test_item_id=item,
         input_value_type='raw', unit_id=unit, qc_method=method, level_count=levels,
         target_n=20, cv_limit=None, quality_target_source_text='', level_ids=physical_levels,
+        target_statistics_mode='cumulative',
         config_name='快捷实际批次', notes='核对单位基础资料', item_notes='核对方法及实际材料')
     values['product_choice_review'] = validate_qc_product_choice(qc_material_id=material,
         reagent_id=reagent, lab_instrument_id=instrument, test_item_id=item, method_id=principle,

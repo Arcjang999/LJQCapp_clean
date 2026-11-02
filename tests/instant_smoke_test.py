@@ -575,6 +575,8 @@ def test_instant_page_uses_business_labels_and_single_judgment_area() -> None:
         assert batch_details["质控品批号"].startswith("AlphaPro-LOT")
         assert batch_details["单位"] == "mg/L"
         assert batch_details["试剂"] == "Reagent-A"
+        assert "批次名称" not in batch_details
+        assert batch_details["质控品批号"] in batch_details["质控品与原厂批号"]
         assert batch_details["输入值类型"] == "Ct值"
 
         record_tables = [table.value for table in at.dataframe if "记录序号" in table.value.columns]
@@ -587,7 +589,7 @@ def test_instant_page_uses_business_labels_and_single_judgment_area() -> None:
         caption_values = [item.value for item in at.caption]
         assert any("AlphaProject" in value and "AlphaPro-LOT" in value for value in caption_values)
         assert not any("当前批次：1" in value for value in caption_values)
-        assert sum("在此查看当前批次的最新判定" in value for value in caption_values) == 1
+        assert not any("在此查看当前批次的最新判定" in value for value in caption_values)
         assert not any("记录维护区" in str(item.value) for item in at.markdown)
 
 

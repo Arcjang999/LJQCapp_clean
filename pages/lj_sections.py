@@ -116,12 +116,12 @@ def render_lj_building_outlier_panel(
     )
     st.caption(str(panel_data["source_text"]))
     if not bool(panel_data["grubbs_ready"]):
-        st.info("当前点数不足，暂不进行格拉布斯法判断。")
+        st.info("至少需要3个有效点才能检验离群值。")
     elif panel_data["suspect_details"] is None:
         if bool(panel_data["target_ready"]):
-            st.success("当前未发现疑似离群参数建立点，参数建立统计已可用于进入正式期。")
+            st.success("未发现疑似离群点，可进入正式期。")
         else:
-            st.success("当前未发现疑似离群参数建立点。")
+            st.success("未发现疑似离群点。")
     else:
         suspect_details = panel_data["suspect_details"]
         st.warning(
@@ -133,7 +133,7 @@ def render_lj_building_outlier_panel(
             f"alpha={float(suspect_details['alpha']):.2f} | "
             f"状态={suspect_details['status_label']}"
         )
-    st.caption("如需保留、禁用或恢复，在下方“检测记录”中选中记录，再点击相应操作。")
+    st.caption("在“检测记录”中选中一条，再点“保留”“禁用”或“恢复”。")
 
 
 def render_lj_formal_westgard_panel(
@@ -162,7 +162,6 @@ def render_lj_abnormal_note_quick_entry(latest_row: pd.Series | None) -> None:
     render_abnormal_entry('lj_result', result_id,
         warning=str(latest_row.get('status')) == '警告', key='latest')
     current_note = str(latest_row.get("manual_note", "") or "")
-    st.caption("在下方填写异常备注并保存，备注会保留在这条检测记录中。")
     with st.form(f"lj_abnormal_note_form_{result_id}"):
         manual_note = st.text_area(
             "\u5f02\u5e38\u5907\u6ce8\uff08\u53ef\u9009\uff09",
@@ -450,11 +449,11 @@ def render_lj_entry_and_stats_section(
             + (
                 "已完成，后续结果自动进行 Westgard 判定。"
                 if stats.get("target_ready")
-                else f"尚需继续录入至少 {int(batch['target_n'])} 次结果。"
+                else f"建靶共需 {int(batch['target_n'])} 个有效点。"
             )
         )
         if cv_limit is not None:
-            st.caption(f"当前批次已保存允许不精密度（CV）：≤ {cv_limit:.2f}%")
+            st.caption(f"本批次CV上限：{cv_limit:.2f}%")
             render_cv_limit_hint(
                 stats.get("cv") if confirmed_target else building_cv_hint.get("cv"),
                 cv_limit,
@@ -464,7 +463,7 @@ def render_lj_entry_and_stats_section(
     with st.expander("实时统计", expanded=False):
         sorted_results = results_df.sort_values(["test_time", "id"]).reset_index(drop=True)
         if sorted_results.empty:
-            st.info("暂无数据，无法计算实时统计。")
+            st.info("尚无检测结果，无法计算统计值。")
             return
 
         sorted_results["sequence"] = sorted_results.index + 1
@@ -502,8 +501,7 @@ def render_lj_entry_and_stats_section(
         if realtime_message:
             st.info(realtime_message)
         st.caption(
-            "统计说明：实时统计仅基于当前批次中判定为“在控”的正式数据计算，"
-            "警告和失控结果不参与计算。"
+            "仅统计所选日期内的正式期在控结果；建靶、警告和失控结果不计入。"
         )
 
 
@@ -607,16 +605,13 @@ def render_lj_chart_and_analysis_section(
 
 def render_lj_rule_summary_section(stats: dict[str, object]) -> None:
     if not bool(stats.get("target_ready")):
-        st.info("当前仍在参数建立期，上方最新分析仅显示离群值判断；Westgard 规则汇总会在正式期启用后显示。")
+        st.info("建靶尚未完成，暂不汇总Westgard规则。")
         return
 
     st.markdown("**本批次规则汇总**")
     render_rule_summary_metrics(stats.get("rule_summary", {}))
 
     with st.expander("Westgard 规则说明", expanded=False):
-        st.caption(
-            "参数建立期可参考，正式质控期会输出规则结论。"
-        )
         for rule_id in ["1_2s", "1_3s", "2_2s", "R_4s", "4_1s", "10x"]:
             st.markdown(f"- `{format_rule_code(rule_id)}`：{format_rule_description(rule_id)}")
 
@@ -681,7 +676,7 @@ def render_lj_records_section(qc_df: pd.DataFrame, input_value_type: str, *, con
             abnormal=bool(row is not None and row['phase'] == '正式数据' and row['status'] in ('警告', '失控')))
         if row is not None and not availability['allowed'] and availability.get('reason'):
             st.caption(availability['reason'])
-        st.caption(f"本批次共 {len(qc_df)} 条记录；先选择一条记录，再查看或处理。")
+        st.caption(f"共 {len(qc_df)} 条记录。选中一条后可查看或维护。")
 
 
 def render_lj_maintenance_section(context: dict[str, object]) -> None:

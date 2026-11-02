@@ -49,7 +49,7 @@ def save_project_details(values: dict, *, template_id=None, expected_revision=No
     if fields['lab_instrument_id'] is None or fields['qc_material_id'] is None or (template_id is None and fields['default_reagent_id'] is None):
         raise ValueError('请选择仪器、默认试剂和质控品。')
     with atomic_write() as connection:
-        from services.qc_product_recommendation_service import validate_choice_review, _decode, _json
+        from services.qc_product_recommendation_service import validate_choice_reviews, choice_review_map, _decode, _json
         current = _check_revision(connection, template_id, expected_revision) if template_id is not None else None
         if current is not None and current['is_disabled']:
             raise ValueError('请先恢复项目，再编辑资料。')
@@ -60,8 +60,11 @@ def save_project_details(values: dict, *, template_id=None, expected_revision=No
         selection_changed = current is None or any(current[key] != fields[key] for key in
             ('lab_instrument_id', 'qc_material_id', 'default_reagent_id', 'default_method_id'))
         if supplied_review is not None or selection_changed:
-            review = validate_choice_review(supplied_review,
-                qc_material_id=fields['qc_material_id'], reagent_id=fields['default_reagent_id'],
+            products = list(choice_review_map(supplied_review)) or [int(fields['qc_material_id'])]
+            if int(fields['qc_material_id']) not in [int(product) for product in products]:
+                raise ValueError('质控品确认未包含所选产品，请重新核对。')
+            review = validate_choice_reviews(supplied_review,
+                qc_material_ids=products, reagent_id=fields['default_reagent_id'],
                 lab_instrument_id=fields['lab_instrument_id'], test_item_id=values.get('test_item_id'),
                 method_id=fields['default_method_id'])
         else:

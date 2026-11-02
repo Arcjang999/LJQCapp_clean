@@ -17,7 +17,7 @@ def render_manufacturer_management():
         st.session_state['reference_manufacturer_category'] = next(iter(labels))
     category = st.radio('选择厂家类别', list(labels), format_func=labels.get, horizontal=True,
                         key='reference_manufacturer_category')
-    st.caption('选择厂家类别后添加或编辑厂家。同一厂家经营多类产品时，勾选对应类别即可。')
+    st.caption('同一厂家可勾选多个业务类别。')
     render_master_data_workspace('manufacturer', manufacturer_category=category)
 
 
@@ -43,14 +43,14 @@ def render_instrument_management():
         open_global_page('show_settings_page')
     if manufacturer.button('维护仪器厂家', key='instrument_manufacturers'):
         open_reference_management('manufacturer', category='instrument')
-    st.caption('点击“新增仪器”，填写名称、厂家和型号。同型号的多台仪器分别登记。选中仪器后，下方显示使用它的项目。')
+    st.caption('同型号的多台仪器须分别登记。选中仪器后可查看关联项目。')
     render_master_data_workspace('lab_instrument')
     instrument_id = st.session_state.get('md_selected_lab_instrument')
     if instrument_id is not None:
         projects = _instrument_projects(instrument_id)
         st.subheader('此仪器下的项目')
         if projects.empty:
-            st.info('此仪器还没有项目。新建项目时选择这台仪器，再添加检验项目。')
+            st.info('此仪器尚无项目。新建项目时选择这台仪器。')
         else:
             display = projects[['template_name', 'material_name', 'item_count']].rename(columns={
                 'template_name': '项目', 'material_name': '质控品', 'item_count': '检验项目数'})
@@ -92,7 +92,7 @@ def render_reagent_management():
         if st.button('维护试剂厂家', key='reagent_manufacturers'):
             open_reference_management('manufacturer', category='reagent')
         st.subheader('试剂产品')
-        st.caption('先选中一条试剂，再点击“编辑试剂”或“管理批号”。在批号页面可登记批号、验证记录和换批安排。')
+        st.caption('选中试剂后点击“管理批号”，登记实际批号、验证记录或换批安排。')
         render_master_data_workspace('reagent', show_detail=False)
         selected = st.session_state.get('md_selected_reagent')
         if st.button('管理批号', key='reagent_manage_selected_lots', disabled=selected is None, width='stretch'):

@@ -100,7 +100,7 @@ def _render_unit(ready: dict) -> None:
 
 
 def _render_materials(ready: dict) -> None:
-    st.write('登记本次要用的**仪器、试剂和质控品**。已有的可直接选择。')
+    st.write('登记本次要用的**仪器、试剂和质控品**，已有资料无需重填。')
     actions = (
         ('仪器', '填仪器名称、厂家和型号。', '仪器管理', 'instrument', 'onboarding_instrument'),
         ('试剂', '填产品、批号和效期。', '试剂管理', 'reagent_lot', 'onboarding_reagent'),
@@ -116,7 +116,7 @@ def _render_materials(ready: dict) -> None:
                 _open_page('materials', 'show_qc_materials_page',
                            reference={'instrument': 'instrument', 'reagent_lot': 'reagent'}.get(flag, ''))
     st.markdown('**单位资料准备（选用）**')
-    st.caption('也可下载填写表，一次填写实验室、仪器、试剂和质控品，再上传保存。')
+    st.caption('下载填写表，批量登记实验室、仪器、试剂和质控品。')
     if st.button('单位资料准备：下载填写表或导入Excel', key='onboarding_checklist', width='stretch'):
         if _leave('materials'):
             from ui.common import open_global_page

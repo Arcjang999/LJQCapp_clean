@@ -37,8 +37,7 @@ def _render_dialog():
         if discard.button('放弃本次准备', key='lab_prep_discard', width='stretch'):
             _close()
         return
-    st.caption('从Excel批量登记资料（选用）：下载清单，填写实验室、人员、仪器、检验项目、计量单位、方法学、试剂和质控品批号，再上传检查。')
-    st.info('保存后，到首页点击“新建项目”，选择仪器、试剂和质控品，填写质量要求并保存。')
+    st.caption('下载空白清单，填写后上传检查。')
     template, reference = st.columns(2)
     template.download_button('下载空白单位资料清单', build_lab_preparation_template(),
         file_name='单位资料准备清单.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -74,7 +73,7 @@ def _render_dialog():
         summary = review['summary']
         st.caption(f"资料 {summary['rows']} 行 · 新增 {summary['create']} 行 · 引用已有 {summary['reuse']} 行 · 单位设置变更 {summary['settings']} 项")
         if summary['has_blocking_errors']:
-            st.error('请按下表提示修改文件，再上传检查。修改前的文件仍保留。')
+            st.error('请按下表修改文件，重新上传检查。')
         else:
             st.success('文件检查完成，核对下方资料后点击“确认保存单位资料”。')
         if review['issues']:

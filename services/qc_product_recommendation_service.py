@@ -28,10 +28,79 @@ def _identity(values):
     return {key: int(values[key]) if values.get(key) is not None else None for key in SCOPE_FIELDS}
 
 
+def choice_review_map(value):
+    """Read a single confirmation or the confirmations of a material combination."""
+    decoded = _decode(value)
+    if not isinstance(decoded, dict):
+        return {}
+    if decoded.get('version') == 1 and decoded.get('qc_material_id') is not None:
+        return {str(int(decoded['qc_material_id'])): decoded}
+    source = decoded.get('products') if decoded.get('version') == 2 else decoded
+    if not isinstance(source, dict):
+        return {}
+    result = {}
+    for key, review in source.items():
+        try:
+            product_id = str(int(key))
+        except (ValueError, TypeError):
+            continue
+        if isinstance(review, dict):
+            result[product_id] = dict(review)
+    return result
+
+
+def pack_choice_reviews(value):
+    """Keep one-product records compact and store combinations in the same field."""
+    reviews = choice_review_map(value)
+    if len(reviews) == 1:
+        return next(iter(reviews.values()))
+    return dict(version=2, products=reviews) if reviews else {}
+
+
+def validate_choice_reviews(reviews, *, qc_material_ids, reagent_id, lab_instrument_id,
+                            test_item_id=None, method_id=None):
+    products = list(dict.fromkeys(int(value) for value in qc_material_ids))
+    if not products:
+        raise ValueError('请先选择各水平的质控品。')
+    source = choice_review_map(reviews)
+    scope = dict(reagent_id=reagent_id, lab_instrument_id=lab_instrument_id,
+                 test_item_id=test_item_id, method_id=method_id)
+    confirmed = {str(product): validate_choice_review(source.get(str(product)),
+        qc_material_id=product, **scope) for product in products}
+    return pack_choice_reviews(confirmed)
+
+
+validate_product_choice_reviews = validate_choice_reviews
+
+
 def _active(connection, values):
     _, invalid = _reference_state(connection, values)
     if invalid:
         raise ValueError('所选资料或其厂家、仪器型号已停用或不存在，请重新核对。')
+
+
+def product_reference_record(connection, product_id):
+    """Fingerprint the displayed business attributes, including directory text."""
+    saved = connection.execute('SELECT * FROM md_qc_materials WHERE id=?', (int(product_id),)).fetchone()
+    if saved is None:
+        return None
+    row = dict(saved)
+    source = connection.execute('''SELECT i.product_code,i.product_name,i.concentration_code,i.concentration
+        FROM md_product_directory_keys k JOIN md_product_directory_items i
+            ON i.release_id=k.current_release_id AND i.product_code=k.product_code AND i.product_id=k.product_id
+        JOIN md_product_directory_releases r ON r.id=k.current_release_id AND r.source_code=k.source_code
+        WHERE k.product_id=? AND r.is_test=0 AND i.excluded_reason=''
+        ORDER BY r.id DESC LIMIT 1''', (int(product_id),)).fetchone()
+    if source is not None:
+        row.update(catalog_no=source['product_code'], generic_name=source['product_name'],
+                   concentration_code=source['concentration_code'], concentration=source['concentration'])
+        # Publishing the same business content refreshes this timestamp only.
+        row.pop('updated_at', None)
+    if not any(str(row.get(field) or '').strip() for field in ('concentration', 'concentration_code')):
+        # Adding empty optional fields must preserve saved selection reviews.
+        row = {field: value for field, value in row.items()
+               if field not in ('concentration', 'concentration_code')}
+    return row
 
 
 def _reference_state(connection, values):
@@ -39,13 +108,11 @@ def _reference_state(connection, values):
     for key, table in REFERENCE_TABLES.items():
         if values.get(key) is None:
             continue
-        record = connection.execute('SELECT * FROM ' + table + ' WHERE id=?', (int(values[key]),)).fetchone()
-        row = dict(record) if record is not None else None
-        if key == 'qc_material_id' and row is not None and not any(
-                str(row.get(field) or '').strip() for field in ('concentration', 'concentration_code')):
-            # Adding empty optional fields must preserve saved selection reviews.
-            row = {field: value for field, value in row.items()
-                   if field not in ('concentration', 'concentration_code')}
+        if key == 'qc_material_id':
+            row = product_reference_record(connection, values[key])
+        else:
+            record = connection.execute('SELECT * FROM ' + table + ' WHERE id=?', (int(values[key]),)).fetchone()
+            row = dict(record) if record is not None else None
         details = {'record': row}
         invalid = invalid or row is None or bool(row.get('is_disabled'))
         if row is not None:
@@ -111,8 +178,10 @@ def validate_qc_product_choice(*, qc_material_id, reagent_id, lab_instrument_id,
     with read_snapshot() as connection:
         _active(connection, {**identity, 'qc_material_id': qc_material_id})
         context = _context(connection, identity)
+        product_state, _ = _reference_state(connection, {'qc_material_id': qc_material_id})
+        product_revision = sha256(_json(product_state).encode()).hexdigest()
         if expected_revision is not None and expected_revision != context['revision']:
-            raise ValueError('该试剂可用的质控品资料已修改。填写内容仍保留，请重新选择质控品并确认选择理由。')
+            raise ValueError('质控品资料已修改，请重新核对并确认质控品。')
         candidate = next((row for row in context['candidates'] if row['qc_material_id'] == int(qc_material_id)), None)
         manual = _decode(manual_review)
         if manual:
@@ -120,25 +189,33 @@ def validate_qc_product_choice(*, qc_material_id, reagent_id, lab_instrument_id,
             if not actor or not evidence:
                 raise ValueError('人工选择须填写核对人及适用依据。')
             return dict(version=1, context=identity, qc_material_id=int(qc_material_id), revision=context['revision'],
-                        basis='manual', relation_ids=[], confirmed_by=actor, evidence=evidence)
+                        product_revision=product_revision, basis='manual', relation_ids=[], confirmed_by=actor, evidence=evidence)
         if candidate is None:
             raise ValueError('尚未登记该试剂可用的质控品。请人工选择质控品，并填写核对人和选择理由。')
         return dict(version=1, context=identity, qc_material_id=int(qc_material_id), revision=context['revision'],
+                    product_revision=product_revision,
                     basis='recommendation', relation_ids=candidate['relation_ids'],
                     confirmed_by='；'.join(candidate['confirmed_by']), evidence='；'.join(candidate['evidence']))
 
 
 def validate_choice_review(review, *, qc_material_id, reagent_id, lab_instrument_id, test_item_id=None, method_id=None):
     """Recheck a UI draft; a serialized review can never authorize a different scope."""
-    review = _decode(review)
+    review = choice_review_map(review).get(str(int(qc_material_id)), {})
     identity = _identity(locals())
     if (review.get('version') != 1 or review.get('basis') not in ('manual', 'recommendation')
             or not review.get('revision') or review.get('context') != identity
             or review.get('qc_material_id') != int(qc_material_id)):
-        raise ValueError('选品资料与当前仪器、试剂或检验项目不一致，请重新核对。')
+        raise ValueError('本次仪器、试剂、方法和检验项目的质控品适用性确认尚未完成。')
     manual = review if review.get('basis') == 'manual' else None
-    return validate_qc_product_choice(qc_material_id=qc_material_id, **identity,
-                                     expected_revision=review.get('revision'), manual_review=manual)
+    current = validate_qc_product_choice(qc_material_id=qc_material_id, **identity,
+                                       expected_revision=review.get('revision'), manual_review=manual)
+    if not review.get('product_revision') and review['basis'] == 'recommendation':
+        # The existing candidate revision already hashes this product and maker.
+        # Preserve an established recommendation's shape after empty-field additions.
+        return review
+    if review.get('product_revision') != current['product_revision']:
+        raise ValueError('质控品资料已修改或尚未核对，请重新确认适用依据。')
+    return current
 
 
 def product_scope_revision(*, reagent_id, lab_instrument_id, test_item_id=None, method_id=None):
@@ -160,6 +237,32 @@ def resolve_item_choice_review(template, row, *, existing=None):
     product = int(template['qc_material_id'])
     if scope['reagent_id'] is None:
         return {}
+    supplied = row.get('product_choice_reviews', row.get('product_choice_review'))
+    supplied_map = choice_review_map(supplied)
+    declared_products = row.get('level_product_ids') or row.get('qc_material_ids')
+    if supplied_map:
+        reviewed = validate_choice_reviews(supplied_map,
+            qc_material_ids=declared_products or list(supplied_map), **scope)
+        row['product_recommendation_revision'] = product_scope_revision(**scope)
+        return reviewed
+    previous = choice_review_map((dict(existing) if existing is not None else {}).get('product_choice_review_json'))
+    if supplied is None and len(previous) > 1:
+        return validate_choice_reviews(previous, qc_material_ids=declared_products or list(previous), **scope)
+    header_reviews = choice_review_map(dict(template).get('product_choice_review_json'))
+    if supplied is None and len(header_reviews) > 1:
+        confirmed = {}
+        for product_key, prior in header_reviews.items():
+            declared = prior.get('context') or {}
+            if declared == scope:
+                confirmed[product_key] = validate_choice_review(prior, qc_material_id=int(product_key), **scope)
+            elif prior.get('basis') == 'manual' and all(
+                    declared.get(key) is None or declared[key] == value for key, value in scope.items()):
+                validate_choice_review(prior, qc_material_id=int(product_key), **declared)
+                confirmed[product_key] = validate_qc_product_choice(qc_material_id=int(product_key),
+                    **scope, manual_review=prior)
+            else:
+                confirmed[product_key] = validate_qc_product_choice(qc_material_id=int(product_key), **scope)
+        return pack_choice_reviews(confirmed)
     context = get_qc_product_recommendations(**scope)
     if row.get('product_choice_review') is not None:
         reviewed = validate_choice_review(row['product_choice_review'], qc_material_id=product, **scope)
@@ -171,8 +274,8 @@ def resolve_item_choice_review(template, row, *, existing=None):
     if row.get('manual_product_review') is not None:
         return validate_qc_product_choice(qc_material_id=product, **scope, manual_review=row['manual_product_review'])
     # A previously saved manual choice is local evidence, never a clinical rule.
-    prior = _decode((dict(existing) if existing is not None else {}).get('product_choice_review_json'))
-    header = _decode(dict(template).get('product_choice_review_json'))
+    prior = choice_review_map((dict(existing) if existing is not None else {}).get('product_choice_review_json')).get(str(product), {})
+    header = choice_review_map(dict(template).get('product_choice_review_json')).get(str(product), {})
     if prior.get('context') == scope and prior.get('qc_material_id') == product:
         return validate_choice_review(prior, qc_material_id=product, **scope)
     declared = header.get('context') or {}
@@ -194,11 +297,15 @@ def item_product_choice_errors(template, row):
         return []
     scope = dict(reagent_id=row.get('reagent_id'), lab_instrument_id=template['lab_instrument_id'],
                  test_item_id=row['test_item_id'], method_id=row.get('method_id'))
-    if review.get('context') != scope or review.get('qc_material_id') != int(template['qc_material_id']):
+    reviews = choice_review_map(review)
+    products = list(dict.fromkeys(row.get('level_product_ids') or row.get('qc_material_ids') or
+                                 list(reviews) or [int(template['qc_material_id'])]))
+    if any(reviews.get(str(product), {}).get('context') != scope or
+           reviews.get(str(product), {}).get('qc_material_id') != int(product) for product in products):
         return ['请核对本检验项目所用试剂与质控品的适用依据；没有匹配关系时可登记人工核对。']
     if template['status'] == 'draft':
         try:
-            validate_choice_review(review, qc_material_id=template['qc_material_id'], **scope)
+            validate_choice_reviews(review, qc_material_ids=products, **scope)
         except (ValueError, TypeError) as exc:
             return [str(exc)]
     return []
@@ -238,7 +345,18 @@ def require_current_draft_choice(scope, item_id, connection):
     if frozen:
         return
     review = _decode(item['product_choice_review_json'])
-    validate_choice_review(review, qc_material_id=item['qc_material_id'], **identity)
+    validate_choice_reviews(review, qc_material_ids=_item_product_ids(connection, scope, item), **identity)
+
+
+def _item_product_ids(connection, scope, item):
+    if scope == 'lot':
+        products = [int(row[0]) for row in connection.execute('''SELECT DISTINCT q.qc_material_id
+            FROM qc_lot_config_item_levels a JOIN md_qc_levels l ON l.id=a.qc_level_id
+            JOIN md_qc_material_lots q ON q.id=l.qc_material_lot_id
+            WHERE a.lot_config_item_id=? AND a.is_disabled=0 ORDER BY q.qc_material_id''', (item['id'],))]
+        if products:
+            return products
+    return [int(value) for value in choice_review_map(item['product_choice_review_json'])] or [int(item['qc_material_id'])]
 
 
 def save_draft_product_choice(scope, item_id, review, *, expected_revision):
@@ -250,7 +368,12 @@ def save_draft_product_choice(scope, item_id, review, *, expected_revision):
                              '本批次已确认，选择质控品的依据已保存。如需更换，请新建批次并重新确认。')
         if int(expected_revision) != int(item['owner_revision']):
             raise ValueError('项目或批次草稿已变化，请重新打开核对。')
-        confirmed = validate_choice_review(review, qc_material_id=item['qc_material_id'], **identity)
+        products = _item_product_ids(connection, scope, item)
+        # A project can declare all products before its first batch is composed.
+        if scope == 'project':
+            products = list(dict.fromkeys([int(item['qc_material_id']),
+                *(int(value) for value in choice_review_map(review))]))
+        confirmed = validate_choice_reviews(review, qc_material_ids=products, **identity)
         table = 'qc_project_template_items' if scope == 'project' else 'qc_lot_config_items'
         owner_table = 'qc_project_templates' if scope == 'project' else 'qc_lot_configs'
         owner_id = item['template_id'] if scope == 'project' else item['lot_config_id']

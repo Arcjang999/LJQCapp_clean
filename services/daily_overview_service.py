@@ -10,6 +10,8 @@ from database import get_connection, get_instant_results, read_snapshot
 from services.search_service import fuzzy_match
 from services.quality_target_service import batch_quality_summary
 from services.out_of_control_service import list_pending
+from services.material_workflow_service import material_label
+from services.qc_product_display_service import product_choice_label
 
 METHOD_LABELS = {'lj':'单水平（L-J）', 'zscore':'多水平法', 'instant':'即时法'}
 CLASS_LABELS = {'accept':'在控','normal':'在控','warning':'警告','reject':'失控','pending':'尚待判读',None:'尚待判读'}
@@ -28,13 +30,31 @@ def list_overview_bindings(*,include_disabled=False):
           c.id AS lot_config_id,c.template_id,c.config_name,c.lab_instrument_id,c.qc_material_id,c.qc_material_lot_id,
           c.status AS config_status,t.template_name,d.chinese_name AS test_item_name,d.abbreviation AS test_item_abbreviation,
           l.display_name AS instrument_name,m.generic_name AS material_name,u.symbol AS unit_symbol,
-          b.runtime_batch_id,b.runtime_project_id,b.binding_status
+          b.runtime_batch_id,b.runtime_project_id,b.binding_status,b.source_snapshot_json
           FROM qc_lot_config_items i JOIN qc_lot_configs c ON c.id=i.lot_config_id
           JOIN qc_project_templates t ON t.id=c.template_id JOIN md_test_items d ON d.id=i.test_item_id
           JOIN lab_instruments l ON l.id=c.lab_instrument_id JOIN md_qc_materials m ON m.id=c.qc_material_id
           LEFT JOIN md_units u ON u.id=i.unit_id LEFT JOIN qc_workbench_bindings b ON b.lot_config_item_id=i.id
           WHERE ?=1 OR (i.is_disabled=0 AND i.is_enabled=1 AND c.is_disabled=0 AND t.is_disabled=0)
           ORDER BY c.lab_instrument_id,c.template_id,i.sort_order,i.id''',(int(include_disabled),))]
+        material_levels = {level['qc_level_id']: dict(level) for level in c.execute('''SELECT l.id AS qc_level_id,l.level_name,l.level_code,
+                q.qc_material_id,q.lot_no,q.expiry_date,m.generic_name,m.catalog_no,m.concentration_code,m.concentration,
+                f.display_name AS manufacturer_name FROM md_qc_levels l JOIN md_qc_material_lots q ON q.id=l.qc_material_lot_id
+                JOIN md_qc_materials m ON m.id=q.qc_material_id LEFT JOIN md_manufacturers f ON f.id=m.manufacturer_id
+                ORDER BY l.id''')}
+        for row in rows:
+            live = [material_levels[level['qc_level_id']] for level in c.execute('''SELECT qc_level_id
+                FROM qc_lot_config_item_levels WHERE lot_config_item_id=? AND is_disabled=0 ORDER BY level_order,id''',
+                (row['lot_config_item_id'],)) if level['qc_level_id'] in material_levels]
+            source = _json(row.pop('source_snapshot_json'))
+            levels = [{**material_levels.get(level.get('qc_level_id'), {}), **level}
+                      for level in source.get('levels', [])] or live
+            materials = {int(level['qc_material_id']): dict(id=int(level['qc_material_id']),
+                name=product_choice_label(level)) for level in levels if level.get('qc_material_id')}
+            row['materials'] = list(materials.values())
+            row['qc_material_ids'] = list(materials)
+            row['material_name'] = ' / '.join(value['name'] for value in materials.values()) or '未选择质控品'
+            row['material_summary'] = '；'.join(material_label(level) for level in levels) or '未选择质控品'
         transferred = []
         for row in rows:
             if row['qc_method'] != 'instant' or row['runtime_batch_id'] is None:
@@ -90,7 +110,7 @@ def get_daily_overview(day=None, *, lab_instrument_id=None, template_id=None, qc
     day=date.fromisoformat(str(day or date.today())[:10]);start=datetime.combine(day,time.min);end=start+timedelta(days=1)
     bindings=list_overview_bindings()
     rows=[r for r in bindings if (lab_instrument_id is None or r['lab_instrument_id']==int(lab_instrument_id))
-          and (template_id is None or r['template_id']==int(template_id)) and (qc_material_id is None or r['qc_material_id']==int(qc_material_id))
+          and (template_id is None or r['template_id']==int(template_id)) and (qc_material_id is None or int(qc_material_id) in r['qc_material_ids'])
           and (not qc_method or r['qc_method']==qc_method) and fuzzy_match(search,r['template_name'],r['test_item_name'],r['test_item_abbreviation'],r['instrument_name'],r['material_name'])]
     month=day.strftime('%Y-%m');items=[]
     with read_snapshot() as c:
@@ -154,15 +174,22 @@ def get_daily_overview(day=None, *, lab_instrument_id=None, template_id=None, qc
             items.append(item)
     pending=list_pending(start_date=day.isoformat(),end_date=day.isoformat(),instrument_id=lab_instrument_id)
     references={(i['qc_method'],i['runtime_batch_id']):i for i in list_overview_bindings(include_disabled=True)}
+    with read_snapshot() as c:
+        level_products = {row['id']: row['qc_material_id'] for row in c.execute('''SELECT l.id,q.qc_material_id
+            FROM md_qc_levels l JOIN md_qc_material_lots q ON q.id=l.qc_material_lot_id''')}
     def relevant(row):
         origin=row['origin_snapshot'];source=origin.get('config_snapshot') or {}
         reference=references.get((origin['qc_method'],origin['batch_id']),{})
+        levels = source.get('levels') or origin.get('context_levels') or origin.get('levels') or []
+        products = {level.get('qc_material_id') or level_products.get(level.get('qc_level_id')) for level in levels} - {None}
+        if not products:
+            products = set(reference.get('qc_material_ids', [])) or {source.get('qc_material_id',reference.get('qc_material_id'))}
         return ((template_id is None or reference.get('template_id')==int(template_id))
-            and (qc_material_id is None or source.get('qc_material_id',reference.get('qc_material_id'))==int(qc_material_id))
+            and (qc_material_id is None or int(qc_material_id) in products)
             and (not qc_method or origin['qc_method']==qc_method)
             and fuzzy_match(search,reference.get('template_name',''),origin.get('project_name',''),
                 source.get('test_item_name',''),source.get('test_item_abbreviation',''),
-                origin.get('instrument_name',''),source.get('qc_material_name','')))
+                origin.get('instrument_name',''),source.get('qc_material_name',''),reference.get('material_name','')))
     pending={**pending,'items':[r for r in pending['items'] if relevant(r)],'cross_day':[r for r in pending['cross_day'] if relevant(r)],
              'verification_gaps':[r for r in pending['verification_gaps'] if relevant(r)]}
     all_pending=pending['items']+pending['cross_day']

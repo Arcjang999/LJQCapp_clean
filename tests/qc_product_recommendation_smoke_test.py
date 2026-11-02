@@ -58,7 +58,7 @@ def database_state():
 class ProductRecommendationTests(unittest.TestCase):
     def assert_stale_rejection_preserves_database(self, action):
         before = database_state()
-        with self.assertRaisesRegex(ValueError, '可用的质控品资料已修改'):
+        with self.assertRaisesRegex(ValueError, '质控品资料已修改'):
             action()
         self.assertEqual(before, database_state())
 
@@ -111,7 +111,7 @@ class ProductRecommendationTests(unittest.TestCase):
                 qc_material_id=scope['qc_material_id'], default_reagent_id=scope['reagent_id'],
                 default_method_id=scope['method_id'], default_qc_method='zscore', default_level_count=2,
                 product_choice_review=review)
-            with self.assertRaisesRegex(ValueError, '不一致'):
+            with self.assertRaisesRegex(ValueError, '质控品适用性确认尚未完成'):
                 save_project_details(values)
             values['test_item_id'] = scope['test_item_id']
             tid = save_project_details(values)
@@ -138,7 +138,7 @@ class ProductRecommendationTests(unittest.TestCase):
             preview = preview_panel_items(f['template_id'], [row])
             values['evidence'] = '整组预览后修改的依据'
             save_qc_product_relation(values, relation_id=rid, expected_revision=1)
-            with self.assertRaisesRegex(ValueError, '重新选择质控品'):
+            with self.assertRaisesRegex(ValueError, '重新核对并确认质控品'):
                 save_panel_items(f['template_id'], preview['rows'], expected_revision=preview['expected_revision'])
             self.assertEqual(1, len(list_template_items(f['template_id'])))
 
@@ -289,7 +289,7 @@ class ProductRecommendationTests(unittest.TestCase):
             fresh = validate_qc_product_choice(qc_material_id=scope['qc_material_id'], **selection(scope))
             wrong = dict(fresh, context=dict(fresh['context'], test_item_id=None))
             before = database_state()
-            with self.assertRaisesRegex(ValueError, '不一致'):
+            with self.assertRaisesRegex(ValueError, '质控品适用性确认尚未完成'):
                 save_draft_product_choice('lot', ciid, wrong, expected_revision=get_lot_config(cid)['revision_no'])
             self.assertEqual(before, database_state())
             save_draft_product_choice('lot', ciid, fresh, expected_revision=get_lot_config(cid)['revision_no'])
@@ -329,7 +329,7 @@ class ProductRecommendationTests(unittest.TestCase):
                     requirement_text='合成验收数据的质量要求', confirmed_by='隔离确认人', evidence='已核对完整质量适用条件',
                     **fixture_conditions(item))
             before = database_state()
-            with self.assertRaisesRegex(ValueError, '不一致'):
+            with self.assertRaisesRegex(ValueError, '质控品适用性确认尚未完成'):
                 confirm_quality()
             self.assertEqual(before, database_state())
             with self.assertRaisesRegex(ValueError, '适用依据'):

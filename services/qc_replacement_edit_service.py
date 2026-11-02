@@ -27,14 +27,14 @@ def get_qc_replacement_context(config_id):
             JOIN qc_lot_config_items i ON i.id=l.lot_config_item_id WHERE i.lot_config_id=? ORDER BY l.id''', (config_id,))
         items = list_lot_config_items(config_id).to_dict('records')
         levels = {int(item['id']): list_lot_item_levels(int(item['id'])).to_dict('records') for item in items}
-        materials = available_materials(config['qc_material_id'], include_disabled=True).to_dict('records')
-        enabled_materials = available_materials(config['qc_material_id']).to_dict('records')
+        materials = available_materials(include_disabled=True).to_dict('records')
+        enabled_materials = available_materials().to_dict('records')
         registration_rows = {
-            'lots': _rows(connection, 'SELECT * FROM md_qc_material_lots WHERE qc_material_id=? ORDER BY id',
-                          (config['qc_material_id'],)),
+            'products': _rows(connection, 'SELECT * FROM md_qc_materials ORDER BY id', ()),
+            'manufacturers': _rows(connection, 'SELECT * FROM md_manufacturers ORDER BY id', ()),
+            'lots': _rows(connection, 'SELECT * FROM md_qc_material_lots ORDER BY id', ()),
             'levels': _rows(connection, '''SELECT l.* FROM md_qc_levels l JOIN md_qc_material_lots q
-                ON q.id=l.qc_material_lot_id WHERE q.qc_material_id=? ORDER BY l.id''',
-                            (config['qc_material_id'],)),
+                ON q.id=l.qc_material_lot_id ORDER BY l.id''', ()),
         }
         lots = list_qc_lots(config['qc_material_id']).to_dict('records')
         existing = _rows(connection, '''SELECT * FROM qc_lot_configs WHERE template_id=?
@@ -66,8 +66,6 @@ def get_qc_replacement_context(config_id):
         reason = ''
         if config['is_disabled'] or project['is_disabled']:
             reason = '此项目或批次已停用，只能查看原有资料。'
-        elif product['is_disabled']:
-            reason = '此质控品已停用，请先核对基础资料。'
         elif not items:
             reason = '原批次没有可沿用的检验项目，请先补充批次设置。'
         return dict(config=config, items=items, levels=levels, materials=enabled_materials,

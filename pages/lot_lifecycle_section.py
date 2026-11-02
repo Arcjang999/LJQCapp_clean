@@ -145,7 +145,6 @@ def render_lot_management(*, render_dialogs=True):
     sync_lj_workbench_bindings();sync_zscore_workbench_bindings();sync_instant_workbench_bindings()
     workbench_systems()
     _render_result_lot_entry_return()
-    st.caption('选择下方页签，登记批号验证、换批或均值和标准差；验证依据按实验室记录填写。')
     labels = ['试剂批号与换批','新旧批号比对','均值和标准差管理','历史记录']
     if 'lot_management_tabs' not in st.session_state and st.session_state.get('lot_management_active_tab') in labels:
         st.session_state['lot_management_tabs'] = st.session_state['lot_management_active_tab']

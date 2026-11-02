@@ -31,6 +31,17 @@ def apply_project_dependency_saved(ctx):
     ctx['draft'][field] = identifier
     st.session_state['project_draft_' + ctx['token'] + '_' + field] = identifier
     if field == 'qc_material_id':
+        if ctx.get('kind') == 'quick':
+            count = int(ctx['draft']['level_count'])
+            for name, value in (('level_product_ids', identifier), ('level_ids', None)):
+                selected = list(ctx['draft'].get(name, []))
+                selected += [None] * max(0, count - len(selected))
+                selected[0] = value
+                ctx['draft'][name] = selected
+            slot = 'quick_control_' + ctx['token'] + '_0'
+            st.session_state[slot + '_product'] = identifier
+            st.session_state[slot + '_level'] = None
+            st.session_state[slot + '_last_product'] = identifier
         prefix = 'project_product_' + ctx['token']
         ctx[prefix + '_mode'] = '人工选品'
         st.session_state[prefix + '_mode'] = '人工选品'
@@ -53,20 +64,20 @@ def render_project_dependencies(ctx, *, kind=None, disabled=False, locked_identi
                'unit': master.list_units, 'qc_material': master.list_qc_materials}
     missing = [_LABELS[entity] for entity in fields if listers[entity]().empty]
     if missing:
-        st.info('、'.join(missing) + '暂无可选资料。展开“补充基础资料”，选择要登记的资料；保存后继续当前设置。')
+        st.info('、'.join(missing) + '尚未登记，请展开“补充基础资料”补充。')
     notice = ctx.pop('dependency_notice', '')
     if notice:
         st.success(notice)
     state = ctx.get('dependency_registration')
     prefix = 'project_dependency_' + ctx['token']
     with st.expander('补充基础资料', expanded=bool(state) or bool(missing)):
-        st.caption('列表中没有本次使用的资料时，在这里登记。保存或取消后可继续当前项目，已填写内容会保留。')
+        st.caption('缺少资料可在这里登记，项目已填内容会保留。')
         if state:
-            st.info('正在登记' + _LABELS[state['entity']] + '。请先在本区域点击“保存”或“取消”，再继续项目设置；上方已填内容会保留。')
+            st.info('正在登记' + _LABELS[state['entity']] + '，请先保存或取消。')
         elif disabled:
-            st.info('请先在“登记质控品批号”中保存或取消当前登记，再补充其他资料。')
+            st.info('请先保存或取消“登记质控品批号”。')
         elif has_pending_product_relation(ctx):
-            st.info('请先在“登记试剂配套的质控品”中保存或取消当前配套记录，再登记其他资料。')
+            st.info('请先保存或取消“登记试剂配套的质控品”中的记录。')
         selected = st.selectbox('要补充的资料', list(fields), format_func=_LABELS.get,
             key=prefix + '_type', disabled=bool(state) or disabled)
         if st.button('登记' + _LABELS[selected], key=prefix + '_open',

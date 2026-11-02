@@ -39,6 +39,8 @@ def _active_lj_source_rows(connection: sqlite3.Connection) -> list[sqlite3.Row]:
             configs.revision_no AS source_revision_no,
             configs.config_name,
             configs.lab_instrument_id, configs.qc_material_id, levels.qc_material_lot_id,
+            lots.qc_material_id AS actual_qc_material_id,
+            materials.catalog_no, materials.generic_name, materials.manufacturer_id,
             tests.chinese_name AS test_item_name,
             tests.standard_code,
             local.display_name AS instrument_name,
@@ -63,7 +65,6 @@ def _active_lj_source_rows(connection: sqlite3.Connection) -> list[sqlite3.Row]:
         INNER JOIN qc_project_templates AS templates ON templates.id = configs.template_id
         INNER JOIN md_test_items AS tests ON tests.id = items.test_item_id
         INNER JOIN lab_instruments AS local ON local.id = configs.lab_instrument_id
-        INNER JOIN md_qc_materials AS materials ON materials.id = configs.qc_material_id
         INNER JOIN qc_lot_config_item_levels AS assigned
             ON assigned.lot_config_item_id = items.id
            AND assigned.is_disabled = 0
@@ -71,6 +72,7 @@ def _active_lj_source_rows(connection: sqlite3.Connection) -> list[sqlite3.Row]:
             ON levels.id = assigned.qc_level_id
            AND levels.is_disabled = 0
         INNER JOIN md_qc_material_lots AS lots ON lots.id=levels.qc_material_lot_id
+        INNER JOIN md_qc_materials AS materials ON materials.id=lots.qc_material_id
         LEFT JOIN md_reagents AS reagents ON reagents.id = items.reagent_id
         LEFT JOIN md_manufacturers AS reagent_manufacturers
             ON reagent_manufacturers.id = reagents.manufacturer_id
@@ -91,7 +93,7 @@ def _active_lj_source_rows(connection: sqlite3.Connection) -> list[sqlite3.Row]:
           AND materials.is_disabled = 0
           AND lots.is_disabled = 0
           AND (configs.material_selection_mode=1 OR levels.qc_material_lot_id = configs.qc_material_lot_id)
-          AND lots.qc_material_id=configs.qc_material_id
+          AND (configs.material_selection_mode=1 OR lots.qc_material_id=configs.qc_material_id)
           AND COALESCE(reagents.is_disabled, 1) = 0
           AND COALESCE(units.is_disabled, 1) = 0
           AND COALESCE(methods.is_disabled, 1) = 0
@@ -250,6 +252,9 @@ def sync_lj_workbench_bindings() -> int:
             source["identity"] = [source[k] for k in ("lab_instrument_id", "qc_material_id", "qc_material_lot_id",
                 "test_item_id", "input_value_type", "unit_id", "method_id", "reagent_id", "qc_level_id", "target_n", "cv_limit")]
             source["levels"] = [{"qc_level_id": source["qc_level_id"], "level_order": 1,
+                                 "qc_material_id": source["actual_qc_material_id"],
+                                 "generic_name": source["generic_name"], "catalog_no": source["catalog_no"],
+                                 "manufacturer_id": source["manufacturer_id"], "manufacturer_name": source["qc_material_manufacturer_name"],
                                  "level_name": source["level_name"], "level_code": source.get("level_code", ""), "specification_id": source.get("specification_id"), "expiry_date": source["expiry_date"], "qc_material_lot_id": source["qc_material_lot_id"],
                                  "lot_no": source["lot_no"], "target_source": source["target_source"],"target_mean":source["target_mean"],"target_sd":source["target_sd"]}]
             snapshot = connection.execute("SELECT id FROM qc_config_snapshots WHERE lot_config_id = ? AND revision_no = ? ORDER BY id DESC LIMIT 1",

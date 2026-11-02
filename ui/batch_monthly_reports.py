@@ -50,7 +50,7 @@ def _render_job(job_id):
             format_func=lambda value: retryable[value]['selection']['project_name'] + '｜' + retryable[value]['selection']['lot_no'],
             key='monthly_retry_' + str(job_id))
         if not chosen:
-            st.info('请在“本次继续生成的报告”中至少选择一份，再点击继续或重试。')
+            st.info('请在“本次继续生成的报告”中至少选择一份。')
         if st.button('继续未完成或重试所选报告', type='primary', disabled=not chosen, key='monthly_retry_run'):
             _run_selected(job, chosen)
             st.rerun()
@@ -65,7 +65,7 @@ def _render_job(job_id):
         st.download_button('下载全部报告和附件（ZIP）', archive, file_name=f"{job['period_start']}_{job['period_end']}_质控报告汇集_{job_id}.zip",
                            mime='application/zip', key='monthly_zip_download')
     except Exception:
-        st.error('报告和附件的ZIP生成失败。请重新打开此页面，或从报告历史逐份下载已保存的报告。')
+        st.error('ZIP生成失败。可从“报告历史”逐份下载，或重新打开此页重试。')
     selected = st.selectbox('查看单份报告', list(succeeded),
         format_func=lambda value: succeeded[value]['selection']['project_name'] + '｜' + succeeded[value]['selection']['lot_no'] +
             '｜' + succeeded[value]['selection']['instrument_name'], key='monthly_individual_' + str(job_id))
@@ -126,7 +126,7 @@ def render_batch_monthly_reports_page():
     methods = st.multiselect('质控方法', list(METHOD_LABELS), default=list(METHOD_LABELS),
                             format_func=METHOD_LABELS.get, key='monthly_methods')
     if not methods:
-        st.info('请在上方“质控方法”中至少选择一种，再点击“核对待生成清单”。')
+        st.info('请在上方“质控方法”中至少选择一种。')
     if st.button('核对待生成清单', type='primary', disabled=not methods or period is None, key='monthly_preview'):
         try:
             previous = st.session_state.get('monthly_prepared') or {}
@@ -149,7 +149,7 @@ def render_batch_monthly_reports_page():
             report_month=period.report_month, period_start=period.start_date, period_end=period.end_date,
             lab_instrument_id=instrument, template_id=template, methods=sorted(methods)).items())
         if not valid_scope:
-            st.info('日期、仪器、项目或质控方法已变更，请重新点“核对待生成清单”。')
+            st.info('日期、仪器、项目或质控方法已变更，请重新点击“核对待生成清单”。')
         else:
             st.subheader('待生成清单')
             if preview['items']:
@@ -161,12 +161,12 @@ def render_batch_monthly_reports_page():
                 frozen_handling = {int(key): int(value) for key, value in preview['scope'].get('handling_versions', {}).items()}
                 handling_changed = chosen_handling != frozen_handling
                 if handling_changed:
-                    st.info('您选了另一版处理记录，请重新点“核对待生成清单”。')
+                    st.info('处理记录版本已切换，请重新点击“核对待生成清单”。')
                 chosen = st.multiselect('选择本次生成的报告', list(candidates), default=list(candidates),
                     format_func=lambda key: candidates[key]['project_name'] + '｜' + candidates[key]['lot_no'],
                     key='monthly_selection_' + st.session_state['monthly_request_id'])
                 if not chosen:
-                    st.info('请在“选择本次生成的报告”中至少选择一份，再点击“生成并保存所选报告”。')
+                    st.info('请在“选择本次生成的报告”中至少选择一份。')
                 if st.button('生成并保存所选报告', type='primary', disabled=not chosen or handling_changed, key='monthly_generate'):
                     try:
                         job_id = create_monthly_report_job(preview, chosen, st.session_state['monthly_request_id'])

@@ -28,13 +28,17 @@ def legacy_replacement_page():
     render_material_replacement(list_lot_configs())
 
 
-def register_in_place(app, key, lot='NEW-REGISTERED', name='新水平', code='NEW'):
-    app.button(key=key + '_register').click().run()
+def register_in_place(app, key, lot='NEW-REGISTERED', name='新水平', code='NEW', button_index=0):
+    buttons = [button for button in app.button if button.key == key + '_register']
+    if not buttons:
+        buttons = [button for button in app.button if (button.key or '').endswith('_new_lot')]
+    buttons[button_index].click().run()
     assert_clean(app)
     state = app.session_state[key + '_registration']
     editor = 'material_edit_' + state['nonce']
-    app.text_input(key=editor + '_new_name').set_value(name)
-    app.text_input(key=editor + '_new_code').set_value(code)
+    if any(widget.key == editor + '_new_name' for widget in app.text_input):
+        app.text_input(key=editor + '_new_name').set_value(name)
+        app.text_input(key=editor + '_new_code').set_value(code)
     app.text_input(key=editor + '_lot').set_value(lot)
     app.date_input(key=editor + '_expiry').set_value(date(2029, 12, 31))
     app.button(key=editor + '_save').click().run()
@@ -49,15 +53,14 @@ def test_batch_creation_registration_keeps_names_and_existing_choices():
         app = AppTest.from_function(workspace_page, default_timeout=20).run()
         app.selectbox(key='batch_project_filter').set_value(tid).run()
         app.button(key='batch_create').click().run()
-        controls = [widget for widget in app.selectbox if widget.key.startswith('create_material_')]
+        controls = [widget for widget in app.selectbox if (widget.key or '').startswith('create_material_') and widget.key.endswith('_level')]
         controls[0].set_value(data['source_levels'][0]).run()
-        selected_key = controls[0].key
-        app.text_input(key='v11_create_config_name').set_value('登记期间保留的批次名称')
+        selected_key, target_key = controls[0].key, controls[1].key
+        assert not any(widget.key == 'v11_create_config_name' for widget in app.text_input)
         configs = list_lot_configs(include_disabled=True).to_json(orient='records')
-        new_id = register_in_place(app, f'material_registration_create_{tid}')
-        assert app.text_input(key='v11_create_config_name').value == '登记期间保留的批次名称'
+        new_id = register_in_place(app, f'material_registration_create_{tid}', button_index=1)
         assert app.selectbox(key=selected_key).value == data['source_levels'][0]
-        assert any('NEW-REGISTERED' in label for label in app.selectbox(key=selected_key).options)
+        assert app.selectbox(key=target_key).value == new_id
         assert list_lot_configs(include_disabled=True).to_json(orient='records') == configs
 
 
@@ -68,22 +71,23 @@ def test_batch_registration_cancel_keeps_the_parent_draft():
         app = AppTest.from_function(workspace_page, default_timeout=20).run()
         app.selectbox(key='batch_project_filter').set_value(tid).run()
         app.button(key='batch_create').click().run()
-        app.text_input(key='v11_create_config_name').set_value('取消登记后保留名称')
+        control = next(widget for widget in app.selectbox if (widget.key or '').startswith('create_material_') and widget.key.endswith('_level'))
+        selected_key = control.key
+        control.set_value(data['source_levels'][0]).run()
         key = f'material_registration_create_{tid}'
         before = available_materials(data['qc_material_id']).to_json(orient='records')
-        app.button(key=key + '_register').click().run()
+        button = next(widget for widget in app.button if (widget.key or '').endswith('_new_lot'))
+        button.click().run()
         editor = 'material_edit_' + app.session_state[key + '_registration']['nonce']
-        assert app.button(key='v11_create_config_button').disabled
-        assert app.button(key='batch_create_cancel').disabled
+        assert not any(widget.key in ('v11_create_config_button', 'batch_create_cancel') for widget in app.button)
         app.button(key=editor + '_cancel').click().run()
         assert_clean(app)
-        assert app.text_input(key='v11_create_config_name').value == '取消登记后保留名称'
-        assert not app.button(key='v11_create_config_button').disabled
+        assert app.selectbox(key=selected_key).value == data['source_levels'][0]
         assert available_materials(data['qc_material_id']).to_json(orient='records') == before
         app.button(key='batch_create_cancel').click().run()
         app.button(key='batch_create_continue').click().run()
         assert_clean(app)
-        assert app.text_input(key='v11_create_config_name').value == '取消登记后保留名称'
+        assert app.selectbox(key=selected_key).value == data['source_levels'][0]
 
 
 def test_legacy_replacement_locks_source_while_registration_is_pending():
@@ -92,20 +96,17 @@ def test_legacy_replacement_locks_source_while_registration_is_pending():
         _, source = _build_active_source_config(data)
         app = AppTest.from_function(legacy_replacement_page, default_timeout=20).run()
         app.selectbox(key='material_copy_source').set_value(source).run()
-        app.text_input(key=f'material_copy_name_{source}').set_value('旧入口未保存批次')
         key = f'material_registration_copy_{source}'
-        app.button(key=key + '_register').click().run()
+        next(widget for widget in app.button if (widget.key or '').endswith('_new_lot')).click().run()
         assert_clean(app)
-        assert app.selectbox(key='material_copy_source').disabled
-        assert app.button(key='material_copy_save').disabled
+        assert not any(widget.key == 'material_copy_source' for widget in app.selectbox)
+        assert not any(widget.key == 'material_copy_save' for widget in app.button)
         state = app.session_state[key + '_registration']
         assert state['product_id'] == data['qc_material_id']
         editor = 'material_edit_' + state['nonce']
         app.button(key=editor + '_cancel').click().run()
         assert_clean(app)
-        assert not app.selectbox(key='material_copy_source').disabled
         assert app.selectbox(key='material_copy_source').value == source
-        assert app.text_input(key=f'material_copy_name_{source}').value == '旧入口未保存批次'
 
 
 def test_replacement_registration_refreshes_candidates_and_preserves_draft():
@@ -116,16 +117,13 @@ def test_replacement_registration_refreshes_candidates_and_preserves_draft():
         state = app.session_state['qc_replacement_dialog']
         item_id = int(state['context']['items'][0]['id'])
         app.multiselect(key=field(app, 'items')).set_value([item_id]).run()
-        original = app.selectbox(key=field(app, f'item_{item_id}_0')).value
-        app.text_input(key=field(app, 'name')).set_value('登记后继续换批')
+        original = app.selectbox(key=field(app, f'item_{item_id}_0_level')).value
         previous_fingerprint = state['fingerprint']
         new_id = register_in_place(app, 'qc_replace_register_' + state['token'])
         state = app.session_state['qc_replacement_dialog']
         assert state['fingerprint'] != previous_fingerprint
         assert state['draft']['item_ids'] == [item_id]
-        assert app.selectbox(key=field(app, f'item_{item_id}_0')).value == original
-        assert app.text_input(key=field(app, 'name')).value == '登记后继续换批'
-        app.selectbox(key=field(app, f'item_{item_id}_0')).set_value(new_id).run()
+        assert app.selectbox(key=field(app, f'item_{item_id}_0_level')).value == new_id
         app.button(key='qc_replace_save').click().run()
         assert_clean(app)
         new_config = app.session_state['v11_pending_copied_config_id']
@@ -171,8 +169,8 @@ def test_replacement_existing_target_and_mode_are_locked_during_registration():
         registration_key = 'qc_replace_register_' + token
         app.button(key=registration_key + '_register').click().run()
         assert_clean(app)
-        assert app.button(key='qc_replace_open_existing').disabled
-        assert app.radio(key=field(app, 'mode')).disabled
+        assert not any(widget.key == 'qc_replace_open_existing' for widget in app.button)
+        assert not any(widget.key == field(app, 'mode') for widget in app.radio)
         editor = 'material_edit_' + app.session_state[registration_key + '_registration']['nonce']
         app.button(key=editor + '_cancel').click().run()
         assert_clean(app)
@@ -194,10 +192,9 @@ def test_lifecycle_verification_registration_preserves_evidence_and_can_save():
         new_level = register_in_place(app, 'qc_lifecycle_register_' + token)
         context = app.session_state['qc_lifecycle_dialog']['context']
         new_lot = next(row['qc_material_lot_id'] for row in context['levels'] if row['id'] == new_level)
-        assert app.selectbox(key=p + 'lot').value is None
+        assert app.selectbox(key=p + 'lot').value == new_lot
         assert app.text_area(key=p + 'evidence').value == '登记新批号之前填写的依据'
         assert app.text_input(key=p + 'person').value == '原确认人员'
-        app.selectbox(key=p + 'lot').set_value(new_lot).run()
         app.button(key='qcl_save').click().run()
         assert_clean(app)
         assert not app.error, [error.value for error in app.error]
@@ -220,10 +217,9 @@ def test_lifecycle_prepare_registration_keeps_reason_and_accepts_new_lot():
         new_level = register_in_place(app, 'qc_lifecycle_register_' + token)
         context = app.session_state['qc_lifecycle_dialog']['context']
         new_lot = next(row['qc_material_lot_id'] for row in context['levels'] if row['id'] == new_level)
-        assert app.selectbox(key=p + 'target').value is None
+        assert app.selectbox(key=p + 'target').value == new_lot
         assert app.text_area(key=p + 'reason').value == '登记前填写的换批依据'
         assert app.text_input(key=p + 'person').value == '换批确认人员'
-        app.selectbox(key=p + 'target').set_value(new_lot).run()
         options = context['items']
         app.multiselect(key=p + 'items').set_value([row['source_template_item_id'] for row in options]).run()
         app.button(key='qcl_save').click().run()
@@ -248,7 +244,7 @@ def test_lifecycle_existing_target_is_locked_during_registration():
         registration_key = 'qc_lifecycle_register_' + token
         app.button(key=registration_key + '_register').click().run()
         assert_clean(app)
-        assert app.button(key='qcl_open_existing').disabled
+        assert not any(button.key in ('qcl_open_existing', 'qcl_cancel', 'qcl_save') for button in app.button)
         editor = 'material_edit_' + app.session_state[registration_key + '_registration']['nonce']
         app.button(key=editor + '_cancel').click().run()
         assert_clean(app)

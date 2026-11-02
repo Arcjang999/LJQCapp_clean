@@ -1,5 +1,5 @@
 """Disposable-db regressions for QC lot dialog operations and actual material identity."""
-from datetime import datetime
+from datetime import date, datetime
 import json
 from pathlib import Path
 import sys
@@ -97,6 +97,16 @@ def navigable_page():
 def integrated_page():
     from pages.lot_lifecycle_section import render_lot_management
     render_lot_management()
+
+
+def direct_prepare_page():
+    import streamlit as st
+    from ui.qc_lifecycle_workspace import open_qc_lifecycle_dialog, render_pending_qc_lifecycle_dialog
+    from ui.qc_replacement_workspace import render_pending_qc_replacement_dialog
+    if st.button('直接准备换批', key='qcl_direct_prepare'):
+        open_qc_lifecycle_dialog('prepare', st.session_state['qc_lifecycle_config_id'])
+    render_pending_qc_lifecycle_dialog()
+    render_pending_qc_replacement_dialog()
 
 
 def start(f, method='zscore'):
@@ -286,6 +296,122 @@ def test_modern_prepare_uses_shared_material_replacement_dialog():
         assert 'qc_replacement_dialog' in at.session_state and 'qc_lifecycle_dialog' not in at.session_state
         assert at.session_state['qc_replacement_dialog']['config_id'] == f['config_id']
         assert dump() == before
+        direct = AppTest.from_function(direct_prepare_page, default_timeout=15)
+        direct.session_state['qc_lifecycle_config_id'] = f['config_id']
+        direct.run()
+        direct.button(key='qcl_direct_prepare').click().run()
+        clean(direct)
+        assert 'qc_replacement_dialog' in direct.session_state and 'qc_lifecycle_dialog' not in direct.session_state
+        assert direct.session_state['qc_replacement_dialog']['config_id'] == f['config_id']
+        assert dump() == before
+
+
+def multi_product_fixture():
+    from tests.multi_product_control_workflow_smoke_test import multi_values, save
+    values = multi_values()
+    result = save(values)
+    workbench_systems()
+    with get_connection() as c:
+        bindings = {row['qc_method']: dict(row) for row in c.execute(
+            'SELECT * FROM qc_workbench_bindings WHERE lot_config_id=?', (result['lot_config_id'],))}
+    return dict(values=values, config_id=result['lot_config_id'], bindings=bindings)
+
+
+def test_multi_product_child_registers_second_slot_and_keeps_parent_until_verified():
+    with TemporaryDatabaseContext():
+        f = multi_product_fixture()
+        at = start(f)
+        at.button(key='qc_lifecycle_combination').click().run()
+        p = prefix(at)
+        registration = 'qc_lifecycle_register_' + at.session_state['qc_lifecycle_dialog']['token']
+        at.selectbox(key=registration + '_slot').set_value(1).run()
+        at.text_input(key=p + 'person').set_value('第二水平换批确认人')
+        at.text_area(key=p + 'reason').set_value('只更换第二货号的原厂批号')
+        before = dump()
+        at.button(key=registration + '_register').click().run()
+        child = at.session_state[registration + '_registration']
+        assert child['product_id'] == f['values']['level_product_ids'][1] and child['slot'] == 1
+        editor = 'material_edit_' + child['nonce']
+        assert not any(button.key in ('qcl_save', 'qcl_cancel') for button in at.button)
+        at.button(key=editor + '_cancel').click().run()
+        clean(at)
+        assert dump() == before
+        assert at.selectbox(key=p + 'level_0').value == f['values']['level_ids'][0]
+        assert at.selectbox(key=p + 'level_1').value == f['values']['level_ids'][1]
+        assert at.text_area(key=p + 'reason').value == '只更换第二货号的原厂批号'
+        at.button(key=registration + '_register').click().run()
+        child = at.session_state[registration + '_registration']
+        editor = 'material_edit_' + child['nonce']
+        at.text_input(key=editor + '_lot').set_value('SECOND-SKU-NEW-LOT')
+        at.date_input(key=editor + '_expiry').set_value(date(2029, 12, 31))
+        at.button(key=editor + '_save').click().run()
+        clean(at)
+        with get_connection() as c:
+            row = c.execute('''SELECT l.id,q.id AS lot_id,q.qc_material_id FROM md_qc_levels l
+                JOIN md_qc_material_lots q ON q.id=l.qc_material_lot_id WHERE q.lot_no=?''',
+                ('SECOND-SKU-NEW-LOT',)).fetchone()
+        assert row['qc_material_id'] == f['values']['level_product_ids'][1]
+        assert at.selectbox(key=p + 'level_0').value == f['values']['level_ids'][0]
+        assert at.selectbox(key=p + 'level_1').value == row['id']
+        assert at.text_input(key=p + 'person').value == '第二水平换批确认人'
+        assert at.text_area(key=p + 'reason').value == '只更换第二货号的原厂批号'
+        assert any(box.key == p + 'verification_1' for box in at.selectbox)
+        at.button(key='qcl_cancel').click().run()
+        at.button(key='qcl_discard').click().run()
+        context = get_qc_binding_context(f['bindings']['zscore']['id'])
+        verification = verify(context, row['lot_id'])
+        at.button(key='qc_lifecycle_combination').click().run()
+        p = prefix(at)
+        at.selectbox(key=p + 'level_1').set_value(row['id']).run()
+        at.selectbox(key=p + 'verification_1').set_value(verification).run()
+        at.text_input(key=p + 'person').set_value('第二水平换批确认人')
+        at.text_area(key=p + 'reason').set_value('第二货号新批验证通过')
+        at.button(key='qcl_save').click().run()
+        clean(at)
+        assert not at.error, [error.value for error in at.error]
+        assert at.session_state['v11_pending_existing_config_id'] != f['config_id']
+
+
+def test_verify_filters_other_skus_and_registration_cannot_accept_changed_source():
+    from services.master_data_service import create_manufacturer, create_qc_material, create_qc_lot
+    with TemporaryDatabaseContext():
+        f = multi_product_fixture()
+        maker = create_manufacturer(display_name='无关货号厂家', categories=['qc_material'])
+        product = create_qc_material(manufacturer_id=maker, generic_name='无关质控品', catalog_no='UNRELATED-SKU')
+        create_qc_lot(qc_material_id=product, lot_no='UNRELATED-LOT', expiry_date='2029-12-31')
+        at = start(f)
+        at.button(key='qc_lifecycle_verify').click().run()
+        p = prefix(at)
+        context = at.session_state['qc_lifecycle_dialog']['context']
+        assert not any('UNRELATED' in label for label in at.selectbox(key=p + 'lot').options)
+        assert any('SKU-002' in label for label in at.selectbox(key=p + 'lot').options)
+        original_lot = next(iter(context['actual_lots']))
+        at.selectbox(key=p + 'lot').set_value(original_lot).run()
+        at.selectbox(key=p + 'conclusion').set_value('pass').run()
+        at.text_area(key=p + 'evidence').set_value('登记前的验证依据')
+        at.text_input(key=p + 'person').set_value('验证确认人')
+        registration = 'qc_lifecycle_register_' + at.session_state['qc_lifecycle_dialog']['token']
+        at.selectbox(key=registration + '_slot').set_value(1).run()
+        at.button(key=registration + '_register').click().run()
+        child = at.session_state[registration + '_registration']
+        assert child['product_id'] == f['values']['level_product_ids'][1]
+        with get_connection() as c:
+            c.execute('UPDATE qc_lot_config_item_levels SET notes=? WHERE lot_config_item_id=?',
+                      ('其他窗口已修改原水平', context['binding']['lot_config_item_id']))
+        editor = 'material_edit_' + child['nonce']
+        at.text_input(key=editor + '_lot').set_value('REGISTERED-AFTER-SOURCE-EDIT')
+        at.date_input(key=editor + '_expiry').set_value(date(2029, 12, 31))
+        at.button(key=editor + '_save').click().run()
+        clean(at)
+        state = at.session_state['qc_lifecycle_dialog']
+        assert state['fingerprint'] == context['fingerprint'] and state['registration_refresh_blocked']
+        assert at.selectbox(key=p + 'lot').value == original_lot
+        assert at.text_area(key=p + 'evidence').value == '登记前的验证依据'
+        before = dump()
+        at.button(key='qcl_save').click().run()
+        clean(at)
+        assert any('已修改' in error.value for error in at.error)
+        assert dump() == before
 
 
 def test_filters_selection_return_and_hidden_selection_clear():
@@ -338,7 +464,9 @@ if __name__ == '__main__':
         test_verification_changed_and_batch_edits_reject_old_windows, test_state_dialog_all_actual_lots_cancel_and_effective_time,
         test_partial_replacement_dialog_uses_high_material_at_product_order_one, test_prepare_and_append_pending_items_without_duplicate_config,
         test_modern_prepare_uses_shared_material_replacement_dialog, test_filters_selection_return_and_hidden_selection_clear,
-        test_integrated_page_sync_does_not_invalidate_dialog]
+        test_integrated_page_sync_does_not_invalidate_dialog,
+        test_multi_product_child_registers_second_slot_and_keeps_parent_until_verified,
+        test_verify_filters_other_skus_and_registration_cannot_accept_changed_source]
     for test in tests:
         test()
         print('PASS ' + test.__name__)

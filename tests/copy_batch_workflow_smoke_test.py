@@ -10,6 +10,7 @@ sys.path.insert(0, str(ROOT))
 from database import get_connection, add_result, get_results
 from services.project_config_service import copy_lot_config, get_lot_config, list_lot_configs, list_lot_config_items, list_lot_item_levels
 from services.workbench_config_service import sync_lj_workbench_bindings
+from services.material_workflow_service import config_material_summary
 from services.lot_lifecycle_service import create_target_profile
 from tests.project_management_v11_smoke_test import TemporaryDatabaseContext, _seed_v11_configuration_dependencies, _build_active_source_config
 from tests.lot_lifecycle_smoke_test import rejected
@@ -64,7 +65,7 @@ def test_ui_guides_to_new_draft_and_preserves_old_results():
         assert new['status'] == 'draft' and new['qc_material_lot_id'] == data['target_lot_id']
         assert app.session_state['batch_project_filter'] == tid
         batch_table = next(table.value for table in app.dataframe if 'batch_configs_' in table.proto.id)
-        assert new['config_name'] in batch_table['批次名称'].tolist()
+        assert config_material_summary(new_id) in batch_table['质控品与原厂批号'].tolist()
         assert any('V11-LOT-002' in str(table.value.to_dict()) for table in app.dataframe)
         assert any(all(text in item.value for text in
                        ('已建立新批次', new['config_name'], '编辑水平设置', '确认批次设置'))

@@ -1,5 +1,6 @@
 """Setup blockers explain their matching action without weakening validation."""
 from pathlib import Path
+from copy import deepcopy
 import sys
 import unittest
 
@@ -52,14 +53,17 @@ class SetupActionFeedbackTests(unittest.TestCase):
         with TemporaryDatabaseContext():
             app = open_details(metadata_values())
             prefix = product_prefix(app)
-            ctx = app.session_state['project_workspace_dialog']
-            ctx['draft'].pop('product_choice_review', None)
+            app.button(key=prefix+'_edit').click().run()
             app.text_input(key=prefix+'_person').set_value('')
             app.text_area(key=prefix+'_evidence').set_value('')
             before = snapshot()
             app.run()
             assert_clean(app)
-            self.assertIn('请填写上方的“质控品确认人”、“为什么选择此质控品”', feedback(app))
+            self.assertIn('请填写质控品确认人。', feedback(app))
+            self.assertIn('请填写此产品的适用依据。', feedback(app))
+            self.assertEqual('质控品确认人', app.text_input(key=prefix+'_person').label)
+            self.assertEqual('适用依据', app.text_area(key=prefix+'_evidence').label)
+            self.assertTrue(app.button(key=prefix+'_confirm').disabled)
             self.assertTrue(app.button(key='quick_details_next').disabled)
             self.assertEqual(before, snapshot())
 
@@ -90,19 +94,22 @@ class SetupActionFeedbackTests(unittest.TestCase):
             prefix = product_prefix(app)
             self.assertFalse(app.button(key='quick_details_next').disabled)
             before = snapshot()
+            original_review = deepcopy(app.session_state['project_workspace_dialog']['draft']['product_choice_review'])
+            app.button(key=prefix+'_edit').click().run()
             app.text_area(key=prefix+'_evidence').set_value('本次重新核对后填写的新依据').run()
             assert_clean(app)
             self.assertTrue(app.button(key='quick_details_next').disabled)
-            self.assertIn('质控品确认人或使用说明已修改', feedback(app))
             self.assertEqual('本次重新核对后填写的新依据', app.text_area(key=prefix+'_evidence').value)
             self.assertEqual('人工选品核对人', app.text_input(key=prefix+'_person').value)
-            self.assertNotIn('product_choice_review', app.session_state['project_workspace_dialog']['draft'])
+            context = app.session_state['project_workspace_dialog']
+            self.assertTrue(context[prefix+'_editing'])
+            self.assertEqual(original_review, context['draft']['product_choice_review'])
             app.button(key=prefix+'_confirm').click().run()
             assert_clean(app)
             self.assertFalse(app.button(key='quick_details_next').disabled)
             review = app.session_state['project_workspace_dialog']['draft']['product_choice_review']
             self.assertEqual('本次重新核对后填写的新依据', review['evidence'])
-            self.assertNotIn('质控品确认人或使用说明已修改', feedback(app))
+            self.assertNotIn(prefix+'_editing', app.session_state['project_workspace_dialog'])
             self.assertEqual(before, snapshot())
 
     def test_reference_registration_explains_blocked_parent_actions(self):
@@ -115,11 +122,11 @@ class SetupActionFeedbackTests(unittest.TestCase):
             assert_clean(app)
             self.assertTrue(app.button(key='quick_details_next').disabled)
             self.assertTrue(app.button(key='project_dialog_cancel').disabled)
-            self.assertIn('正在登记方法学。请先在本区域点击“保存”或“取消”', feedback(app))
+            self.assertIn('正在登记方法学，请先保存或取消。', feedback(app))
             app.button(key='md_dialog_cancel').click().run()
             assert_clean(app)
             self.assertFalse(app.button(key='quick_details_next').disabled)
-            self.assertNotIn('正在登记方法学。', feedback(app))
+            self.assertNotIn('正在登记方法学', feedback(app))
             self.assertEqual(before, snapshot())
 
     def test_batch_creation_distinguishes_unconfirmed_and_disabled_projects(self):
@@ -196,12 +203,12 @@ render_material_replacement(list_lot_configs(include_disabled=True))
             app.multiselect(key=f'material_copy_items_{config_id}').set_value([]).run()
             assert_clean(app)
             self.assertTrue(app.button(key='material_copy_save').disabled)
-            self.assertIn('“保存新批次”暂不可用。请在上方“需要换批的检验项目”中至少选择一项', feedback(app))
+            self.assertIn('请在“需要换批的检验项目”中至少选择一项', feedback(app))
             item_id = int(list_lot_config_items(config_id).iloc[0].id)
             app.multiselect(key=f'material_copy_items_{config_id}').set_value([item_id]).run()
             assert_clean(app)
             self.assertFalse(app.button(key='material_copy_save').disabled)
-            self.assertNotIn('“保存新批次”暂不可用', feedback(app))
+            self.assertNotIn('请在“需要换批的检验项目”中至少选择一项', feedback(app))
             self.assertEqual(before, snapshot())
 
 

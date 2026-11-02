@@ -48,7 +48,7 @@ def get_batch_item_context(lot_config_item_id: int) -> dict:
         else:
             reason = ''
         if config.get('material_selection_mode'):
-            available = _records(list_available_materials(config['qc_material_id']))
+            available = _records(list_available_materials())
         else:
             available = _records(list_qc_levels(qc_material_lot_id=config['qc_material_lot_id']))
         return dict(config=config, item=item, levels=levels, available_levels=available,

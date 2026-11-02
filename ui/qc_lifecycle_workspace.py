@@ -11,7 +11,7 @@ import pandas as pd
 import streamlit as st
 from services.search_service import fuzzy_match, SEARCH_HELP
 
-from services.material_workflow_service import concentration_label, material_label
+from services.material_workflow_service import concentration_label, material_label, config_material_summary
 from services.project_config_service import QC_METHOD_LABELS
 from services.qc_lifecycle_edit_service import (
     get_qc_binding_context, get_qc_config_context, list_qc_lifecycle_configs,
@@ -42,6 +42,10 @@ def open_qc_lifecycle_dialog(kind, context_id):
     if kind not in _TITLES:
         raise ValueError('请选择要进行的操作。')
     context = get_qc_config_context(context_id) if kind == 'prepare' else get_qc_binding_context(context_id)
+    if kind == 'prepare' and context['config']['material_selection_mode']:
+        from ui.qc_replacement_workspace import open_qc_replacement_dialog
+        open_qc_replacement_dialog(context_id)
+        return
     now = datetime.now().replace(microsecond=0)
     draft = {'when': now, 'person': '', 'reason': ''}
     if kind == 'prepare':
@@ -71,7 +75,8 @@ def _open_review(config_id):
 def _close(review_id=None):
     state = st.session_state.pop(MODAL_KEY, None)
     if state:
-        st.session_state.setdefault('qcl_cleanup', []).append(_prefix(state))
+        st.session_state.setdefault('qcl_cleanup', []).extend([
+            _prefix(state), 'qc_lifecycle_register_' + state['token']])
     if review_id is not None:
         _open_review(review_id)
     st.rerun(scope='app')
@@ -97,12 +102,65 @@ def _verification_choice(state, field, label, rows):
                   format_func=lambda value: '请选择验证记录' if value is None else choices[value])
 
 
+def _source_levels(context):
+    """Resolve a slot's product from its actual level, never the batch header."""
+    levels = {row['id']: row for row in context['levels']}
+    lots = {row['id']: row for row in context['lots']}
+    return [(position, levels[level['qc_level_id']],
+             lots[levels[level['qc_level_id']]['qc_material_lot_id']]['qc_material_id'])
+            for position, level in enumerate(context['source']['levels'])]
+
+
+def _eligible_lots(context, *, prepare=False):
+    from ui.control_selection import control_products
+    from services.qc_product_display_service import product_choice_label
+    products = ({context['config']['qc_material_id']} if prepare else
+                {product for _, _, product in _source_levels(context)})
+    labels = {product: product_choice_label(row) for product, row in control_products().items()
+              if product in products}
+    return {row['id']: {**row, 'product_label': labels.get(row['qc_material_id'], '')} for row in context['lots']
+            if not row['is_disabled'] and row['qc_material_id'] in products}
+
+
+def _lot_label(row):
+    return ((row['product_label'] + '｜') if row.get('product_label') else '') + \
+        f"{row['lot_no']}｜效期 {row['expiry_date'] or '未填写'}"
+
+
+def _register_material(state, registration_key):
+    from ui.material_registration import open_material_registration
+    context = state['context']
+    slot = None
+    level = None
+    if state['kind'] == 'prepare':
+        product = context['config']['qc_material_id']
+    else:
+        levels = _source_levels(context)
+        if state['kind'] == 'combination' or len({product for _, _, product in levels}) > 1:
+            choices = {position: (level, product) for position, level, product in levels}
+            slot = st.selectbox('登记哪个水平', list(choices), key=registration_key + '_slot',
+                format_func=lambda position: f'水平 {position + 1}｜{concentration_label(choices[position][0])}')
+            level, product = choices[slot]
+        else:
+            _, level, product = levels[0]
+    if st.button('登记质控品批号', key=registration_key + '_register'):
+        open_material_registration(product, key=registration_key, slot=slot,
+                                   preserve_prefixes=(_prefix(state), registration_key + '_slot'), rerun=False)
+        if level:
+            editor = st.session_state[registration_key + '_registration']
+            if level.get('specification_id'):
+                editor['initial_specification_id'] = level['specification_id']
+            else:
+                editor['material_defaults'] = dict(level_name=level['level_name'], level_code=level['level_code'] or '')
+        st.rerun(scope='app')
+
+
 def _prepare_fields(state):
     context, draft = state['context'], state['draft']
-    lots = {row['id']: row for row in context['lots'] if not row['is_disabled']
-            and row['id'] != context['config']['qc_material_lot_id']}
+    lots = {identifier: row for identifier, row in _eligible_lots(context, prepare=True).items()
+            if identifier != context['config']['qc_material_lot_id']}
     target = _field(state, 'target', '新质控品批号 *', 'selectbox', options=[None] + list(lots),
-        format_func=lambda value: '请选择新批号' if value is None else f"{lots[value]['lot_no']}｜效期 {lots[value]['expiry_date'] or '未填写'}")
+        format_func=lambda value: '请选择新批号' if value is None else _lot_label(lots[value]))
     existing, eligible = parallel_target(context, target) if target is not None else (None, [])
     if existing:
         st.info('此批号已有待确认批次，可打开核对；尚未加入的检验项目可在下方选择。' if eligible
@@ -118,15 +176,15 @@ def _prepare_fields(state):
     _field(state, 'items', '本次更换质控批号的检验项目 *', 'multiselect', options=list(names), format_func=names.get, placeholder='请选择检验项目')
     if not lots:
         st.info('还没有其他可选批号。点击下方“登记质控品批号”，登记新批号和浓度水平，保存后在这里选择。')
-    st.caption('准备后进入新批次核对。质量目标及各水平设置确认后再录入，旧批检测结果保留。')
+    st.caption('新批次确认质量目标和各水平设置后才能录入；旧批结果保留。')
     return {'target_qc_lot_id': target, 'template_item_ids': draft['items']}
 
 
 def _verify_fields(state):
     context = state['context']
-    lots = {row['id']: row for row in context['lots'] if not row['is_disabled']}
+    lots = _eligible_lots(context)
     lot = _field(state, 'lot', '待验证质控品批号 *', 'selectbox', options=[None] + list(lots),
-        format_func=lambda value: '请选择批号' if value is None else f"{lots[value]['lot_no']}｜效期 {lots[value]['expiry_date'] or '未填写'}")
+        format_func=lambda value: '请选择批号' if value is None else _lot_label(lots[value]))
     conclusion = _field(state, 'conclusion', '验证结论 *', 'selectbox', options=[None, 'pass', 'fail'],
         format_func=lambda value: {None: '请选择验证结论', 'pass': '通过', 'fail': '未通过'}[value])
     st.caption('填写新旧批号比对结果，以及均值和标准差仍适用的依据。')
@@ -144,7 +202,7 @@ def _state_fields(state):
             selected[lot_id] = _verification_choice(state, f'verification_{lot_id}', f"关联验证：{lot['lot_no']} *",
                 [v for v in context['verifications'] if v['qc_lot_id'] == lot_id])
     else:
-        st.caption('选择新旧批同时使用或停止使用时，填写生效时间和原因。停止使用的批次仍可查询原检测结果。')
+        st.caption('填写使用状态的生效时间和原因；停用后仍可查询原检测结果。')
     return {'state': target, 'verification_ids': selected}
 
 
@@ -169,7 +227,7 @@ def _combination_fields(state):
                 draft[f'verification_{i}'] = None
                 st.session_state[_prefix(state) + f'verification_{i}'] = None
             verification_ids[lid] = _verification_choice(state, f'verification_{i}', f'第 {i + 1} 个水平换批验证 *', records)
-    st.caption('保存新组合后，核对所有水平的均值、标准差和质量目标，再开始采集新结果。未换批水平的原参数供核对。')
+    st.caption('保存后确认各水平的均值、SD和质量目标，再录入新结果；未换批水平的原参数供核对。')
     return {'level_ids': chosen, 'verification_ids': verification_ids}
 
 
@@ -177,6 +235,12 @@ def _combination_fields(state):
 def _render_dialog():
     state = st.session_state.get(MODAL_KEY)
     if not state:
+        return
+    from ui.control_selection import restore_registration_inputs
+    from ui.material_registration import render_material_registration_view
+    registration_key = 'qc_lifecycle_register_' + state['token']
+    registered = restore_registration_inputs(registration_key)
+    if render_material_registration_view(registration_key):
         return
     st.subheader(_TITLES[state['kind']])
     if state['discard']:
@@ -189,7 +253,6 @@ def _render_dialog():
             _close(state['review_after_close'])
         return
     context = state['context']
-    registration_key = 'qc_lifecycle_register_' + state['token']
     if st.session_state.pop(registration_key + '_registration_saved', None) is not None:
         from services.material_registration_refresh_service import can_refresh_registered_materials
         current = (get_qc_config_context(state['context_id']) if state['kind'] == 'prepare'
@@ -197,12 +260,20 @@ def _render_dialog():
         if can_refresh_registered_materials(context, current):
             state['context'] = context = current
             state['fingerprint'] = current['fingerprint']
+            if registered:
+                level = next((row for row in context['levels'] if row['id'] == registered['level_id']), None)
+                if level:
+                    field = ('level_' + str(registered['slot']) if state['kind'] == 'combination'
+                             else 'lot' if state['kind'] == 'verify' else 'target')
+                    value = level['id'] if state['kind'] == 'combination' else level['qc_material_lot_id']
+                    state['draft'][field] = value
+                    st.session_state[_prefix(state) + field] = value
         else:
             state['registration_refresh_blocked'] = True
     if state.get('registration_refresh_blocked'):
         st.warning('批次资料或验证记录已在别处修改。刚登记的批号已保留，请关闭本窗口后重新打开，核对最新内容。')
     if state['kind'] == 'prepare':
-        st.caption('来源批次：' + context['config']['config_name'])
+        st.caption('来源质控品：' + config_material_summary(context['config']['id']))
     else:
         st.caption(context['source']['test_item_name'] + '｜' + context['source']['instrument_name'])
         st.caption('质控品批号：' + '；'.join(f"{lot['lot_no']}（{'、'.join(lot['level_names'])}）" for lot in context['actual_lots'].values()))
@@ -215,15 +286,13 @@ def _render_dialog():
     else:
         reason = _field(state, 'reason', '换批原因或状态调整依据 *', 'text_area')
         values.update(effective_at=when, operator=person, reason=reason)
-    registering = False
     if state['kind'] in ('prepare', 'verify', 'combination'):
-        from ui.material_registration import render_material_registration_shortcut
-        registering = render_material_registration_shortcut(context['config']['qc_material_id'], key=registration_key)
+        _register_material(state, registration_key)
     left, right = st.columns(2)
-    if left.button('取消', key='qcl_cancel', width='stretch', disabled=registering):
+    if left.button('取消', key='qcl_cancel', width='stretch'):
         _cancel(state)
     label = {'prepare': '准备新批次并核对', 'verify': '保存验证记录', 'state': '确认使用状态', 'combination': '建立新组合并核对'}[state['kind']]
-    if right.button(label, key='qcl_save', type='primary', width='stretch', disabled=registering):
+    if right.button(label, key='qcl_save', type='primary', width='stretch'):
         try:
             if state['kind'] == 'prepare' and values['target_qc_lot_id'] is None:
                 raise ValueError('请选择新质控品批号。')
@@ -274,7 +343,7 @@ def _render_binding_detail(context):
     st.caption('均值和标准差确认状态：' + (f"已生效 V{profile['version_no']}（{profile['effective_at']}）" if profile else '按本批检测结果建立，进度在质控工作台查看'))
     plan = context['state_plan']
     if plan is None:
-        st.caption('当前沿用批次建立时的使用状态。换批时，先点“登记批号验证”，再点“调整使用状态”。')
+        st.caption('尚无使用状态调整记录。换批先“登记批号验证”，再“调整使用状态”。')
     elif plan['state'] != context['state']:
         st.caption(f"另有待生效安排：{QC_USAGE_LABELS[plan['state']]}，生效时间 {plan['effective_at']}。")
     lot_rows = [{'浓度水平': '、'.join(lot['level_names']), '批号': lot['lot_no'], '效期': lot['expiry_date'],
@@ -286,7 +355,7 @@ def _render_binding_detail(context):
         if column.button(label, key='qc_lifecycle_' + kind, disabled=disabled, width='stretch'):
             open_qc_lifecycle_dialog(kind, binding['id'])
     if binding['qc_method'] != 'zscore':
-        st.caption('“部分水平换批”用于多水平法。当前为单水平检测，需要换批时请使用“更换质控品批次”。')
+        st.caption('单水平换批请使用“更换质控品批次”。')
     elif binding['binding_status'] != 'active':
         if context['config']['status'] == 'draft':
             st.info('请点击上方“打开批次设置”，完成各水平设置并点击“确认批次设置”，再进行“部分水平换批”。')
@@ -305,7 +374,7 @@ def render_qc_lifecycle_workspace():
     notice = st.session_state.pop('qc_lifecycle_notice', None)
     if notice:
         st.success(notice)
-    st.caption('先按实验室流程比对新旧批号，再在这里登记验证结果和使用状态。更换质控品产品时，从“新建项目”开始。')
+    st.caption('完成新旧批号比对后，登记验证和使用状态；更换质控品产品需新建项目。')
     rows = list_qc_lifecycle_configs()
     settings = st.session_state.setdefault('qc_lifecycle_filters', {})
     projects = {row['template_id']: row['template_name'] for row in rows}
@@ -315,7 +384,7 @@ def render_qc_lifecycle_workspace():
     if st.session_state['qc_lifecycle_project'] not in projects:
         st.session_state['qc_lifecycle_project'] = None
     left, right = st.columns(2)
-    query = left.text_input('搜索项目、批次或质控品批号', key='qc_lifecycle_search', help=SEARCH_HELP)
+    query = left.text_input('搜索项目、质控品或原厂批号', key='qc_lifecycle_search', help=SEARCH_HELP)
     project = right.selectbox('项目', [None] + list(projects), key='qc_lifecycle_project', placeholder='全部项目',
         format_func=lambda value: '全部项目' if value is None else projects[value])
     settings.update(qc_lifecycle_search=query, qc_lifecycle_project=project)
@@ -323,7 +392,7 @@ def render_qc_lifecycle_workspace():
         rows = [row for row in rows if row['template_id'] == project]
     if query.strip():
         rows = [row for row in rows if fuzzy_match(query, *(row[field] for field in ('template_name', 'config_name', 'material_summary')))]
-    config_id = _table(rows, {'template_name': '项目', 'config_name': '批次', 'material_summary': '质控品浓度水平及批号'}, 'qc_lifecycle_config_id')
+    config_id = _table(rows, {'template_name': '项目', 'material_summary': '质控品与原厂批号'}, 'qc_lifecycle_config_id')
     if config_id is None:
         st.info('请选择批次，查看检验项目及批号使用情况。')
         return

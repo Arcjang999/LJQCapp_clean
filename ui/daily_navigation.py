@@ -35,9 +35,17 @@ def prepare_project_daily_entry(template_id):
     st.session_state['daily_entry_template_id'] = tid
     st.session_state['workspace_project_id'] = tid
     st.session_state['entry_instrument'] = template['lab_instrument_id']
-    st.session_state['entry_product'] = template['qc_material_id']
     draft = st.session_state.get('daily_draft')
-    st.session_state['entry_lot'] = draft['context']['selection']['qc_material_lot_id'] if draft else None
+    from services.daily_context_service import list_daily_choices
+    choices = list_daily_choices(template_id=tid)
+    products = {row['id'] for row in choices['materials']
+                if template['lab_instrument_id'] in row.get('instrument_ids', [])}
+    preferred = draft['context']['selection']['qc_material_id'] if draft else template['qc_material_id']
+    product = preferred if preferred in products else (template['qc_material_id'] if template['qc_material_id'] in products
+                                                      else next((row['id'] for row in choices['materials'] if row['id'] in products), None))
+    st.session_state['entry_product'] = product
+    st.session_state['entry_lot'] = (draft['context']['selection']['qc_material_lot_id']
+        if draft and draft['context']['selection']['qc_material_id'] == product else None)
     if draft:
         selection = draft['context']['selection']
         key = f"entry_combination_{tid}_{selection['lab_instrument_id']}_{selection['qc_material_id']}_{selection['qc_material_lot_id']}"

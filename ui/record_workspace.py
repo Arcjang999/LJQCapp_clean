@@ -26,7 +26,7 @@ def render_record_selection(display_df, record_ids, *, scope):
     # A changed order/content creates a fresh widget with the same selected identity.
     signature = sha256((repr(record_ids) + display_df.to_json(date_format='iso')).encode()).hexdigest()[:12]
     table_key = scope + '_table_' + signature
-    st.caption('勾选行首选择框选中一条记录，再点击下方操作。')
+    st.caption('勾选一条记录后，点击下方操作。')
     st.dataframe(display_df, hide_index=True, width='stretch',
         height=min(420, max(120, 36 * len(display_df) + 38)), key=table_key,
         selection_mode='single-row',

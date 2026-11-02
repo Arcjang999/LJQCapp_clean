@@ -57,7 +57,7 @@ try:
     ensure_builtin_bondson_directory()
 except (ValueError, OSError):
     logging.exception('Bundled product directory could not be prepared')
-    st.warning('内置产品名录暂未准备完成。请在质控品管理中核对目录资料，或联系维护人员；已登记资料仍可使用。')
+    st.warning('内置产品名录加载失败，请刷新页面重试或联系维护人员。已登记资料仍可使用。')
 
 normalize_top_level_method_selection()
 _consume_pending_navigation_intent()

@@ -77,7 +77,7 @@ def render_report_history_page() -> None:
     )
     render_workbench_context_bar(
         title="历史记录概览",
-        caption="按项目名称查找，再结合质控方法、批次和生成时间确认报告。",
+        caption=None,
         items=[
             ("历史报告数", len(records)),
             ("涉及项目数", len({record.project_name for record in records})),
@@ -94,7 +94,6 @@ def render_report_history_page() -> None:
     with st.container():
         render_section_intro(
             title="筛选条件",
-            caption="可按项目、方法、批次和报告期间筛选。",
             tone="muted",
         )
         project_query, method_label, batch_query, report_month = _render_filters(records)
@@ -128,7 +127,7 @@ def render_report_history_page() -> None:
     if not filtered_records:
         st.session_state.pop('report_history_records_selected', None)
         st.session_state.pop('report_history_detail_id', None)
-        st.info("当前筛选条件下没有匹配的历史记录，请调整项目、方法、批次或报告期间。")
+        st.info("没有匹配的报告，请调整筛选条件。")
         return
 
     from ui.record_workspace import render_record_selection
@@ -286,11 +285,11 @@ def _render_report_history_card(record: ReportHistoryRecord) -> None:
                         "file_name": regeneration_result.file_name,
                         "snapshot_id": regeneration_result.snapshot_id,
                     }
-                    st.success("已按当前数据重新生成报告，可继续下载新的 PDF。")
+                    st.success("新报告已保存。")
 
         regeneration_state = st.session_state.get(regeneration_state_key)
         if isinstance(regeneration_state, dict):
-            st.caption("这份新报告使用当前检测数据和设置，内容可能与原报告不同；原报告仍可下载。")
+            st.caption("新报告使用当前数据和设置；原报告仍保留。")
             with action_right:
                 st.download_button(
                     label="下载重新生成的 PDF",
@@ -349,7 +348,7 @@ def _render_event_report_card(record: ReportHistoryRecord) -> None:
         st.caption(f"仪器：{package['instrument_name']}｜原检测：{record.report_period_label}｜实际质控批号：{record.batch_label}")
         with st.expander("查看生成报告时的处理记录"):
             content = event.get("content") or {}
-            st.caption(f"本报告采用第 {package['revision_no']} 版处理记录。后续补充或更正处理内容，不会改变这份报告。")
+            st.caption(f"采用第 {package['revision_no']} 版处理记录，之后的修改不影响此报告。")
             for key, label in (("cause_analysis", "原因分析"), ("corrective_action", "纠正措施"),
                                ("effect_description", "处理效果"), ("handler_text", "处理人"),
                                ("confirmer_text", "确认人"), ("confirmed_at", "确认时间")):
@@ -367,4 +366,4 @@ def _render_event_report_card(record: ReportHistoryRecord) -> None:
             else:
                 st.download_button("下载当前处理记录的报告", result.pdf_bytes, file_name=result.file_name,
                                    mime="application/pdf", key=f"report_history_event_new_{record.export_id}")
-                st.caption("处理记录未修改时，下载的是此前保存的报告。补充或更正处理记录后，可生成新报告。")
+                st.caption("处理记录未修改，继续使用已保存报告；修改后可生成新报告。")

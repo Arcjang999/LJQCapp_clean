@@ -255,6 +255,8 @@ def init_db() -> None:
         ensure_template_reagent_schema(connection)
         ensure_v12_workbench_schema(connection)
         ensure_lot_lifecycle_schema(connection)
+        from migrations.target_statistics import ensure_target_statistics_schema
+        ensure_target_statistics_schema(connection)
         ensure_quality_target_schema(connection)
         ensure_material_workflow_schema(connection)
         from migrations.product_directory import ensure_product_directory_schema

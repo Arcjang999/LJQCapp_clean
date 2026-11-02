@@ -22,10 +22,10 @@ def render_zscore_monthly_report_section(selected_batch_id: int) -> None:
     batch = get_zscore_batch(selected_batch_id)
     months = list_zscore_report_month_options(selected_batch_id)
     with st.container(border=True):
-        render_section_intro(title="多水平法质控报告", caption="选择日期，核对报告后生成PDF。报告、处理记录和附件一同保存，可分别下载。", tone="accent")
+        render_section_intro(title="多水平法质控报告", caption="报告、处理记录和附件一同保存。", tone="accent")
         st.caption(f"{batch['project_name']} · {_build_batch_display(batch)} · 正式期")
         if not months:
-            st.info("当前批次暂无正式期检测记录。进入正式期并录入结果后，可生成质控报告。")
+            st.info("本批次尚无正式期记录，暂不能生成报告。")
             return
         render_single_report('zscore', selected_batch_id, months=months, preview_renderer=_render_report_preview)
 
@@ -115,7 +115,7 @@ def _render_report_preview(package: ZScoreMonthlyReportPackage) -> None:
     st.dataframe(pd.DataFrame(level_rows), hide_index=True, width="stretch")
 
     st.markdown("**异常/失控汇总表**")
-    st.caption("请以“本次检测结论”判断整次检测是否在控；各水平的规则提示用于核对判定原因。")
+    st.caption("“本次检测结论”是整组判定，各水平列出触发规则。")
     abnormal_rows = [asdict(record) for record in report.abnormal_records]
     if not abnormal_rows:
         st.info("所选期间未发现警告或失控检测记录。")

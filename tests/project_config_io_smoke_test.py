@@ -13,6 +13,7 @@ from services.export_utils import dataframes_to_xlsx_bytes, xlsx_bytes_to_datafr
 from services.project_config_io_service import (
     PROJECT_IMPORT_COLUMNS,
     PROJECT_IDENTITY_COLUMNS,
+    PROJECT_OPTIONAL_COLUMNS,
     build_lot_config_xlsx,
     build_project_import_template_xlsx,
     build_project_template_xlsx,
@@ -80,7 +81,7 @@ def test_multi_sheet_xlsx_round_trip() -> None:
     assert payload.startswith(b"PK")
     sheets = xlsx_bytes_to_dataframes(payload)
     assert list(sheets) == ["项目配置", "填写说明"]
-    assert list(sheets["项目配置"].columns) == PROJECT_IMPORT_COLUMNS
+    assert list(sheets["项目配置"].columns) == PROJECT_IMPORT_COLUMNS + PROJECT_OPTIONAL_COLUMNS
 
 
 def test_project_import_export_and_lot_export_round_trip() -> None:
@@ -149,7 +150,7 @@ def test_quality_review_export_is_readable_but_cannot_confirm_an_import() -> Non
         original = decode(item_context('project', item_id)['quality_review_json'])
         payload = build_project_template_xlsx(fixture['template_id'])
         sheets = xlsx_bytes_to_dataframes(payload)
-        assert list(sheets['项目配置'].columns) == PROJECT_IMPORT_COLUMNS + PROJECT_IDENTITY_COLUMNS
+        assert list(sheets['项目配置'].columns) == PROJECT_IMPORT_COLUMNS + PROJECT_OPTIONAL_COLUMNS + PROJECT_IDENTITY_COLUMNS
         source = sheets['质量目标（供查阅）'].iloc[0]
         assert source['来源名称'] == 'PCR 检测 SOP'
         assert source['来源版本或编号'] == 'QC-PCR-2026-09'

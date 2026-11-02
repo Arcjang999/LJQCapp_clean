@@ -38,9 +38,13 @@ def _capture_draft(state):
             draft[target] = deepcopy(st.session_state[prefix + field])
     for item_id, values in draft['selections'].items():
         for position in range(len(values)):
-            key = prefix + f'item_{item_id}_{position}'
+            key = prefix + f'item_{item_id}_{position}_level'
             if key in st.session_state:
                 values[position] = st.session_state[key]
+            product_key = prefix + f'item_{item_id}_{position}_product'
+            if product_key in st.session_state:
+                products = draft.setdefault('products', {}).setdefault(item_id, [None] * len(values))
+                products[position] = st.session_state[product_key]
 
 
 def open_qc_replacement_dialog(config_id, *, register_material=False):
@@ -51,7 +55,10 @@ def open_qc_replacement_dialog(config_id, *, register_material=False):
         selections[int(item['id'])] = [int(levels[index]['qc_level_id']) if index < len(levels) else None
                                        for index in range(int(item['level_count']))]
     initial = dict(mode='materials', item_ids=[int(item['id']) for item in context['items'] if item['is_enabled']],
-                   selections=selections, target_lot=None, name='')
+                   selections=selections,
+                   products={item_id: [next((int(row['qc_material_id']) for row in context['all_materials']
+                                             if int(row['id']) == level), None) for level in levels]
+                             for item_id, levels in selections.items()}, target_lot=None, name='')
     st.session_state[MODAL_KEY] = dict(config_id=int(config_id), token=uuid4().hex, context=context,
         fingerprint=context['fingerprint'], draft=deepcopy(initial), initial=initial, discard=False, review_after_discard=None)
     if register_material:
@@ -90,8 +97,10 @@ def _render_material_choice(state):
         format_func=lambda identifier: items[identifier]['test_item_name'] + ' · ' + QC_METHOD_LABELS[items[identifier]['qc_method']],
         placeholder='请选择检验项目',
         key=_key(state, 'items', draft['item_ids']))
+    from ui.control_selection import control_products, render_control_slot
     active = {int(row['id']): row for row in context['materials']}
     original = {int(row['id']): row for row in context['all_materials']}
+    products = control_products()
     selections, preview = {}, []
     for item_id in draft['item_ids']:
         item = items[item_id]
@@ -102,30 +111,26 @@ def _render_material_choice(state):
         for position in range(int(item['level_count'])):
             current = values[position] if position < len(values) else None
             old = previous[position] if position < len(previous) else {}
-            options = [None, *active]
-            if current is not None and current not in options:
-                options.append(current)
-            def label(value):
-                if value is None:
-                    return '请选择浓度水平和批号'
-                row = active.get(value) or original.get(value)
-                return (material_label(row) if row else '原记录无法查询') + ('（已停用，请重新选择）' if value not in active else '')
-            value = st.selectbox(f'第 {position+1} 个水平的质控品', options,
-                placeholder='请选择浓度水平和批号',
-                key=_key(state, f'item_{item_id}_{position}', current), format_func=label)
+            _, value = render_control_slot(
+                prefix='qcr_' + state['token'] + f'_item_{item_id}_{position}', order=position+1,
+                selected_level=current,
+                selected_product=(draft.get('products', {}).get(item_id) or [None] * int(item['level_count']))[position],
+                registration_key='qc_replace_register_' + state['token'],
+                slot=(item_id, position), products=products, materials=context['materials'],
+                preserve_prefixes=('qcr_' + state['token'] + '_',))
             chosen.append(value)
             row = active.get(value) or original.get(value) or {}
             preview.append({'检验项目': item['test_item_name'], '水平': position+1,
-                '原浓度水平 / 批号': (old.get('level_name') or '未选择') + ' / ' + (old.get('lot_no') or '未记录'),
-                '新浓度水平 / 批号': (row.get('level_name') or '未选择') + ' / ' + (row.get('lot_no') or '未记录'),
+                '原质控品': material_label(old) if old else '未选择',
+                '新质控品': material_label(row) if row else '未选择',
                 '本次更换': '否' if value == old.get('qc_level_id') else '是'})
         draft['selections'][item_id] = chosen
-        selections[item_id] = [value for value in chosen if value is not None]
+        selections[item_id] = chosen
     if preview:
         st.dataframe(pd.DataFrame(preview), hide_index=True, width='stretch')
     if not active:
-        st.info('此质控品还没有可选批号。点击下方“登记质控品批号”，填写批号、效期和浓度水平，保存后在这里选择。')
-    st.caption('未换批的水平可保留原批号；已有均值和标准差作为参考，保存后仍需核对。')
+        st.info('没有可选批号，请点击“登记质控品批号”。')
+    st.caption('未换批的水平保留原批号；带入的均值和SD需重新确认。')
     return selections, None
 
 
@@ -139,7 +144,7 @@ def _render_lot_choice(state):
         format_func=lambda value: '请选择新质控品批号' if value is None else f"{lots[value]['lot_no']}｜效期 {lots[value]['expiry_date']}")
     existing = next((row for row in context['existing'] if row['qc_material_lot_id'] == draft['target_lot'] and not row['combination_key']), None)
     if existing:
-        st.info('此批号已经建立批次，可直接打开继续核对或使用，原有检测记录保留。')
+        st.info('此批号已有批次，请直接打开。原检测记录保留。')
         registering = bool(st.session_state.get('qc_replace_register_' + state['token'] + '_registration'))
         if st.button('打开已有新批次', key='qc_replace_open_existing', disabled=registering):
             if draft != state['initial']:
@@ -152,7 +157,7 @@ def _render_lot_choice(state):
             '水平数': item['level_count'], '新批次参数': '参考值待核对' if any(level['target_source'] != 'building' for level in context['levels'][int(item['id'])])
                 else '重新收集数据建立均值和标准差'} for item in context['items']]), hide_index=True, width='stretch')
     if not lots:
-        st.info('还没有其他可选批号。点击下方“登记质控品批号”，登记新批号和浓度水平，保存后在这里选择。')
+        st.info('没有其他可选批号，请点击“登记质控品批号”。')
     return None, existing
 
 
@@ -161,7 +166,7 @@ def _render_dialog():
     state = st.session_state[MODAL_KEY]
     _capture_draft(state)
     context, draft = state['context'], state['draft']
-    st.subheader(context['config']['config_name'])
+    st.subheader(config_material_summary(state['config_id']))
     if state['discard']:
         st.warning('本次填写内容尚未保存，是否放弃？')
         left, right = st.columns(2)
@@ -176,6 +181,28 @@ def _render_dialog():
         return
     current = get_qc_replacement_context(state['config_id'])
     registration_key = 'qc_replace_register_' + state['token']
+    from ui.control_selection import restore_registration_inputs
+    from ui.material_registration import render_material_registration_view
+    result = restore_registration_inputs(registration_key)
+    if result and result.get('slot') is None and draft['mode'] == 'lot':
+        from services.material_workflow_service import available_materials
+        registered = available_materials().loc[lambda frame: frame.id == int(result['level_id'])]
+        if not registered.empty:
+            draft['target_lot'] = int(registered.iloc[0]['qc_material_lot_id'])
+            st.session_state['qcr_' + state['token'] + '_target_lot'] = draft['target_lot']
+    elif result and result.get('slot') is None and draft['item_ids']:
+        result['slot'] = (draft['item_ids'][0], 0)
+    if result and result.get('slot') is not None:
+        item_id, position = result['slot']
+        values = draft['selections'].setdefault(item_id, [])
+        values += [None] * max(0, position + 1 - len(values))
+        values[position] = result['level_id']
+        prefix = 'qcr_' + state['token'] + f'_item_{item_id}_{position}'
+        st.session_state[prefix + '_product'] = result['product_id']
+        st.session_state[prefix + '_level'] = result['level_id']
+        st.session_state[prefix + '_last_product'] = result['product_id']
+    if render_material_registration_view(registration_key):
+        return
     if st.session_state.pop(registration_key + '_registration_saved', None) is not None:
         from services.material_registration_refresh_service import can_refresh_registered_materials
         if can_refresh_registered_materials(context, current):
@@ -187,16 +214,18 @@ def _render_dialog():
             _close()
         return
     if current['fingerprint'] != state['fingerprint']:
-        st.warning('原批次或质控品资料已修改。当前输入仍保留，请关闭后重新打开，核对最新资料。')
+        st.warning('原批次或质控品资料已修改，请关闭后重新打开。当前输入保留。')
     if not context['config']['material_selection_mode']:
         draft['mode'] = st.radio('更换方式', list(_MODE_LABELS), format_func=_MODE_LABELS.get,
                                 horizontal=True, key=_key(state, 'mode', draft['mode']),
                                 disabled=bool(st.session_state.get(registration_key + '_registration')))
     selections, existing = _render_material_choice(state) if draft['mode'] == 'materials' else _render_lot_choice(state)
-    draft['name'] = st.text_input('新批次名称（选填）', key=_key(state, 'name', draft['name']))
-    st.caption('单位、方法和试剂沿用原项目。保存新批次后，核对各水平的均值、标准差和质量目标，再点“确认批次设置”。新批次从首次检测开始记录。')
-    from ui.material_registration import render_material_registration_shortcut
-    registering = render_material_registration_shortcut(context['config']['qc_material_id'], key=registration_key)
+    if draft['mode'] == 'lot' and st.button('登记质控品批号', key=registration_key + '_register'):
+        from ui.material_registration import open_material_registration
+        open_material_registration(context['config']['qc_material_id'], key=registration_key,
+                                   preserve_prefixes=('qcr_' + state['token'] + '_',))
+    st.caption('保存后需确认新批次的均值、SD和质量目标。旧检测数据不带入。')
+    registering = bool(st.session_state.get(registration_key + '_registration'))
     left, right = st.columns(2)
     if left.button('取消', key='qc_replace_cancel', width='stretch', disabled=registering):
         if draft != state['initial']:
@@ -223,7 +252,7 @@ def render_pending_qc_replacement_dialog():
 
 
 def render_qc_replacement_workspace():
-    st.caption('选择原批次，查看各水平批号后更换。新批次的均值和标准差、质量目标仍需核对；旧批次及检测记录保留。')
+    st.caption('选择原批次后点击“更换质控品批次”。旧批次及检测记录保留。')
     settings = st.session_state.setdefault('qc_replace_filters', {})
     projects = {int(row['id']): row['template_name'] for row in list_project_templates(include_disabled=True).to_dict('records')}
     for key, default in (('qc_replace_search', ''), ('qc_replace_project', None)):
@@ -251,7 +280,7 @@ def render_qc_replacement_workspace():
     if configs.empty:
         st.info('没有符合条件的批次，请调整筛选；首次使用请先在“批次管理”建立批次。')
         return
-    display = configs[['config_name', 'template_name', 'instrument_name', 'qc_material_name', 'status']].copy()
+    display = configs[['template_name', 'instrument_name', 'status']].copy()
     display['质控品批号'] = [summaries[int(identifier)] for identifier in configs.id]
     display['status'] = display.status.map(_STATUS_LABELS)
     display.rename(columns={'config_name':'批次名称','template_name':'项目','instrument_name':'仪器','qc_material_name':'质控品','status':'状态'}, inplace=True)
@@ -261,7 +290,7 @@ def render_qc_replacement_workspace():
         on_select=partial(_select,key,ids))
     if selected is not None:
         context = get_qc_replacement_context(selected)
-        st.markdown('**原批次：' + context['config']['config_name'] + '**')
+        st.markdown('**原质控品：' + config_material_summary(selected) + '**')
         detail = _display_levels(context)
         if not detail.empty:
             st.dataframe(detail, hide_index=True, width='stretch')

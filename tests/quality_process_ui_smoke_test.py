@@ -1,5 +1,6 @@
 """Editable procedure defaults survive Streamlit reruns, drafts and reopening."""
 from pathlib import Path
+from datetime import date
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -8,6 +9,11 @@ from streamlit.testing.v1 import AppTest
 from tests.quality_applicability_smoke_test import IsolatedDatabase, draft, context
 from services.quality_target_service import decode, item_context
 from services.quality_review_service import validate_project_quality
+from services.time_service import local_today
+
+
+GENERAL_SOURCE = ('wst641-2026-iqc' if local_today() >= date(2026, 11, 1)
+                  else 'wst641-2018-iqc')
 
 
 def screen(item_id):
@@ -35,7 +41,7 @@ def test_default_edit_draft_reopen_confirm_and_clear():
         prefix = f'quality_project_{item_id}'
         app = prepare(screen(item_id), prefix)
         assert not app.exception
-        assert app.multiselect(key=prefix+'_process_sources').value == ['wst641-2018-iqc']
+        assert app.multiselect(key=prefix+'_process_sources').value == [GENERAL_SOURCE]
         reference = app.text_area(key=prefix+'_process_text').value
         assert 'WS/T 641' in reference and '均值' in reference
         local = '按本地区质控方案，每日首批设置本实验室规定的对照。\n异常时依照 SOP 处理并记录。'
@@ -77,7 +83,7 @@ def test_reference_reset_and_deselection_update_only_unedited_text():
         reference = app.text_area(key=prefix+'_process_text').value
         app.multiselect(key=prefix+'_process_sources').set_value([]).run()
         assert app.text_area(key=prefix+'_process_text').value == ''
-        app.multiselect(key=prefix+'_process_sources').set_value(['wst641-2018-iqc']).run()
+        app.multiselect(key=prefix+'_process_sources').set_value([GENERAL_SOURCE]).run()
         assert app.text_area(key=prefix+'_process_text').value == reference
         app.text_area(key=prefix+'_process_text').set_value('本地安排').run()
         app.button(key=prefix+'_process_reset').click().run()

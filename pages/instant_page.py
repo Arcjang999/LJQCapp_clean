@@ -100,8 +100,7 @@ def _render_instant_transfer_dialog(batch_id: int) -> None:
     target_batch_summary = str(transfer_state.get("target_batch_lot_no") or "").strip() or "系统将新建 L-J 批次"
 
     st.caption(
-        "确认后会新建一个L-J批次，并带入本批次的有效检测值。"
-        "今后请在新L-J批次继续录入；原即时法记录保留供查看。"
+        "确认后新建L-J批次，带入有效检测值；后续在L-J批次录入，原即时法记录仅供查询。"
     )
 
     if transfer_state.get("is_transferred"):
@@ -280,7 +279,7 @@ def _render_instant_entry_and_summary_section(
             ("实测变异系数（%）", format_optional_float(summary["cv"], digits=2, suffix="%")),
         ]
     )
-    st.caption("统计说明：均值、SD、CV 仅基于当前有效点计算；疑似离群点在未手工禁用前仍计入有效统计。")
+    st.caption("均值、SD和CV仅统计未禁用的结果；疑似离群点未禁用时仍计入。")
 
 
 def _render_instant_transfer_section(context: dict[str, object]) -> None:
@@ -350,7 +349,6 @@ def _render_instant_si_method_explanation(summary: dict[str, object]) -> None:
         )
     )
     with st.expander("即刻法 SI 值说明", expanded=False):
-        st.caption("用于前 20 个有效点内的即时质控提示，系统只提示，不自动剔除。")
         st.markdown(
             "\n".join(
                 [
@@ -360,7 +358,7 @@ def _render_instant_si_method_explanation(summary: dict[str, object]) -> None:
                     "- 使用范围：即刻法 SI 表仅用于前 20 个有效点，超过后应转入 L-J 法。",
                     f"- 公式：`{formula}`，其中 `s` 使用样本标准差。",
                     "- 判定阈值：SI上限和 SI下限均不超过 n2s 为在控；超过 n2s 但不超过 n3s 为警告；超过 n3s 为疑似离群。",
-                    "- 疑似离群结果由您核对。可在“检测记录”中选中一条，再点保留、禁用或恢复。",
+                    "- 疑似离群点不会自动剔除；在“检测记录”中选中后，可保留、禁用或恢复。",
                 ]
             )
         )
@@ -383,7 +381,6 @@ def _render_instant_chart_analysis_section(context: dict[str, object]) -> object
 
     st.divider()
     st.markdown("**最新判定区**")
-    st.caption("在此查看当前批次的最新判定。")
     latest_source_text = (
         f"最近记录 #{int(latest_row['sequence'])}"
         if latest_row is not None and "sequence" in latest_row
@@ -506,6 +503,7 @@ def _render_instant_records_section(context: dict[str, object]) -> None:
 
 
 def _render_instant_context(context: dict[str, object]) -> None:
+    from pages.lj_config_section import _actual_material_label
     batch = context["batch"]
     summary = context["summary"]
     transfer_state = context["transfer_state"]
@@ -524,7 +522,7 @@ def _render_instant_context(context: dict[str, object]) -> None:
             ("质控水平", batch["level_name"] or "-"),
             ("单位", batch["unit_symbol"] or "-"),
             ("检测方法", batch["method_name"] or "-"),
-            ("批次名称", batch["v11_config_name"] or "-"),
+            ("质控品与原厂批号", _actual_material_label(batch, 'instant')),
             ("批号效期", batch["v11_expiry_date"] or "-"),
             ("输入值类型", context["input_value_type_label"]),
         ]

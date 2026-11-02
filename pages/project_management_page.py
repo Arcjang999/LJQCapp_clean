@@ -233,7 +233,7 @@ def _render_template_creation() -> None:
                 reagent_label = st.selectbox("试剂 *", reagent_labels)
             with col3:
                 material_label = st.selectbox("质控品 *", material_labels)
-            st.caption("所选试剂将作为新增检验项目的默认试剂；不同检验项目可分别调整。")
+            st.caption("新增检验项目时默认选用此试剂，可逐项调整。")
             defaults_left,defaults_right=st.columns(2)
             default_kind=defaults_left.selectbox('默认质控方法',['单水平','多水平联合'],key='create_default_kind',
                 format_func=lambda value: QC_METHOD_LABELS['lj' if value=='单水平' else 'zscore'])
@@ -247,7 +247,7 @@ def _render_template_creation() -> None:
             default_method=defaults_right.selectbox('默认检测方法学',method_ids,format_func=lambda k:'请选择，或在检验项目中逐项设置' if k is None else method_names[k],key='create_default_method')
             default_count=st.selectbox('多水平使用数量',[2,3],key='create_default_count') if default_qc=='zscore' else 1
             project_group=st.text_input('工作分组（选填）',placeholder='例如：血筛、生化、分子，方便查找项目',key='create_project_group')
-            st.caption('选择新增检验项目时默认使用的方法。添加项目后，可分别修改每一项的方法。')
+            st.caption('新增检验项目时默认选用上述方法，可逐项调整。')
             notes = st.text_input("项目备注")
             submitted = st.button(
                 "创建项目", key="create_project_submit",
@@ -532,9 +532,9 @@ def _render_template_default_reagent(template) -> None:
     )
     current = by_id.get(template["default_reagent_id"])
     with st.expander("项目默认试剂", expanded=current is None):
-        st.caption("新增检验项目时会自动填入此试剂。已有项目继续使用各自保存的试剂。")
+        st.caption("仅用于新增检验项目，不改变已有项目的试剂。")
         if current is None:
-            st.warning("请选择新增检验项目时默认带入的试剂。已有检验项目继续使用各自已选的试剂。")
+            st.warning("请选择默认试剂。")
         selected = st.selectbox(
             "默认试剂 *", labels, index=labels.index(current) if current else 0,
             key=f"v12_default_reagent_{template_id}_{template['revision_no']}",
@@ -727,7 +727,7 @@ def _render_lot_config_editor(lot_config_id: int) -> None:
 
 def _render_lot_configs_tab() -> None:
     from ui.batch_workspace import render_batch_workspace
-    render_batch_workspace()
+    render_batch_workspace(render_target_dialogs=False)
 
 
 def _render_copy_tab() -> None:
@@ -738,8 +738,7 @@ def _render_copy_tab() -> None:
 def _render_import_export_tab() -> None:
     st.markdown("**批量导入项目配置**")
     st.caption(
-        "下载模板并填写后，选择项目、上传文件，再点击“查看导入预览”。确认导入时，软件会保存预览中"
-        "列出的检验项目、单位、方法学、试剂和厂家。导入后请分别设置质量要求。"
+        "填写模板，选择目标项目并上传。核对预览后确认导入，再设置各检验项目的质量要求。"
     )
     st.download_button(
         "下载项目配置导入模板",
@@ -790,7 +789,7 @@ def _render_import_export_tab() -> None:
             st.error('上传文件超过 10 MB，无法导入。')
         else:
             if target_template_id is None:
-                st.info('请先在上方“导入到项目”中选择一个项目，再点击“查看导入预览”。')
+                st.info('请在“导入到项目”中选择一个项目。')
             if st.button('查看导入预览', disabled=target_template_id is None, key='v11_prepare_project_import'):
                 try:
                     st.session_state['v11_import_prepared'] = prepare_project_template_import(
@@ -829,7 +828,7 @@ def _render_import_export_tab() -> None:
                             key='v11_import_replace_' + str(prepared['template_id']) + '_' +
                             str(prepared['expected_revision']) + '_' + prepared['file_sha256'])
                         if not confirmed and not prepared['errors'] and fresh:
-                            st.info('请先核对移除清单并勾选上方确认项，再点击“确认批量导入”。')
+                            st.info('请核对移除清单并勾选上方确认项。')
                     apply, cancel = st.columns(2)
                     if cancel.button('取消本次导入', key='v11_cancel_project_import'):
                         st.session_state.pop('v11_import_prepared', None)

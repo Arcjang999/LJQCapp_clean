@@ -26,7 +26,7 @@ def _configuration_sources(connection: sqlite3.Connection) -> tuple[list[dict], 
           AND configs.status = 'active' AND configs.is_disabled = 0
           AND templates.status = 'active' AND templates.is_disabled = 0
           AND tests.is_disabled = 0 AND instruments.is_disabled = 0
-          AND materials.is_disabled = 0 AND (configs.material_selection_mode = 1 OR lots.is_disabled = 0)
+          AND (configs.material_selection_mode = 1 OR (materials.is_disabled = 0 AND lots.is_disabled = 0))
           AND reagents.is_disabled = 0 AND units.is_disabled = 0 AND methods.is_disabled = 0
         ORDER BY items.id
     """).fetchall()
@@ -68,7 +68,7 @@ def _configuration_sources(connection: sqlite3.Connection) -> tuple[list[dict], 
             continue
         config = payload["config"]
         from services.material_workflow_service import concentration_label,validate_material_selection
-        try: validate_material_selection(connection,config['qc_material_id'],live_level_ids,row['level_count'])
+        try: validate_material_selection(connection,config['qc_material_id'],live_level_ids,row['level_count'],allow_multiple_products=bool(row['material_selection_mode']))
         except ValueError as exc:
             reject(str(exc));continue
         sources.append({
@@ -82,8 +82,8 @@ def _configuration_sources(connection: sqlite3.Connection) -> tuple[list[dict], 
             "quality_review_json": item.get("quality_review_json", "{}"),
             "unit_symbol": item["unit_symbol"], "method_name": item["method_name"],
             "instrument_name": config["instrument_name"], "reagent_name": item["reagent_name"],
-            "reagent_manufacturer_name": "", "qc_material_name": config["qc_material_name"],
-            "qc_material_manufacturer_name": "", "lot_no": item["levels"][0].get("lot_no") or config["lot_no"],
+            "reagent_manufacturer_name": "", "qc_material_name": item['levels'][0].get('generic_name') or config["qc_material_name"],
+            "qc_material_manufacturer_name": item['levels'][0].get('manufacturer_name') or "", "lot_no": item["levels"][0].get("lot_no") or config["lot_no"],
             "expiry_date": item["levels"][0].get("expiry_date") or config["expiry_date"], "levels": item["levels"],
             "concentration_label": (concentration_label(item["levels"][0])
                 if item["levels"][0].get("level_code") else

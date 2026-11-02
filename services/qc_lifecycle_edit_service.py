@@ -29,10 +29,11 @@ def _scope(c, config_id):
         WHERE q.template_id=? ORDER BY i.id''', (template_id,))
     data['assignments'] = _rows(c, '''SELECT a.* FROM qc_lot_config_item_levels a JOIN qc_lot_config_items i ON i.id=a.lot_config_item_id
         JOIN qc_lot_configs q ON q.id=i.lot_config_id WHERE q.template_id=? ORDER BY a.id''', (template_id,))
-    data['material'] = _rows(c, 'SELECT * FROM md_qc_materials WHERE id=?', (material_id,))
-    data['lots'] = _rows(c, 'SELECT * FROM md_qc_material_lots WHERE qc_material_id=? ORDER BY id', (material_id,))
+    data['material'] = _rows(c, 'SELECT * FROM md_qc_materials ORDER BY id')
+    data['manufacturers'] = _rows(c, 'SELECT * FROM md_manufacturers ORDER BY id')
+    data['lots'] = _rows(c, 'SELECT * FROM md_qc_material_lots ORDER BY id')
     data['levels'] = _rows(c, '''SELECT l.* FROM md_qc_levels l JOIN md_qc_material_lots q ON q.id=l.qc_material_lot_id
-        WHERE q.qc_material_id=? ORDER BY l.id''', (material_id,))
+        ORDER BY l.id''')
     data['bindings'] = _rows(c, '''SELECT b.* FROM qc_workbench_bindings b JOIN qc_lot_configs q ON q.id=b.lot_config_id
         WHERE q.template_id=? ORDER BY b.id''', (template_id,))
     # Existing synchronization touches this timestamp on every page run, even when
@@ -59,8 +60,8 @@ def _fingerprint(scope):
 
 def _registration_context(scope):
     return {'material_registration_guard': _fingerprint({
-        key: value for key, value in scope.items() if key not in ('lots', 'levels')}),
-        'material_registration_rows': {key: scope[key] for key in ('lots', 'levels')}}
+        key: value for key, value in scope.items() if key not in ('material', 'manufacturers', 'lots', 'levels')}),
+        'material_registration_rows': {key: scope[key] for key in ('material', 'manufacturers', 'lots', 'levels')}}
 
 
 def list_qc_lifecycle_configs():
@@ -121,7 +122,10 @@ def replacement_materials(context, position):
     old_id = context['source']['levels'][position]['qc_level_id']
     original = next(row for row in context['levels'] if row['id'] == old_id)
     choices = []
-    for row in available_materials(context['config']['qc_material_id']).to_dict('records'):
+    for row in available_materials().to_dict('records'):
+        if row['qc_material_id'] != next(
+                record['qc_material_id'] for record in context['lots'] if record['id'] == original['qc_material_lot_id']):
+            continue
         if original.get('specification_id'):
             same = row.get('specification_id') == original['specification_id']
         elif row.get('level_code') or original.get('level_code'):

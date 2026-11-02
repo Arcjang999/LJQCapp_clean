@@ -186,12 +186,30 @@ def save_pending_review(scope, item_id, *, context, search_record=None, register
         if draft_recorded is not None:
             review['draft_recorded'] = {k: str(draft_recorded.get(k) or '')[:2000]
                 for k in ('source_name', 'source_version', 'requirement_text')}
-            if draft_recorded.get('mode') == 'sd_cv':
+            draft_mode = draft_recorded.get('mode')
+            if draft_mode in ('sd_cv', 'source', 'recorded'):
+                review['draft_recorded']['mode'] = draft_mode
+            if draft_mode in ('sd_cv', 'source'):
                 from services.quality_target_service import finite_number
                 limit = finite_number(draft_recorded.get('cv_limit'), '实验室CV上限', optional=True)
-                if limit is not None and limit <= 0:
+                if draft_mode == 'sd_cv' and limit is not None and limit <= 0:
                     raise ValueError('实验室CV上限须大于0。')
-                review['draft_recorded'].update(mode='sd_cv', cv_limit=limit)
+                review['draft_recorded']['cv_limit'] = limit
+            if draft_mode == 'source':
+                review['draft_recorded']['requirement_id'] = str(draft_recorded.get('requirement_id') or '')[:200]
+                review['draft_recorded']['manual_mode'] = ('recorded' if draft_recorded.get('manual_mode') == 'recorded' else 'sd_cv')
+            review['draft_recorded']['evidence'] = str(draft_recorded.get('evidence') or '')[:2000]
+            if draft_recorded.get('levels') is not None:
+                review['draft_recorded']['levels'] = list(draft_recorded['levels'])
+                if scope == 'lot':
+                    assigned = {row['level_order']: row['qc_level_id'] for row in _levels(connection, item)}
+                    review['draft_recorded']['levels'] = [
+                        {**row, 'qc_level_id': assigned.get(row.get('level_order'))} if isinstance(row, dict) else row
+                        for row in review['draft_recorded']['levels']]
+            if draft_recorded.get('supplemental_cv') is not None:
+                from services.quality_target_service import finite_number
+                review['draft_recorded']['supplemental_cv'] = finite_number(
+                    draft_recorded['supplemental_cv'], '实验室更严CV要求')
         save_review(connection, scope, item_id, review)
         if scope == 'project':
             connection.execute("UPDATE qc_project_templates SET status='draft', revision_no=revision_no+1 WHERE id=?", (item['template_id'],))

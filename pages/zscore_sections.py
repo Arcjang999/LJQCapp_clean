@@ -133,9 +133,9 @@ def render_zscore_latest_analysis_panel(
     st.markdown("**最新结果分析**")
     if latest_run is None:
         if overall_phase == PHASE_FORMAL_QC:
-            st.info("控制参数已确认，正式规则已启用。请录入首条正式质控检测记录。")
+            st.info("尚无正式期记录，请录入检测结果。")
         else:
-            st.info("当前处于参数建立期，请先录入检测记录，用于建立均值和标准差并观察多水平趋势。")
+            st.info("请录入各水平检测值，积累建靶数据。")
         return
 
     is_building_phase = (not formal_rules_enabled) or latest_run.get("phase") != PHASE_FORMAL_QC
@@ -153,7 +153,7 @@ def render_zscore_latest_analysis_panel(
         else format_zscore_rule_hits(latest_run.get("rule_hits_run", []))
     )
     summary_text = (
-        "本次结果纳入均值和标准差建立观察，不作为正式质控结论。"
+        "本次结果用于建靶，尚不判定正式质控结论。"
         if is_building_phase
         else str(latest_run.get("analysis_prompt", "") or "暂无分析提示。").splitlines()[0].strip()
     )
@@ -192,7 +192,7 @@ def render_zscore_rules_config_expander(
         st.markdown(f"- 当前阶段：`{display_generated_text(get_phase_label(overall_phase))}`")
         st.markdown(f"- 正式规则已启用：`{'是' if formal_rules_enabled else '否'}`")
         if not formal_rules_enabled:
-            st.info("当前仍处于参数建立期，以下规则说明仅供进入正式质控期后的判读参考。")
+            st.info("以下规则在正式期启用。")
         for rule_id in template["rule_ids"]:
             st.markdown(f"- `{format_rule_code(rule_id)}`：{format_rule_description(rule_id)}")
 
@@ -794,7 +794,6 @@ def render_zscore_chart_controls(
 
     with st.container(border=True):
         st.markdown("**图表控制**")
-        st.caption("常用选项直接显示，更多设置可在展开后调整。")
         control_col1, control_col2 = st.columns([1.05, 1.15], gap="large")
         phase_scope = control_col1.radio(
             "数据范围",
@@ -1209,11 +1208,10 @@ def render_zscore_entry_section(
     if notice_message:
         st.success(notice_message)
     st.caption(
-        f"请填写 {level_count} 个水平的{input_value_type_label}，保存后查看质控图和检测结论。"
-        f"所用规则：{format_zscore_template_display_name(template)}。"
+        f"一次填齐 {level_count} 个水平的{input_value_type_label}，再保存。"
     )
     if cv_limit is not None:
-        st.caption(f"当前批次已保存允许不精密度（CV）：≤ {cv_limit:.2f}%")
+        st.caption(f"本批次CV上限：{cv_limit:.2f}%")
 
     with st.container(border=True):
         st.markdown("**录入信息**")

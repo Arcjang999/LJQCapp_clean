@@ -349,6 +349,7 @@ def test_creation_requires_three_dictionaries_and_prefills_selected_reagent() ->
         assert at.selectbox(key=key('method_id')).value == data['method_id']
         at.selectbox(key=key('test_item_id')).set_value(data['lj_item_id'])
         at.selectbox(key=key('unit_id')).set_value(data['unit_id']).run()
+        at.selectbox(key=key('target_statistics_mode')).set_value('cumulative').run()
         confirm_product('item_product_' + at.session_state['project_workspace_dialog']['token'])
         at.button(key='project_item_save').click().run()
         assert not list(at.exception)
@@ -360,11 +361,13 @@ def test_creation_requires_three_dictionaries_and_prefills_selected_reagent() ->
         at.selectbox(key=key('reagent_id')).set_value(data['reagent_id'])
         at.selectbox(key=key('test_item_id')).set_value(data['zscore_item_id'])
         at.selectbox(key=key('unit_id')).set_value(data['unit_id']).run()
+        at.selectbox(key=key('target_statistics_mode')).set_value('monthly').run()
         confirm_product('item_product_' + at.session_state['project_workspace_dialog']['token'])
         at.button(key='project_item_save').click().run()
         assert not list(at.exception)
         at.button(key='project_quality_close').click().run()
         assert list_template_items(template_id)["reagent_id"].tolist() == [alternate_id, data["reagent_id"]]
+        assert list_template_items(template_id)['target_statistics_mode'].tolist() == ['cumulative', 'monthly']
 
 
 def test_default_change_preserves_items_lots_and_snapshots_and_rejects_disabled() -> None:

@@ -10,7 +10,7 @@ def render_daily_result_files(draft):
             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',key='daily_template')
         st.download_button('导出本组已填内容',export_daily_workbook(draft),'常规质控本组结果.xlsx',
             mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',key='daily_export')
-        st.caption('先下载本组模板填写检测值，再上传并预览。核对项目和水平后，点击“带入结果草稿”，再到整组录入区核对并保存；保存前不会计入当日检测。')
+        st.caption('下载模板填写后上传。预览无误，点“带入结果草稿”，再到整组录入区保存；带入草稿不等于保存检测。')
         file=st.file_uploader('上传本组常规结果文件',type=['xlsx'],max_upload_size=10,key='daily_result_file_'+draft['draft_id'])
         if file:
             data=file.getvalue();digest=sha256(data).hexdigest()

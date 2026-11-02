@@ -53,7 +53,7 @@ def render_draft_standard_preview(draft):
             state = _applicability_label(row)
             st.caption(row['source']['standard']+' · '+row['spec']['name']+'｜'+KIND_LABELS[row['kind']]+'｜'+state)
         if not candidates:
-            st.info('本软件已收录的标准中，没有此项目的数值要求。保存后可设置SD控制；原始定量结果可另填CV上限。')
+            st.info('已收录标准未匹配此项目的数值限值。可在质量目标中填写实验室要求。')
         missing = context_errors(item, context)
         if missing:
             st.caption('保存后还需填写：'+' '.join(missing))
@@ -71,14 +71,19 @@ def render_conditions(item, review, prefix, *, quick=False, settings_location=No
         current['technique'] = inferred
     missing = missing_context_fields(current)
     context = {}
-    # Keep these five inputs visible so a missing condition cannot be hidden
-    # behind an expander. The keys and original widget labels stay unchanged.
-    with st.container(border=True, key=prefix+'_conditions'):
-        st.markdown('**检测条件**')
-        st.caption('以下5项均为必填。请检查已填选项，并填写本次标本。方法学：' + (item.get('method_name') or '未设置'))
-        if missing:
-            st.info(f'还有 {len(missing)} 项必填：' + '、'.join(CONTEXT_LABELS[key] for key in missing)
-                    + '。请填写下方标出的输入框。')
+    st.markdown('**检测条件**')
+    scale = {'concentration': '原始定量值', 'ct': 'Ct', 'log': 'log',
+             's_co': 'S/CO、COI', 'qualitative': '阳性/阴性', 'other_numeric': '其他数值'}.get(current.get('result_scale'), '')
+    unit = str(item.get('unit_symbol') or '')
+    if scale and unit and unit.casefold() not in scale.casefold():
+        scale += '（' + unit + '）'
+    summary = [item.get('method_name'), CONTEXT_OPTIONS['result_kind'].get(current.get('result_kind'), ''),
+               scale, CONTEXT_OPTIONS['purpose'].get(current.get('purpose'), '')]
+    summary.append(str(current.get('specimen') or '').strip())
+    st.caption('｜'.join(str(value) for value in summary if value and value != '请选择'))
+    # Existing values stay available for editing; missing or conflicting
+    # conditions open the editor without moving the user's draft.
+    with st.expander('修改检测条件', expanded=bool(missing or context_errors(item, current))):
         columns = st.columns(2)
         for index, (key, options) in enumerate(CONTEXT_OPTIONS.items()):
             values = list(options)
@@ -100,7 +105,7 @@ def render_conditions(item, review, prefix, *, quick=False, settings_location=No
             context['specimen'] = st.text_input('标本或基质', value=saved.get('specimen', ''),
                 key=prefix+'_context_specimen', max_chars=200)
     rows = assess(item, context)
-    with st.expander('查看标准及填写对照要求', expanded=False):
+    with st.expander('对照与质控要求', expanded=False):
         for row in rows:
             if source_status(row['source']) != 'current':
                 continue
@@ -136,7 +141,6 @@ def render_conditions(item, review, prefix, *, quick=False, settings_location=No
         with st.expander('高级：查找或补充标准', expanded=False):
             active = st.checkbox('记录官方查找或补充标准', value=bool(prior and prior.get('scope') != 'local_catalog'),
                                  key=prefix+'_advanced_search')
-            st.caption('需要保存官方查询结果或新增标准时，勾选上方选项，再填写下列资料。')
             candidate_search['query'] = st.text_input('查找词（检测项、方法及用途）',value=prior.get('query',''),key=prefix+'_search_query',max_chars=500)
             candidate_search['official_url'] = st.text_input('官方查询结果或标准链接',value=prior.get('official_url',''),key=prefix+'_search_url',max_chars=2000)
             candidate_search['checked_on'] = str(st.date_input('核查日期',value=date.fromisoformat(prior['checked_on']) if prior.get('checked_on') else local_today(),max_value=local_today(),key=prefix+'_search_date'))
@@ -173,8 +177,7 @@ def render_process_requirements(rows, review, prefix):
         st.session_state[source_key] = [identifier for identifier in st.session_state[source_key] if identifier in names]
     st.session_state[source_key] = list(dict.fromkeys(st.session_state[source_key] + newly_available))
     st.session_state[seen_key] = list(dict.fromkeys(st.session_state[seen_key] + list(names)))
-    st.markdown('**对照与质控要求**')
-    st.caption('下方已填入标准的参考内容。请改成本实验室实际执行的对照和质控要求，也可留空；标准原文可在下方查看。')
+    st.caption('请将参考文字改为本实验室实际要求；可删减或留空。')
     selected = st.multiselect('参考标准（可调整）', list(names), key=source_key, format_func=names.get)
     seed = default_process_requirements(rows, selected)['requirement_text']
     if text_key not in st.session_state:

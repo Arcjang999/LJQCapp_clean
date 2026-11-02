@@ -160,7 +160,7 @@ def render_reagent_history_workspace():
     if selected not in ids:
         selected = None
         st.session_state['reagent_history_selected_event'] = None
-    st.caption(f'共 {len(ids)} 条记录。选择一行查看详情；更正保存为新记录，原记录保留。')
+    st.caption(f'共 {len(ids)} 条记录。选中一行查看详情；更正另存，原记录保留。')
     if visible:
         key = 'reagent_history_table_' + sha1(str((ids, st.session_state.get('reagent_history_table_version', 0))).encode()).hexdigest()[:12]
         columns = ['事件编号', '检验项目、仪器及试剂', '操作', '调整前', '调整后', '生效时间', '时间状态', '确认人']
@@ -186,7 +186,7 @@ def render_reagent_history_workspace():
                     open_reagent_history_dialog(selected)
                 except ValueError as error:
                     st.error(str(error))
-    st.caption('更正后保存一条新的试剂使用记录。检测结果按检测时保存的批号和判读查询。')
+    st.caption('更正试剂使用记录不会改写已保存检测的实际批号和判读。')
     _render_result_history(context)
 
 
@@ -273,7 +273,7 @@ def _render_editor(state, current):
     if draft['verification_id'] in verifications:
         _verification_detail(verifications[draft['verification_id']])
     elif draft['reagent_lot_id'] is not None and not verifications and _effective_time(draft['effective_at']) is not None:
-        st.info('所选批号在该生效时间没有可采用的通过验证，请核对验证结论和时间。需要补登记时，先点击“取消”退出更正，再在此试剂批号的“登记批号验证”中填写并保存，重新打开更正记录。')
+        st.info('该生效时间没有可用的通过验证记录。请核对结论和时间；需要补登记时，先取消更正，在该批号的“登记批号验证”中保存，再重新打开更正。')
     draft['operator'] = st.text_input('操作者', key=_key(state, 'operator', draft['operator']))
     draft['reason'] = st.text_area('更正原因', key=_key(state, 'reason', draft['reason']))
     draft['confirmed'] = st.checkbox('已核对原使用记录、试剂批号、验证记录和生效时间',

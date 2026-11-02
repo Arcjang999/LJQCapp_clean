@@ -24,7 +24,7 @@ def _configuration_sources(connection: sqlite3.Connection) -> tuple[list[dict], 
           AND configs.status = 'active' AND configs.is_disabled = 0
           AND templates.status = 'active' AND templates.is_disabled = 0
           AND tests.is_disabled = 0 AND instruments.is_disabled = 0
-          AND materials.is_disabled = 0 AND (configs.material_selection_mode = 1 OR lots.is_disabled = 0)
+          AND (configs.material_selection_mode = 1 OR (materials.is_disabled = 0 AND lots.is_disabled = 0))
         ORDER BY items.id
     """).fetchall()
     sources, issues = [], []
@@ -65,7 +65,7 @@ def _configuration_sources(connection: sqlite3.Connection) -> tuple[list[dict], 
             continue
         config = payload["config"]
         from services.material_workflow_service import concentration_label,validate_material_selection
-        try: validate_material_selection(connection,config['qc_material_id'],live_level_ids,row['level_count'])
+        try: validate_material_selection(connection,config['qc_material_id'],live_level_ids,row['level_count'],allow_multiple_products=bool(row['material_selection_mode']))
         except ValueError as exc:
             reject(str(exc));continue
         sources.append({
@@ -79,8 +79,11 @@ def _configuration_sources(connection: sqlite3.Connection) -> tuple[list[dict], 
             "quality_review_json": item.get("quality_review_json", "{}"),
             "unit_symbol": item["unit_symbol"], "method_name": item["method_name"],
             "instrument_name": config["instrument_name"], "reagent_name": item["reagent_name"],
-            "reagent_manufacturer_name": "", "qc_material_name": config["qc_material_name"],
-            "qc_material_manufacturer_name": "", "lot_no": " / ".join(dict.fromkeys(level.get("lot_no") or config["lot_no"] for level in item["levels"])),
+            "reagent_manufacturer_name": "", "qc_material_name": ' / '.join(dict.fromkeys(
+                '｜'.join(str(level.get(key) or '') for key in ('catalog_no','generic_name') if level.get(key))
+                or config['qc_material_name'] for level in item['levels'])),
+            "qc_material_manufacturer_name": ' / '.join(dict.fromkeys(level.get('manufacturer_name') or '' for level in item['levels'])),
+            "lot_no": " / ".join(dict.fromkeys(level.get("lot_no") or config["lot_no"] for level in item["levels"])),
             "expiry_date": min((l.get("expiry_date") or config["expiry_date"]) for l in item["levels"]), "levels": item["levels"],
             "concentration_label": " / ".join(concentration_label(level) for level in item["levels"]),
             "quality_target_source_text": item["quality_target_source_text"],

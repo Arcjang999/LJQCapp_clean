@@ -156,9 +156,11 @@ def test_recorded_source_follows_runtime_and_transfer_snapshot():
 def test_record_only_form_retains_invalid_submission_then_saves():
     with IsolatedDatabase():
         fixture, project_item = draft_fixture('ct')
+        from services.quality_review_service import save_pending_review
+        save_pending_review('project', project_item, context={}, draft_recorded={'mode': 'recorded'})
         app = AppTest.from_string(f"from ui.quality_targets import render_adoption\nrender_adoption('project', {project_item})", default_timeout=30).run()
         prefix = f'quality_project_{project_item}'
-        app.radio(key=prefix+'_mode').set_value('记录实验室要求').run()
+        assert app.session_state[prefix+'_mode'] == 'recorded'
         app.selectbox(key=prefix+'_context_technique').set_value('clinical_chemistry')
         app.selectbox(key=prefix+'_context_result_kind').set_value('quantitative')
         app.selectbox(key=prefix+'_context_purpose').set_value('research')
@@ -173,7 +175,7 @@ def test_record_only_form_retains_invalid_submission_then_saves():
         app.text_input(key=prefix+'_person').set_value('页面验收人')
         app.checkbox(key=prefix+'_confirmed').check().run()
         assert not app.exception
-        assert any('说明此要求如何用于本次检测' in warning.value for warning in app.warning)
+        assert any('说明此要求如何用于本次检测' in row.value for row in app.caption)
         before = item_context('project', project_item)['quality_review_json']
         app.button(key=prefix+'_adopt').click().run()
         assert not app.exception and app.error

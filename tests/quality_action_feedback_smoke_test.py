@@ -55,7 +55,7 @@ class QualityActionFeedbackTest(unittest.TestCase):
             before=database_contents();app=self.app()
             self.assertTrue(app.button(key='test_next').disabled)
             self.assertEqual(['checked'],[row['field'] for row in self.issues(app)])
-            self.assertIn('请勾选上方“已确认检测方法',self.warnings(app))
+            self.assertNotIn('请勾选上方“已确认检测方法',self.warnings(app))
             self.assertIn('必填 · 请核对本页设置后勾选确认。',[row.value for row in app.caption])
             self.assertNotIn('保存，稍后继续','\n'.join(row.value for row in app.caption))
             app.checkbox(key='feedback_checked').check().run();self.healthy(app)
@@ -70,11 +70,27 @@ class QualityActionFeedbackTest(unittest.TestCase):
             app.checkbox(key='feedback_checked').check().run();self.healthy(app)
             self.assertEqual(['confirmed_by'],[row['field'] for row in self.issues(app)])
             self.assertIn('必填 · 请填写质量要求确认人。',[row.value for row in app.caption])
-            self.assertIn('请填写“质量要求确认人”。',self.warnings(app))
+            self.assertNotIn('请填写“质量要求确认人”。',self.warnings(app))
             # Existing service save validation remains authoritative; no new gate.
             self.assertFalse(app.button(key='test_next').disabled)
             app.text_input(key='feedback_person').set_value('填写人').run()
             self.assertEqual([],self.issues(app))
+
+    def test_missing_conditions_keep_only_local_prompts_and_still_block_next_step(self):
+        with IsolatedDatabase():
+            item=dict(test_item_name='快捷配置合成项目',test_aliases=[],method_name='快捷配置检测法',
+                method_code='',method_principle='',input_value_type='raw',unit_symbol='IU/mL',level_count=2)
+            app=self.app(item=item,prior=dict(confirmed_by='核对人',context=dict(
+                technique='',result_kind='',result_scale='',purpose='',specimen='')))
+            self.assertEqual('',self.warnings(app))
+            self.assertEqual({'technique','result_kind','result_scale','purpose','specimen','checked'},
+                             {row['field'] for row in self.issues(app)})
+            captions='\n'.join(row.value for row in app.caption)
+            for label in ('检测技术','检测结果性质','结果尺度','检测用途','标本或基质'):
+                self.assertIn(label,captions)
+            app.checkbox(key='feedback_checked').check().run();self.healthy(app)
+            self.assertTrue(app.button(key='test_next').disabled)
+            self.assertEqual('',self.warnings(app))
 
     def test_input_type_conflict_names_the_actual_previous_step_button(self):
         with IsolatedDatabase():
@@ -118,15 +134,20 @@ class QualityActionFeedbackTest(unittest.TestCase):
 
     def test_recorded_requirement_missing_fields_and_cv_zero_name_exact_controls(self):
         with IsolatedDatabase():
-            app=self.app();app.checkbox(key='feedback_checked').check()
-            app.radio(key='feedback_mode').set_value('recorded').run();self.healthy(app)
+            app=self.app(prior=dict(mode='recorded',confirmed_by='Yan',context=dict(
+                technique='realtime_pcr',result_kind='quantitative',result_scale='ct',
+                purpose='research',specimen='血清')))
+            app.checkbox(key='feedback_checked').check().run();self.healthy(app)
             app.text_input(key='feedback_source_name').set_value('')
             app.text_input(key='feedback_source_version').set_value('')
             app.text_area(key='feedback_recorded').set_value('').run();self.healthy(app)
             fields={row['field'] for row in self.issues(app)}
             self.assertTrue({'source_name','source_version','requirement_text','evidence'}<=fields)
-            self.assertIn('“填写其他实验室要求”',self.warnings(app))
-            self.assertIn('“质量要求设置说明”',self.warnings(app))
+            self.assertNotIn('“要求与文件依据”',self.warnings(app))
+            captions = '\n'.join(row.value for row in app.caption)
+            for missing in ('使用的说明书或实验室文件名称', '设置日期或文件版本', '实验室实际要求',
+                            '说明此要求如何用于本次检测'):
+                self.assertIn(missing, captions)
             _,identifier=draft();item=item_context('project',identifier)
             item['test_item_name']='没有预置数值标准的隔离项目'
             item['test_aliases']=[];item['standard_code']=''

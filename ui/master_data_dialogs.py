@@ -24,7 +24,7 @@ FIELD_LABELS = {
     'device_category_code': '医疗器械分类代码', 'catalog_no': '产品货号',
     'instrument_model_id': '仪器型号', 'asset_code': '资产编号', 'serial_number': '序列号',
     'department_name': '所属科室', 'instrument_group': '仪器组', 'location': '放置位置',
-    'trade_name': '商品名称', 'specification': '规格型号', 'applicable_instrument_text': '适用仪器',
+    'trade_name': '商品名称／别名（选填）', 'specification': '规格型号', 'applicable_instrument_text': '适用仪器',
     'method_name': '方法学名称', 'method_code': '方法代码', 'method_category': '专业分类',
     'principle': '检测原理', 'symbol': '单位符号', 'unit_name': '单位名称',
     'ucum_code': 'UCUM 代码', 'quantity_kind': '量纲 / 类型',
@@ -172,7 +172,7 @@ def _render_field(state, field, locked):
     elif field == 'categories':
         draft[field] = st.multiselect(label, list(MANUFACTURER_CATEGORIES), key=key, disabled=locked,
             format_func=MANUFACTURER_CATEGORIES.get, placeholder='请选择厂家业务类别，可多选')
-        st.caption('请按该厂家实际业务至少选择一类；经营多类产品时可以多选。')
+        st.caption('厂家业务类别至少选择一类，可多选。')
     elif field == 'alias_type':
         draft[field] = st.selectbox(label, list(ALIAS_TYPE_LABELS), key=key, disabled=locked,
                                     format_func=ALIAS_TYPE_LABELS.get, placeholder='请选择别名类型')
@@ -213,15 +213,15 @@ def _render_edit(state, current, *, on_saved=None, on_cancel=None):
     if entity == 'lab_instrument' and 'instrument_model_id' in locked:
         locked.update(('manufacturer_id', 'model'))
     if readonly:
-        st.info('此记录已停用，暂不能编辑。恢复后可继续维护。')
+        st.info('请先恢复此记录，再编辑。')
     elif current and current['lock_reason']:
         st.info(current['lock_reason'])
     if current and current['fingerprint'] != state['fingerprint']:
-        st.warning('此记录已修改。当前填写内容仍保留，请关闭后重新打开，核对最新资料。')
+        st.warning('此记录已被修改，请关闭后重新打开。当前填写内容保留。')
     if entity == 'alias':
         st.caption('检验项目：' + state['parent']['chinese_name'])
     if entity == 'lab_instrument':
-        st.caption('填写本机名称、厂家和型号；同型号的多台仪器请使用不同名称，并填写各自的资产编号或序列号。')
+        st.caption('同型号的多台仪器须分别登记，使用不同名称和各自的资产编号或序列号。')
     fields = [field for field in _FIELDS[entity] if field != 'notes']
     for start in range(0, len(fields), 2):
         columns = st.columns(2)
@@ -235,7 +235,7 @@ def _render_edit(state, current, *, on_saved=None, on_cancel=None):
         if category and 'manufacturer_id' not in locked:
             options, _ = _relation_options('manufacturer_id', state['initial']['manufacturer_id'], category)
             if len(options) == 1:
-                st.info('还没有可选的' + MANUFACTURER_CATEGORIES[category] + '。点击下方按钮登记，当前填写内容会保留。')
+                st.info('还没有可选的' + MANUFACTURER_CATEGORIES[category] + '，请点击“新增' + MANUFACTURER_CATEGORIES[category] + '”。')
             if st.button('新增' + MANUFACTURER_CATEGORIES[category], key=_prefix(state) + 'add_manufacturer'):
                 state['dependency'] = dict(field='manufacturer_id', category=category,
                     state=create_master_data_draft('manufacturer', manufacturer_category=category))
@@ -282,7 +282,7 @@ def render_master_data_editor(state, *, on_saved=None, on_cancel=None):
     if dependency:
         child = dependency['state']
         child['required_manufacturer_category'] = dependency.get('category')
-        st.caption('保存或取消' + ENTITY_LABELS[child['entity_type']] + '后，继续填写' + ENTITY_LABELS[state['entity_type']] + '。此前填写内容会保留。')
+        st.caption('保存或取消' + ENTITY_LABELS[child['entity_type']] + '后返回' + ENTITY_LABELS[state['entity_type']] + '，已填内容保留。')
 
         def cancel_dependency():
             state.pop('dependency', None)
@@ -315,7 +315,7 @@ def _render_status(state, current):
     if current['fingerprint'] != state['fingerprint']:
         st.warning('此记录已修改，请取消后重新打开，核对最新资料。')
     if disabled:
-        st.caption('停用后不再供新增时选择，已有项目和检测历史仍保留。')
+        st.caption('停用后不能新增使用，已有项目和检测历史保留。')
         state['reason'] = st.text_area('停用原因 *', key=_key(state, 'reason', state['reason']))
     elif original.get('disabled_reason'):
         st.caption('原停用原因：' + original['disabled_reason'])

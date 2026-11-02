@@ -10,7 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from database import get_connection
-from services.project_config_service import get_lot_config, list_config_snapshots
+from services.project_config_service import get_lot_config, list_config_snapshots, list_lot_configs
+from services.material_workflow_service import config_material_summary
 from tests.project_management_v11_smoke_test import TemporaryDatabaseContext, _seed_v11_configuration_dependencies, _build_active_source_config
 from tests.project_workspace_smoke_test import select_table_row
 
@@ -65,8 +66,9 @@ def test_cancel_reason_gate_disable_and_management_restore():
         assert_clean(app)
         app.checkbox(key='batch_show_disabled').check().run()
         assert_clean(app)
-        names = app.dataframe[0].value['批次名称'].tolist()
-        select_table_row(app, names.index(before['config_name']))
+        ids = list_lot_configs(include_disabled=True)['id'].tolist()
+        assert app.dataframe[0].value['质控品与原厂批号'].tolist() == [config_material_summary(i) for i in ids]
+        select_table_row(app, ids.index(config_id))
         assert app.session_state['v11_selected_lot_config_id'] == config_id
         app.button(key='v11_restore_lot_config_button').click().run()
         assert_clean(app)

@@ -60,7 +60,7 @@ def render_record_maintenance_dialog(
 
     normalized_input_value_type = normalize_input_value_type(input_value_type)
     input_value_type_label = get_input_value_type_label(normalized_input_value_type)
-    st.caption(f"请选择一条检测记录，查看检测时间、检测人和“{input_value_type_label}”。批次还在建靶时，可修改或禁用记录；进入正式期后保留供查看。")
+    st.caption("建靶期记录可修改或禁用；进入正式期后只可查看。")
     if qc_df.empty:
         st.info("本批次还没有保存检测记录，请先录入一次结果。")
         if st.button("关闭", key="close_record_dialog_empty", width="stretch"):
@@ -179,7 +179,7 @@ def render_record_maintenance_dialog(
                                 st.rerun()
 
             with maintenance_right:
-                st.info("原始检测记录保留供查看。建靶时可禁用疑似离群结果：原始值和填写的原因仍会保存，统计和默认图表会跳过这条记录。")
+                st.info("禁用后保留原始值和原因，不再纳入建靶统计和默认图表。")
 
     st.divider()
     if st.button("关闭", key="close_record_dialog", width="stretch"):
@@ -210,7 +210,7 @@ def render_zscore_record_maintenance_dialog(
     input_value_type = normalize_input_value_type(batch_context["batch"]["input_value_type"])
     input_value_type_label = get_input_value_type_label(input_value_type)
     st.caption(
-        f"请选择一整次检测，核对检测时间、检测人和各水平的“{input_value_type_label}”。批次还在建靶时，可修改或禁用记录；进入正式期后保留供查看。"
+        "建靶期记录可修改或禁用，操作同时作用于全部水平；进入正式期后只可查看。"
     )
     if not saved_runs:
         st.info("本批次还没有保存检测记录，请先录入一次结果。")
@@ -409,7 +409,7 @@ def render_zscore_record_maintenance_dialog(
                                     st.rerun()
 
             with maintenance_right:
-                st.info("每次检测的原始结果保留供查看。建靶时，保留、禁用或恢复会同时作用于这次检测的全部水平。")
+                st.info("保留、禁用或恢复同时作用于本次检测的全部水平，原始值保留。")
 
     st.divider()
     if st.button("关闭", key="close_zscore_record_dialog", width="stretch"):

@@ -16,7 +16,8 @@ MODAL_KEY = 'project_workspace_dialog'
 
 
 def _plain(row):
-    return {k: None if v is None or (not isinstance(v, (dict, list)) and pd.isna(v)) else v
+    return {k: None if v is None or (not isinstance(v, (dict, list)) and pd.isna(v))
+            else v.item() if callable(getattr(v, 'item', None)) else v
             for k, v in dict(row).items()}
 
 
@@ -39,12 +40,15 @@ def open_project_dialog(kind, template_id=None, item_id=None):
             'test_item_id': None, 'qc_method': template['default_qc_method'], 'input_value_type': 'raw',
             'unit_id': None, 'method_id': template['default_method_id'],
             'reagent_id': template['default_reagent_id'], 'level_count': template['default_level_count'],
+            'target_statistics_mode': None,
             'target_n': 20, 'cv_limit': None, 'quality_target_source_text': '', 'notes': '',
         }
     else:
         draft = template or {'template_name': '', 'lab_instrument_id': None, 'qc_material_id': None,
             'default_reagent_id': None, 'default_qc_method': 'lj', 'default_method_id': None,
             'default_level_count': 1, 'project_group': '', 'notes': ''}
+    if kind == 'item' and draft.get('target_statistics_mode') not in ('monthly', 'cumulative'):
+        draft['target_statistics_mode'] = None
     st.session_state[MODAL_KEY] = dict(kind=kind, template_id=template_id, item_id=item_id,
         revision=template.get('revision_no'), draft=deepcopy(draft), initial=deepcopy(draft), token=uuid4().hex,
         discard=False, template_name=template.get('template_name', ''))
@@ -143,7 +147,7 @@ def _render_catalogue_picker(ctx):
     if not ctx.get('catalogue_open'):
         return
     with st.container(border=True):
-        st.caption('输入产品编号、名称、浓度或浓度编号，找到产品后点击“使用此目录产品”。质控品批号在新增批次时选择。')
+        st.caption('按产品编号、名称或浓度查找，再点击“使用此目录产品”。实际批号在新增批次时选择。')
         query = st.text_input('搜索名录产品', key='project_catalogue_query_' + ctx['token'])
         matches = list_catalog_product_choices(query=query)
         if matches.empty:
@@ -193,15 +197,15 @@ def _render_project_form(ctx):
         lab_instrument_id=ctx['draft']['lab_instrument_id'], method_id=ctx['draft']['default_method_id'],
         locked=locked or dependency_pending, allow_relation_edit=not dependency_pending)
     if locked:
-        st.caption('已添加检验项目或批次，不能更换仪器和质控品。如需更换，请新建项目。')
+        st.caption('已添加检验项目或批次；更换仪器或质控品需新建项目。')
     _text(ctx, 'project_group', '分组', placeholder='例如：血筛、生化、分子')
     _qc_choices(ctx, defaults=True)
-    st.caption('默认设置只带入以后新增的检验项目，各项可分别调整。')
+    st.caption('默认设置仅用于以后新增的检验项目。')
     _text(ctx, 'notes', '项目备注', multiline=True)
     registration_open = render_project_dependencies(ctx, kind='project', locked_identity=locked)
     relation_pending = render_pending_product_relation_notice(ctx)
     if ctx['template_id'] is None and not reviewed:
-        st.info('“保存项目”暂不可用。请按上方质控品区域的提示完成选择，并点击“确认所选质控品”。')
+        st.info('“保存项目”暂不可用，请先点击“确认所选质控品”。')
     cancel, save = st.columns(2)
     if cancel.button('取消', key='project_dialog_cancel', disabled=registration_open):
         _cancel(ctx)
@@ -219,7 +223,7 @@ def _render_project_form(ctx):
     if ctx['template_id'] is not None:
         st.divider()
         if ctx['draft'] != ctx['initial']:
-            st.caption('点击“停用项目”前，如需保留本次修改，请先点击“保存项目”。')
+            st.caption('如需保留本次修改，请先保存再停用。')
         if st.button('停用项目', key='project_editor_disable', disabled=registration_open or relation_pending):
             _begin_project_status(ctx, disabled=True)
     if switch_requested:
@@ -329,6 +333,9 @@ def _render_item_form(ctx):
         ctx['draft']['target_n'] = 20
     else:
         ctx['draft']['target_n'] = st.number_input('建立均值和标准差所需数据点数', min_value=5, max_value=20, step=1, key=_key(ctx, 'target_n'))
+    from ui.target_statistics import render_target_statistics_mode
+    ctx['draft']['target_statistics_mode'] = render_target_statistics_mode(ctx['draft'].get('target_statistics_mode'),
+        key=_key(ctx, 'target_statistics_mode'))
     if ctx['draft']['test_item_id']:
         from ui.quality_applicability import render_draft_standard_preview
         render_draft_standard_preview(ctx['draft'])
@@ -338,7 +345,8 @@ def _render_item_form(ctx):
     cancel, save = st.columns(2)
     if cancel.button('取消', key='project_dialog_cancel', disabled=registration_open):
         _cancel(ctx)
-    if save.button('保存', type='primary', key='project_item_save', disabled=registration_open or relation_pending):
+    if save.button('保存', type='primary', key='project_item_save',
+                   disabled=registration_open or relation_pending or not ctx['draft']['target_statistics_mode']):
         try:
             iid = save_single_test_item(ctx['template_id'], ctx['draft'], expected_revision=ctx['revision'], item_id=ctx['item_id'])
         except (ValueError, TypeError) as exc:
@@ -351,13 +359,16 @@ def _render_item_form(ctx):
 
 
 _PANEL_FIELDS = {'unit_id': '单位', 'method_id': '方法学', 'reagent_id': '试剂', 'qc_method': '质控方法',
-                 'input_value_type': '输入值类型', 'level_count': '水平数', 'target_n': '参数建立点数'}
+                 'input_value_type': '输入值类型', 'level_count': '水平数', 'target_n': '参数建立点数',
+                 'target_statistics_mode': '均值和SD统计方式'}
 
 
 def _panel_reference_options():
     from services.master_data_service import list_units, list_methods, list_reagents
     from services.project_config_service import QC_METHOD_LABELS
-    options = {'qc_method': QC_METHOD_LABELS, 'input_value_type': INPUT_VALUE_TYPE_LABELS}
+    from ui.target_statistics import STATISTICS_MODE_LABELS
+    options = {'qc_method': QC_METHOD_LABELS, 'input_value_type': INPUT_VALUE_TYPE_LABELS,
+               'target_statistics_mode': STATISTICS_MODE_LABELS}
     for field, frame, names in [('unit_id', list_units(), ['symbol']), ('method_id', list_methods(), ['method_name']),
                                 ('reagent_id', list_reagents(), ['generic_name', 'trade_name', 'manufacturer_name'])]:
         options[field] = {int(r['id']): '｜'.join(str(r.get(name) or '') for name in names if r.get(name))
@@ -368,10 +379,14 @@ def _panel_reference_options():
 def _panel_values(ctx, template, options):
     values = ctx.setdefault('panel_defaults', dict(unit_id=None, method_id=template['default_method_id'],
         reagent_id=template['default_reagent_id'], qc_method=template['default_qc_method'],
-        input_value_type='raw', level_count=int(template['default_level_count']), target_n=20))
+        input_value_type='raw', level_count=int(template['default_level_count']), target_n=20,
+        target_statistics_mode=None))
     for field, label in _PANEL_FIELDS.items():
         key = 'panel_default_' + ctx['token'] + '_' + field
-        if field in options:
+        if field == 'target_statistics_mode':
+            from ui.target_statistics import render_target_statistics_mode
+            values[field] = render_target_statistics_mode(values.get(field), key=key, required=False)
+        elif field in options:
             choices = options[field]
             current = values.get(field)
             values[field] = st.selectbox(label, [None, *choices], index=[None, *choices].index(current) if current in choices else 0,
@@ -379,7 +394,7 @@ def _panel_values(ctx, template, options):
         else:
             values[field] = st.number_input(label, min_value=1 if field == 'level_count' else 5,
                 max_value=3 if field == 'level_count' else 20, value=int(values[field]), step=1, key=key)
-    st.caption('请为各检验项目选择质控方法。使用即时法时，累计20个有效结果后可点击转入L-J。')
+    st.caption('请逐项选择质控方法。即时法达到20个有效结果后可人工转入L-J。')
     return dict(values)
 
 
@@ -406,7 +421,7 @@ def _render_panel_source(ctx, template, options):
                 st.rerun()
         if chosen:
             candidates = template_item_rows(chosen)
-            st.caption('复制后可修改各项的检测方法、单位和结果类型。保存后，请分别设置质量要求。')
+            st.caption('核对复制的检测方法、单位和结果类型；保存后逐项设置质量要求。')
     elif source == '导入配置清单':
         file = st.file_uploader('项目配置 XLSX', type=['xlsx'], key='panel_source_file_' + ctx['token'])
         if file:
@@ -481,7 +496,7 @@ def _panel_frame(rows, options):
                    '质量要求': '已确认，修改后请重新设置' if review.get('status') == 'confirmed' else '请分别设置质量要求',
                    '备注': row.get('notes', '')}
         for field, label in _PANEL_FIELDS.items():
-            current[label] = options[field].get(row.get(field), '') if field in options else row.get(field)
+            current[label] = options[field].get(row.get(field), None if field == 'target_statistics_mode' else '') if field in options else row.get(field)
         display.append(current)
     return pd.DataFrame(display)
 
@@ -516,7 +531,12 @@ def _render_panel_form(ctx):
                          hide_index=True, width='stretch')
     columns = {'行标识': None}
     for field, choices in options.items():
-        columns[_PANEL_FIELDS[field]] = st.column_config.SelectboxColumn(_PANEL_FIELDS[field], options=['', *choices.values()])
+        if field == 'target_statistics_mode':
+            from ui.target_statistics import STATISTICS_MODE_HELP
+            columns[_PANEL_FIELDS[field]] = st.column_config.SelectboxColumn(_PANEL_FIELDS[field],
+                options=list(choices.values()), required=True, help=STATISTICS_MODE_HELP)
+        else:
+            columns[_PANEL_FIELDS[field]] = st.column_config.SelectboxColumn(_PANEL_FIELDS[field], options=['', *choices.values()])
     columns['水平数'] = st.column_config.NumberColumn('水平数', min_value=1, max_value=3, step=1)
     columns['参数建立点数'] = st.column_config.NumberColumn('参数建立点数', min_value=5, max_value=20, step=1)
     edited = st.data_editor(_panel_frame(ctx['draft']['rows'], options), hide_index=True, width='stretch',
@@ -567,7 +587,11 @@ def _render_panel_form(ctx):
     cancel, save = st.columns(2)
     if cancel.button('取消', key='panel_edit_cancel', disabled=registration_open):
         _cancel(ctx)
-    if save.button('保存整组项目', type='primary', key='panel_save', disabled=registration_open):
+    missing_statistics = [row.get('test_item_name') or str(row['test_item_id']) for row in ctx['draft']['rows']
+                          if row.get('target_statistics_mode') not in ('monthly', 'cumulative')]
+    if missing_statistics:
+        st.error('请选择以下项目的均值和SD统计方式：' + '、'.join(missing_statistics))
+    if save.button('保存整组项目', type='primary', key='panel_save', disabled=registration_open or bool(missing_statistics)):
         try:
             result = save_panel_items(ctx['template_id'], ctx['draft']['rows'], expected_revision=ctx['revision'])
         except (TypeError, ValueError) as exc:

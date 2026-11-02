@@ -9,7 +9,8 @@ from tests.lot_lifecycle_smoke_test import IsolatedDatabase,lj,rejected
 from tests.zscore_v12_fixtures import seed_zscore_configuration
 from tests.instant_v12_fixtures import seed_instant_configuration
 from services.quality_target_service import *
-from services.project_config_service import (copy_lot_config,activate_lot_config,activate_project_template,list_lot_config_items,create_lot_config_from_template,save_lot_item_cv_requirement,get_lot_config)
+from services.project_config_service import (copy_lot_config,activate_lot_config,activate_project_template,list_lot_config_items,list_lot_configs,create_lot_config_from_template,save_lot_item_cv_requirement)
+from services.material_workflow_service import config_material_summary
 from services.master_data_service import create_qc_lot,create_qc_level,list_units
 from services.workbench_config_service import sync_lj_workbench_bindings
 from services.zscore_workbench_service import sync_zscore_workbench_bindings
@@ -189,7 +190,7 @@ def test_three_method_snapshots_and_report_do_not_modify_records():
                     (method,batch))]
             assert len(profiles)==1,profiles
             profile=profiles[0]
-            expected=dict(summary, statistics_scope='分批次、参数版本及水平；仅正式期在控结果，多水平法按整次在控筛选；标准SD上限、偏倚和总误差不自动比较，质控图仍按所选规则判读',
+            expected=dict(summary, statistics_scope='按批次、参数版本和水平统计正式期在控结果；多水平按整次在控筛选',
                 rows=[dict(row, level=f"{row['level']} / 参数版本 {profile['version_no']}",
                            level_order=order, profile_id=profile['id'], parameter_version=str(profile['version_no']))
                       for order,row in enumerate(summary['rows'],1)])
@@ -261,8 +262,12 @@ def test_page_catalog_and_adoption_existing_batch_readonly():
         assert at.session_state['v11_management_tabs']=='批次管理'
         assert not any(b.key==f'quality_lot_{item}_adopt' for b in at.button)
         config_table = next(index for index, table in enumerate(at.dataframe) if 'batch_configs_' in table.proto.id)
-        names = at.dataframe[config_table].value['批次名称'].tolist()
-        select_table_row(at, names.index(get_lot_config(config)['config_name']), index=config_table)
+        assert not at.text_input(key='batch_search').value.strip()
+        ids = list_lot_configs(template_id=at.selectbox(key='batch_project_filter').value,
+            include_disabled=at.checkbox(key='batch_show_disabled').value).id.tolist()
+        assert at.dataframe[config_table].value['质控品与原厂批号'].tolist() == [
+            config_material_summary(identifier) for identifier in ids]
+        select_table_row(at, ids.index(config), index=config_table)
         assert at.session_state['v11_selected_lot_config_id'] == config
         assert at.session_state[f'batch_selected_item_{config}'] == item
         at.button(key=f'batch_edit_quality_{item}').click().run()

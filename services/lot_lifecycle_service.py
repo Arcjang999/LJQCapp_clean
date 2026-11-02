@@ -32,6 +32,20 @@ def _required(value, label):
     return value
 
 
+def source_product_ids(connection, source):
+    products = set()
+    for level in source.get('levels', []):
+        if level.get('qc_level_id'):
+            row = connection.execute('''SELECT q.qc_material_id FROM md_qc_levels l
+                JOIN md_qc_material_lots q ON q.id=l.qc_material_lot_id WHERE l.id=?''',
+                (level['qc_level_id'],)).fetchone()
+            if row:
+                products.add(int(row[0]))
+    if not products and len(source.get('identity') or []) > 1:
+        products.add(int(source['identity'][1]))
+    return products
+
+
 def source_context(connection, method, batch_id, *, read_only=False):
     if method not in CONTEXT_COLUMNS:
         raise ValueError('不支持的质控方法。')
@@ -106,14 +120,15 @@ def require_writable(connection, method, batch_id, test_time=None, *, read_only=
                 raise ValueError('质控品或浓度水平顺序已修改，请新建批次；已有检测保留当时使用的质控品和水平。')
         if source.get('identity'):
             for table,index in [('lab_instruments',0),('md_qc_materials',1),('md_qc_material_lots',2),('md_test_items',3),('md_units',5),('md_methods',6),('md_reagents',7)]:
-                if material_mode and index == 2:
+                if material_mode and index in (1, 2):
                     continue
                 identity=source['identity'][index]
                 if identity and not connection.execute(f'SELECT 1 FROM {table} WHERE id=? AND is_disabled=0',(identity,)).fetchone():
                     raise ValueError('检测系统引用的基础资料已停用，请刷新确认。')
         for level in source.get('levels',[]):
             if level.get('qc_level_id') and not connection.execute("""SELECT 1 FROM md_qc_levels l JOIN md_qc_material_lots q ON q.id=l.qc_material_lot_id
-                WHERE l.id=? AND l.is_disabled=0 AND q.is_disabled=0""",(level['qc_level_id'],)).fetchone():
+                JOIN md_qc_materials p ON p.id=q.qc_material_id
+                WHERE l.id=? AND l.is_disabled=0 AND q.is_disabled=0 AND p.is_disabled=0""",(level['qc_level_id'],)).fetchone():
                 raise ValueError('当前水平或其质控批号已停用，请刷新确认。')
     return source
 
@@ -171,7 +186,14 @@ def record_lot_verification(*, template_item_id, conclusion, evidence, confirmed
                 raise ValueError('验证试剂批号必须属于该检测项的试剂产品。')
         if qc_lot_id is not None:
             lot=c.execute('SELECT * FROM md_qc_material_lots WHERE id=? AND is_disabled=0',(qc_lot_id,)).fetchone()
-            if lot is None or lot['qc_material_id']!=json.loads(system['snapshot_json'])['identity'][1]:
+            saved_source=json.loads(system['snapshot_json'])
+            products=source_product_ids(c,saved_source)
+            for candidate in c.execute('SELECT source_snapshot_json FROM qc_workbench_bindings WHERE project_template_item_id=?', (template_item_id,)):
+                candidate_source=json.loads(candidate[0] or '{}')
+                identity=candidate_source.get('identity') or []
+                if len(identity)>=8 and all(identity[i]==saved_source['identity'][i] for i in (0,3,4,5,6,7)):
+                    products.update(source_product_ids(c,candidate_source))
+            if lot is None or lot['qc_material_id'] not in products:
                 raise ValueError('质控验证批号必须属于该检测配置的质控品。')
         return c.execute('''INSERT INTO qc_lot_verifications(template_item_id,reagent_lot_id,qc_lot_id,conclusion,evidence,confirmed_by,confirmed_at,system_id)
             VALUES(?,?,?,?,?,?,?,?)''',(template_item_id,reagent_lot_id,qc_lot_id,conclusion,evidence,confirmed_by,timestamp(confirmed_at),system['id'])).lastrowid
@@ -219,7 +241,7 @@ def qc_lots_for_source(connection, source):
 def _require_qc_verification(connection, source, lot_id, verification_id, effective_at):
     when=timestamp(effective_at)
     lot=connection.execute('SELECT * FROM md_qc_material_lots WHERE id=?',(lot_id,)).fetchone()
-    if lot is None or lot['qc_material_id']!=source['identity'][1]:
+    if lot is None or lot['qc_material_id'] not in source_product_ids(connection, source):
         raise ValueError('验证质控批号必须属于当前检测配置的质控品。')
     if lot['is_disabled']:
         raise ValueError('实际质控批号已停用，不能正式使用或建立换批组合。')
@@ -352,8 +374,16 @@ def context_dataframe(method,batch_id):
         with get_connection() as c:
             levels=c.execute('SELECT level_name,level_code,lot_no,expiry_date FROM qc_result_context_levels WHERE context_id=? ORDER BY level_order',(r['id'],)).fetchall()
         from services.material_workflow_service import concentration_label
-        qc_label=' / '.join(f"{concentration_label(level)}: {level['lot_no']}" for level in levels)
-        s=json.loads(r['config_snapshot_json']);records.append({'result_id':r['result_id'],'test_time':r['test_time'],
+        s=json.loads(r['config_snapshot_json'])
+        frozen_levels=s.get('levels') or []
+        labels=[]
+        for order,level in enumerate(levels):
+            frozen=frozen_levels[order] if order<len(frozen_levels) else {}
+            product='｜'.join(str(frozen.get(key) or '') for key in
+                ('manufacturer_name','catalog_no','generic_name') if frozen.get(key))
+            labels.append((product+'｜' if product else '')+f"{concentration_label(level)}: {level['lot_no']}")
+        qc_label=' / '.join(labels)
+        records.append({'result_id':r['result_id'],'test_time':r['test_time'],
             'context_id':r['id'],'reagent_lot_no':r['reagent_lot_no'] or '未记录','reagent_expiry_date':r['reagent_expiry_date'],
             'qc_lot_no':qc_label or s.get('lot_no','未记录'),'instrument':s.get('instrument_name',''),
             'reagent':s.get('reagent_name',''),'unit_symbol':s.get('unit_symbol',''),
@@ -496,7 +526,7 @@ def target_profile(method,batch_id,test_time=None,profile_id=None):
     result=dict(row);result['levels']=json.loads(row['levels_json']);return result
 
 
-def create_target_profile(*, method,batch_id,levels,source,evidence,confirmed_by,effective_at,source_result_ids=None):
+def create_target_profile(*, method,batch_id,levels,source,evidence,confirmed_by,effective_at,source_result_ids=None,source_statistics=None,expected_statistics_policy_revision=None):
     if method not in ('lj','zscore') or source not in ('building','manual','manufacturer','revision'):
         raise ValueError('不支持的控制参数来源。')
     evidence=_required(evidence,'靶值依据');confirmed_by=_required(confirmed_by,'确认人')
@@ -522,9 +552,23 @@ def create_target_profile(*, method,batch_id,levels,source,evidence,confirmed_by
         for result_id in source_result_ids or []:
             if not c.execute(f'SELECT 1 FROM {RESULT_TABLES[method]} WHERE id=? AND batch_id=?',(result_id,batch_id)).fetchone():
                 raise ValueError('均值和标准差来源记录必须属于当前方法和质控批次。')
+        if source_statistics is not None:
+            if source!='revision':
+                raise ValueError('统计候选须作为新的参数修订版本确认。')
+            from services.target_statistics_service import validate_statistics_source
+            source_statistics=validate_statistics_source(c,method,batch_id,levels,source_statistics,effective_at=effective_at)
         profile_id=c.execute('''INSERT INTO qc_target_profiles(qc_method,batch_id,version_no,effective_at,source,levels_json,evidence,confirmed_by,source_result_ids_json)
             VALUES(?,?,?,?,?,?,?,?,?)''',(method,batch_id,1 if previous is None else previous['version_no']+1,when,source,
             json.dumps(levels,ensure_ascii=False),evidence,confirmed_by,json.dumps(source_result_ids or []))).lastrowid
+        if source_statistics is not None:
+            c.execute('UPDATE qc_target_profiles SET source_statistics_json=? WHERE id=?',
+                (json.dumps(source_statistics,ensure_ascii=False,allow_nan=False),profile_id))
+            from services.target_statistics_policy_service import save_target_statistics_policy
+            from services.target_binding_service import target_binding_for_batch
+            binding=target_binding_for_batch(c,method,batch_id)
+            save_target_statistics_policy('lot',binding['lot_config_item_id'],source_statistics['strategy'],
+                expected_revision=source_statistics['policy_revision'] if expected_statistics_policy_revision is None else expected_statistics_policy_revision,
+                confirmed_by=confirmed_by,connection=c)
         if snapshot.get('system_id'):
             c.execute('''INSERT INTO qc_lot_change_events(system_id,template_item_id,event_type,previous_id,next_id,effective_at,reason,operator,details_json)
                 VALUES(?,?,'target',?,?,?,?,?,?)''',(snapshot['system_id'],snapshot['project_template_item_id'],previous['id'] if previous else None,profile_id,when,evidence,confirmed_by,json.dumps({'method':method,'batch_id':batch_id})))
@@ -758,6 +802,14 @@ def report_lot_trace(method,batch_id,month,frame,*,start_date=None,end_date=None
         source,_,_=source_context(c,method,batch_id,read_only=True)
         events=[dict(r) for r in c.execute('SELECT * FROM qc_lot_change_events WHERE system_id=? AND effective_at>=? AND effective_at<? ORDER BY effective_at,id',
             (source.get('system_id'),str(period.start_time),str(period.end_exclusive)))]
+    for group in groups:
+        profile=target_profile(method,batch_id,profile_id=group['profile_id']) if group['profile_id'] else None
+        statistics=json.loads(profile.get('source_statistics_json') or '{}') if profile else {}
+        if statistics:
+            group['statistics_source']={key:statistics.get(key) for key in
+                ('strategy','as_of','period_start','period_end','period_end_inclusive','rule','fingerprint')}
+            group['statistics_source']['level']=next((row for row in statistics.get('levels',[])
+                if row['level_id']==group['level']),{})
     return _json_safe({'actual_lots':df.to_dict('records'),'statistics_by_target_version':groups,'events':events,
         'basis':'按本次结果保存的批号及参数版本回顾；累计判定按各版本自己的窗口，缺失历史批号显示未记录。'})
 
@@ -777,12 +829,13 @@ def create_level_combination(*,source_batch_id,level_ids,verification_ids,operat
         old_target=target_profile('zscore',source_batch_id,effective_at)
         chosen=[]
         for order,lid in enumerate(level_ids,1):
+            old_level=c.execute('''SELECT l.*,q.qc_material_id FROM md_qc_levels l
+                JOIN md_qc_material_lots q ON q.id=l.qc_material_lot_id WHERE l.id=?''', (old_ids[order-1],)).fetchone()
             level=c.execute('''SELECT l.*,q.qc_material_id,q.lot_no,q.expiry_date,q.is_disabled AS lot_disabled FROM md_qc_levels l
                 JOIN md_qc_material_lots q ON q.id=l.qc_material_lot_id WHERE l.id=?''',(lid,)).fetchone()
-            if (level is None or level['is_disabled'] or level['lot_disabled'] or level['qc_material_id']!=source['identity'][1]
+            if (level is None or level['is_disabled'] or level['lot_disabled'] or level['qc_material_id']!=old_level['qc_material_id']
                 or level['expiry_date']<timestamp(effective_at)[:10]):
-                raise ValueError('各水平必须属于同一质控产品、对应浓度顺序且未过期。')
-            old_level=c.execute('SELECT * FROM md_qc_levels WHERE id=?',(old_ids[order-1],)).fetchone()
+                raise ValueError('请为各水平选择原产品对应浓度、未过期的新批号；更换产品请新建批次。')
             if old_level['specification_id']:
                 if level['specification_id']!=old_level['specification_id']: raise ValueError('换批须选择对应浓度规格的新材料；改变规格请重新建立批次。')
             elif level['level_code'] or old_level['level_code']:

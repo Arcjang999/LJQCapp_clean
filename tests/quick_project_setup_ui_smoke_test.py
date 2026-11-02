@@ -43,6 +43,8 @@ def open_details(values, *, candidate=False):
     for field in ('test_item_id', 'lab_instrument_id', 'reagent_id', 'method_id', 'unit_id'):
         app.selectbox(key=draft_key(app, field)).set_value(values[field]).run()
         assert_clean(app)
+    if values.get('target_statistics_mode'):
+        app.selectbox(key=draft_key(app, 'target_statistics_mode')).set_value(values['target_statistics_mode']).run()
     token = app.session_state['project_workspace_dialog']['token']
     if values['qc_method'] == 'zscore':
         app.radio(key='project_kind_' + token).set_value('多水平').run()
@@ -50,19 +52,22 @@ def open_details(values, *, candidate=False):
     elif values['qc_method'] == 'instant':
         app.checkbox(key='project_instant_' + token).check().run()
     prefix = product_prefix(app)
-    if candidate:
-        app.radio(key=prefix + '_mode').set_value('已核对的候选').run()
-    app.selectbox(key=prefix + '_product').set_value(values['qc_material_id']).run()
-    if not candidate:
-        app.text_input(key=prefix + '_person').set_value('人工选品核对人')
-        app.text_area(key=prefix + '_evidence').set_value('已逐项核对仪器、试剂、项目、方法及质控品适用性。')
+    product_ids = values.get('level_product_ids') or [values['qc_material_id']] * values['level_count']
+    for position in range(values['level_count']):
+        slot = f'quick_control_{token}_{position}'
+        app.selectbox(key=slot + '_product').set_value(product_ids[position]).run()
+    for product in dict.fromkeys(product_ids):
+        pfx = prefix if len(set(product_ids)) == 1 else prefix + '_' + str(product)
+        if not candidate:
+            app.text_input(key=pfx + '_person').set_value('人工选品核对人')
+            app.text_area(key=pfx + '_evidence').set_value('已逐项核对仪器、试剂、项目、方法及质控品适用性。')
+    app.run()
     app.button(key=prefix + '_confirm').click().run()
     assert_clean(app)
     assert app.button(key='quick_details_next').disabled
-    for index, level_id in enumerate(values['level_ids'], 1):
-        app.selectbox(key=f"quick_material_{token}_{values['qc_material_id']}_{index}").set_value(level_id).run()
+    for position, level_id in enumerate(values['level_ids']):
+        app.selectbox(key=f'quick_control_{token}_{position}_level').set_value(level_id).run()
     app.text_input(key=draft_key(app, 'template_name')).set_value(values['template_name'])
-    app.text_input(key=draft_key(app, 'config_name')).set_value(values['config_name'])
     app.text_area(key=draft_key(app, 'notes')).set_value('完整项目草稿备注')
     app.run()
     assert_clean(app)
@@ -131,20 +136,18 @@ class QuickProjectSetupUiTests(unittest.TestCase):
             values.update(qc_material_id=product, level_ids=[])
             app = open_details(values)
             self.assertTrue(app.button(key='quick_details_next').disabled)
-            self.assertTrue(any('暂无可选的批号' in item.value for item in app.info))
-            self.assertTrue(all(widget.disabled for widget in app.selectbox if widget.key.startswith('quick_material_')))
-            original = deepcopy(app.session_state['project_workspace_dialog']['draft'])
             token = app.session_state['project_workspace_dialog']['token']
+            self.assertTrue(all(widget.disabled for widget in app.selectbox if (widget.key or '').startswith('quick_control_') and widget.key.endswith('_level')))
+            original = deepcopy(app.session_state['project_workspace_dialog']['draft'])
             registration_key = 'quick_' + token
             recorded_ids = []
-            for name in ('低值', '高值'):
-                app.button(key=registration_key + '_register').click().run()
+            for position, name in enumerate(('低值', '高值')):
+                app.button(key=f'quick_control_{token}_{position}_new_lot').click().run()
                 assert_clean(app)
                 state = app.session_state[registration_key + '_registration']
                 prefix = 'material_edit_' + state['nonce']
                 self.assertEqual(product, state['product_id'])
-                self.assertFalse(any(widget.key == product_prefix(app) + '_product' for widget in app.selectbox))
-                self.assertTrue(app.button(key='quick_details_next').disabled)
+                self.assertFalse(any(widget.key == 'quick_details_next' for widget in app.button))
                 app.text_input(key=prefix + '_new_name').set_value(name)
                 app.text_input(key=prefix + '_lot').set_value('NEW-PACKAGE-01')
                 app.date_input(key=prefix + '_expiry').set_value(date(2028, 12, 31))
@@ -152,19 +155,104 @@ class QuickProjectSetupUiTests(unittest.TestCase):
                 assert_clean(app)
                 self.assertNotIn(registration_key + '_registration', app.session_state.filtered_state)
                 draft = app.session_state['project_workspace_dialog']['draft']
-                for field in ('template_name', 'config_name', 'notes', 'reagent_id', 'test_item_id', 'product_choice_review'):
+                for field in ('template_name', 'notes', 'reagent_id', 'test_item_id', 'product_choice_review'):
                     self.assertEqual(original[field], draft[field])
                 material_id = int(available_materials(product).loc[lambda frame: frame.level_name == name, 'id'].iloc[0])
                 recorded_ids.append(material_id)
-                self.assertTrue(app.button(key='quick_details_next').disabled)
-                app.selectbox(key=f'quick_material_{token}_{product}_{len(recorded_ids)}').set_value(material_id).run()
+                self.assertEqual(material_id, app.selectbox(key=f'quick_control_{token}_{position}_level').value)
+                self.assertEqual(recorded_ids, draft['level_ids'][:position+1])
+                self.assertEqual(position == 0, app.button(key='quick_details_next').disabled)
             self.assertFalse(app.button(key='quick_details_next').disabled)
-            app.selectbox(key=f'quick_material_{token}_{product}_2').set_value(recorded_ids[0]).run()
+            app.selectbox(key=f'quick_control_{token}_1_level').set_value(recorded_ids[0]).run()
             self.assertTrue(app.button(key='quick_details_next').disabled)
-            app.selectbox(key=f'quick_material_{token}_{product}_2').set_value(recorded_ids[1]).run()
+            self.assertTrue(any('各水平不能选择同一条' in error.value for error in app.error))
+            self.assertFalse(any('继续前请先完成' in warning.value for warning in app.warning))
+            app.selectbox(key=f'quick_control_{token}_1_level').set_value(recorded_ids[1]).run()
             app.button(key='quick_details_next').click().run()
             assert_clean(app)
             self.assertEqual('quality', app.session_state['project_workspace_dialog']['quick_step'])
+            with get_connection() as connection:
+                self.assertEqual(0, connection.execute('SELECT COUNT(*) FROM qc_project_templates').fetchone()[0])
+
+    def test_different_manufacturers_and_products_are_selected_per_level(self):
+        from services.master_data_service import create_manufacturer, create_qc_lot, create_qc_level
+        with IsolatedDatabase():
+            values = metadata_values('zscore', 2)
+            maker = create_manufacturer(display_name='另一厂家', categories=['qc_material'])
+            second = create_qc_material(manufacturer_id=maker, generic_name='高水平质控品',
+                                       catalog_no='SKU-HIGH', concentration_code='HIGH')
+            lot = create_qc_lot(qc_material_id=second, lot_no='FACTORY-HIGH-02', expiry_date='2029-12-31')
+            level = create_qc_level(qc_material_lot_id=lot, level_name='厂家高水平', level_order=1)
+            values['level_ids'][1] = level
+            values['level_product_ids'] = [values['qc_material_id'], second]
+            app = open_details(values)
+            token = app.session_state['project_workspace_dialog']['token']
+            self.assertEqual(second, app.selectbox(key=f'quick_control_{token}_1_product').value)
+            self.assertEqual(level, app.selectbox(key=f'quick_control_{token}_1_level').value)
+            self.assertTrue(any('SKU-HIGH' in option and '另一厂家' in option
+                                for option in app.selectbox(key=f'quick_control_{token}_1_product').options))
+            self.assertFalse(any(widget.key == draft_key(app, 'config_name') for widget in app.text_input))
+            to_preview(app, values)
+            app.button(key='quick_save').click().run()
+            assert_clean(app)
+            with get_connection() as connection:
+                rows = connection.execute("""SELECT a.level_order,q.qc_material_id,q.lot_no,p.catalog_no
+                    FROM qc_lot_config_item_levels a JOIN md_qc_levels l ON l.id=a.qc_level_id
+                    JOIN md_qc_material_lots q ON q.id=l.qc_material_lot_id
+                    JOIN md_qc_materials p ON p.id=q.qc_material_id ORDER BY a.level_order""").fetchall()
+            self.assertEqual([values['qc_material_id'], second], [row['qc_material_id'] for row in rows])
+            self.assertEqual('FACTORY-HIGH-02', rows[1]['lot_no'])
+            self.assertEqual('SKU-HIGH', rows[1]['catalog_no'])
+
+    def test_new_product_and_lot_return_to_second_slot_and_preserve_parent(self):
+        from datetime import date
+        from services.master_data_service import create_manufacturer
+        with IsolatedDatabase():
+            values = metadata_values('zscore', 2)
+            maker = create_manufacturer(display_name='补登记厂家', categories=['qc_material'])
+            app = open_details(values)
+            token = app.session_state['project_workspace_dialog']['token']
+            first_product = app.selectbox(key=f'quick_control_{token}_0_product').value
+            first_level = app.selectbox(key=f'quick_control_{token}_0_level').value
+            before = database_contents()
+            app.button(key=f'quick_control_{token}_1_new_product').click().run()
+            state = app.session_state['quick_' + token + '_registration']
+            product_prefix_key = 'product_edit_' + state['nonce']
+            self.assertTrue(any('请选择厂家' in row.value for row in app.caption))
+            self.assertTrue(any('请填写质控品名称' in row.value for row in app.caption))
+            app.button(key=product_prefix_key + '_cancel').click().run()
+            assert_clean(app)
+            self.assertEqual(before, database_contents())
+            self.assertEqual(values['level_ids'][1], app.selectbox(key=f'quick_control_{token}_1_level').value)
+            app.text_area(key=draft_key(app, 'notes')).set_value('尚未单独刷新也要保留的项目备注')
+            app.button(key=f'quick_control_{token}_1_new_product').click().run()
+            state = app.session_state['quick_' + token + '_registration']
+            product_prefix_key = 'product_edit_' + state['nonce']
+            app.selectbox(key=product_prefix_key + '_manufacturer').set_value(maker)
+            app.text_input(key=product_prefix_key + '_generic_name').set_value('新货号高水平质控品')
+            app.text_input(key=product_prefix_key + '_catalog_no').set_value('NEW-HIGH-002')
+            app.text_input(key=product_prefix_key + '_concentration_code').set_value('H2')
+            app.button(key=product_prefix_key + '_save').click().run()
+            assert_clean(app)
+            state = app.session_state['quick_' + token + '_registration']
+            self.assertEqual('material', state['kind'])
+            new_product = state['product_id']
+            prefix = 'material_edit_' + state['nonce']
+            self.assertTrue(app.text_input(key=prefix + '_new_catalog').disabled)
+            self.assertEqual('NEW-HIGH-002', app.text_input(key=prefix + '_new_catalog').value)
+            app.text_input(key=prefix + '_new_name').set_value('厂家高水平')
+            app.text_input(key=prefix + '_lot').set_value('PRINTED-LOT-02')
+            app.date_input(key=prefix + '_expiry').set_value(date(2029, 12, 31))
+            app.button(key=prefix + '_save').click().run()
+            assert_clean(app)
+            self.assertEqual(first_product, app.selectbox(key=f'quick_control_{token}_0_product').value)
+            self.assertEqual(first_level, app.selectbox(key=f'quick_control_{token}_0_level').value)
+            self.assertEqual(new_product, app.selectbox(key=f'quick_control_{token}_1_product').value)
+            selected = app.selectbox(key=f'quick_control_{token}_1_level').value
+            self.assertEqual('PRINTED-LOT-02', available_materials(new_product).set_index('id').loc[selected,'lot_no'])
+            self.assertEqual('尚未单独刷新也要保留的项目备注', app.text_area(key=draft_key(app, 'notes')).value)
+            self.assertEqual(values['reagent_id'], app.selectbox(key=draft_key(app, 'reagent_id')).value)
+            self.assertFalse(any(widget.key == draft_key(app, 'config_name') for widget in app.text_input))
             with get_connection() as connection:
                 self.assertEqual(0, connection.execute('SELECT COUNT(*) FROM qc_project_templates').fetchone()[0])
 
@@ -175,7 +263,7 @@ class QuickProjectSetupUiTests(unittest.TestCase):
             before = database_contents()
             original = deepcopy(app.session_state['project_workspace_dialog']['draft'])
             key = 'quick_' + app.session_state['project_workspace_dialog']['token']
-            app.button(key=key + '_register').click().run()
+            app.button(key='quick_control_' + app.session_state['project_workspace_dialog']['token'] + '_0_new_lot').click().run()
             state = app.session_state[key + '_registration']
             prefix = 'material_edit_' + state['nonce']
             app.text_input(key=prefix + '_new_name').set_value('尚未保存的水平').run()
@@ -220,7 +308,7 @@ class QuickProjectSetupUiTests(unittest.TestCase):
             self.assertEqual(original_token, context['token'])
             self.assertEqual(original, context['draft'])
             self.assertEqual(values['template_name'], app.text_input(key=draft_key(app, 'template_name')).value)
-            self.assertEqual('人工选品核对人', app.text_input(key=product_prefix(app) + '_person').value)
+            self.assertTrue(any('人工选品核对人' in row.value for row in app.caption))
             self.assertEqual(values['level_ids'], context['draft']['level_ids'])
             self.assertEqual(values['quality']['source_version'], context['draft']['quality']['source_version'])
             app.button(key='quick_use_group').click().run()
@@ -234,8 +322,8 @@ class QuickProjectSetupUiTests(unittest.TestCase):
             for field, previous in [('default_reagent_id', 'reagent_id'), ('default_method_id', 'method_id'),
                                     ('default_qc_method', 'qc_method'), ('default_level_count', 'level_count')]:
                 self.assertEqual(original[previous], context['draft'][field])
-            for identity, cached in original['manual_choice_drafts'].items():
-                self.assertEqual(cached, context['draft']['manual_choice_drafts'][identity])
+            for identity, cached in original['product_manual_drafts'].items():
+                self.assertEqual(cached, context['draft']['product_manual_drafts'][identity])
             self.assertNotIn('quality', context['draft'])
             self.assertNotIn('level_ids', context['draft'])
             self.assertEqual(values['template_name'], app.text_input(key=draft_key(app, 'template_name')).value)
@@ -285,7 +373,7 @@ class QuickProjectSetupUiTests(unittest.TestCase):
             self.assertEqual(before, database_contents())
             app.button(key='project_continue_edit').click().run()
             assert_clean(app)
-            self.assertEqual('recorded', app.radio(key=prefix + '_mode').value)
+            self.assertFalse(any(widget.key == prefix + '_mode' for widget in app.radio))
             self.assertEqual(values['quality']['source_name'], app.text_input(key=prefix + '_source_name').value)
             self.assertEqual(values['quality']['source_version'], app.text_input(key=prefix + '_source_version').value)
             self.assertEqual(values['quality']['requirement_text'], app.text_area(key=prefix + '_recorded').value)
@@ -293,15 +381,15 @@ class QuickProjectSetupUiTests(unittest.TestCase):
             assert_clean(app)
             app.button(key='quick_preview_back').click().run()
             assert_clean(app)
-            self.assertEqual('recorded', app.radio(key=prefix + '_mode').value)
+            self.assertFalse(any(widget.key == prefix + '_mode' for widget in app.radio))
             self.assertEqual(values['quality']['source_version'], app.text_input(key=prefix + '_source_version').value)
             app.button(key='quick_quality_back').click().run()
             assert_clean(app)
             self.assertEqual(values['template_name'], app.text_input(key=draft_key(app, 'template_name')).value)
             self.assertEqual('完整项目草稿备注', app.text_area(key=draft_key(app, 'notes')).value)
             product = product_prefix(app)
-            self.assertEqual('人工选品核对人', app.text_input(key=product + '_person').value)
-            self.assertEqual('已逐项核对仪器、试剂、项目、方法及质控品适用性。', app.text_area(key=product + '_evidence').value)
+            self.assertTrue(any('人工选品核对人' in row.value for row in app.caption))
+            self.assertTrue(any('已逐项核对仪器、试剂、项目、方法及质控品适用性。' in row.value for row in app.caption))
             self.assertEqual(values['level_ids'], app.session_state['project_workspace_dialog']['draft']['level_ids'])
             self.assertEqual(before, database_contents())
             app.button(key='project_dialog_cancel').click().run()
@@ -330,8 +418,8 @@ class QuickProjectSetupUiTests(unittest.TestCase):
                 self.assertEqual('preview', app.session_state['project_workspace_dialog']['quick_step'])
                 self.assertEqual(draft, app.session_state['project_workspace_dialog']['draft'])
                 self.assertEqual(before, database_contents())
-                expected = ('项目资料或可用质控品已修改', '返回上一步') if change == 'lot' else (
-                    '该试剂可用的质控品资料已修改', '重新选择质控品')
+                expected = ('项目资料或可用质控品已修改', '预览已失效') if change == 'lot' else (
+                    '质控品资料已修改', '重新核对并确认质控品')
                 self.assertTrue(any(all(text in str(item.value) for text in expected) for item in app.error))
 
     def test_numeric_quality_back_step_retains_automatic_uniform_standard_and_stricter_cv(self):
@@ -383,7 +471,7 @@ class QuickProjectSetupUiTests(unittest.TestCase):
             values = metadata_values()
             app = open_details(values)
             prefix = product_prefix(app)
-            self.assertEqual(['全部质控品'], app.radio(key=prefix + '_mode').options)
+            self.assertFalse(any(widget.key == prefix + '_mode' for widget in app.radio))
             app.button(key=prefix + '_relation_add').click().run()
             assert_clean(app)
             editor = app.session_state['project_workspace_dialog'][prefix + '_editor']
@@ -392,10 +480,8 @@ class QuickProjectSetupUiTests(unittest.TestCase):
                 app.text_input(key=ep + '_' + field).set_value(value)
             app.button(key=ep + '_save').click().run()
             assert_clean(app)
-            self.assertIn('已登记的配套质控品', app.radio(key=prefix + '_mode').options)
             self.assertTrue(any('已核对说明书及实验室适用依据' in str(item.value) for item in app.caption))
             self.assertTrue(app.button(key='quick_details_next').disabled)
-            app.radio(key=prefix + '_mode').set_value('已核对的候选').run()
             app.button(key=prefix + '_confirm').click().run()
             assert_clean(app)
             self.assertEqual('recommendation', app.session_state['project_workspace_dialog']['draft']['product_choice_review']['basis'])

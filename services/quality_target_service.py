@@ -273,7 +273,7 @@ def batch_quality_summary(method,batch_id,month=None):
         cv=calculate_cv_percent(data.mean(),data.std(ddof=1)) if len(data)>1 else None
         decision='即时法过渡期，暂不评价正式期 CV' if method=='instant' else evaluate_cv(goal,order,cv,count=len(data),days=len(dates[order]))
         rows.append(dict(level=f'水平 {order}',requirement=requirement_text(entry['rule']),category=entry['category'],concentration=entry['concentration'],count=len(data),days=len(dates[order]),cv=cv,decision=decision))
-    return dict(goal=goal,review=review,rows=rows,period=month or '本批次全部正式期',statistics_scope='仅正式期在控结果；Z-score按整次在控筛选；标准SD上限、偏倚和总误差不自动比较，质控图仍按所选规则判读')
+    return dict(goal=goal,review=review,rows=rows,period=month or '本批次全部正式期',statistics_scope='仅统计正式期在控结果；多水平按整次在控筛选')
 
 
 IMPORT_COLUMNS=['检验项目','来源名称','版本','实施日期','单位','允许不精密度类型','上限','比较符','浓度下限','浓度上限','水平类别','允许偏倚说明','允许总误差说明','来源链接或依据','确认人']

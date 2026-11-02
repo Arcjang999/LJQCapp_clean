@@ -78,6 +78,7 @@ class ProjectDependenciesUiTests(unittest.TestCase):
             app.button(key='workspace_add_item').click().run()
             for field in ('test_item_id', 'method_id', 'unit_id'):
                 app.selectbox(key=draft_key(app, field)).set_value(values[field]).run()
+            app.selectbox(key=draft_key(app, 'target_statistics_mode')).set_value('cumulative').run()
             ctx = app.session_state['project_workspace_dialog']
             prefix = 'item_product_' + ctx['token']
             app.button(key=prefix + '_relation_add').click().run()
@@ -119,7 +120,7 @@ class ProjectDependenciesUiTests(unittest.TestCase):
             app.button(key='home_create_project').click().run()
             name_key = draft_key(app, 'template_name')
             app.text_input(key=name_key).set_value('补资料期间保留项目名称').run()
-            self.assertTrue(any('暂无可选资料' in message.value for message in app.info))
+            self.assertTrue(any('尚未登记' in message.value for message in app.info))
             prefix = dependency_prefix(app)
             app.selectbox(key=prefix + '_type').set_value('lab_instrument').run()
             before = snapshot()
@@ -218,11 +219,13 @@ class ProjectDependenciesUiTests(unittest.TestCase):
             assert_clean(app)
             draft = app.session_state['project_workspace_dialog']['draft']
             self.assertEqual('建项中新增的产品', get_material_product(draft['qc_material_id'])['generic_name'])
-            self.assertEqual(draft['qc_material_id'], app.selectbox(key=product_prefix(app) + '_product').value)
-            self.assertEqual('人工选品', app.radio(key=product_prefix(app) + '_mode').value)
+            slot = 'quick_control_' + app.session_state['project_workspace_dialog']['token'] + '_0'
+            self.assertEqual(draft['qc_material_id'], app.selectbox(key=slot + '_product').value)
+            self.assertEqual([draft['qc_material_id']], draft['level_product_ids'])
             self.assertEqual(original_name, app.text_input(key=draft_key(app, 'template_name')).value)
-            self.assertEqual([], draft['level_ids'])
-            self.assertNotIn('product_choice_review', draft)
+            self.assertEqual([None], draft['level_ids'])
+            self.assertEqual({}, draft['product_choice_reviews'])
+            self.assertEqual({}, draft['product_choice_review'])
             self.assertTrue(app.button(key='quick_details_next').disabled)
 
     def test_default_unit_dependency_returns_to_unsaved_test_item(self):

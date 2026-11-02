@@ -16,6 +16,7 @@ from services.material_catalog_service import (
 )
 from services.material_workflow_service import concentration_label, list_material_specs, material_label, register_control_material
 from services.qc_product_display_service import product_choice_label, product_concentration_caption, product_display_rows
+from ui.required_fields import required_field
 
 
 def _open_dialog(kind: str, *, product_id=None, level_id=None) -> None:
@@ -80,17 +81,23 @@ def _material_editor(state: dict, *, on_saved=None, on_cancel=None) -> None:
     product_id = state['product_id']
     locked = bool(record.get('identity_locked'))
     product = get_material_product(product_id)
-    st.caption(f'质控品：{product["generic_name"]}')
+    st.caption('质控品：' + product_choice_label(product))
     if locked:
-        st.info('此批号已使用，可在这里补充备注。需要更改批号、效期或浓度水平时，先点击“保存修改”或“取消”返回批号列表，再点“新增质控品批号”登记，随后设置项目批次。')
+        st.info('此批号已使用，只能修改备注。更换批号、效期或浓度水平，请返回列表点击“新增质控品批号”。')
     spec_id = None
     defaults = dict(level_name=record.get('level_name', ''), level_code=record.get('level_code', ''),
-        catalog_no=record.get('specification_catalog_no', ''), lot_no=record.get('lot_no', ''),
+        catalog_no=record.get('specification_catalog_no', '') if edit else product.get('catalog_no', ''),
+        lot_no=record.get('lot_no', ''),
         expiry_date=date.fromisoformat(record['expiry_date']) if record.get('expiry_date') else None,
         concentration_note=record.get('concentration_label', ''))
     if not edit:
+        defaults.update(state.get('material_defaults', {}))
+    if not edit:
         specs = {int(r['id']): r for r in list_material_specs(product_id).to_dict('records')}
-        spec_id = st.selectbox('已登记的浓度水平', [None] + list(specs),
+        spec_options = [None] + list(specs)
+        initial_spec = state.get('initial_specification_id')
+        spec_id = st.selectbox('已登记的浓度水平', spec_options,
+            index=spec_options.index(initial_spec) if initial_spec in spec_options else 0,
             format_func=lambda value: '新增浓度水平' if value is None else concentration_label(specs[value]),
             key=f'{prefix}_spec')
         if spec_id:
@@ -104,25 +111,34 @@ def _material_editor(state: dict, *, on_saved=None, on_cancel=None) -> None:
             identity_draft[field] = st.session_state[key]
     identity_values = defaults if spec_id else {**defaults, **identity_draft}
     if spec_id:
-        st.caption('浓度水平、浓度编号和货号沿用“已登记的浓度水平”所选记录。需要登记新水平时，在该下拉框选择“新增浓度水平”。')
+        st.caption('需要填写其他浓度水平时，在上方选择“新增浓度水平”。')
     identity_prefix = f'{prefix}_{spec_id or "new"}'
     left, right = st.columns(2)
-    name = left.text_input('浓度水平 *', value=identity_values['level_name'], max_chars=100,
-        disabled=locked or bool(spec_id), key=f'{identity_prefix}_name', placeholder='例如：低值、高值或厂家 Level 2')
+    with left, required_field(f'{identity_prefix}_name',
+            missing=not str(st.session_state.get(f'{identity_prefix}_name', identity_values['level_name']) or '').strip(),
+            message='请填写浓度水平。'):
+        name = st.text_input('浓度水平 *', value=identity_values['level_name'], max_chars=100,
+            disabled=locked or bool(spec_id), key=f'{identity_prefix}_name', placeholder='例如：低值、高值或厂家 Level 2')
     code = right.text_input('浓度编号', value=identity_values['level_code'], max_chars=100,
         disabled=locked or bool(spec_id), key=f'{identity_prefix}_code', placeholder='例如：001、L02；保留原编号')
-    catalog = st.text_input('货号', value=identity_values['catalog_no'], max_chars=100,
-        disabled=locked or bool(spec_id), key=f'{identity_prefix}_catalog')
+    catalog = st.text_input('产品货号', value=identity_values['catalog_no'], max_chars=100,
+        disabled=True, key=f'{identity_prefix}_catalog')
     if not spec_id:
         state['new_specification_draft'] = dict(level_name=name, level_code=code, catalog_no=catalog)
     left, right = st.columns(2)
-    lot = left.text_input('批号 *', value=defaults['lot_no'], max_chars=100, disabled=locked, key=f'{prefix}_lot')
-    expiry = right.date_input('效期 *', value=defaults['expiry_date'], format='YYYY-MM-DD', disabled=locked, key=f'{prefix}_expiry')
+    with left, required_field(f'{prefix}_lot',
+            missing=not str(st.session_state.get(f'{prefix}_lot', defaults['lot_no']) or '').strip(),
+            message='请填写包装上的批号。'):
+        lot = st.text_input('批号 *', value=defaults['lot_no'], max_chars=100, disabled=locked, key=f'{prefix}_lot')
+    with right, required_field(f'{prefix}_expiry',
+            missing=st.session_state.get(f'{prefix}_expiry', defaults['expiry_date']) is None,
+            message='请选择效期。'):
+        expiry = st.date_input('效期 *', value=defaults['expiry_date'], format='YYYY-MM-DD', disabled=locked, key=f'{prefix}_expiry')
     note = st.text_area('浓度说明 / 备注', value=defaults['concentration_note'], key=f'{prefix}_note',
         help='各检验项目的均值和标准差请在批次设置中填写并确认。')
     draft = dict(level_name=name, level_code=code, catalog_no=catalog, lot_no=lot,
                  expiry_date=expiry, concentration_note=note)
-    dirty = draft != defaults or bool(spec_id)
+    dirty = draft != defaults or spec_id != state.get('initial_specification_id')
     if _cancel_controls(prefix, dirty=dirty, on_close=on_cancel):
         return
     if st.button('保存修改' if edit else '保存', key=f'{prefix}_save', type='primary', width='stretch'):
@@ -146,7 +162,7 @@ def _product_editor(state: dict, *, on_saved=None, on_cancel=None) -> None:
         from ui.master_data_dialogs import render_master_data_editor
         child = state['manufacturer_editor']
         st.subheader('新增质控品厂家')
-        st.caption('保存或取消厂家后，继续填写质控品。此前填写内容会保留。')
+        st.caption('质控品已填内容会保留。')
 
         def finish_manufacturer():
             state.pop('manufacturer_editor', None)
@@ -171,14 +187,17 @@ def _product_editor(state: dict, *, on_saved=None, on_cancel=None) -> None:
     manufacturers = {int(r['id']): r['display_name'] for r in all_manufacturers
                      if 'qc_material' in r['categories'] or r['id'] == record.get('manufacturer_id')}
     options = [None] + list(manufacturers)
-    manufacturer = st.selectbox('厂家 *', options,
-        index=options.index(record.get('manufacturer_id')) if record.get('manufacturer_id') in options else 0,
-        format_func=lambda value: '请选择厂家' if value is None else manufacturers[value],
-        disabled=edit, key=f'{prefix}_manufacturer')
+    with required_field(f'{prefix}_manufacturer',
+            missing=st.session_state.get(f'{prefix}_manufacturer', record.get('manufacturer_id')) is None,
+            message='请选择厂家。'):
+        manufacturer = st.selectbox('厂家 *', options,
+            index=options.index(record.get('manufacturer_id')) if record.get('manufacturer_id') in options else 0,
+            format_func=lambda value: '请选择厂家' if value is None else manufacturers[value],
+            disabled=edit, key=f'{prefix}_manufacturer')
     if locked:
-        st.info('此质控品已登记批号或用于项目，可在这里补充备注。需要更换名称、货号或浓度资料时，先点击“保存修改”或“取消”返回质控品列表，再点“新增质控品”登记。')
+        st.info('此质控品已登记批号或用于项目，只能修改备注。需要更换产品资料，请返回列表点击“新增质控品”。')
     elif edit:
-        st.caption('厂家沿用当前产品，不能在编辑时更换。需要登记其他厂家的产品时，点击“取消”返回列表，再点“新增质控品”。')
+        st.caption('更换厂家需返回列表点击“新增质控品”。')
     labels = {'generic_name': '质控品名称 *', 'catalog_no': '产品货号',
               'concentration_code': '浓度编号', 'concentration': '实际浓度',
               'trade_name': '商品名称', 'matrix': '基质', 'physical_form': '物理形态',
@@ -186,13 +205,16 @@ def _product_editor(state: dict, *, on_saved=None, on_cancel=None) -> None:
     values = {}
     columns = st.columns(2)
     for position, (key, label) in enumerate(labels.items()):
-        values[key] = columns[position % 2].text_input(label, value=record.get(key, ''),
-            max_chars=200, disabled=locked, key=f'{prefix}_{key}')
+        with columns[position % 2], required_field(f'{prefix}_{key}',
+                missing=key == 'generic_name' and not str(st.session_state.get(f'{prefix}_{key}', record.get(key, '')) or '').strip(),
+                message='请填写质控品名称。'):
+            values[key] = st.text_input(label, value=record.get(key, ''),
+                max_chars=200, disabled=locked, key=f'{prefix}_{key}')
     values['notes'] = st.text_area('备注', value=record.get('notes', ''), key=f'{prefix}_notes')
     state['product_draft'] = dict(values, manufacturer_id=manufacturer)
     if not edit:
         if not manufacturers:
-            st.info('还没有质控品厂家。点击“新增质控品厂家”，保存后继续填写当前质控品。')
+            st.info('还没有质控品厂家，请点击“新增质控品厂家”。')
         if st.button('新增质控品厂家', key=f'{prefix}_add_manufacturer'):
             from ui.master_data_dialogs import create_master_data_draft
             child = create_master_data_draft('manufacturer', manufacturer_category='qc_material')
@@ -209,7 +231,7 @@ def _product_editor(state: dict, *, on_saved=None, on_cancel=None) -> None:
                 product_id = state['product_id']
             else:
                 if manufacturer is None:
-                    raise ValueError('请选择厂家；列表中没有时，点击“新增质控品厂家”，保存后继续填写。')
+                    raise ValueError('请选择厂家；缺少厂家时点击“新增质控品厂家”。')
                 product_id = create_qc_material(manufacturer_id=manufacturer, **values)
         except ValueError as exc:
             st.error(str(exc))
@@ -230,11 +252,11 @@ def _status_confirmation(state: dict) -> None:
     label = record['generic_name'] if product_mode else material_label(record)
     st.markdown(f'**{label}**')
     if disabled:
-        st.warning('停用后移入已停用列表，已保存的检测记录、均值、标准差及报告保留。')
+        st.warning('停用后不能新增使用，原检测记录、参数和报告保留。')
     else:
-        st.info('恢复后可重新选择此产品或批号，原检测记录保留。')
+        st.info('恢复后可重新选用。')
     if lot_mode:
-        st.caption('恢复批号后，可以重新选择该批号下未单独停用的浓度水平。')
+        st.caption('单独停用的浓度水平需另行恢复。')
     if not product_mode:
         st.caption(f'用于批次设置：{record["config_count"]} 项；检测记录：{record["result_count"]} 条。')
     reason = st.text_area('停用原因 *', key=f'{prefix}_reason') if disabled else ''
@@ -369,7 +391,7 @@ def render_material_catalog(*, render_dialog: bool = True, include_directory: bo
     if add.button('新增质控品', key='material_catalog_add_product', width='stretch'):
         _open_dialog('product_new')
     if product_id is None:
-        st.info('先选择或新增质控品，再在下方登记批号、效期和浓度水平。')
+        st.info('请选择质控品；没有该产品时点击“新增质控品”。')
     else:
         product = get_material_product(product_id)
         concentration = product_concentration_caption(products[product_id])
@@ -400,7 +422,7 @@ def render_pending_material_dialog() -> None:
 
 def _render_product_batches(product_id, product, show_disabled):
     st.subheader('批号与浓度水平')
-    st.caption('按包装登记批号、效期和浓度水平；均值和标准差在项目批次中确认。')
+    st.caption('批号、效期和浓度水平按包装填写；均值和SD在项目中设置。')
     manager = st.session_state.get('material_dialog', {})
     if manager.get('kind') == 'batches' and 'material_catalog_search' not in st.session_state:
         st.session_state['material_catalog_search'] = manager.get('search', '')
@@ -418,7 +440,7 @@ def _render_product_batches(product_id, product, show_disabled):
         matches = materials[['level_name', 'level_code', 'lot_no']].fillna('').apply(lambda row: fuzzy_match(search, *row), axis=1)
         reveal = materials['id'].eq(reveal_id)
         if (reveal & ~matches).any():
-            st.caption('下方已显示刚保存的记录，原搜索条件保留。')
+            st.caption('已显示刚保存的记录。')
         materials = materials[matches | reveal]
     ids = materials['id'].astype(int).tolist()
     selected_id = st.session_state.get('material_catalog_selected_id')
@@ -458,7 +480,7 @@ def _render_product_batches(product_id, product, show_disabled):
                 st.warning('此批号已停用。请先恢复批号，再选择需要使用的浓度水平。')
                 if st.button('恢复批号', key='material_catalog_restore_lot'):
                     _open_dialog('lot_status', product_id=product_id, level_id=selected_id)
-    st.caption('浓度编号照包装填写，可留空；每个浓度水平可选择自己的批号。')
+    st.caption('浓度编号按包装填写，没有则留空。')
 
 
 

@@ -47,7 +47,11 @@ def render_daily_overview():
     instrument=select(columns[1],'仪器','lab_instrument_id','instrument_name','daily_instrument')
     template=select(columns[2],'项目','template_id','template_name','daily_template')
     columns=st.columns([1,1,2])
-    product=select(columns[0],'质控品','qc_material_id','material_name','daily_material')
+    products={product['id']:product['name'] for row in bindings for product in row.get('materials', [])}
+    _restore('daily_material')
+    if st.session_state.get('daily_material') not in [None,*products]:st.session_state['daily_material']=None
+    product=columns[0].selectbox('质控品',[None,*products],key='daily_material',
+        format_func=lambda value:'全部' if value is None else products[value],on_change=_value,args=('daily_material',))
     _restore('daily_method')
     method=columns[1].selectbox('按质控方法筛选',[None,*METHOD_LABELS],key='daily_method',format_func=lambda k:METHOD_LABELS.get(k,'全部'),on_change=_value,args=('daily_method',))
     _restore('daily_search')
@@ -74,9 +78,9 @@ def render_daily_overview():
     items=result['items']; metrics=st.columns(3)
     metrics[0].metric('当日检测次数',result['count']);metrics[1].metric('当日曾失控项目',sum(i['ever_reject'] for i in items))
     metrics[2].metric('未完成处理',len(result['pending']['items'])+len(result['pending']['cross_day']))
-    st.caption('多水平同一次检测按1次统计。“今日无记录”表示所选日期没有已保存的结果，请结合当日检测安排核对。')
+    st.caption('多水平整次检测计1次；“今日无记录”表示所选日期没有已保存结果。')
     frame=pd.DataFrame([{'项目':i['template_name'],'检验项目':i['test_item_name'],'仪器':i['instrument_name'],
-        '质控品':i['material_name'],'批次':i['config_name'],'质控方法':METHOD_LABELS[i['qc_method']],
+        '质控品与原厂批号':i['material_summary'],'质控方法':METHOD_LABELS[i['qc_method']],
         '阶段':i['phase'],'当日次数':i['count'],'最新结论':(i['latest'] or {}).get('conclusion','今日无记录'),
         '最新检测时间':(i['latest'] or {}).get('test_time',''),'今日曾失控':'是' if i['ever_reject'] else '否',
         '未完成处理':len(i['pending'])} for i in items])
@@ -85,7 +89,7 @@ def render_daily_overview():
     choices={i['overview_key']:i for i in items};_restore('daily_selected')
     if st.session_state.get('daily_selected') not in [None,*choices]:st.session_state['daily_selected']=None
     selected=st.selectbox('查看项目详情',[None,*choices],key='daily_selected',format_func=lambda k:'请选择' if k is None else
-        f"{choices[k]['test_item_name']} · {choices[k]['config_name']} · {METHOD_LABELS[choices[k]['qc_method']]}",on_change=_value,args=('daily_selected',))
+        f"{choices[k]['test_item_name']} · {choices[k]['material_summary']} · {METHOD_LABELS[choices[k]['qc_method']]}",on_change=_value,args=('daily_selected',))
     if selected is not None:
         item=choices[selected]
         buttons=st.columns(3)
@@ -115,4 +119,4 @@ def render_daily_overview():
             st.dataframe(pd.DataFrame([{'水平':r['level'],'有效点数':r['count'],'检测日数':r.get('days'),
                 'CV%':r['cv'],'采用要求':r['requirement'],'评价':r['decision']} for r in quality['rows']]),hide_index=True,width='stretch')
             st.caption(quality.get('statistics_scope',''))
-        else:st.info('暂不能判断 CV 是否满足要求。请查看批次已采用的质量要求，并核对所选期间是否有足够的有效检测结果。')
+        else:st.info('CV暂无法评价，请核对本批次的CV限值和所选日期内的有效数据。')

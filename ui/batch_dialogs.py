@@ -44,8 +44,8 @@ def _clear_prefix(prefix):
 
 
 def open_batch_item_dialog(item_id, kind='levels'):
-    if kind not in ('levels', 'quality'):
-        raise ValueError('请选择水平设置或质量目标。')
+    if kind not in ('levels', 'quality', 'product'):
+        raise ValueError('请选择水平设置、质控品核对或质量目标。')
     context = get_batch_item_context(int(item_id))
     levels = [_assignment(row) for row in context['levels']]
     initial = dict(selected=[row['qc_level_id'] for row in levels],
@@ -65,7 +65,12 @@ def _close(message='', *, rerun=True):
     state = st.session_state.pop(MODAL_KEY, None)
     if state:
         prefixes = st.session_state.get(_CLEANUP_KEY, [])
-        prefixes.append(_quality_prefix(state['item_id']) if state['kind'] == 'quality' else 'batch_level_' + state['token'])
+        prefixes.append(_quality_prefix(state['item_id']) if state['kind'] == 'quality' else
+                        'batch_product_' + state['token'] if state['kind'] == 'product' else
+                        'batch_level_' + state['token'])
+        if state['kind'] == 'levels':
+            prefixes.extend(('batch_control_' + state['token'] + '_',
+                             'batch_control_register_' + state['token']))
         st.session_state[_CLEANUP_KEY] = prefixes
         st.session_state['v11_selected_lot_config_id'] = int(state['context']['config']['id'])
     if message:
@@ -83,14 +88,14 @@ def _key(state, suffix, value):
 
 def _shown_assignments(draft):
     return [dict(draft['levels'][level_id], level_order=order)
-            for order, level_id in enumerate(draft['selected'], start=1)]
+            for order, level_id in enumerate(draft['selected'], start=1) if level_id is not None]
 
 
 def _dirty(state):
     draft, initial = state['draft'], state['initial']
     if draft['selected'] != initial['selected'] or draft['cv_limit'] != initial['cv_limit'] or draft['cv_source'] != initial['cv_source']:
         return True
-    return any(draft['levels'][level_id] != initial['levels'].get(level_id) for level_id in draft['selected'])
+    return any(draft['levels'][level_id] != initial['levels'].get(level_id) for level_id in draft['selected'] if level_id is not None)
 
 
 def _readonly(context):
@@ -109,6 +114,22 @@ def _readonly(context):
 
 
 def _render_levels(state, current):
+    from ui.control_selection import restore_registration_inputs
+    from ui.material_registration import render_material_registration_view
+    registration_key = 'batch_control_register_' + state['token']
+    result = restore_registration_inputs(registration_key)
+    if result:
+        position = int(result['slot'])
+        selected = state['draft']['selected']
+        selected += [None] * max(0, position + 1 - len(selected))
+        selected[position] = result['level_id']
+        prefix = 'batch_control_' + state['token'] + '_' + str(position)
+        st.session_state[prefix + '_product'] = result['product_id']
+        st.session_state[prefix + '_level'] = result['level_id']
+        st.session_state[prefix + '_last_product'] = result['product_id']
+        state['context'] = current
+    if render_material_registration_view(registration_key):
+        return
     original = state['context']
     item = original['item']
     st.subheader('水平设置 · ' + item['test_item_name'])
@@ -134,12 +155,35 @@ def _render_levels(state, current):
     active_ids = set(available)
     for row in original['levels']:
         available.setdefault(int(row['qc_level_id']), dict(row))
+    for level_id, row in draft['levels'].items():
+        for suffix, field in (('source','target_source'), ('mean','target_mean'), ('sd','target_sd'),
+                              ('confirmed','target_confirmed'), ('notes','notes')):
+            widget = 'batch_level_' + state['token'] + f'_{level_id}_{suffix}'
+            if widget in st.session_state:
+                row[field] = st.session_state[widget]
+    from ui.control_selection import control_products, render_control_slot
+    products = control_products()
+    prior = list(draft['selected'])
+    selected = []
+    for position in range(int(item['level_count'])):
+        _, level_id = render_control_slot(
+            prefix='batch_control_' + state['token'] + '_' + str(position), order=position+1,
+            selected_level=prior[position] if position < len(prior) else None,
+            registration_key=registration_key, slot=position, products=products,
+            materials=list(available.values()),
+            preserve_prefixes=('batch_level_' + state['token'] + '_', 'batch_control_' + state['token'] + '_'))
+        selected.append(level_id)
+    draft['selected'] = selected
+    complete = all(level_id is not None for level_id in selected) and len(set(selected)) == len(selected)
+    if len(set(level_id for level_id in selected if level_id is not None)) != sum(level_id is not None for level_id in selected):
+        st.warning('各水平不能选择同一条质控品记录。')
     def label(level_id):
         return material_label(available[level_id]) + ('（当前不可选用）' if level_id not in active_ids else '')
-    draft['selected'] = st.multiselect('选择各水平使用的质控品', list(available),
-        format_func=label, key=_key(state, 'selected', list(draft['selected'])))
-    st.caption(f'请选择 {item["level_count"]} 个水平，并检查浓度编号、批号和效期。选择的第一条保存为水平1，后续依次排列。')
+    rendered_levels = set()
     for order, level_id in enumerate(draft['selected'], start=1):
+        if level_id is None or level_id in rendered_levels:
+            continue
+        rendered_levels.add(level_id)
         row = draft['levels'].setdefault(level_id, dict(qc_level_id=level_id, target_source='building',
             target_mean=None, target_sd=None, target_confirmed=False, notes=''))
         st.markdown(f'**水平 {order}：{label(level_id)}**')
@@ -175,7 +219,7 @@ def _render_levels(state, current):
             state['discard'] = True
             st.rerun(scope='app')
         _close()
-    if save.button('保存水平设置', type='primary', key='batch_levels_save', width='stretch'):
+    if save.button('保存水平设置', type='primary', key='batch_levels_save', width='stretch', disabled=not complete):
         try:
             save_batch_item_settings(state['item_id'], _shown_assignments(draft),
                 expected_revision=state['revision'], cv_limit=draft['cv_limit'],
@@ -183,51 +227,76 @@ def _render_levels(state, current):
         except ValueError as error:
             st.error(str(error))
         else:
-            _close('水平设置已保存。请点击“质量目标”设置要求，再点击“确认批次设置”。')
+            _close('水平设置已保存。')
 
 
 def _render_product_recheck(state, current):
-    if not current['editable']:
-        return
-    from database import get_connection
-    from services.qc_product_recommendation_service import (
-        require_current_draft_choice, save_draft_product_choice,
-    )
-    try:
-        with get_connection() as connection:
-            require_current_draft_choice('lot', state['item_id'], connection)
-    except (ValueError, TypeError) as error:
-        st.warning(str(error))
-    else:
-        return
-    st.markdown('**确认本批次使用的质控品**')
-    st.caption('在下方点击“确认所选质控品”，再点击“保存本批次质控品确认”。保存后继续设置质量目标。')
     item, config = current['item'], current['config']
-    ctx = state.setdefault('product_recheck', dict(token=state['token'], draft={
-        'qc_material_id': int(config['qc_material_id']),
-        'product_choice_review': decode(item.get('product_choice_review_json')),
-    }))
-    from ui.qc_product_choice import render_product_choice
-    valid = render_product_choice(ctx, reagent_id=item.get('reagent_id'),
-        lab_instrument_id=config['lab_instrument_id'], test_item_id=item['test_item_id'],
-        method_id=item.get('method_id'), locked=True, prefix=_quality_prefix(state['item_id']) + 'product')
-    state.setdefault('product_recheck_initial', deepcopy(ctx['draft']))
-    state['product_recheck_dirty'] = ctx['draft'] != state['product_recheck_initial'] or any(
-        key.endswith('_editor') and value for key, value in ctx.items())
-    if st.button('保存本批次质控品确认', key=_quality_prefix(state['item_id']) + 'product_save', disabled=not valid):
-        try:
-            revision = save_draft_product_choice('lot', state['item_id'],
-                ctx['draft']['product_choice_review'], expected_revision=state['revision'])
-        except (ValueError, TypeError) as error:
-            st.error(str(error))
-        else:
-            state['revision'] = revision
-            state['context'] = get_batch_item_context(state['item_id'])
-            state.pop('product_recheck', None)
-            state.pop('product_recheck_initial', None)
-            state['product_recheck_dirty'] = False
-            state['restore_quality_inputs'] = True
+    st.caption('｜'.join(str(value) for value in (
+        config.get('instrument_name'), item.get('reagent_name'), item.get('test_item_name'),
+        item.get('method_name')) if value))
+    from database import get_connection
+    with get_connection() as connection:
+        materials = [dict(row) for row in connection.execute('''SELECT a.level_order,
+            q.qc_material_id,m.generic_name,m.catalog_no,f.display_name AS manufacturer_name,
+            l.level_name,l.level_code,q.lot_no,q.expiry_date
+            FROM qc_lot_config_item_levels a JOIN md_qc_levels l ON l.id=a.qc_level_id
+            JOIN md_qc_material_lots q ON q.id=l.qc_material_lot_id
+            JOIN md_qc_materials m ON m.id=q.qc_material_id
+            LEFT JOIN md_manufacturers f ON f.id=m.manufacturer_id
+            WHERE a.lot_config_item_id=? AND a.is_disabled=0 ORDER BY a.level_order''',
+            (state['item_id'],))]
+    if materials:
+        st.dataframe(pd.DataFrame([{
+            '水平': row['level_order'], '产品': row['generic_name'], '货号': row['catalog_no'],
+            '厂家': row['manufacturer_name'], '浓度水平': row['level_name'],
+            '浓度编号': row['level_code'], '原厂批号': row['lot_no'], '效期': row['expiry_date']
+        } for row in materials]), hide_index=True, width='stretch')
+    if not current['editable']:
+        st.info(current['read_only_reason'])
+        if st.button('关闭', key='batch_product_close'):
+            _close()
+        return
+    if int(current['revision']) != state['revision']:
+        st.warning('批次资料已修改，请关闭后重新打开核对。')
+        if st.button('关闭', key='batch_product_close'):
+            _close()
+        return
+    if state['discard']:
+        st.warning('适用依据尚未保存，是否放弃？')
+        keep, discard = st.columns(2)
+        if keep.button('继续填写', key='batch_product_keep', type='primary'):
+            state['discard'] = False
             st.rerun(scope='app')
+        if discard.button('放弃修改', key='batch_product_discard'):
+            _close()
+        return
+    product_ids = list(dict.fromkeys(row['qc_material_id'] for row in materials))
+    if not product_ids:
+        st.info('请先在“编辑水平设置”中选择各水平的质控品。')
+        if st.button('关闭', key='batch_product_close'):
+            _close()
+        return
+    from services.qc_product_recommendation_service import save_draft_product_choice
+    from ui.qc_product_choice import render_product_reviews
+    ctx = state.setdefault('product_recheck', dict(token=state['token'], draft={
+        'product_choice_review': decode(item.get('product_choice_review_json'))}))
+    prefix = 'batch_product_' + state['token']
+
+    def save(review):
+        save_draft_product_choice('lot', state['item_id'], review,
+                                  expected_revision=state['revision'])
+        _close('质控品适用性已确认。')
+
+    render_product_reviews(ctx, product_ids, reagent_id=item.get('reagent_id'),
+        lab_instrument_id=config['lab_instrument_id'], test_item_id=item['test_item_id'],
+        method_id=item.get('method_id'), prefix=prefix,
+        confirm_label='确认并保存', on_confirm=save, allow_relation_edit=False)
+    if st.button('取消', key='batch_product_cancel', width='stretch'):
+        if ctx.get(prefix + '_dirty'):
+            state['discard'] = True
+            st.rerun(scope='app')
+        _close()
 
 
 def _render_quality(state, current):
@@ -250,7 +319,6 @@ def _render_quality(state, current):
     if int(current['revision']) != state['revision']:
         st.error('这个批次已在别处修改。请关闭窗口后重新打开“质量目标”。')
     else:
-        _render_product_recheck(state, current)
         from ui.quality_targets import render_adoption
         try:
             render_adoption('lot', state['item_id'], embedded=True, expected_revision=state['revision'],
@@ -286,8 +354,26 @@ def _render_dialog():
         _render_quality(state, current)
 
 
+@st.dialog('核对质控品', width='large', dismissible=False)
+def _render_product_dialog():
+    state = st.session_state.get(MODAL_KEY)
+    if not state:
+        return
+    try:
+        current = get_batch_item_context(state['item_id'])
+    except ValueError as error:
+        st.error(str(error))
+        if st.button('关闭', key='batch_product_missing_close'):
+            _close()
+        return
+    _render_product_recheck(state, current)
+
+
 def render_batch_item_dialog():
     for prefix in st.session_state.pop(_CLEANUP_KEY, []):
         _clear_prefix(prefix)
     if st.session_state.get(MODAL_KEY):
-        _render_dialog()
+        if st.session_state[MODAL_KEY]['kind'] == 'product':
+            _render_product_dialog()
+        else:
+            _render_dialog()

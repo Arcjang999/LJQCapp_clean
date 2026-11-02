@@ -46,11 +46,12 @@ def list_daily_choices(template_id=None):
     """Choices come from actual level relationships, never a header lot/name guess."""
     template = _positive(template_id, '项目') if template_id is not None else None
     with database.read_snapshot() as c:
-        links = _rows(c, '''SELECT DISTINCT t.lab_instrument_id,t.qc_material_id,l.qc_material_lot_id
+        links = _rows(c, '''SELECT DISTINCT x.lab_instrument_id,q.qc_material_id,l.qc_material_lot_id
             FROM qc_project_templates t JOIN qc_lot_configs x ON x.template_id=t.id
             JOIN qc_lot_config_items i ON i.lot_config_id=x.id
             JOIN qc_lot_config_item_levels a ON a.lot_config_item_id=i.id AND a.is_disabled=0
             JOIN md_qc_levels l ON l.id=a.qc_level_id
+            JOIN md_qc_material_lots q ON q.id=l.qc_material_lot_id
             WHERE i.is_disabled=0 AND i.is_enabled=1 AND (? IS NULL OR t.id=?)''', (template, template))
         instruments = _rows(c, 'SELECT id,display_name AS name,is_disabled FROM lab_instruments ORDER BY display_name,id')
         materials = _rows(c, 'SELECT id,generic_name AS name,is_disabled FROM md_qc_materials ORDER BY generic_name,id')
@@ -67,9 +68,12 @@ def list_daily_choices(template_id=None):
 def _levels(c, item_id):
     return _rows(c, '''SELECT a.*,l.level_name,l.level_code,l.concentration_label,l.specification_id,
         l.is_disabled AS level_disabled,l.qc_material_lot_id,q.qc_material_id,q.lot_no,q.expiry_date,
-        q.is_disabled AS lot_disabled,m.source_profile_id,m.verification_id
+        q.is_disabled AS lot_disabled,p.is_disabled AS product_disabled,p.generic_name,p.catalog_no,
+        p.manufacturer_id,f.display_name AS manufacturer_name,m.source_profile_id,m.verification_id
         FROM qc_lot_config_item_levels a JOIN md_qc_levels l ON l.id=a.qc_level_id
         JOIN md_qc_material_lots q ON q.id=l.qc_material_lot_id
+        JOIN md_qc_materials p ON p.id=q.qc_material_id
+        LEFT JOIN md_manufacturers f ON f.id=p.manufacturer_id
         LEFT JOIN qc_level_combination_members m ON m.lot_config_item_id=a.lot_config_item_id AND m.qc_level_id=a.qc_level_id
         WHERE a.lot_config_item_id=? AND a.is_disabled=0 ORDER BY a.level_order,a.id''', (item_id,))
 
@@ -176,12 +180,16 @@ def _item(c, item, config, when):
         problem('当前批次与所选仪器或检测项目不一致，请重新核对项目设置。', 'binding')
     if [r['qc_level_id'] for r in levels] != [r.get('qc_level_id') for r in source.get('levels', [])]:
         problem('质控品、批号或浓度水平顺序已修改，请重新打开本组录入并选择质控品。', 'levels')
-    for table, identifier, label in [('lab_instruments', identity[0], '仪器'), ('md_qc_materials', identity[1], '质控品'),
-        ('md_test_items', identity[3], '检测项'), ('md_units', identity[5], '单位'), ('md_methods', identity[6], '方法学'), ('md_reagents', identity[7], '试剂')]:
+    references = [('lab_instruments', identity[0], '仪器'),
+        ('md_test_items', identity[3], '检测项'), ('md_units', identity[5], '单位'), ('md_methods', identity[6], '方法学'), ('md_reagents', identity[7], '试剂')]
+    if not config['material_selection_mode']:
+        references.append(('md_qc_materials', identity[1], '质控品'))
+    for table, identifier, label in references:
         if not identifier or not c.execute(f'SELECT 1 FROM {table} WHERE id=? AND is_disabled=0', (identifier,)).fetchone():
             problem(f'{label}未设置或已停用，请先核对基础资料。')
     for level in levels:
-        if level['qc_material_id'] != config['qc_material_id'] or level['lot_disabled'] or level['level_disabled']:
+        if ((not config['material_selection_mode'] and level['qc_material_id'] != config['qc_material_id'])
+                or level['product_disabled'] or level['lot_disabled'] or level['level_disabled']):
             problem('该水平材料不属于所选产品或已停用。', 'material', level['qc_level_id'])
         if not level['expiry_date'] or level['expiry_date'] < when[:10]:
             problem('该水平实际批号未填写效期或在检测日已过期。', 'expiry_date', level['qc_level_id'])
@@ -262,8 +270,8 @@ def get_daily_context(lab_instrument_id, qc_material_id, qc_material_lot_id, tes
             JOIN qc_lot_config_items i ON i.lot_config_id=x.id AND i.is_disabled=0 AND i.is_enabled=1
             JOIN qc_lot_config_item_levels a ON a.lot_config_item_id=i.id AND a.is_disabled=0
             JOIN md_qc_levels l ON l.id=a.qc_level_id JOIN md_qc_material_lots q ON q.id=l.qc_material_lot_id
-            WHERE x.lab_instrument_id=? AND x.qc_material_id=? AND q.id=? AND q.qc_material_id=?
-            AND (? IS NULL OR x.template_id=?) ORDER BY x.template_id,x.id''', (instrument, material, lot, material, template, template))
+            WHERE x.lab_instrument_id=? AND q.id=? AND q.qc_material_id=?
+            AND (? IS NULL OR x.template_id=?) ORDER BY x.template_id,x.id''', (instrument, lot, material, template, template))
         combinations = []
         for config in configs:
             members = _rows(c, 'SELECT id FROM qc_lot_config_items WHERE lot_config_id=? AND is_enabled=1 AND is_disabled=0 ORDER BY sort_order,id', (config['id'],))

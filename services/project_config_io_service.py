@@ -61,6 +61,19 @@ PROJECT_IMPORT_COLUMNS = [
 # Optional stable identities are emitted on export; the blank hand-entry template
 # stays small. Database integer IDs are never used to resolve cross-database rows.
 PROJECT_IDENTITY_COLUMNS = ['检验项目标识', '单位标识', '方法学标识', '试剂标识', '试剂厂家标识', '试剂厂家类别']
+PROJECT_OPTIONAL_COLUMNS = ['均值和SD统计方式']
+
+
+def _statistics_mode(value):
+    from services.target_statistics_policy_service import STATISTICS_MODE_LABELS, normalize_statistics_mode
+    text = _text(value)
+    reverse = {label: code for code, label in STATISTICS_MODE_LABELS.items()}
+    return normalize_statistics_mode(reverse.get(text, text), optional=True)
+
+
+def _statistics_label(value):
+    from services.target_statistics_policy_service import STATISTICS_MODE_LABELS
+    return STATISTICS_MODE_LABELS.get(_text(value), '')
 
 _QC_METHOD_BY_TEXT = {
     **{code.casefold(): code for code in QC_METHOD_LABELS},
@@ -122,6 +135,7 @@ def _instructions_dataframe() -> pd.DataFrame:
             ["输入值类型", "填写 真实检测值、Ct值 或 log值；检验项目、质控方法和输入值类型的组合不得重复。"],
             ["水平数", "L-J/即时法固定 1；Z-score 填 2 或 3。"],
             ["参数建立点数", "L-J/Z-score 填 5–20；即时法固定按 20 个有效点。"],
+            ["均值和SD统计方式", "填写月度统计或累计统计；空白保留为待选择。仅手动确认切换后启用新参数。"],
             ["新增资料", "未登记的检验项目、单位、方法学、试剂及厂家会新增到基础资料中，请先核对名称，避免重复登记。"],
             ["导入方式", "合并会保留未出现在文件中的原检验项目；替换会以文件内容作为完整的检验项目表。"],
             ["设置确认", "导入后项目保持待确认。请回到项目设置，逐项核对后确认。"],
@@ -156,6 +170,7 @@ def build_project_import_template_xlsx() -> bytes:
         ],
         columns=PROJECT_IMPORT_COLUMNS,
     )
+    example['均值和SD统计方式'] = ''
     return dataframes_to_xlsx_bytes(
         OrderedDict(
             [
@@ -197,6 +212,7 @@ def _project_items_export_dataframe(template_id: int) -> pd.DataFrame:
                 "允许不精密度(CV%)": "" if pd.isna(row["cv_limit"]) else float(row["cv_limit"]),
                 "质量目标来源": _text(row["quality_target_source_text"]),
                 "备注": _text(row["notes"]),
+                "均值和SD统计方式": _statistics_label(row.get('target_statistics_mode')),
             }
         )
     with get_connection() as connection:
@@ -212,7 +228,7 @@ def _project_items_export_dataframe(template_id: int) -> pd.DataFrame:
             exported['试剂厂家标识'] = found['uid'] if found else ''
             from services.master_data_service import get_manufacturer_categories
             exported['试剂厂家类别'] = ','.join(get_manufacturer_categories(found['id'], connection)) if found else ''
-    return pd.DataFrame(rows, columns=PROJECT_IMPORT_COLUMNS + PROJECT_IDENTITY_COLUMNS)
+    return pd.DataFrame(rows, columns=PROJECT_IMPORT_COLUMNS + PROJECT_OPTIONAL_COLUMNS + PROJECT_IDENTITY_COLUMNS)
 
 
 def _quality_review_export_sheets(items: pd.DataFrame) -> list[tuple[str, pd.DataFrame]]:
@@ -289,6 +305,12 @@ def _quality_review_export_sheets(items: pd.DataFrame) -> list[tuple[str, pd.Dat
 
 def build_project_template_xlsx(template_id: int) -> bytes:
     template = get_project_template(template_id)
+    template_items = list_template_items(template_id)
+    from services.qc_product_recommendation_service import choice_review_map
+    product_ids = {int(template['qc_material_id']),
+        *(int(value) for value in choice_review_map(template['product_choice_review_json']))}
+    for item in template_items.to_dict('records'):
+        product_ids.update(int(value) for value in choice_review_map(item.get('product_choice_review_json')))
     with get_connection() as connection:
         instrument_uid = connection.execute('SELECT uid FROM lab_instruments WHERE id=?', (template['lab_instrument_id'],)).fetchone()['uid']
     overview = pd.DataFrame(
@@ -309,12 +331,17 @@ def build_project_template_xlsx(template_id: int) -> bytes:
         ],
         columns=["字段", "值"],
     )
+    if len(product_ids) > 1:
+        overview.loc[overview['字段'] == '质控品', '值'] = _product_set_label(product_ids)
+        overview.loc[overview['字段'] == '质控品商品名', '值'] = _product_set_label(product_ids, trade_names=True)
+        overview.loc[overview['字段'] == '质控品厂家', '值'] = _product_set_label(product_ids, manufacturers=True)
+        overview.loc[len(overview)] = ['导入说明', _MULTI_PRODUCT_REFERENCE_NOTICE]
     return dataframes_to_xlsx_bytes(
         OrderedDict(
             [
                 ("项目信息", overview),
                 ("项目配置", _project_items_export_dataframe(template_id)),
-                *_material_context_sheets(int(template['qc_material_id'])),
+                *_material_context_sheets(int(template['qc_material_id']), product_ids=product_ids),
                 ("填写说明", _instructions_dataframe()),
                 *_quality_review_export_sheets(list_template_items(template_id)),
             ]
@@ -325,6 +352,10 @@ def build_project_template_xlsx(template_id: int) -> bytes:
 def build_lot_config_xlsx(lot_config_id: int) -> bytes:
     config = get_lot_config(lot_config_id)
     items = list_lot_config_items(lot_config_id)
+    actual_levels = [dict(level, test_item_name=item['test_item_name'])
+                     for item in items.to_dict('records') if item.get('is_enabled', 1)
+                     for level in list_lot_item_levels(int(item['id'])).to_dict('records')]
+    product_ids = {int(level['qc_material_id']) for level in actual_levels}
     overview = pd.DataFrame(
         [
             ["批次名称", config["config_name"]],
@@ -342,6 +373,18 @@ def build_lot_config_xlsx(lot_config_id: int) -> bytes:
         ],
         columns=["字段", "值"],
     )
+    if actual_levels:
+        several_items = len({level['test_item_name'] for level in actual_levels}) > 1
+        def level_label(level):
+            return (str(level['test_item_name'])+' / ' if several_items else '') + f"水平{level['level_order']}"
+        overview.loc[overview['字段'] == '质控品', '值'] = _product_set_label(product_ids)
+        overview.loc[overview['字段'] == '质控品商品名', '值'] = _product_set_label(product_ids, trade_names=True)
+        overview.loc[overview['字段'] == '批号', '值'] = '；'.join(
+            f"{level_label(level)}：{level['lot_no']}" for level in actual_levels)
+        overview.loc[overview['字段'] == '效期', '值'] = '；'.join(
+            f"{level_label(level)}：{level['expiry_date']}" for level in actual_levels)
+    if len(product_ids | {int(config['qc_material_id'])}) > 1:
+        overview.loc[len(overview)] = ['导入说明', _MULTI_PRODUCT_REFERENCE_NOTICE]
     item_export = items.rename(
         columns={
             "test_item_name": "检验项目",
@@ -355,11 +398,13 @@ def build_lot_config_xlsx(lot_config_id: int) -> bytes:
             "target_n": "参数建立点数",
             "cv_limit": "允许不精密度(CV%)",
             "quality_target_source_text": "质量目标来源",
+            "target_statistics_mode": "均值和SD统计方式",
         }
     ).copy()
     if not item_export.empty:
         item_export["质控方法"] = item_export["质控方法"].map(QC_METHOD_LABELS)
         item_export["输入值类型"] = item_export["输入值类型"].map(INPUT_VALUE_TYPE_LABELS)
+        item_export['均值和SD统计方式'] = item_export['均值和SD统计方式'].map(_statistics_label)
     item_columns = [
         "检验项目",
         "质控方法",
@@ -372,6 +417,7 @@ def build_lot_config_xlsx(lot_config_id: int) -> bytes:
         "参数建立点数",
         "允许不精密度(CV%)",
         "质量目标来源",
+        "均值和SD统计方式",
     ]
     item_export = item_export.reindex(columns=item_columns)
 
@@ -393,6 +439,10 @@ def build_lot_config_xlsx(lot_config_id: int) -> bytes:
                     "方法学": _text(item['method_name']),
                     "水平顺序": int(level["level_order"]),
                     "浓度水平": _text(level["level_name"]),
+                    "质控品名称": _text(level.get('generic_name')),
+                    "质控品厂家": _text(level.get('manufacturer_name')),
+                    "产品货号": _text(level.get('catalog_no')),
+                    "实际浓度": _text(level.get('concentration')),
                     "实际批号": _text(level["lot_no"]),
                     "效期": _text(level["expiry_date"]),
                     "浓度编号": _text(level["level_code"]),
@@ -411,7 +461,7 @@ def build_lot_config_xlsx(lot_config_id: int) -> bytes:
             )
     level_export = pd.DataFrame(
         level_rows,
-        columns=["检验项目", "质控方法", "输入值类型", "单位", "方法学", "水平顺序", "浓度水平", "浓度编号", "实际批号", "效期", "均值和标准差来源", "设定均值", "SD", "设定变异系数（%）", "已确认", "备注", "材料批次标识", "材料水平标识", "目录规格标识"],
+        columns=["检验项目", "质控方法", "输入值类型", "单位", "方法学", "水平顺序", "质控品厂家", "产品货号", "质控品名称", "实际浓度", "浓度水平", "浓度编号", "实际批号", "效期", "均值和标准差来源", "设定均值", "SD", "设定变异系数（%）", "已确认", "备注", "材料批次标识", "材料水平标识", "目录规格标识"],
     )
     snapshots = list_config_snapshots(lot_config_id).rename(
         columns={
@@ -429,7 +479,7 @@ def build_lot_config_xlsx(lot_config_id: int) -> bytes:
                 ("批次信息", overview),
                 ("项目配置", item_export),
                 ("水平均值和标准差", level_export),
-                *_material_context_sheets(int(config['qc_material_id'])),
+                *_material_context_sheets(int(config['qc_material_id']), product_ids=product_ids),
                 ("修订记录", snapshots),
                 *_quality_review_export_sheets(items),
             ]
@@ -451,7 +501,7 @@ def preview_project_template_xlsx(data: bytes) -> tuple[pd.DataFrame, list[str]]
     missing_columns = [column for column in PROJECT_IMPORT_COLUMNS if column not in source.columns]
     if missing_columns:
         raise ValueError("项目配置工作表缺少列：" + "、".join(missing_columns))
-    source = source.reindex(columns=PROJECT_IMPORT_COLUMNS + [c for c in PROJECT_IDENTITY_COLUMNS if c in source.columns])
+    source = source.reindex(columns=PROJECT_IMPORT_COLUMNS + PROJECT_OPTIONAL_COLUMNS + [c for c in PROJECT_IDENTITY_COLUMNS if c in source.columns])
     source = source[
         source.apply(lambda row: any(_text(value) for value in row.tolist()), axis=1)
     ]
@@ -515,6 +565,7 @@ def preview_project_template_xlsx(data: bytes) -> tuple[pd.DataFrame, list[str]]
                     "允许不精密度(CV%)": cv_limit,
                     "质量目标来源": _text(row["质量目标来源"]),
                     "备注": _text(row["备注"]),
+                    "均值和SD统计方式": _statistics_label(_statistics_mode(row.get('均值和SD统计方式'))),
                 }
             )
         except (TypeError, ValueError) as exc:
@@ -556,6 +607,7 @@ def _normalized_import_rows(data: bytes) -> list[dict[str, object]]:
                 "cv_limit": None if pd.isna(row["允许不精密度(CV%)"]) else float(row["允许不精密度(CV%)"]),
                 "quality_target_source_text": _text(row["质量目标来源"]),
                 "notes": _text(row["备注"]),
+                "target_statistics_mode": _statistics_mode(row.get('均值和SD统计方式')),
             }
         )
     return result
@@ -647,6 +699,7 @@ class _ImportResolver:
                                                 trade_name=row['reagent_trade_name']))
                 test_item_id = self.test_item(row, unit_id)
                 rows.append(dict(test_item_id=test_item_id, unit_id=unit_id, method_id=method_id, reagent_id=reagent_id,
+                    **({'target_statistics_mode': row['target_statistics_mode']} if row.get('target_statistics_mode') else {}),
                     **{k: row[k] for k in ('qc_method', 'input_value_type', 'level_count', 'target_n', 'cv_limit',
                                           'quality_target_source_text', 'notes')}, sort_order=order))
             except (ValueError, TypeError) as exc:
@@ -684,7 +737,29 @@ def _read_material_context(data):
     return dict(product=product, manufacturer=manufacturer, coverage=coverage)
 
 
-def _material_context_sheets(material_id):
+_MULTI_PRODUCT_REFERENCE_NOTICE = ('全部产品来源、覆盖及各水平批号供查阅；'
+    '导入项目配置后，须重新选择各水平产品和批号，并确认适用性。')
+
+
+def _product_set_label(product_ids, *, trade_names=False, manufacturers=False):
+    labels = []
+    with get_connection() as connection:
+        for product_id in sorted(product_ids):
+            product = connection.execute('''SELECT p.*,m.display_name AS manufacturer_name
+                FROM md_qc_materials p LEFT JOIN md_manufacturers m ON m.id=p.manufacturer_id
+                WHERE p.id=?''', (product_id,)).fetchone()
+            if product is None:
+                raise ValueError('导出引用的质控品不存在，请重新核对。')
+            label = (str(product['trade_name'] or '') if trade_names else
+                     str(product['manufacturer_name'] or '') if manufacturers else
+                     '｜'.join(str(product[key] or '') for key in
+                         ('manufacturer_name', 'catalog_no', 'generic_name') if product[key]))
+            if label and label not in labels:
+                labels.append(label)
+    return '；'.join(labels)
+
+
+def _material_context_sheets(material_id, *, product_ids=None):
     from services.product_directory_service import export_material_catalog_context
     context = export_material_catalog_context(material_id)
     product, manufacturer = context['product'], context['manufacturer']
@@ -699,7 +774,27 @@ def _material_context_sheets(material_id):
               'evidence': '覆盖依据', 'confirmed_by': '关系确认人', 'confirmed_at': '关系确认时间',
               'method_id': '来源方法号', 'method_uid': '方法学标识', 'method_name': '方法学', 'is_disabled': '关系停用'}
     coverage = [{label: item.get(key, '') for key, label in fields.items()} for item in context.get('coverage', [])]
-    return [('产品来源', pd.DataFrame([row])), ('产品覆盖', pd.DataFrame(coverage, columns=list(fields.values())))]
+    sheets = [('产品来源', pd.DataFrame([row])), ('产品覆盖', pd.DataFrame(coverage, columns=list(fields.values())))]
+    all_products = sorted({int(material_id), *(int(value) for value in product_ids or [])})
+    if len(all_products) > 1:
+        product_rows, coverage_rows = [], []
+        for product_id in all_products:
+            detail = export_material_catalog_context(product_id)
+            item, maker = detail['product'], detail['manufacturer']
+            product_row = {label: item.get(key, '') for key, label in labels.items()}
+            product_row.update({'厂家标识': maker.get('uid', ''), '厂家名称': maker.get('display_name', ''),
+                                '厂家类别': ','.join(maker.get('categories', []))})
+            product_rows.append(product_row)
+            for entry in detail.get('coverage', []):
+                coverage_rows.append({'产品标识': item.get('uid', ''), '产品编号': item.get('product_code', ''),
+                    '厂家名称': maker.get('display_name', ''),
+                    **{label: entry.get(key, '') for key, label in fields.items()}})
+        sheets.extend([
+            ('全部产品来源（供查阅）', pd.DataFrame(product_rows)),
+            ('全部产品覆盖（供查阅）', pd.DataFrame(coverage_rows,
+                columns=['产品标识', '产品编号', '厂家名称', *fields.values()])),
+        ])
+    return sheets
 
 
 def _resolve_material_context(connection, template, context, resolver, *, apply=False, expected_version=None):

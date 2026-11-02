@@ -22,7 +22,7 @@ def _render_manufacturers_tab():
 
 
 def _render_test_items_tab():
-    st.caption('按名称、代码或别名查找检验项目。选好项目后，在“质量目标”中设置该项目的要求。')
+    st.caption('按名称、代码或别名查找检验项目。')
     render_master_data_workspace('test_item')
     with st.expander('检验项目名称来源'):
         sources = list_sources()

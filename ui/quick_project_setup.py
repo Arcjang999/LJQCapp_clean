@@ -20,12 +20,54 @@ def new_quick_setup_draft():
     return dict(template_name='', lab_instrument_id=None, qc_material_id=None,
         test_item_id=None, reagent_id=None, method_id=None, unit_id=None,
         qc_method='lj', input_value_type='raw', level_count=1, target_n=20,
+        target_statistics_mode=None,
         cv_limit=None, quality_target_source_text='', project_group='', notes='',
-        level_ids=[], config_name='', quality={})
+        level_ids=[None], level_product_ids=[None], product_choice_reviews={}, product_choice_review={},
+        product_manual_drafts={}, config_name='', quality={})
+
+
+def _quality_context_identity(context):
+    """Track selected business inputs, excluding reference sync timestamps."""
+    bookkeeping = {'created_at', 'updated_at', 'last_seen_at', 'refreshed_at', 'target_statistics_mode'}
+
+    def semantic(value):
+        if isinstance(value, dict):
+            return {key: semantic(item) for key, item in value.items() if key not in bookkeeping}
+        if isinstance(value, (list, tuple)):
+            return [semantic(item) for item in value]
+        return value
+
+    return sha256(json.dumps(semantic(context), sort_keys=True, default=str).encode()).hexdigest()[:12]
+
+
+def _use_quality_context(ctx, context):
+    identity = _quality_context_identity(context)
+    if ctx.get('quick_quality_identity') != identity:
+        ctx['draft']['quality'] = {}
+        ctx.pop('quick_quality_inputs', None)
+        ctx.pop('quick_preview', None)
+        ctx['quick_quality_identity'] = identity
 
 
 def render_quick_project_setup(ctx):
     from ui.project_dialogs import _cancel
+    from ui.material_registration import render_material_registration_view
+    from ui.control_selection import restore_registration_inputs
+    registration_key = 'quick_' + ctx['token']
+    result = restore_registration_inputs(registration_key)
+    if result:
+        position = int(result['slot'])
+        for field, value in (('level_ids', result['level_id']), ('level_product_ids', result['product_id'])):
+            values = list(ctx['draft'].get(field, []))
+            values += [None] * max(0, ctx['draft']['level_count'] - len(values))
+            values[position] = value
+            ctx['draft'][field] = values
+        prefix = 'quick_control_' + ctx['token'] + '_' + str(position)
+        st.session_state[prefix + '_product'] = result['product_id']
+        st.session_state[prefix + '_level'] = result['level_id']
+        st.session_state[prefix + '_last_product'] = result['product_id']
+    if render_material_registration_view(registration_key):
+        return
     step = ctx.get('quick_step', 'details')
     st.subheader('新建项目')
     st.caption({'details': '1 选择检验项目、仪器、试剂和质控品', 'quality': '2 设置质量要求',
@@ -40,10 +82,10 @@ def render_quick_project_setup(ctx):
 
 def request_setup_mode(ctx, target):
     if ctx.get('dependency_registration'):
-        st.warning('下方资料登记尚未完成。请先保存或取消，再切换设置方式。')
+        st.warning('请先保存或取消下方资料登记，再切换设置方式。')
         return
     if any(key.endswith('_editor') and value for key, value in ctx.items()):
-        st.warning('下方还有未完成的试剂与质控品配套记录。请先保存或取消，再切换设置方式。')
+        st.warning('请先保存或取消下方配套记录，再切换设置方式。')
         return
     if ctx['draft'] != ctx['initial']:
         ctx['setup_mode_switch'] = target
@@ -80,9 +122,15 @@ def _convert_setup_mode(ctx, target):
         for field, original in [('reagent_id', 'default_reagent_id'), ('method_id', 'default_method_id'),
                                 ('qc_method', 'default_qc_method'), ('level_count', 'default_level_count')]:
             draft[field] = old[original]
+        count = int(draft['level_count']) if draft['qc_method'] == 'zscore' else 1
+        count = count if count in (1, 2, 3) and (draft['qc_method'] != 'zscore' or count > 1) else 2
+        draft['level_count'] = count
+        draft['level_ids'] = [None] * count
+        draft['level_product_ids'] = [draft.get('qc_material_id')] + [None] * (count - 1)
         kind = 'quick'
-    if old.get('manual_choice_drafts'):
-        draft['manual_choice_drafts'] = deepcopy(old['manual_choice_drafts'])
+    for cache in ('manual_choice_drafts', 'product_manual_drafts'):
+        if old.get(cache):
+            draft[cache] = deepcopy(old[cache])
     ctx.update(kind=kind, draft=draft, token=uuid4().hex, quick_step='details')
     for key in ('setup_mode_switch', 'quick_preview', 'quick_quality_identity', 'quick_quality_inputs', 'quick_auto_name_item'):
         ctx.pop(key, None)
@@ -96,6 +144,7 @@ def _render_details(ctx):
     from ui.project_dialogs import _choice, _text, _key, _qc_choices, _cancel
     from ui.qc_product_choice import render_product_choice
     from ui.material_registration import render_material_registration_shortcut
+    from ui.required_fields import required_field
     from ui.project_dependencies import project_dependency_pending, render_project_dependencies
     from ui.qc_product_choice import render_pending_product_relation_notice
     draft = ctx['draft']
@@ -136,88 +185,60 @@ def _render_details(ctx):
     else:
         draft['target_n'] = st.number_input('建靶所需有效点数', min_value=5, max_value=20,
             step=1, key=_key(ctx, 'target_n'))
-    st.markdown('**试剂与质控品**')
-    reviewed = render_product_choice(ctx, reagent_id=draft['reagent_id'], lab_instrument_id=draft['lab_instrument_id'],
-        test_item_id=draft['test_item_id'], method_id=draft['method_id'], locked=registration_pending or dependency_pending,
-        allow_relation_edit=not dependency_pending)
-    materials_ready = False
-    missing_levels = []
-    duplicate_levels = False
-    registration_open = False
-    if draft.get('qc_material_id') is not None:
-        materials = available_materials(draft['qc_material_id'])
-        options = {int(row['id']): row for row in materials.to_dict('records')}
-        if not options:
-            st.info('此质控品暂无可选的批号和浓度水平。点击“登记质控品批号”，按包装填写浓度水平、批号和效期；保存后在下方选择。')
-        level_ids = []
-        prior_levels = list(draft.get('level_ids', []))
-        for order in range(1, draft['level_count'] + 1):
-            key = 'quick_material_' + ctx['token'] + '_' + str(draft['qc_material_id']) + '_' + str(order)
-            if key not in st.session_state:
-                previous = prior_levels[order - 1] if len(prior_levels) >= order else None
-                st.session_state[key] = previous if previous in options else None
-            elif st.session_state.get(key) not in [None, *options]:
-                st.session_state[key] = None
-            selected = st.selectbox(f'水平 {order} 的实际质控品 *', [None, *options], key=key,
-                disabled=not options,
-                format_func=lambda value: '请选择浓度水平、批号和效期' if value is None else material_label(options[value]))
-            if selected is not None:
-                level_ids.append(selected)
-            else:
-                missing_levels.append(str(order))
-        draft['level_ids'] = level_ids
-        duplicate_levels = len(set(level_ids)) != len(level_ids)
-        materials_ready = len(level_ids) == draft['level_count'] and len(set(level_ids)) == len(level_ids)
-        st.caption('为每个水平选择质控品批号和效期，各水平须使用不同的质控品记录。试剂批号在录入检测结果时选择。')
-        if options and not materials_ready:
-            st.caption('请为每个水平选择一条不同的记录；缺少本次批号或浓度水平时，点击“登记质控品批号”补充。')
-    if (draft.get('qc_material_id') is not None or registration_pending) and not dependency_pending:
-        registration_open = render_material_registration_shortcut(draft.get('qc_material_id'), key=registration_key)
-        st.session_state.pop(registration_key + '_registration_saved', None)
-    _text(ctx, 'config_name', '批次名称（留空自动生成）')
+    from ui.target_statistics import render_target_statistics_mode
+    draft['target_statistics_mode'] = render_target_statistics_mode(draft.get('target_statistics_mode'),
+        key=_key(ctx, 'target_statistics_mode'))
+    st.markdown('**各水平质控品**')
+    from ui.control_selection import control_products, render_control_slot
+    from ui.qc_product_choice import render_product_reviews
+    products = control_products()
+    materials = available_materials().to_dict('records')
+    previous_levels = list(draft.get('level_ids', []))
+    previous_products = list(draft.get('level_product_ids', []))
+    level_ids, product_ids = [], []
+    for position in range(draft['level_count']):
+        level = previous_levels[position] if position < len(previous_levels) else None
+        product = previous_products[position] if position < len(previous_products) else (
+            draft.get('qc_material_id') if position == 0 else None)
+        product, level = render_control_slot(
+            prefix='quick_control_' + ctx['token'] + '_' + str(position), order=position + 1,
+            selected_level=level, selected_product=product, registration_key=registration_key,
+            slot=position, products=products, materials=materials,
+            preserve_prefixes=('project_draft_' + ctx['token'] + '_', 'quick_control_' + ctx['token'] + '_',
+                               'project_product_' + ctx['token'],
+                               'project_kind_' + ctx['token'], 'project_instant_' + ctx['token']),
+            disabled=dependency_pending)
+        level_ids.append(level)
+        product_ids.append(product)
+    draft['level_ids'], draft['level_product_ids'] = level_ids, product_ids
+    draft['qc_material_id'] = product_ids[0] if product_ids else None
+    chosen = [value for value in level_ids if value is not None]
+    materials_ready = len(chosen) == draft['level_count'] and len(set(chosen)) == len(chosen)
+    duplicate_levels = len(set(chosen)) != len(chosen)
+    reviewed = render_product_reviews(ctx, [product for product in product_ids if product is not None],
+        reagent_id=draft['reagent_id'], lab_instrument_id=draft['lab_instrument_id'],
+        test_item_id=draft['test_item_id'], method_id=draft['method_id'],
+        prefix='project_product_' + ctx['token'])
+    registration_open = bool(st.session_state.get(registration_key + '_registration'))
     with st.expander('分组与项目备注'):
         _text(ctx, 'project_group', '分组')
         _text(ctx, 'notes', '项目备注', multiline=True)
     dependency_open = render_project_dependencies(ctx, kind='quick', disabled=registration_open)
     relation_pending = render_pending_product_relation_notice(ctx)
-    requirements = []
-    for field, label in (('test_item_id', '检验项目'), ('lab_instrument_id', '仪器'),
-                         ('reagent_id', '试剂'), ('method_id', '方法学'), ('unit_id', '单位')):
-        if draft.get(field) is None:
-            requirements.append('在本页选择“' + label + '”。')
-    if not str(draft.get('template_name') or '').strip():
-        requirements.append('填写本页的“项目名称”。')
-    if not reviewed:
-        requirements.append('在“试剂与质控品”中选择并确认本次使用的质控品。')
-    if missing_levels:
-        requirements.append('选择水平 ' + '、'.join(missing_levels) + ' 的实际质控品；缺少记录时点击“登记质控品批号”。')
     if duplicate_levels:
-        requirements.append('各水平不能选择同一条质控品记录，请调整上方“水平 N 的实际质控品”。')
-    if registration_open:
-        requirements.append('先保存或取消当前的质控品批号登记，再继续项目设置。')
-    if dependency_open:
-        requirements.append('先保存或取消“补充基础资料”中正在填写的记录。')
-    if relation_pending:
-        requirements.append('先保存或取消尚未完成的试剂与质控品配套记录。')
-    if requirements:
-        st.warning('继续前请先完成：\n\n' + '\n'.join('- ' + message for message in requirements))
+        st.error('各水平不能选择同一条质控品记录，请调整上方的原厂批号与浓度。')
     cancel, forward = st.columns(2)
     if cancel.button('取消', key='project_dialog_cancel', disabled=registration_open or dependency_open):
         _cancel(ctx)
     if forward.button('下一步：设置质量要求', type='primary', key='quick_details_next',
-                      disabled=not reviewed or not materials_ready or registration_open or dependency_open or relation_pending):
+                      disabled=not reviewed or not materials_ready or not draft['target_statistics_mode']
+                      or registration_open or dependency_open or relation_pending):
         try:
-            prepare_quick_project_details(draft)
+            context = prepare_quick_project_details(draft)
         except (ValueError, TypeError) as error:
             st.error(str(error))
         else:
-            identity = sha256(json.dumps({key: draft[key] for key in ('test_item_id', 'method_id', 'unit_id',
-                'reagent_id', 'qc_material_id', 'input_value_type', 'qc_method', 'level_count', 'level_ids')},
-                sort_keys=True).encode()).hexdigest()[:12]
-            if ctx.get('quick_quality_identity') != identity:
-                draft['quality'] = {}
-                ctx.pop('quick_quality_inputs', None)
-                ctx['quick_quality_identity'] = identity
+            _use_quality_context(ctx, context)
             ctx['quick_step'] = 'quality'
             st.rerun()
     if switch_requested:
@@ -274,13 +295,14 @@ def _render_quality(ctx):
         context = prepare_quick_project_details(ctx['draft'])
     except (ValueError, TypeError) as error:
         st.error(str(error))
-        st.info('请点击“返回检测设置”，在上一步修改上述项目、资料或实际批号，再回来核对质量要求。')
+        st.info('点击“返回检测设置”修改上述内容。')
         if st.button('返回检测设置', key='quick_invalid_back'):
             ctx['quick_step'] = 'details'
             st.rerun()
         if st.button('取消', key='project_dialog_cancel'):
             _cancel(ctx)
         return
+    _use_quality_context(ctx, context)
     saved = ctx.get('quick_quality_inputs') or {}
     if saved.get('identity') == ctx.get('quick_quality_identity'):
         for key, value in saved.get('values', {}).items():
@@ -300,10 +322,10 @@ def _render_quality(ctx):
             ctx['quick_preview'] = prepare_quick_project_setup(ctx['draft'])
         except QuickSetupDetailsError as error:
             st.error(str(error))
-            st.info('上述内容在上一步填写。请点击“返回检测设置”修改，再回来核对质量要求。')
+            st.info('点击“返回检测设置”修改上述内容。')
         except (ValueError, TypeError) as error:
             st.error(str(error))
-            st.info('请按上述提示修改本页的质量要求，再点击“下一步：查看设置”。')
+            st.info('修改上述质量要求后，点击“下一步：查看设置”。')
         else:
             ctx['quick_step'] = 'preview'
             st.rerun()
@@ -327,7 +349,6 @@ def _render_preview(ctx):
         st.caption(f'水平 {order}：{label}')
     quality = ctx['draft']['quality']
     st.caption('质量要求确认人：' + quality['confirmed_by'])
-    st.caption('请查看以上检验项目、仪器、试剂、质控品和质量要求。点击“确认保存并进入录入”后，即可开始输入检测结果。')
     details, back, cancel, save = st.columns([1, 1, 0.7, 1.6])
     if details.button('返回检测设置', key='quick_preview_details'):
         ctx['quick_step'] = 'details'
@@ -343,10 +364,10 @@ def _render_preview(ctx):
                 expected_preview_hash=preview['preview_hash'], request_key=ctx['token'])
         except QuickSetupDetailsError as error:
             st.error(str(error))
-            st.info('请点击“返回检测设置”修改上述内容，再重新查看设置并保存。')
+            st.info('点击“返回检测设置”修改上述内容。')
         except (ValueError, TypeError) as error:
             st.error(str(error))
-            st.info('请点击“返回质量要求”核对上述内容，再重新查看设置并保存；项目、单位或实际批号需要修改时，点击“返回检测设置”。')
+            st.info('质量要求有误请点击“返回质量要求”；项目、单位或批号有误请点击“返回检测设置”。')
         except (sqlite3.Error, OSError):
             logging.exception('Quick project setup failed')
             st.error('项目尚未保存，全部填写内容仍保留。请检查保存位置后重试。')

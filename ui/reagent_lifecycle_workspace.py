@@ -104,7 +104,7 @@ def _register_fields(state):
     lot_no = _field(state, 'lot_no', '试剂批号 *')
     expiry = _field(state, 'expiry', '效期 *', 'date_input')
     source = _field(state, 'source', '资料来源／厂家说明', 'text_area')
-    st.caption('请先核对批号是否已登记；已有批号可直接选用。新批号保存后，按检验项目登记验证，再确认切换使用。')
+    st.caption('已有批号请直接选用；新批号保存后需登记验证，再切换使用。')
     return dict(reagent_id=product, lot_no=lot_no, expiry_date=expiry, source_text=source)
 
 
@@ -142,10 +142,9 @@ def _switch_fields(state):
             hide_index=True, width='stretch')
     elif when is not None:
         st.info('请选择本次切换的检验项目，查看新旧批号及验证记录。')
-    st.caption('核对所选项目、新旧批号和验证，填写启用时间及换批依据。保存后，所选项目按这个时间使用新批号；历史记录保留原批号。')
+    st.caption('保存后从启用时间使用新批号；已保存的检测记录保留原批号。')
     person = _field(state, 'person', '操作者 *')
-    st.caption('换批依据中说明原因，以及原均值和标准差仍适用的依据。')
-    reason = _field(state, 'reason', '换批原因及参数沿用依据 *', 'text_area')
+    reason = _field(state, 'reason', '换批原因及原均值、SD仍适用的依据 *', 'text_area')
     confirmed = _field(state, 'confirmed', '已核对项目、验证结论和启用时间，确认沿用原均值和标准差', 'checkbox')
     return dict(selections=preview, effective_at=when, operator=person, reason=reason, confirmed=confirmed)
 
@@ -215,7 +214,6 @@ def _render_detail(context, lot, *, product_id=None):
     available = lot['id'] in {row['id'] for row in context['lots']}
     systems = _systems(context, lot['id'])
     active = [row for row in systems if row['available']]
-    st.caption('把实验室对这批试剂的检查结论和依据记在这里。')
     left, right = st.columns(2)
     if left.button('登记批号验证', key='reagent_verify', disabled=not available or not active, width='stretch'):
         open_reagent_lifecycle_dialog('verify', lot['id'], product_id=product_id)
@@ -224,7 +222,7 @@ def _render_detail(context, lot, *, product_id=None):
     if not available:
         st.info('此试剂产品或批号已停用，仅供查询。')
     elif not active:
-        st.info('此试剂尚未关联可用的项目批次。请在项目工作台选择或新建项目，核对所用试剂并确认项目和批次设置，再回到这里登记验证。')
+        st.info('尚无使用此试剂的可用批次。请在项目工作台核对所用试剂并确认批次设置，再登记验证。')
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     lots = {row['id']: row for row in context['all_lots']}
     usage_rows = []
@@ -274,7 +272,7 @@ def render_reagent_lifecycle_workspace(*, product_id=None):
     notice = st.session_state.pop('reagent_notice', '')
     if notice and receipt_matches:
         st.success(notice)
-    st.caption('先“登记试剂批号”，再“登记批号验证”，最后“切换到此试剂批号”。换批时填写原均值和标准差仍适用的依据。')
+    st.caption('新批号使用前，先“登记批号验证”，再“切换到此试剂批号”；换批需说明原均值和SD仍适用的依据。')
     products = {row['id']:row for row in context['all_products']}
     for key, value in [('reagent_search',''), ('reagent_product_filter',None), ('reagent_show_disabled',False)]:
         if key not in st.session_state:

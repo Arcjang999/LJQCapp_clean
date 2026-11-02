@@ -87,7 +87,7 @@ def render_settings_page() -> None:
     )
     render_workbench_context_bar(
         title="当前实验室信息",
-        caption="下方填写单位、检验员和复核员，点“保存设置”。之后生成的报告使用这些信息。",
+        caption=None,
         items=[
             ("实验室名称", current_settings.lab_name or "未填写"),
             ("科室名称", current_settings.department_name or "未填写"),
@@ -100,7 +100,7 @@ def render_settings_page() -> None:
     with st.container():
         render_section_intro(
             title="实验室信息",
-            caption="填写实验室、科室、检验员、复核员和报告声明，点“保存设置”。",
+            caption="用于之后生成的报告。",
             tone="accent",
         )
         info_left, info_right = st.columns(2, gap="medium")
@@ -126,7 +126,7 @@ def render_settings_page() -> None:
             )
             st.session_state["refresh_settings_form"] = True
             st.session_state["settings_saved_notice"] = (
-                "设置已保存，下次生成报告时使用这些单位和人员信息。"
+                "设置已保存。"
             )
             st.rerun()
 
@@ -135,8 +135,7 @@ def render_settings_page() -> None:
             st.success(saved_notice)
 
         st.caption(
-            "未填写时：实验室名称、科室名称、检验员、复核员为空时，报告会显示“未填写”；"
-            "报告声明为空时，报告会使用默认声明。"
+            "名称和人员留空时，报告显示“未填写”；声明留空时使用默认正文。"
         )
         with st.expander("查看未填写时的报告内容", expanded=False):
             st.write(f"实验室名称：{REPORT_SETTINGS_FALLBACKS['lab_name']}")
@@ -149,7 +148,6 @@ def render_settings_page() -> None:
         from ui.lab_preparation import render_lab_preparation_entry
         render_section_intro(
             title='单位资料准备',
-            caption='选用：下载填写表，一次填写实验室、仪器、试剂和质控品，再上传保存。也可到各管理页面逐项登记。',
             tone='muted',
         )
         render_lab_preparation_entry()
@@ -235,7 +233,7 @@ def _render_storage_section() -> None:
         st.warning(storage_message(status.status_text))
 
     st.markdown("**更改数据保存位置**")
-    st.caption("选择新的数据保存文件夹，完成更改后请重新打开软件。")
+    st.caption("现有资料将复制到新位置，重新打开软件后生效。")
     migration_left, migration_right = st.columns([1.1, 0.9], gap="medium")
     with migration_left:
         if st.button("选择新文件夹", key="pick_storage_migration_dir", use_container_width=True):
@@ -262,7 +260,7 @@ def _render_storage_section() -> None:
             else:
                 st.warning(storage_message(migration_validation[1]))
         else:
-            st.info('请先点击“选择新文件夹”，选择可写的数据文件夹，再确认更改保存位置。')
+            st.info('请点击“选择新文件夹”。')
         if st.button(
             "确认更改保存位置",
             key="confirm_storage_migration",
@@ -277,11 +275,10 @@ def _render_storage_section() -> None:
             else:
                 st.success(storage_message(result.message))
     with migration_right:
-        st.info("更改保存位置后，现有项目和检测记录会一起保留。")
-        st.caption("建议更改保存位置前先备份，完成后按提示重新打开软件。")
+        st.caption("建议更改前先备份。")
 
     st.markdown("**数据备份**")
-    st.caption("项目资料、检测记录、处理附件和已保存报告一同备份。可保存到默认备份文件夹，也可另选文件夹。")
+    st.caption("包含项目资料、检测记录、处理附件和已保存报告。")
     backup_left, backup_right = st.columns(2, gap="medium")
     with backup_left:
         if st.button("立即备份到默认目录", key="backup_default_dir", use_container_width=True):
@@ -347,9 +344,9 @@ def _render_storage_section() -> None:
     )
     restore_confirmed = bool(st.session_state.get(STORAGE_SESSION_KEYS["restore_confirmed"], False))
     if selected_restore_file is None:
-        st.info('请先点击“选择备份文件”，通过检查后勾选上方确认项，再点击“确认恢复数据”。')
+        st.info('请点击“选择备份文件”。')
     elif restore_ready and not restore_confirmed:
-        st.info('备份文件已通过检查。请勾选上方确认项，再点击“确认恢复数据”。')
+        st.info('备份文件已通过检查。请勾选上方确认项。')
     if st.button(
         "确认恢复数据",
         key="confirm_restore_database",
@@ -373,7 +370,7 @@ def _render_cloud_storage_section() -> None:
         st.success(notice)
 
     st.markdown("**数据备份**")
-    st.caption("项目资料、检测记录、处理附件和已保存报告一同备份。")
+    st.caption("包含项目资料、检测记录、处理附件和已保存报告。")
     if st.button("生成完整备份", key="cloud_create_backup", use_container_width=True):
         try:
             result = create_database_backup()
@@ -397,7 +394,7 @@ def _render_cloud_storage_section() -> None:
         st.session_state["settings_cloud_restore_confirmed"] = False
 
     if uploaded is None:
-        st.info('请先在“选择备份文件”中上传备份，通过检查后勾选确认项，再点击“确认恢复数据”。')
+        st.info('请先在“选择备份文件”中上传备份。')
         st.checkbox("我确认用此备份替换当前数据。", key="settings_cloud_restore_confirmed", disabled=True)
         st.button("确认恢复数据", key="cloud_confirm_restore", type="primary",
                   use_container_width=True, disabled=True)
@@ -415,7 +412,7 @@ def _render_cloud_storage_section() -> None:
             confirmed = st.checkbox("我确认用此备份替换当前数据。", key="settings_cloud_restore_confirmed",
                                     disabled=not restore_ready)
             if restore_ready and not confirmed:
-                st.info('备份文件已通过检查。请勾选上方“我确认用此备份替换当前数据”，再点击“确认恢复数据”。')
+                st.info('备份文件已通过检查。请勾选上方确认项。')
             if st.button("确认恢复数据", key="cloud_confirm_restore", type="primary",
                          use_container_width=True, disabled=not (restore_ready and confirmed)):
                 try:

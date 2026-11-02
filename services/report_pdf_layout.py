@@ -1029,12 +1029,20 @@ def _build_lot_trace_pages(report):
     def number(value):return '未记录' if value is None else f'{value:.4f}'
     source_labels={'manual':'实验室确认','manufacturer':'厂家赋值经确认','revision':'参数修订','building':'本批次均值和标准差建立','legacy':'旧序列'}
     event_labels={'reagent':'试剂换批','qc':'质控换批','target':'均值和标准差确认/修订','correction':'更正','active':'正式使用','ended':'停止使用','parallel':'新旧批同时使用观察'}
-    parameters=[f"V{r['version']} / {format_level_id_display(r['level'])}：{r['count']} 点；期间均值 {number(r['monthly_mean'])}，期间 SD {number(r['monthly_sd'])}；设定均值 {number(r['target_mean'])}，设定 SD {number(r['target_sd'])}。来源 {source_labels.get(r['source'],r['source'])}；确认人 {r['confirmed_by'] or '未记录'}；生效 {r['effective_at'] or '未记录'}。依据：{r['evidence']}" for r in groups]
+    parameters=[]
+    for r in groups:
+        statistics=r.get('statistics_source') or {}
+        source_label={'monthly':'月度统计','cumulative':'累计统计'}.get(statistics.get('strategy'),source_labels.get(r['source'],r['source']))
+        basis=''
+        if statistics:
+            level=statistics.get('level') or {}
+            basis=f"统计来源：{level.get('start') or '未记录'} 至 {level.get('end') or '未记录'}，有效 {level.get('n',0)} 点。"
+        parameters.append(f"V{r['version']} / {format_level_id_display(r['level'])}：{r['count']} 点；期间均值 {number(r['monthly_mean'])}，期间 SD {number(r['monthly_sd'])}；设定均值 {number(r['target_mean'])}，设定 SD {number(r['target_sd'])}。来源 {source_label}；确认人 {r['confirmed_by'] or '未记录'}；生效 {r['effective_at'] or '未记录'}。{basis}依据：{r['evidence']}")
     usage=[]
     for lot in dict.fromkeys(r['reagent_lot_no'] for r in rows):
         points=[r for r in rows if r['reagent_lot_no']==lot]
         usage.append(f"试剂批号 {lot}：{len(points)} 条记录；{points[0]['test_time']} 至 {points[-1]['test_time']}。质控品批号：{' / '.join(dict.fromkeys(r['qc_lot_no'] for r in points))}。")
-    events=[f"事件 #{e['id']}，{e['effective_at']}，类型 {event_labels.get(e['event_type'],e['event_type'])}；操作人 {e['operator']}；依据：{e['reason']}。更正来源：{e['corrects_event_id'] or '-'}。" for e in trace.get('events',[])]
+    events=[f"事件 #{e['id']}，{e['effective_at']}，类型 {event_labels.get(e['event_type'],e['event_type'])}；操作人 {e['operator']}；依据：{str(e['reason']).rstrip('。.')}。更正来源：{e['corrects_event_id'] or '-'}。" for e in trace.get('events',[])]
     basis_lines = _wrap_measured_text(trace['basis'], A4_PAGE_SIZE[0] * 72 * PAGE_WIDTH * .98, 9.3).splitlines()
     return _build_text_pages(report_title=report.title,page_title='实际批号与控制参数追溯',
         subtitle_lines=[f"项目：{report.basic_info.project_name}  /  {report.report_month_label}", *basis_lines],
@@ -1089,7 +1097,7 @@ def _build_quality_pages(report):
         evidence.append(f"{source['standard']} / {source['version']}；{source['source_clause']}；PDF {source['source_page']}。{source['requirement_text']}；仅登记依据，尚无自动评价。")
     recorded=review.get('recorded',{})
     if recorded:
-        comparison = ('未设置CV上限，未进行CV目标比较；单次质控仍使用所选方法的现有规则。'
+        comparison = ('未设置CV上限，未进行CV目标比较。'
                       if review.get('search_record', {}).get('scope') == 'local_catalog'
                       else '仅登记依据，尚无自动评价。')
         evidence.append(f"{recorded['source_name']} / {recorded['source_version']}：{recorded['requirement_text']}；{comparison}")

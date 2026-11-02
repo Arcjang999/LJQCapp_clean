@@ -298,10 +298,8 @@ def _render_import_dialog(state):
         st.info("当前批次已完成建靶，请选择正式期导入。")
     elif phase == "formal" and not _ready(method, current):
         st.info("当前批次尚未完成建靶。可以先检查文件，完成建靶后再点“确认导入”。")
-    st.caption("按本次数据的用途选择导入阶段，下载当前模板填写后上传CSV或单工作表Excel。"
-               "点击“检查文件并预览”，核对后再点“确认导入”。切换阶段后请重新上传；未填试剂批号的行会保存为“未记录”。")
-    st.caption("建靶数据与正式期数据分别导入。正式期数据请在完成建靶后选择“正式期”；"
-               "“全部”检测数据导出文件用于查询和留档，不能直接作为当前阶段的导入文件。")
+    st.caption("下载当前阶段的模板，填写后上传CSV或单工作表Excel。切换阶段须重新上传；试剂批号留空会保存为“未记录”。")
+    st.caption("建靶与正式期数据须分别导入，不能直接上传“全部”阶段的导出文件。")
     template = (build_lj_building_template_dataframe(current["input_value_type"]) if method == "lj" else
                 build_zscore_building_template_dataframe(current["level_count"], current["input_value_type"]))
     st.download_button("下载导入模板", dataframe_to_csv_bytes(template),
@@ -338,9 +336,9 @@ def _render_import_dialog(state):
     if review:
         render_import_review_summary(review["summary"])
         if review["summary"]["has_blocking_errors"]:
-            st.error("文件有下列问题。请修正后重新上传，再检查一次；本次数据尚未导入。")
+            st.error("尚未导入。请按下表修正文件，重新上传检查。")
         else:
-            st.success("文件检查通过。请核对下方检测时间、结果和实际试剂批号，再点“确认导入”。")
+            st.success("检查通过。核对下表的时间、结果和试剂批号后，点击“确认导入”。")
         issues = build_review_issues_dataframe(review["issues"])
         if not issues.empty:
             st.dataframe(issues, hide_index=True, width="stretch")
@@ -388,8 +386,7 @@ def _render_export_dialog(state, context):
             period = render_report_period(f'qc_transfer_data_period_{nonce}',
                 months=times.dt.to_period('M').astype(str).unique().tolist())
             frame = build_data_export(method, context, phase, start_date=period.start_date, end_date=period.end_date) if period else frame.iloc[:0]
-        st.caption("导出文件用于查询和留档，保留检测阶段和实际试剂批号。"
-                   "重新导入时请按所需阶段下载导入模板并整理原始数据，不能直接上传全部阶段的导出文件。"
+        st.caption("导出包含检测阶段和实际试剂批号；重新导入须使用对应阶段的模板。"
                    + ("每行是一整次检测，各水平完整列出。" if method == "zscore" else ""))
         if frame.empty:
             if dates == '按月或自选日期' and period is None:
@@ -412,7 +409,7 @@ def _render_export_dialog(state, context):
             from zscore_logic import PHASE_FORMAL_QC
             frame = context["qc_df"] if method == "lj" else context["plot_df"]
             formal = frame[frame["phase"] == ("正式数据" if method == "lj" else PHASE_FORMAL_QC)] if not frame.empty else frame
-            st.caption("按日期导出正式期质控图，包含起止日期当日及所选期间的全部检测。")
+            st.caption("包含起止日期当日的全部正式期检测。")
             if formal.empty:
                 st.info("当前批次暂无正式期质控数据。")
                 ready = False

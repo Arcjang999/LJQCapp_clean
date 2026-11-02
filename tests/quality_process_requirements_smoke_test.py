@@ -1,5 +1,6 @@
 """Editable local process requirements preserve numeric gates and source snapshots."""
 from copy import deepcopy
+from datetime import date
 from pathlib import Path
 import sys
 import unittest
@@ -20,6 +21,7 @@ from services.quality_review_service import (
     validate_project_quality, validate_quality_review,
 )
 from services.quality_target_service import decode, item_context
+from services.time_service import local_today
 from tests.instant_v12_integration_smoke_test import IsolatedDatabase
 from tests.quality_applicability_smoke_test import adopt, context, draft, record, search
 
@@ -122,12 +124,13 @@ class QualityProcessRequirementsTest(unittest.TestCase):
                     'source_ids': [pending_id], 'requirement_text': ''})
             self.assertEqual(before, self.dump())
 
-    def test_unknown_inapplicable_future_and_nonprocess_sources_are_rejected_atomically(self):
+    def test_unknown_inapplicable_noncurrent_and_nonprocess_sources_are_rejected_atomically(self):
         with IsolatedDatabase():
             _, identifier, ctx = self.pcr()
             before = self.dump()
+            noncurrent = 'wst641-2018-iqc' if local_today() >= date(2026, 11, 1) else 'wst641-2026-iqc'
             for source_id in ('unknown-source', 'cdc-hcv-2023-rna-quantitative-iqc',
-                              'wst641-2026-iqc', 'wst494-2017-signal', 'wst403-2024-047'):
+                              noncurrent, 'wst494-2017-signal', 'wst403-2024-047'):
                 with self.subTest(source_id=source_id):
                     with self.assertRaises(ValueError):
                         record(identifier, ctx, search_record=search(), process_requirements={

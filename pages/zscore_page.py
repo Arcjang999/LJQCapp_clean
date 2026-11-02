@@ -157,9 +157,9 @@ def _render_zscore_level_summary_compact_section(context: dict[str, object]) -> 
     with st.container(border=True):
         st.markdown("**各水平统计摘要**")
         if range_text is not None:
-            st.caption(f"正式期实时统计范围：{range_text}，仅包含正式期内在控数据。")
+            st.caption(f"统计日期：{range_text}；仅计入正式期在控结果。")
         else:
-            st.info("当前批次还没有正式期数据，正式期实时统计暂为空。")
+            st.info("尚无正式期数据，实时统计为空。")
 
         st.dataframe(
             pd.DataFrame(rows),
@@ -181,7 +181,7 @@ def _render_zscore_level_summary_compact_section(context: dict[str, object]) -> 
                     value=end_date,
                     key=f"zscore_level_summary_end_{batch_id}",
                 )
-                st.caption("开始日期 / 结束日期会影响正式期实时统计数据。按日期统计，结束日期包含当日全部记录。")
+                st.caption("结束日期包含当日全部记录。")
                 if range_warning:
                     st.warning(range_warning)
 

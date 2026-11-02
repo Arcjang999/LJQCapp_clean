@@ -10,7 +10,7 @@ from services.project_config_service import _normalize_template_item
 
 
 _FIELDS = ('test_item_id', 'qc_method', 'input_value_type', 'unit_id', 'method_id',
-           'reagent_id', 'level_count', 'target_n', 'cv_limit', 'quality_target_source_text')
+           'reagent_id', 'level_count', 'target_n', 'cv_limit', 'quality_target_source_text', 'target_statistics_mode')
 _QUALITY_ARGS = ('confirmed_by', 'evidence', 'context', 'search_record',
                  'adopted_standard_ids', 'registered_standards', 'process_requirements')
 
@@ -48,6 +48,7 @@ def get_quick_setup_context(values):
 
 
 def _context(connection, values):
+    from services.qc_product_recommendation_service import product_reference_record
     references = {}
     for field, table, label in (
         ('lab_instrument_id', 'lab_instruments', '仪器'),
@@ -58,6 +59,7 @@ def _context(connection, values):
         ('reagent_id', 'md_reagents', '试剂'),
     ):
         references[field] = _active(connection, table, values.get(field), label)
+    references['qc_material_id'] = product_reference_record(connection, values['qc_material_id'])
     item = _normalize_template_item({key: values.get(key) for key in _FIELDS}, 1)
     test, unit, method = (references[key] for key in ('test_item_id', 'unit_id', 'method_id'))
     item.update(test_item_name=test['chinese_name'], abbreviation=test['abbreviation'],
@@ -73,10 +75,14 @@ def _context(connection, values):
         level_ids = [int(value) for value in values.get('level_ids', [])]
     except (ValueError, TypeError):
         raise ValueError('请为全部水平选择有效的实际质控品。') from None
-    levels = [dict(row) for row in validate_material_selection(connection,
-        int(values['qc_material_id']), level_ids, item['level_count'])]
+    levels = [{**dict(row), 'physical_level_order': row['level_order'], 'level_order': order}
+        for order, row in enumerate(validate_material_selection(connection,
+            int(values['qc_material_id']), level_ids, item['level_count'], allow_multiple_products=True), 1)]
     # Selected lots/specifications and their parent status are part of the review.
     for level in levels:
+        _active(connection, 'md_qc_materials', level['qc_material_id'], '质控品产品')
+        references['product_' + str(level['qc_material_id'])] = product_reference_record(
+            connection, level['qc_material_id'])
         references['lot_' + str(level['qc_material_lot_id'])] = _active(
             connection, 'md_qc_material_lots', level['qc_material_lot_id'], '质控品批号')
     references['aliases'] = aliases
@@ -84,11 +90,17 @@ def _context(connection, values):
 
 
 def _product_review(values):
-    from services.qc_product_recommendation_service import validate_choice_review
-    prior = values.get('product_choice_review') or {}
+    from services.qc_product_recommendation_service import validate_choice_reviews
+    prior = values.get('product_choice_reviews') or values.get('product_choice_review') or {}
     if not prior:
         raise ValueError('请先选择质控品，并确认它可用于所选仪器和试剂。')
-    return validate_choice_review(prior, qc_material_id=int(values['qc_material_id']),
+    with read_snapshot() as connection:
+        levels = validate_material_selection(connection, int(values['qc_material_id']),
+            [int(value) for value in values.get('level_ids', [])],
+            int(values['level_count']) if values['qc_method'] == 'zscore' else 1,
+            allow_multiple_products=True)
+    products = list(dict.fromkeys(int(row['qc_material_id']) for row in levels))
+    return validate_choice_reviews(prior, qc_material_ids=products,
         reagent_id=int(values['reagent_id']), lab_instrument_id=int(values['lab_instrument_id']),
         test_item_id=int(values['test_item_id']), method_id=int(values['method_id']))
 
@@ -107,6 +119,8 @@ def prepare_quick_project_details(values):
 
 def _prepare_details(connection, values):
     try:
+        from services.target_statistics_policy_service import normalize_statistics_mode
+        normalize_statistics_mode(values.get('target_statistics_mode'))
         name = str(values.get('template_name') or '').strip()
         if not name:
             raise ValueError('请填写项目名称。')
@@ -172,7 +186,10 @@ def _prepare(connection, values):
         ('项目', name), ('仪器', context['references']['lab_instrument_id']['display_name']),
         ('检验项目', context['item']['test_item_name']), ('方法学', context['item']['method_name']),
         ('单位', context['item']['unit_symbol']),
-        ('质控品', context['references']['qc_material_id']['generic_name']),
+        ('均值和SD统计方式', {'monthly':'月度统计','cumulative':'累计统计'}[values['target_statistics_mode']]),
+        ('质控品', '；'.join(dict.fromkeys(
+            '｜'.join(str(row.get(key) or '') for key in ('catalog_no', 'generic_name', 'manufacturer_name')
+                      if row.get(key)) for row in context['levels']))),
     ]
     from services.project_config_service import QC_METHOD_LABELS, INPUT_VALUE_TYPE_LABELS
     summary.extend([('质控方法', QC_METHOD_LABELS[context['item']['qc_method']]),
@@ -206,7 +223,7 @@ def save_quick_project_setup(values, *, expected_preview_hash, request_key):
             return json.loads(old['receipt_json'])
         preview = _prepare(connection, values)
         if preview['preview_hash'] != expected_preview_hash:
-            raise ValueError('项目资料或可用质控品已修改。填写内容仍保留，请返回上一步检查，再查看保存预览。')
+            raise ValueError('项目资料或可用质控品已修改，本次预览已失效。')
         item_values = {key: values.get(key) for key in _FIELDS}
         item_values.update(product_choice_review=_product_review(values), notes=str(values.get('item_notes') or ''))
         project_values = dict(template_name=values['template_name'], lab_instrument_id=values['lab_instrument_id'],

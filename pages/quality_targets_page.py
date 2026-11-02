@@ -13,7 +13,6 @@ def render_quality_targets_page():
     st.subheader('质量目标')
     if st.button('返回工作台',key='quality_back'):
         st.session_state['show_quality_targets_page']=False;st.rerun()
-    st.caption('先选检验项目，再设置质量要求。软件会列出本次检测的标准限值；其他项目可使用SD控制，原始定量结果可选填CV上限。')
     project,browse,custom=st.tabs(['质量目标设置','标准参考（高级）','自定要求目录（高级）'])
     with browse:
         from ui.quality_catalog import render_quality_catalog
@@ -30,7 +29,7 @@ def render_quality_targets_page():
             selected=next((row for row in rows if row['id']==selected_item),None)
             open_project_setup(selected['template_id'] if selected is not None else None)
     with custom:
-        st.caption('单个项目的CV可在“质量目标设置”中直接填写。多套实验室要求可在这里集中登记；已确认批次继续保留原要求。')
+        st.caption('多套限值在此登记；单项CV在“质量目标设置”中填写。已确认批次的要求不变。')
         if st.button('新增实验室自定要求',key='quality_custom_open'):
             _custom_requirement_dialog()
         st.download_button('下载质量要求导入模板',custom_template_csv(),'质量要求导入模板.csv','text/csv')

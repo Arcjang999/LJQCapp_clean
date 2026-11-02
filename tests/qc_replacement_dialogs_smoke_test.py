@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from streamlit.testing.v1 import AppTest
 from database import get_connection
-from services.material_workflow_service import register_control_material
+from services.material_workflow_service import register_control_material, config_material_summary
 from services.project_config_service import copy_lot_config, get_lot_config, list_lot_config_items, list_lot_item_levels
 from services.qc_replacement_edit_service import get_qc_replacement_context, save_qc_replacement
 from tests.project_management_v11_smoke_test import TemporaryDatabaseContext, _seed_v11_configuration_dependencies, _build_active_source_config
@@ -74,15 +74,15 @@ def test_partial_level_dialog_uses_actual_ids_and_preserves_other_materials():
         before = snapshot()
         app.multiselect(key=field(app,'items')).set_value([zitem['id']]).run()
         # Product order=1 can legitimately serve the second position in this batch.
-        app.selectbox(key=field(app,f'item_{zitem["id"]}_1')).set_value(new_mid).run()
-        app.text_input(key=field(app,'name')).set_value('中水平换批试用').run()
+        app.selectbox(key=field(app,f'item_{zitem["id"]}_1_level')).set_value(new_mid).run()
+        assert not any(widget.key == field(app, 'name') for widget in app.text_input)
         assert_clean(app)
         assert snapshot() == before
         app.button(key='qc_replace_cancel').click().run()
         assert_clean(app)
         app.button(key='qc_replace_continue').click().run()
-        assert app.selectbox(key=field(app,f'item_{zitem["id"]}_1')).value == new_mid
-        assert app.text_input(key=field(app,'name')).value == '中水平换批试用'
+        assert app.selectbox(key=field(app,f'item_{zitem["id"]}_1_level')).value == new_mid
+        assert not any(widget.key == field(app, 'name') for widget in app.text_input)
         app.button(key='qc_replace_save').click().run()
         assert_clean(app)
         new_id = app.session_state['v11_pending_copied_config_id']
@@ -105,11 +105,11 @@ def test_validation_failure_discard_and_reopen_never_leak_draft():
         before = snapshot()
         token = app.session_state['qc_replacement_dialog']['token']
         app.radio(key=field(app,'mode')).set_value('lot').run()
-        app.text_input(key=field(app,'name')).set_value('未保存新批次')
+        assert not any(widget.key == field(app, 'name') for widget in app.text_input)
         app.button(key='qc_replace_save').click().run()
         assert_clean(app)
         assert any('请选择新质控品批号' in item.value for item in app.error)
-        assert app.text_input(key=field(app,'name')).value == '未保存新批次'
+        assert not any(widget.key == field(app, 'name') for widget in app.text_input)
         assert snapshot() == before
         app.button(key='qc_replace_cancel').click().run()
         app.button(key='qc_replace_discard').click().run()
@@ -117,7 +117,7 @@ def test_validation_failure_discard_and_reopen_never_leak_draft():
         assert snapshot() == before and app.session_state['qc_replace_selected_config'] == source
         app.button(key='qc_replace_open').click().run()
         assert app.session_state['qc_replacement_dialog']['token'] != token
-        assert app.text_input(key=field(app,'name')).value == ''
+        assert not any(widget.key == field(app, 'name') for widget in app.text_input)
         assert app.radio(key=field(app,'mode')).value == 'materials'
 
 
@@ -129,21 +129,21 @@ def test_existing_target_opens_without_creating_duplicate():
         app = AppTest.from_function(app_page,default_timeout=20).run()
         app.text_input(key='qc_replace_search').set_value(get_lot_config(source)['config_name']).run()
         index = next(i for i,table in enumerate(app.dataframe) if 'qc_replace_table_' in table.proto.id)
-        names = app.dataframe[index].value['批次名称'].tolist()
-        select_table_row(app,names.index(get_lot_config(source)['config_name']),index=index)
+        names = app.dataframe[index].value['质控品批号'].tolist()
+        select_table_row(app,names.index(config_material_summary(source)),index=index)
         app.button(key='qc_replace_open').click().run()
         app.radio(key=field(app,'mode')).set_value('lot').run()
         app.selectbox(key=field(app,'target_lot')).set_value(data['target_lot_id']).run()
         assert_clean(app)
         assert app.button(key='qc_replace_save').disabled
         before = snapshot()
-        app.text_input(key=field(app,'name')).set_value('尚未保存的名称')
+        assert not any(widget.key == field(app, 'name') for widget in app.text_input)
         app.button(key='qc_replace_open_existing').click().run()
         assert_clean(app)
         assert app.session_state['qc_replacement_dialog']['discard']
         assert snapshot() == before
         app.button(key='qc_replace_continue').click().run()
-        assert app.text_input(key=field(app,'name')).value == '尚未保存的名称'
+        assert not any(widget.key == field(app, 'name') for widget in app.text_input)
         app.button(key='qc_replace_open_existing').click().run()
         app.button(key='qc_replace_discard').click().run()
         assert app.session_state['v11_pending_existing_config_id'] == target
@@ -160,14 +160,14 @@ def test_switching_modes_keeps_unsubmitted_material_choices():
         original = state['draft']['selections'][item['id']][0]
         different = next(row['id'] for row in state['context']['materials'] if row['id'] != original)
         before = snapshot()
-        app.selectbox(key=field(app,f'item_{item["id"]}_0')).set_value(different)
-        app.text_input(key=field(app,'name')).set_value('切换后保留')
+        app.selectbox(key=field(app,f'item_{item["id"]}_0_level')).set_value(different)
+        assert not any(widget.key == field(app, 'name') for widget in app.text_input)
         app.radio(key=field(app,'mode')).set_value('lot').run()
         app.selectbox(key=field(app,'target_lot')).set_value(data['target_lot_id'])
         app.radio(key=field(app,'mode')).set_value('materials').run()
         assert_clean(app)
-        assert app.selectbox(key=field(app,f'item_{item["id"]}_0')).value == different
-        assert app.text_input(key=field(app,'name')).value == '切换后保留'
+        assert app.selectbox(key=field(app,f'item_{item["id"]}_0_level')).value == different
+        assert not any(widget.key == field(app, 'name') for widget in app.text_input)
         app.radio(key=field(app,'mode')).set_value('lot').run()
         assert app.selectbox(key=field(app,'target_lot')).value == data['target_lot_id']
         assert snapshot() == before

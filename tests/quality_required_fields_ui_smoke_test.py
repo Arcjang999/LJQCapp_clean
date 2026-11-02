@@ -44,11 +44,9 @@ class QualityRequiredFieldsUiTests(unittest.TestCase):
                 self.assertNotIn(prompt, captions)
                 self.assertNotIn(selector, styles)
         summaries = [row.value for row in app.info if row.value.startswith('还有 ')]
-        expected = [] if not fields else [
-            f"还有 {len(fields)} 项必填：{'、'.join(CONTEXT_LABELS[field] for field in fields)}。"
-            '请填写下方标出的输入框。']
-        self.assertEqual(expected, summaries)
-        self.assertFalse(any(row.label == '检测条件' for row in app.expander))
+        self.assertEqual([], summaries, '已在字段旁提示的缺项不再重复列一遍')
+        editor = next(row for row in app.expander if row.label == '修改检测条件')
+        self.assertEqual(bool(fields), editor.proto.expanded)
 
     def test_default_blanks_show_local_prompts_and_summary_without_changing_labels(self):
         with IsolatedDatabase():

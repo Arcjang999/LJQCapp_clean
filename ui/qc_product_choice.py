@@ -16,6 +16,7 @@ from services.qc_product_display_service import (
 )
 from services.qc_product_recommendation_service import (
     get_qc_product_recommendations, validate_qc_product_choice, validate_choice_review,
+    choice_review_map, pack_choice_reviews, validate_choice_reviews,
     list_qc_product_relations, save_qc_product_relation, set_qc_product_relation_disabled,
 )
 
@@ -27,7 +28,7 @@ def has_pending_product_relation(ctx):
 def render_pending_product_relation_notice(ctx):
     pending = has_pending_product_relation(ctx)
     if pending:
-        st.info('“登记试剂配套的质控品”中有配套记录尚未完成。请先保存或取消这条记录，再继续项目设置。')
+        st.info('请先保存或取消“登记试剂配套的质控品”中的记录。')
     return pending
 
 
@@ -44,7 +45,7 @@ def render_product_choice(ctx, *, reagent_id, lab_instrument_id, test_item_id=No
             frozen = {name: editor['values'].get(name) for name in scope}
             _render_relation_editor(ctx, frozen, editor['values'].get('qc_material_id'), prefix)
     if reagent_id is None or lab_instrument_id is None:
-        st.info('选择仪器和试剂后，在这里选择本次使用的质控品。')
+        st.info('请先选择仪器和试剂。')
         draft.pop('product_choice_review', None)
         pending_editor()
         return False
@@ -60,12 +61,12 @@ def render_product_choice(ctx, *, reagent_id, lab_instrument_id, test_item_id=No
     review = draft.get('product_choice_review') or {}
     if review and review.get('revision') != suggestions['revision']:
         draft.pop('product_choice_review', None)
-        st.warning('试剂与质控品的使用记录已更新，请重新选择并点击“确认所选质控品”。')
+        st.warning('配套资料已更新，请核对后点击“确认所选质控品”。')
     candidates = {int(row['qc_material_id']): row for row in suggestions['candidates']}
     products = {int(row['id']): row for row in product_display_rows(
         list_qc_materials(include_disabled=False).to_dict('records'))}
     if not products and not locked:
-        st.info('还没有可选的质控品产品。展开“补充基础资料”，选择“质控品产品”并登记；保存后再选择本次批号。')
+        st.info('没有可选质控品，请在“补充基础资料”中登记“质控品产品”。')
     current = draft.get(field)
     if locked:
         row = products.get(current)
@@ -98,10 +99,6 @@ def render_product_choice(ctx, *, reagent_id, lab_instrument_id, test_item_id=No
             st.caption(concentration)
     if (draft.get('product_choice_review') or {}).get('qc_material_id') != current:
         draft.pop('product_choice_review', None)
-    if candidates:
-        st.caption('已找到本次仪器、试剂和检验项目的配套记录。请选择产品并点击“确认所选质控品”。' if not locked else '此质控品已有配套使用记录，请点击“确认所选质控品”。')
-    else:
-        st.caption('还没有这套仪器和试剂的质控品使用记录。请填写确认人和使用说明。' if locked else '还没有这套仪器和试剂的质控品使用记录。请选择质控品，并填写确认人和使用说明。')
     candidate = candidates.get(current)
     if candidate:
         st.caption('使用说明：' + '；'.join(candidate['evidence']))
@@ -127,15 +124,13 @@ def render_product_choice(ctx, *, reagent_id, lab_instrument_id, test_item_id=No
                 str(confirmed.get(name) or '').strip() != str(manual_review[name] or '').strip()
                 for name in ('confirmed_by', 'evidence'))):
             draft.pop('product_choice_review', None)
-            st.info('质控品确认人或使用说明已修改。请点击“确认所选质控品”，重新确认本次填写。')
+            st.info('质控品确认人或使用说明已修改，请重新点击“确认所选质控品”。')
     if st.button('确认所选质控品', key=prefix + '_confirm', disabled=current is None):
         try:
             draft['product_choice_review'] = validate_qc_product_choice(qc_material_id=current,
                 **scope, expected_revision=suggestions['revision'], manual_review=manual_review)
         except ValueError as error:
             st.error(str(error))
-        else:
-            st.success('已确认此质控品。')
     review = draft.get('product_choice_review')
     valid = False
     if review:
@@ -148,18 +143,140 @@ def render_product_choice(ctx, *, reagent_id, lab_instrument_id, test_item_id=No
             st.caption('本次质控品已确认。')
     if not valid:
         if current is None:
-            st.info('请先在上方“质控品”中选择产品，再点击“确认所选质控品”。')
+            st.info('请选择“质控品”，再点击“确认所选质控品”。')
         elif manual and not all(str(manual_review.get(name) or '').strip() for name in ('confirmed_by', 'evidence')):
             missing = [label for name, label in (('confirmed_by', '质控品确认人'), ('evidence', '为什么选择此质控品'))
                        if not str(manual_review.get(name) or '').strip()]
             st.info('请填写上方的“' + '”、“'.join(missing) + '”，再点击“确认所选质控品”。')
         else:
-            st.info('请点击上方“确认所选质控品”，确认完成后才能继续项目设置。')
+            st.info('请点击“确认所选质控品”。')
     if allow_relation_edit:
         with st.expander('登记试剂配套的质控品'):
-            st.caption('在这里记录这套仪器和试剂可使用哪些质控品，方便下次选择。质控品批号另行登记。')
+            st.caption('保存产品的适用范围和依据；实际批号另行登记。')
             _render_relation_editor(ctx, scope, current, prefix)
     return valid
+
+
+def render_product_reviews(ctx, qc_material_ids, *, reagent_id, lab_instrument_id,
+                           test_item_id=None, method_id=None, prefix=None,
+                           on_confirm=None, confirm_label='确认所选质控品', allow_relation_edit=True):
+    """Confirm the chosen products together; a lot change alone needs no new evidence."""
+    prefix = prefix or 'product_reviews_' + ctx['token']
+    draft = ctx['draft']
+    products = list(dict.fromkeys(int(value) for value in qc_material_ids if value is not None))
+    scope = dict(reagent_id=reagent_id, lab_instrument_id=lab_instrument_id,
+                 test_item_id=test_item_id, method_id=method_id)
+    if allow_relation_edit:
+        pending = next(((key[:-7], value) for key, value in ctx.items()
+                        if key.startswith(prefix) and key.endswith('_editor') and value), None)
+        if pending:
+            relation_prefix, editor = pending
+            frozen = {field: editor['values'].get(field) for field in scope}
+            _render_relation_editor(ctx, frozen, editor['values'].get('qc_material_id'), relation_prefix)
+            return False
+    reviews = choice_review_map(draft.get('product_choice_reviews') or draft.get('product_choice_review'))
+    reviews = {str(product): reviews[str(product)] for product in products if str(product) in reviews}
+    draft['product_choice_reviews'] = reviews
+    draft['product_choice_review'] = pack_choice_reviews(reviews)
+    if not products:
+        return False
+    if reagent_id is None or lab_instrument_id is None:
+        st.info('请先选择仪器和试剂。')
+        return False
+    suggestions = get_qc_product_recommendations(**scope)
+    candidates = {int(row['qc_material_id']): row for row in suggestions['candidates']}
+    catalog = {int(row['id']): row for row in product_display_rows(
+        list_qc_materials(include_disabled=True).to_dict('records'))}
+    prepared, complete, all_valid, dirty_inputs = {}, True, True, False
+    cache = draft.setdefault('product_manual_drafts', {})
+    for product in products:
+        product_key = str(product)
+        old = reviews.get(product_key, {})
+        pfx = prefix if len(products) == 1 else prefix + '_' + product_key
+        label = product_choice_label(catalog[product]) if product in catalog else '质控品已不存在'
+        st.markdown('**' + label + '**')
+        error = ''
+        try:
+            current = validate_choice_review(old, qc_material_id=product, **scope)
+        except (ValueError, TypeError) as exc:
+            current, error = None, str(exc)
+        editing = bool(ctx.get(pfx + '_editing'))
+        if current and not editing:
+            prepared[product_key] = current
+            st.caption('已确认：' + str(current.get('confirmed_by') or '') + '｜' + str(current.get('evidence') or ''))
+            if st.button('修改适用依据', key=pfx + '_edit'):
+                ctx[pfx + '_editing'] = True
+                st.rerun(scope='app')
+            if allow_relation_edit:
+                with st.expander('登记试剂配套的质控品'):
+                    _render_relation_editor(ctx, scope, product, pfx)
+            continue
+        all_valid = False
+        if old and error:
+            st.warning(error)
+        candidate = candidates.get(product)
+        manual = candidate is None or old.get('basis') == 'manual' or editing
+        fields, fields_ready = None, True
+        if manual:
+            identity = sha256(json.dumps(dict(scope, qc_material_id=product), sort_keys=True).encode()).hexdigest()[:16]
+            initial = cache.get(identity) or old or {}
+            person_key, evidence_key = pfx + '_person', pfx + '_evidence'
+            if ctx.get(pfx + '_identity') != identity:
+                st.session_state[person_key] = initial.get('confirmed_by', '')
+                st.session_state[evidence_key] = initial.get('evidence', '')
+                ctx[pfx + '_identity'] = identity
+            else:
+                # A discard prompt temporarily removes the widgets from the page.
+                # Streamlit clears their keys, while the explicit draft must survive.
+                if person_key not in st.session_state:
+                    st.session_state[person_key] = initial.get('confirmed_by', '')
+                if evidence_key not in st.session_state:
+                    st.session_state[evidence_key] = initial.get('evidence', '')
+            from ui.required_fields import required_field
+            with required_field(person_key, missing=not str(st.session_state.get(person_key) or '').strip(),
+                                message='请填写质控品确认人。'):
+                person = st.text_input('质控品确认人', key=person_key, max_chars=80)
+            with required_field(evidence_key, missing=not str(st.session_state.get(evidence_key) or '').strip(),
+                                message='请填写此产品的适用依据。'):
+                evidence = st.text_area('适用依据', key=evidence_key, max_chars=2000,
+                    placeholder='说明书名称或实验室使用记录。')
+            fields = dict(confirmed_by=person, evidence=evidence)
+            dirty_inputs = dirty_inputs or any(str(fields[key]) != str(old.get(key) or '')
+                                              for key in ('confirmed_by', 'evidence'))
+            cache[identity] = fields
+            if not person.strip() or not evidence.strip():
+                complete = False
+                fields_ready = False
+        else:
+            st.caption('已登记依据：' + '；'.join(candidate['evidence']))
+            st.caption('核对人：' + '；'.join(candidate['confirmed_by']))
+        if fields_ready:
+            try:
+                prepared[product_key] = validate_qc_product_choice(qc_material_id=product, **scope,
+                    expected_revision=suggestions['revision'], manual_review=fields)
+            except (ValueError, TypeError) as exc:
+                complete = False
+                st.error(str(exc))
+        if allow_relation_edit:
+            with st.expander('登记试剂配套的质控品'):
+                _render_relation_editor(ctx, scope, product, pfx)
+    ctx[prefix + '_dirty'] = not all_valid and (any(
+        key.startswith(prefix) and key.endswith('_editing') and value for key, value in ctx.items()) or
+        dirty_inputs)
+    if not all_valid and st.button(confirm_label, key=prefix + '_confirm', disabled=not complete):
+        try:
+            confirmed = validate_choice_reviews(prepared, qc_material_ids=products, **scope)
+            if on_confirm is not None:
+                on_confirm(confirmed)
+            draft['product_choice_reviews'] = choice_review_map(confirmed)
+            draft['product_choice_review'] = confirmed
+            for product in products:
+                pfx = prefix if len(products) == 1 else prefix + '_' + str(product)
+                ctx.pop(pfx + '_editing', None)
+            st.rerun(scope='app')
+        except (ValueError, TypeError) as exc:
+            st.error(str(exc))
+    return all_valid
 
 
 def render_panel_product_review(ctx, template):
@@ -196,7 +313,7 @@ def render_panel_product_review(ctx, template):
         if missing_reagents:
             st.info('请在上方表格的“试剂”列为以下项目选择试剂：' + '、'.join(missing_reagents) + '。')
         if not checked:
-            st.info('请核对以上项目，并勾选“已确认此质控品可用于以上各项的试剂和检测方法”，再点击“确认以上项目的质控品”。')
+            st.info('请勾选“已确认此质控品可用于以上各项的试剂和检测方法”，再点击“确认以上项目的质控品”。')
         if st.button('确认以上项目的质控品', key=prefix + '_confirm', disabled=not checked):
             try:
                 proposed = []
@@ -272,7 +389,7 @@ def _render_relation_editor(ctx, scope, current_product, prefix):
         text = product_choice_label(row) if row and field == 'qc_material_id' else str(row[name]) if row else '全部'
         summaries.append(label + '：' + text)
     st.caption('｜'.join(summaries))
-    st.caption('上方列出这条记录使用的仪器、检验项目和方法。“全部”表示没有限制，请在下方说明。')
+    st.caption('“全部”表示不限该条件，请在下方填写适用范围和依据。')
     # Identity is frozen for this form, so changing the surrounding project cannot rebind it.
     if editor['action'] != 'status':
         for field, label in [('scope_note', '可使用的仪器、项目和方法'), ('evidence', '说明书或使用记录'), ('confirmed_by', '确认人')]:
@@ -300,5 +417,9 @@ def _render_relation_editor(ctx, scope, current_product, prefix):
             st.error('这条配套记录没有保存成功。填写内容仍保留，请检查保存位置后重试。')
         else:
             ctx.pop(editor_key, None)
-            ctx['draft'].pop('product_choice_review', None)
+            reviews = choice_review_map(ctx['draft'].get('product_choice_reviews') or
+                                        ctx['draft'].get('product_choice_review'))
+            reviews.pop(str(values['qc_material_id']), None)
+            ctx['draft']['product_choice_reviews'] = reviews
+            ctx['draft']['product_choice_review'] = pack_choice_reviews(reviews)
             st.rerun()

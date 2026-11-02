@@ -53,7 +53,6 @@ def render_review_summary(review, *, historical=False):
     if recorded:
         st.write('实验室自定要求：' + recorded.get('requirement_text', ''))
         st.caption('使用文件：' + recorded.get('source_name', '') + ' / ' + recorded.get('source_version', ''))
-        st.caption('请按以上要求检查检测结果，均值和SD使用本批次设置。')
     st.caption('确认人：' + review.get('confirmed_by', '') + '｜设置说明：' + review.get('evidence', ''))
     local_process = review.get('process_requirements')
     if local_process is not None:
@@ -98,7 +97,7 @@ def quality_validation_issues(item, result, plan, spec=None, *, quick=False, set
     """Describe the existing validation rules at the fields that can resolve them."""
     from services.quality_applicability_service import (
         CONTEXT_LABELS, context_errors, missing_context_fields,
-        validate_registered_sources, validate_search_record,
+        validate_registered_sources, validate_search_record, source_status,
     )
     from services.quality_target_service import select_rule
 
@@ -131,7 +130,8 @@ def quality_validation_issues(item, result, plan, spec=None, *, quick=False, set
     pending = [row for row in plan['assessments'] if row['kind'] != 'process' and row['status'] == 'pending']
     for row in pending:
         message = row['reason']
-        if message == '待补充适用条件' and missing:
+        if (missing and message in ('待补充适用条件', '待补充适用条件或核对现行依据')
+                and source_status(row['source']) == 'current'):
             continue
         if '单位' in message:
             settings('unit_id', message)
@@ -140,9 +140,9 @@ def quality_validation_issues(item, result, plan, spec=None, *, quick=False, set
         elif '输入值类型' in message:
             settings('input_value_type', message)
         else:
-            add('context', '检测条件', message + ' 请核对上方“检测条件”；条款在“查看标准及填写对照要求”中。')
+            add('context', '检测条件', message + ' 请核对上方“检测条件”；条款在“对照与质控要求”中。')
     if plan['state'] == 'blocked' and not missing and not pending and not context_errors(item, context):
-        add('context', '检测条件', plan['reason'] + ' 请核对上方“检测条件”和“查看标准及填写对照要求”。')
+        add('context', '检测条件', plan['reason'] + ' 请核对上方“检测条件”和“对照与质控要求”。')
     if not str(result.get('confirmed_by') or '').strip():
         label = '质量要求确认人' if quick else '确认人'
         add('confirmed_by', label, f'请填写“{label}”。')
@@ -156,7 +156,7 @@ def quality_validation_issues(item, result, plan, spec=None, *, quick=False, set
     mode = result['mode']
     if mode == 'source':
         if spec is None:
-            add('requirement_id', '选择实验室自定要求', '请在“选择实验室自定要求”中选择一项要求。')
+            add('requirement_id', '已登记限值', '请在“已登记限值”中选择一项要求。')
         else:
             try:
                 validate_spec_for_item(spec, item)
@@ -166,7 +166,7 @@ def quality_validation_issues(item, result, plan, spec=None, *, quick=False, set
                 elif 'Ct' in str(error) or 'log' in str(error):
                     settings('input_value_type', str(error))
                 else:
-                    add('requirement_id', '选择实验室自定要求', str(error) + ' 请在“选择实验室自定要求”中重新选择。')
+                    add('requirement_id', '已登记限值', str(error) + ' 请在“已登记限值”中重新选择。')
             rules = []
             for level in result['levels']:
                 try:
@@ -193,14 +193,14 @@ def quality_validation_issues(item, result, plan, spec=None, *, quick=False, set
         if result.get('cv_limit') is not None and result['cv_limit'] <= 0:
             add('cv_limit', '实验室CV上限', '“实验室CV上限”须大于0；没有此项要求时请清空，保留为空。')
         if not str(result.get('requirement_text') or '').strip():
-            add('requirement_text', '文字要求与依据', '请展开“文字要求与依据”，在“实验室实际要求”中保留SD控制说明或填写本实验室实际要求。')
+            add('requirement_text', '要求与文件依据', '请在“要求与文件依据”中填写“实验室实际要求”。')
     elif mode == 'recorded':
         for field, label in (('source_name', '使用的说明书或实验室文件名称'),
                              ('source_version', '设置日期或文件版本'), ('requirement_text', '实验室实际要求')):
             if not str(result.get(field) or '').strip():
-                add(field, '填写其他实验室要求', f'请在“填写其他实验室要求”中填写“{label}”。')
+                add(field, '要求与文件依据', f'请在“要求与文件依据”中填写“{label}”。')
     if mode != 'sd_cv' and not str(result.get('evidence') or '').strip():
-        add('evidence', '质量要求设置说明', '请展开“质量要求设置说明”，填写“说明此要求如何用于本次检测”。')
+        add('evidence', '要求与文件依据', '请在“要求与文件依据”中填写“说明此要求如何用于本次检测”。')
     try:
         registered = validate_registered_sources(result.get('registered_standards'), context)
         if plan['state'] != 'blocked' and plan['state'] != 'standard':
@@ -219,6 +219,7 @@ def render_quality_setup(item, prior, prefix, *, levels=None, goal=None, quick=F
     from services.quality_setup_service import SD_REQUIREMENT, quality_setup_plan, local_catalog_review
     from services.quality_catalog_service import browse_quality_catalog
     from ui.quality_applicability import render_conditions
+    from ui.required_fields import required_field
 
     condition_args, assessments = render_conditions(item, prior, prefix, quick=quick, settings_location=settings_location)
     plan = quality_setup_plan(item, condition_args['context'])
@@ -232,8 +233,44 @@ def render_quality_setup(item, prior, prefix, *, levels=None, goal=None, quick=F
         previous_mode = ('sd_cv' if simple_goal else
                          'source' if goal else
                          'recorded' if prior.get('decision') == 'record_only' else 'sd_cv')
-    source_value = 'source' if quick else '选择标准或自定义目录'
-    recorded_value = 'recorded' if quick else '记录实验室要求'
+    manual_mode = ('recorded' if recorded.get('manual_mode') == 'recorded' or
+                   previous_mode in ('recorded', '记录实验室要求') else 'sd_cv')
+    cache = st.session_state.setdefault(prefix+'_manual_values', {})
+    for field, suffix in (('cv_limit', '_cv_limit'), ('source_name', '_source_name'),
+                          ('source_version', '_source_version'),
+                          ('requirement_text', '_recorded' if quick else '_recorded_text')):
+        if field in recorded and suffix not in cache:
+            value = recorded[field]
+            if field == 'requirement_text' and (simple_goal or previous_mode == 'sd_cv'):
+                import re
+                value = re.sub(r'\s*实验室自定义CV上限为≤[^。]*。', '', str(value))
+            cache[suffix] = value
+    for suffix in ('_cv_limit', '_source_name', '_source_version', '_recorded' if quick else '_recorded_text'):
+        if prefix+suffix in st.session_state:
+            cache[suffix] = st.session_state[prefix+suffix]
+    catalog_values = st.session_state.setdefault(prefix+'_catalog_values', {})
+    level_identity = [(int(level.get('level_order', order)), level.get('qc_level_id') or level.get('id'))
+                      for order, level in enumerate(levels or [], 1)]
+    old_identity = st.session_state.get(prefix+'_catalog_level_identity')
+    if old_identity is not None and old_identity != level_identity:
+        for widget_key in list(st.session_state):
+            if widget_key.startswith(prefix+'_') and widget_key.endswith(('_concentration', '_category')):
+                st.session_state.pop(widget_key, None)
+        for widget_key in list(catalog_values):
+            if widget_key.endswith(('_concentration', '_category')):
+                catalog_values.pop(widget_key, None)
+    st.session_state[prefix+'_catalog_level_identity'] = level_identity
+    for widget_key, value in list(st.session_state.items()):
+        if widget_key.startswith(prefix+'_') and widget_key.endswith(('_concentration', '_category', '_supplemental_cv')):
+            catalog_values[widget_key] = value
+    def restore_catalog_value(widget_key):
+        if widget_key not in st.session_state and widget_key in catalog_values:
+            st.session_state[widget_key] = catalog_values[widget_key]
+    def manual_value(suffix, default):
+        value = cache.get(suffix, default)
+        if prefix+suffix not in st.session_state:
+            st.session_state[prefix+suffix] = value
+        return value
     mode = 'source' if plan['state'] == 'standard' else 'sd_cv'
     if plan['state'] == 'standard':
         st.markdown('**引用现行数值标准**')
@@ -243,35 +280,30 @@ def render_quality_setup(item, prior, prefix, *, levels=None, goal=None, quick=F
     else:
         if plan['state'] == 'blocked':
             st.markdown('**请先完成检测条件**')
-            st.warning(plan['reason'])
-            st.caption('请按下方提示完成填写；需要修改方法学、单位或输入值类型时，点击底部“返回检测设置”。'
-                       if quick else '可以先点击“保存，稍后继续”。填写完整后，再确认质量要求。')
-        else:
-            st.markdown('**SD控制＋实验室CV**')
-            st.caption('本批次按当前方法的质控规则判读；CV按正式期在控结果比较。')
-        with st.expander('高级：其他实验室要求或自定目录', expanded=False):
-            choices = ['sd_cv', source_value, recorded_value]
-            seed = {'source': source_value, 'recorded': recorded_value}.get(previous_mode, previous_mode)
-            if st.session_state.get(prefix+'_mode') not in choices:
-                st.session_state[prefix+'_mode'] = seed if seed in choices else 'sd_cv'
-            choice = st.radio('质量要求设置', choices, key=prefix+'_mode', horizontal=True,
-                format_func=lambda value: {'sd_cv': 'SD控制＋实验室CV', source_value: '自定要求目录',
-                                          recorded_value: '记录其他实验室要求'}[value])
-        mode = {source_value: 'source', recorded_value: 'recorded'}.get(choice, 'sd_cv')
+        mode = manual_mode
         spec = None
         selected = None
-        if mode == 'source':
+        initial = prior.get('requirement_id') or recorded.get('requirement_id') or (goal['spec']['id'] if goal and not simple_goal else None)
+        existing_selection = st.session_state.get(prefix+'_requirement', initial)
+        if plan['cv_supported'] or existing_selection:
             candidates = {row['id'] for row in assessments if row['kind'] == 'numeric' and row['status'] == 'applicable'}
             sources = {row['id']: row['spec'] for row in browse_quality_catalog()
                        if row['kind'] in ('numeric', 'custom') and (row['spec']['origin'] != 'builtin' or row['id'] in candidates)}
-            initial = prior.get('requirement_id') or (goal['spec']['id'] if goal else None)
             if prefix+'_requirement' not in st.session_state or st.session_state.get(prefix+'_requirement') not in [None, *sources]:
                 st.session_state[prefix+'_requirement'] = initial if initial in sources else None
-            selected = st.selectbox('选择实验室自定要求', [None, *sources], key=prefix+'_requirement',
-                format_func=lambda value: '请选择' if value is None else sources[value]['name']+'｜'+sources[value]['standard'])
+            with st.expander('选用已登记限值', expanded=bool(st.session_state[prefix+'_requirement'])):
+                selected = st.selectbox('已登记限值', [None, *sources], key=prefix+'_requirement',
+                    format_func=lambda value: '不选用，直接填写' if value is None else sources[value]['name']+'｜'+sources[value]['standard'])
             spec = sources.get(selected)
+            if selected is not None:
+                mode = 'source'
+        if plan['state'] == 'sd_cv' and selected is None:
+            st.caption('已收录标准未匹配数值限值。')
 
-    result = dict(condition_args, mode=mode, levels=[], requirement_id=selected)
+    # Keep the existing save contract; the user no longer selects a mode.
+    st.session_state[prefix+'_mode'] = mode
+
+    result = dict(condition_args, mode=mode, manual_mode=manual_mode, levels=[], requirement_id=selected)
     if spec is not None:
         st.write(spec['standard']+' / '+spec['version']+' · '+spec['name'])
         st.write('允许不精密度：'+spec['imprecision_text'])
@@ -279,82 +311,121 @@ def render_quality_setup(item, prior, prefix, *, levels=None, goal=None, quick=F
             render_spec(spec)
         categories = list(dict.fromkeys(row['category'] for row in spec['imprecision'] if row.get('category')))
         needs_concentration = any('lower' in row or 'upper' in row for row in spec['imprecision'])
-        previous_levels = prior.get('levels') or (goal.get('levels', []) if goal and goal['spec']['id'] == selected else [])
+        previous_levels = []
+        if goal and not goal.get('pending') and goal['spec']['id'] == selected:
+            previous_levels.extend(goal.get('levels', []))
+        if (prior.get('requirement_id') or prior.get('selected_source_id')) == selected:
+            previous_levels.extend(prior.get('levels', []))
+        if recorded.get('requirement_id') == selected:
+            previous_levels.extend(recorded.get('levels', []))
+        selected_limits = []
         for order, level in enumerate(levels or [], 1):
             order = int(level.get('level_order', order))
-            previous = next((row for row in previous_levels if row['level_order'] == order), {})
+            actual_id = level.get('qc_level_id') or level.get('id')
+            previous = {}
+            for row in previous_levels:
+                saved_id = row.get('qc_level_id')
+                matches = (saved_id == actual_id if saved_id is not None and actual_id is not None else
+                           (quick or actual_id is None) and row.get('level_order') == order)
+                if matches:
+                    previous.update({field: row[field] for field in ('concentration', 'category') if field in row})
             concentration, category = previous.get('concentration'), previous.get('category', '')
             if needs_concentration or categories:
                 from services.material_workflow_service import material_label
                 st.markdown(f'**水平 {order}：{material_label(level)}**')
             if needs_concentration:
+                restore_catalog_value(f'{prefix}_{selected}_{order}_concentration')
                 concentration = st.number_input('质控品浓度（按此浓度选择标准限值）', min_value=0.0,
                     value=concentration, format='%.4f', key=f'{prefix}_{selected}_{order}_concentration')
             if categories:
+                restore_catalog_value(f'{prefix}_{selected}_{order}_category')
                 category = st.selectbox('水平类别', ['', *categories],
                     index=categories.index(category)+1 if category in categories else 0,
                     key=f'{prefix}_{selected}_{order}_category', format_func=lambda value: value or '请选择')
                 # Fib's abnormal-category rule also requires the actual concentration.
                 if selected == 'wst406-2024-fib' and category == '异常' and not needs_concentration:
+                    restore_catalog_value(f'{prefix}_{selected}_{order}_concentration')
                     concentration = st.number_input('异常水平浓度（g/L）', min_value=0.0, value=concentration,
                         key=f'{prefix}_{selected}_{order}_concentration')
-            result['levels'].append(dict(level_order=order, concentration=concentration, category=category))
-        if not needs_concentration and not categories and levels:
-            st.caption(f'全部 {len(levels)} 个水平采用此限值。')
+            entry = dict(level_order=order, concentration=concentration, category=category)
+            if actual_id is not None:
+                entry['qc_level_id'] = actual_id
+            result['levels'].append(entry)
+            from services.quality_target_service import select_rule, requirement_text
+            try:
+                rule = select_rule(spec, concentration, category)
+            except ValueError:
+                pass
+            else:
+                selected_limits.append({'水平': order, '采用限值': requirement_text(rule)})
+        if selected_limits:
+            st.dataframe(pd.DataFrame(selected_limits), hide_index=True, width='stretch')
         if spec['origin'] == 'builtin' and all(row['kind'] == 'cv' for row in spec['imprecision']):
             with st.expander('选填：实验室更严CV要求', expanded=False):
-                value = prior.get('supplemental_cv', (goal or {}).get('supplement', {}).get('cv'))
+                value = prior.get('supplemental_cv', recorded.get('supplemental_cv', (goal or {}).get('supplement', {}).get('cv')))
+                restore_catalog_value(prefix+'_supplemental_cv')
                 if prefix+'_supplemental_cv' not in st.session_state:
                     st.session_state[prefix+'_supplemental_cv'] = value
                 result['supplemental_cv'] = st.number_input('实验室更严 CV 要求（选填，%）', min_value=0.0,
                     value=None, key=prefix+'_supplemental_cv', help='填入值须小于各水平的标准CV上限。标准规定的上限会同时保留。')
-    elif mode == 'sd_cv':
+    elif mode in ('sd_cv', 'recorded'):
         if plan['cv_supported']:
             cv = prior.get('cv_limit', recorded.get('cv_limit'))
             if cv is None and simple_goal and 'cv_limit' not in prior and 'cv_limit' not in recorded:
                 cv = item.get('cv_limit')
-            if prefix+'_cv_limit' not in st.session_state:
-                st.session_state[prefix+'_cv_limit'] = cv
+            manual_value('_cv_limit', cv)
             result['cv_limit'] = st.number_input('实验室CV上限（选填，%）', min_value=0.0, value=None,
-                key=prefix+'_cv_limit', help='原始定量尺度（浓度、活性、计数等）可设置；留空表示只使用现有质控规则。CV另行比较正式期在控结果的精密度。')
+                key=prefix+'_cv_limit', help='按百分数填写，留空不比较。以正式期在控结果的CV与此上限比较。')
+            if result['cv_limit'] is not None:
+                mode = result['mode'] = st.session_state[prefix+'_mode'] = 'sd_cv'
         else:
             result['cv_limit'] = None
-            st.caption('Ct、log、S/CO或定性结果沿用当前方法的质控规则，其他要求可在文字依据中填写。')
 
-    if mode in ('sd_cv', 'recorded'):
-        with st.expander('文字要求与依据' if mode == 'sd_cv' else '填写其他实验室要求', expanded=mode == 'recorded'):
+    evidence = recorded.get('evidence', prior.get('evidence', ''))
+    if not evidence and spec:
+        evidence = f"{item.get('test_item_name', '')}使用{item.get('method_name', '')}，单位为{item.get('unit_symbol', '')}，全部水平采用{spec['standard']} / {spec['version']}。"
+        old_auto = st.session_state.get(prefix+'_auto_evidence')
+        if old_auto != evidence and st.session_state.get(prefix+'_evidence', '') in ('', old_auto):
+            st.session_state[prefix+'_evidence'] = evidence
+        st.session_state[prefix+'_auto_evidence'] = evidence
+    with st.expander('要求与文件依据', expanded=mode == 'recorded'):
+        if mode in ('sd_cv', 'recorded'):
             simple = mode == 'sd_cv'
-            if simple and plan['state'] == 'sd_cv':
-                st.caption('本软件已收录的标准中，没有对应本次检测的数值限值。')
-            result['source_name'] = st.text_input('使用的说明书或实验室文件名称',
-                value=recorded.get('source_name') or ('本实验室SD质控方案' if simple else ''), key=prefix+'_source_name', max_chars=200)
-            result['source_version'] = st.text_input('设置日期或文件版本',
-                value=recorded.get('source_version') or (local_today().isoformat() if simple else ''), key=prefix+'_source_version', max_chars=200)
+            manual_value('_source_name', recorded.get('source_name') or ('本实验室SD质控方案' if simple else ''))
+            manual_value('_source_version', recorded.get('source_version') or (local_today().isoformat() if simple else ''))
+            with required_field(prefix+'_source_name',
+                    missing=mode == 'recorded' and not str(st.session_state[prefix+'_source_name']).strip(),
+                    message='请填写使用的说明书或实验室文件名称。'):
+                result['source_name'] = st.text_input('使用的说明书或实验室文件名称',
+                    key=prefix+'_source_name', max_chars=200)
+            with required_field(prefix+'_source_version',
+                    missing=mode == 'recorded' and not str(st.session_state[prefix+'_source_version']).strip(),
+                    message='请填写设置日期或文件版本。'):
+                result['source_version'] = st.text_input('设置日期或文件版本',
+                    key=prefix+'_source_version', max_chars=200)
             text = recorded.get('requirement_text') or (SD_REQUIREMENT if simple else '')
             # The service appends the current structured CV; old generated CV text
             # must not survive a change to that limit or become its input source.
             if simple:
                 import re
                 text = re.sub(r'\s*实验室自定义CV上限为≤[^。]*。', '', text)
-            result['requirement_text'] = st.text_area('实验室实际要求', value=text,
-                key=prefix+('_recorded' if quick else '_recorded_text'), max_chars=2000)
+            manual_value('_recorded' if quick else '_recorded_text', text)
+            requirement_key = prefix+('_recorded' if quick else '_recorded_text')
+            with required_field(requirement_key, missing=not str(st.session_state[requirement_key]).strip(),
+                    message='请填写实验室实际要求。'):
+                result['requirement_text'] = st.text_area('实验室实际要求',
+                    key=requirement_key, max_chars=2000)
             if not simple:
-                st.caption('填写实验室执行的要求和文件名称。查到新的标准时，可在“高级：查找或补充标准”中登记。')
+                st.caption('文字要求由实验室核查，软件不自动判读。')
+        with required_field(prefix+'_evidence',
+                missing=mode != 'sd_cv' and not str(st.session_state.get(prefix+'_evidence', evidence)).strip(),
+                message='请说明此要求如何用于本次检测。'):
+            result['evidence'] = st.text_area('说明此要求如何用于本次检测', value=evidence, key=prefix+'_evidence', max_chars=2000)
     person_label = '质量要求确认人' if quick else '确认人'
-    from ui.required_fields import required_field
     with required_field(prefix+'_person',
             missing=not str(st.session_state.get(prefix+'_person', prior.get('confirmed_by', actor)) or '').strip(),
             message=f'请填写{person_label}。'):
         result['confirmed_by'] = st.text_input(person_label, value=prior.get('confirmed_by', actor), key=prefix+'_person', max_chars=80)
-    with st.expander('补充设置说明（选填）' if mode == 'sd_cv' else '质量要求设置说明', expanded=False):
-        evidence = prior.get('evidence', '')
-        if not evidence and spec:
-            evidence = f"{item.get('test_item_name', '')}使用{item.get('method_name', '')}，单位为{item.get('unit_symbol', '')}，全部水平采用{spec['standard']} / {spec['version']}。"
-            old_auto = st.session_state.get(prefix+'_auto_evidence')
-            if old_auto != evidence and st.session_state.get(prefix+'_evidence', '') in ('', old_auto):
-                st.session_state[prefix+'_evidence'] = evidence
-            st.session_state[prefix+'_auto_evidence'] = evidence
-        result['evidence'] = st.text_area('说明此要求如何用于本次检测', value=evidence, key=prefix+'_evidence', max_chars=2000)
     checked_key = prefix+('_checked' if quick else '_confirmed')
     with required_field(checked_key,
             missing=not st.session_state.get(checked_key, bool(prior.get('checked')) if quick else False),
@@ -364,9 +435,18 @@ def render_quality_setup(item, prior, prefix, *, levels=None, goal=None, quick=F
     result['blocked'] = plan['state'] == 'blocked'
     result['validation_issues'] = quality_validation_issues(item, result, plan, spec, quick=quick,
                                                         settings_location=settings_location)
-    if result['validation_issues']:
+    from services.quality_applicability_service import missing_context_fields
+    inline_fields = {'confirmed_by', 'checked', *missing_context_fields(result['context'])}
+    if mode in ('sd_cv', 'recorded'):
+        inline_fields.add('requirement_text')
+    if mode == 'recorded':
+        inline_fields.update(('source_name', 'source_version'))
+    if mode != 'sd_cv':
+        inline_fields.add('evidence')
+    other_issues = [row for row in result['validation_issues'] if row['field'] not in inline_fields]
+    if other_issues:
         st.warning(('下一步前' if quick else '保存质量目标前') + '，请完成以下操作：\n\n' +
-                   '\n'.join('- ' + row['message'] for row in result['validation_issues']))
+                   '\n'.join('- ' + row['message'] for row in other_issues))
     return result
 
 
@@ -434,10 +514,14 @@ def render_adoption(scope,item_id,*,embedded=False,expected_revision=None,on_sav
                 search = condition_args['search_record']
                 if result['mode'] == 'sd_cv' and not result['blocked'] and not search:
                     search = local_catalog_review(item, result['context'])
-                draft_recorded = {key: result.get(key, '') for key in
-                                  ('source_name', 'source_version', 'requirement_text')}
-                if result['mode'] == 'sd_cv':
-                    draft_recorded.update(mode='sd_cv', cv_limit=result.get('cv_limit'))
+                manual_cache = st.session_state.get(prefix+'_manual_values', {})
+                draft_recorded = {key: result.get(key, manual_cache.get(suffix, '')) for key, suffix in
+                    (('source_name', '_source_name'), ('source_version', '_source_version'),
+                     ('requirement_text', '_recorded_text'))}
+                draft_recorded.update(mode=result['mode'], requirement_id=result.get('requirement_id'),
+                    manual_mode=result['manual_mode'], cv_limit=result.get('cv_limit', manual_cache.get('_cv_limit')),
+                    evidence=result.get('evidence', ''), levels=result['levels'],
+                    supplemental_cv=result.get('supplemental_cv'))
                 save_pending_review(scope, item_id, context=result['context'], search_record=search,
                     registered_standards=result['registered_standards'],
                     process_requirements=result['process_requirements'], draft_recorded=draft_recorded)

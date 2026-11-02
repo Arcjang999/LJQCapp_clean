@@ -8,8 +8,7 @@ from ui.quality_targets import render_spec
 
 
 def render_quality_catalog():
-    st.caption('搜索检验项目，查看标准规定的质量要求。在“质量目标设置”中填写检测方法和单位后即可采用。')
-    st.caption('“对照与质控要求”的参考文字会带入质量目标设置，可改成本实验室实际执行的要求。')
+    st.caption('在“质量目标设置”中核对检测条件并选用要求。')
     section = st.radio('查看内容', ['projects', 'general'],
         format_func=lambda v: {'projects':'检验项目要求', 'general':'通用质控要求'}[v],
         horizontal=True, key='quality_catalog_section')
@@ -48,7 +47,7 @@ def render_quality_catalog():
             st.write('标准规定的检测条件：'+row['scope'])
             for requirement in row['spec']['requirements']:
                 st.write(requirement)
-            st.caption('以上是标准参考内容。可在“质量目标设置”中改成本实验室实际执行的要求。'
+            st.caption('可在“质量目标设置”中修改参考文字。'
                        if row['kind'] == 'process' else '请按以上要求检查对照结果，并记录结果和异常处理情况。')
             st.caption('条款：'+row['spec']['source_clause']+'｜原文第 '+str(row['spec']['source_page'])+' 页（含封面）')
             st.link_button('查看标准原文', row['source']['source_url'])

@@ -24,16 +24,25 @@ def fixture_conditions(item, *, clinical=False):
 def confirm_fixture_product_choice(scope, item_id):
     """Explicitly prepare current applicability evidence for an isolated draft."""
     from services.project_config_service import get_project_template, get_lot_config
-    from services.qc_product_recommendation_service import validate_qc_product_choice, save_draft_product_choice
+    from services.qc_product_recommendation_service import validate_qc_product_choice, save_draft_product_choice, pack_choice_reviews
     item = item_context(scope, item_id)
     owner = get_project_template(item['template_id']) if scope == 'project' else get_lot_config(item['lot_config_id'])
     if owner['status'] == 'draft' and (scope == 'project' or not owner['activated_at']):
-        product_review = validate_qc_product_choice(qc_material_id=owner['qc_material_id'],
+        products=[owner['qc_material_id']]
+        if scope=='lot':
+            from database import get_connection
+            with get_connection() as connection:
+                actual=[row[0] for row in connection.execute('''SELECT DISTINCT q.qc_material_id
+                    FROM qc_lot_config_item_levels a JOIN md_qc_levels l ON l.id=a.qc_level_id
+                    JOIN md_qc_material_lots q ON q.id=l.qc_material_lot_id
+                    WHERE a.lot_config_item_id=? AND a.is_disabled=0''',(item_id,))]
+            products=actual or products
+        reviews={str(product):validate_qc_product_choice(qc_material_id=product,
             reagent_id=item['reagent_id'], lab_instrument_id=owner['lab_instrument_id'],
             test_item_id=item['test_item_id'], method_id=item['method_id'],
             manual_review={'confirmed_by': '隔离回归适用核对人',
-                'evidence': '已明确核对本合成测试检测系统与质控品的适用性，仅用于软件回归数据准备。'})
-        save_draft_product_choice(scope, item_id, product_review, expected_revision=owner['revision_no'])
+                'evidence': '已明确核对本合成测试检测系统与质控品的适用性，仅用于软件回归数据准备。'}) for product in products}
+        save_draft_product_choice(scope, item_id, pack_choice_reviews(reviews), expected_revision=owner['revision_no'])
 
 
 def confirm_fixture_quality(scope, item_id):

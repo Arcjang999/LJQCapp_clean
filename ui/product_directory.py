@@ -99,8 +99,8 @@ def render_product_catalogue():
         reveal = all_products.loc[all_products['product_id'] == reveal_id]
         if not reveal.empty and (show_disabled or not reveal.iloc[0]['is_disabled']):
             products = pd.concat([reveal, products], ignore_index=True)
-            st.caption('已显示刚保存的质控品，原查找条件保留。')
-    st.caption(f'当前显示 {len(products)} 项。单选一个产品后，使用下方按钮管理。')
+            st.caption('已显示刚保存的质控品。')
+    st.caption(f'当前显示 {len(products)} 项。')
     view = _product_table(products)
     view['状态'] = products['is_disabled'].map({0: '启用', 1: '已停用'})
     product_ids = products['product_id'].astype(int).tolist()
@@ -142,7 +142,7 @@ def render_product_catalogue():
 
 def render_directory_import(*, show_published=True, expander_label='产品目录与来源'):
     with st.expander(expander_label):
-        st.caption('核对产品编号、名称和浓度资料。阴性、分型、位点照原文填写；选好产品后，在“管理批次”登记批号和水平，在项目中选择质控方法。')
+        st.caption('产品编号和浓度资料按原文填写。实际批号在“管理批次”登记。')
         manufacturers = list_manufacturers(category='qc_material')
         rows = {int(row['id']):row['display_name'] for row in manufacturers.to_dict('records')}
         if '邦德盛' not in rows.values() and st.button('登记邦德盛厂家', key='directory_register_bondson'):
@@ -288,7 +288,7 @@ def render_product_relationships(product_id):
         st.dataframe(_product_table(pd.DataFrame([product])), hide_index=True, width='stretch')
     with st.expander('适用检验项目', expanded=True):
         active=[row for row in relationship['coverage'] if not row['is_disabled']]
-        st.caption('点击“选择检验项目”，按产品说明书勾选适用项目，再填写核对人和参考资料，点击“保存适用项目”。')
+        st.caption('点击“选择检验项目”，按产品说明书勾选适用项目。')
         drafts=st.session_state.setdefault('product_coverage_drafts',{})
         key=str(product_id)
         if key not in drafts:
@@ -300,7 +300,7 @@ def render_product_relationships(product_id):
         records={int(row['id']):row for row in list_test_items(include_disabled=True).to_dict('records')}
         previous={row['test_item_id']:row for row in active}
         if selected:
-            st.caption(f'已选择 {len(selected)} 项。修改后请点击下方“保存适用项目”。')
+            st.caption(f'已选择 {len(selected)} 项。')
             view=[]
             for identifier in selected:
                 row=records.get(identifier)
@@ -323,7 +323,7 @@ def render_product_relationships(product_id):
         draft['actor']=actor
         evidence=st.text_area('参考资料',value=draft.get('evidence',''),placeholder='例如：产品说明书名称及页码，或厂商提供的说明',key=prefix+'_evidence')
         draft['evidence']=evidence
-        st.caption('请填写核对人和参考资料。质控方法、单位和质量要求在具体项目中设置。')
+        st.caption('填写核对人和参考资料后，点击“保存适用项目”。')
         save,cancel=st.columns(2)
         if save.button('保存适用项目',key=prefix+'_save'):
             try:

@@ -26,7 +26,7 @@ _COLUMNS = {
                          'model': '型号', 'registration_no': '注册证 / 备案编号'},
     'lab_instrument': {'display_name': '仪器名称', 'manufacturer_name': '厂家', 'model': '型号',
                        'asset_code': '资产编号', 'department_name': '所属科室', 'location': '放置位置'},
-    'reagent': {'generic_name': '试剂名称', 'manufacturer_name': '厂家', 'trade_name': '商品名称',
+    'reagent': {'generic_name': '试剂名称', 'manufacturer_name': '厂家', 'trade_name': '商品名称／别名',
                 'specification': '规格型号', 'registration_no': '注册证 / 备案编号'},
     'method': {'method_name': '方法学名称', 'method_category': '专业分类', 'method_code': '方法代码', 'principle': '检测原理'},
     'unit': {'symbol': '单位符号', 'unit_name': '单位名称', 'ucum_code': 'UCUM 代码', 'quantity_kind': '量纲 / 类型'},
@@ -156,7 +156,7 @@ def _render_detail(entity_type, record_id, list_row):
     record = context['record']
     st.markdown('**所选' + ENTITY_LABELS[entity_type] + '**')
     if record['is_disabled']:
-        st.info('此记录已停用。已有项目和检测历史仍保留，需要继续使用时可恢复。')
+        st.info('此记录已停用；恢复后可选用，已有项目和检测历史保留。')
     elif context['lock_reason'] and entity_type != 'alias':
         st.caption(context['lock_reason'])
     fields = [field for field in FIELD_LABELS if field in EDIT_FIELDS[entity_type]
@@ -176,7 +176,7 @@ def _render_detail(entity_type, record_id, list_row):
             st.session_state['md_selected_alias'] = None
             st.session_state['md_search_alias'] = ''
         st.markdown('**项目别名**')
-        st.caption('可为此检验项目添加常用简称、英文名称或 LIS 代码，之后可用这些名称搜索同一检验项目。')
+        st.caption('可用简称、英文名称或 LIS 代码搜索此检验项目。')
         render_master_data_workspace('alias', parent_id=record_id, allow_create=not record['is_disabled'])
 
 
@@ -220,7 +220,7 @@ def render_master_data_workspace(entity_type, *, parent_id=None, allow_create=Tr
             saved_row = all_records.loc[all_records.id == reveal[0]]
             if not saved_row.empty:
                 frame = pd.concat([saved_row, frame], ignore_index=True)
-                st.caption('已显示刚保存的试剂，原搜索条件保留。')
+                st.caption('已显示刚保存的试剂。')
     if entity_type == 'manufacturer':
         category = manufacturer_category
         if category is None:
@@ -247,7 +247,7 @@ def render_master_data_workspace(entity_type, *, parent_id=None, allow_create=Tr
                      width='stretch'):
         open_master_data_dialog(entity_type, selected, kind='status', parent_id=parent_id)
     hint = '点击行首选择框，进入产品管理。' if on_open is not None else (
-        '选择一行查看详情。' if show_detail else '单选一款试剂后，可编辑、停用或管理批号。')
+        '选择一行查看详情。' if show_detail else '请选择一款试剂。')
     st.caption(f'共 {len(frame)} 条。' + hint)
     selected = _table(entity_type, frame, parent_id, on_open)
     if selected is not None and on_open is None and show_detail:

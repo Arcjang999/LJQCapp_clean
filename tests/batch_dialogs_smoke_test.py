@@ -117,7 +117,10 @@ def test_level_selection_order_and_per_material_values_survive_reorder():
         app = run_app(fixture)
         app.button(key=f'open_levels_{item}').click().run()
         app.number_input(key=key(app, 'mean', low)).set_value(222.0).run()
-        app.multiselect(key=key(app, 'selected')).set_value([high, low, middle]).run()
+        token = app.session_state['batch_item_dialog']['token']
+        for position, identifier in enumerate((high, low, middle)):
+            app.selectbox(key=f'batch_control_{token}_{position}_level').set_value(identifier)
+        app.run()
         assert_clean(app)
         assert app.number_input(key=key(app, 'mean', low)).value == 222.0
         assert app.number_input(key=key(app, 'mean', high)).value == 400.0
@@ -193,7 +196,6 @@ def test_quality_cancel_save_and_reopen_clear_unsaved_fields():
         original = get_batch_item_context(item)['item']['quality_review_json']
         app.button(key=f'open_quality_{item}').click().run()
         assert_clean(app)
-        app.radio(key=prefix+'mode').set_value('记录实验室要求').run()
         app.text_input(key=prefix+'source_name').set_value('尚未保存的依据')
         app.button(key='batch_quality_close').click().run()
         assert_clean(app)
@@ -207,7 +209,6 @@ def test_quality_cancel_save_and_reopen_clear_unsaved_fields():
         assert get_batch_item_context(item)['item']['quality_review_json'] == original
         assert 'batch_item_dialog' not in app.session_state
         app.button(key=f'open_quality_{item}').click().run()
-        app.radio(key=prefix+'mode').set_value('记录实验室要求').run()
         assert app.text_input(key=prefix+'source_name').value != '尚未保存的依据'
         app.text_input(key=prefix+'source_name').set_value('批次弹窗试验 SOP')
         app.text_input(key=prefix+'source_version').set_value('SOP-2026-09')

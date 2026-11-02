@@ -31,7 +31,7 @@ def render_report_period(prefix, *, months=None, default_start=None, default_end
     except ValueError as error:
         st.warning(str(error))
         return None
-    st.caption('所选期间：' + period.label + '，包含起止日期当日。')
+    st.caption(period.label + '（含起止日期）')
     return period
 
 
@@ -39,7 +39,7 @@ def render_handling_versions(options, *, prefix):
     selected = {}
     if options:
         with st.expander('选择报告要使用的处理记录', expanded=False):
-            st.caption('原检测日期在所选期间内的处理记录会列入报告；所选记录中的复测和附件也会一并保存。')
+            st.caption('按原检测日期纳入报告，包含该版处理记录中的复测和附件。')
             for item in options:
                 versions = {int(row['revision_no']): row for row in item['versions']}
                 keys = sorted(versions, reverse=True)
@@ -98,7 +98,7 @@ def render_single_report(method, batch_id, *, months, preview_renderer):
         return
     if state.get('snapshot_id'):
         render_saved_report_downloads(state['snapshot_id'], prefix=prefix)
-        st.caption(f"报告已保存，编号：{state['snapshot_id']}。可在“报告历史”查找和下载。")
+        st.caption(f"已存入“报告历史”，编号：{state['snapshot_id']}。")
         with st.expander('已保存报告预览', expanded=False):
             preview_renderer(state['package'])
         if st.button('核对并生成另一份报告', key=prefix + '_new'):
@@ -109,7 +109,7 @@ def render_single_report(method, batch_id, *, months, preview_renderer):
     frozen = {int(row['event_id']): int(row['selected_revision_no']) for row in state['options']}
     changed = chosen != frozen
     if changed:
-        st.info('您选了另一版处理记录，请先点“更新报告预览”，再生成报告。')
+        st.info('处理记录版本已切换，请点击“更新报告预览”。')
         if st.button('更新报告预览', key=prefix + '_refresh'):
             try:
                 package = build(batch_id, period.start_date, period.end_date,

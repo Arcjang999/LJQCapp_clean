@@ -14,7 +14,6 @@ from services.project_config_service import (
     list_config_snapshots, validate_lot_config, activate_lot_config,
 )
 from services.quality_target_service import decode
-from services.quality_review_service import validate_quality_review
 
 _CREATE_KEY = 'batch_workspace_create'
 _STATUS_LABELS = {'draft': '设置尚未确认', 'active': '设置已确认', 'disabled': '已停用', 'superseded': '已换用新批次'}
@@ -48,13 +47,23 @@ def render_batch_item_detail(item_id):
     st.subheader(item['test_item_name'])
     st.caption(' · '.join(str(value or '未填写') for value in [QC_METHOD_LABELS[item['qc_method']],
         item.get('method_name'), item.get('reagent_name'), item.get('unit_symbol')]))
-    edit, quality = st.columns(2)
+    edit, product, quality = st.columns(3)
     if edit.button('编辑水平设置', key=f'batch_edit_levels_{item_id}', disabled=not ctx['editable'], width='stretch'):
         open_batch_item_dialog(item_id)
+    if product.button('核对质控品', key=f'batch_recheck_product_{item_id}', disabled=not ctx['editable'], width='stretch'):
+        open_batch_item_dialog(item_id, kind='product')
     if quality.button('质量目标', key=f'batch_edit_quality_{item_id}', disabled=not ctx['editable'], width='stretch'):
         open_batch_item_dialog(item_id, kind='quality')
     if not ctx['editable']:
         st.caption(ctx['read_only_reason'])
+    else:
+        from services.qc_product_recommendation_service import require_current_draft_choice
+        from database import get_connection
+        try:
+            with get_connection() as connection:
+                require_current_draft_choice('lot', item_id, connection)
+        except (ValueError, TypeError):
+            st.warning('质控品适用性尚未确认，请点击“核对质控品”。')
     if levels:
         st.dataframe(pd.DataFrame([{ '水平': level['level_order'], '浓度水平': level['level_name'],
             '浓度编号': level.get('level_code') or '', '批号': level.get('lot_no') or '',
@@ -75,7 +84,6 @@ def render_batch_item_detail(item_id):
             '设定均值': level['mean'], 'SD': level['sd'],
             '设定变异系数（%）': calculate_cv_percent(level['mean'], level['sd'])}
             for level in profile['levels']]), hide_index=True, width='stretch')
-        st.caption('如需调整控制参数，请前往“批号使用与追溯 → 均值和标准差管理”。')
     elif levels:
         st.dataframe(pd.DataFrame([{'质控水平': level['level_name'],
             '均值和SD的设置方式': TARGET_SOURCE_LABELS.get(level['target_source'], level['target_source']),
@@ -87,6 +95,12 @@ def render_batch_item_detail(item_id):
             st.caption('即时法按有效结果计算均值和标准差，当前计算结果请在工作台查看。')
         elif any(level['target_source'] == 'building' for level in levels):
             st.caption(f"用本批质控结果建立均值和标准差，所需有效数据点：{item['target_n']}。")
+    if binding and binding['qc_method'] in ('lj', 'zscore'):
+        from services.target_profile_edit_service import get_target_profile_context
+        from ui.target_profile_workspace import open_target_statistics_dialog
+        parameters = get_target_profile_context(binding['id'])
+        if st.button('切换均值和SD', key=f'batch_switch_statistics_{item_id}', disabled=not parameters['editable']):
+            open_target_statistics_dialog(binding['id'], return_to='batch')
     st.markdown('**本批次质量目标**')
     goal, review = decode(item.get('quality_goal_json')), decode(item.get('quality_review_json'))
     if goal:
@@ -98,17 +112,16 @@ def render_batch_item_detail(item_id):
     elif item.get('cv_limit') is not None:
         st.caption(f"允许不精密度（CV）：≤{item['cv_limit']:g}%｜依据：{item.get('quality_target_source_text') or '未填写'}")
     render_review_summary(review)
-    if ctx['editable'] and (validate_quality_review('lot', item_id) or goal.get('pending')):
-        st.info('请点击“质量目标”，填写并保存本批次的质量要求。')
-    elif not goal and not review and item.get('cv_limit') is None:
+    if not goal and not review and item.get('cv_limit') is None:
         st.caption('本批次未设置质量目标。')
 
 
 def render_batch_detail(config_id):
     config = dict(get_lot_config(config_id))
     items = list_lot_config_items(config_id)
-    st.subheader(config['config_name'])
-    st.caption(f"{config['template_name']} · {config['instrument_name']} · {config['qc_material_name']} · "
+    from services.material_workflow_service import config_material_summary
+    st.subheader(config_material_summary(config_id))
+    st.caption(f"{config['template_name']} · {config['instrument_name']} · "
         + _STATUS_LABELS.get(config['status'], config['status']))
     if items.empty:
         st.info('当前批次没有检验项目。')
@@ -136,7 +149,6 @@ def render_batch_detail(config_id):
         if config['status'] == 'draft':
             if errors:
                 st.warning('请完成以下设置：\n\n' + '\n'.join(f'- {error}' for error in errors))
-                st.info('请先在上方列表选择对应检验项目：水平选择、均值和标准差在“编辑水平设置”中修改；质控品适用性和质量要求在“质量目标”中核对。保存后再点击“确认批次设置”。')
                 if any('效期' in error for error in errors):
                     st.info('质控品批号或效期需要修改时，点击顶部“质控品管理”，选择产品后打开“管理批次”修改，再回到本批次核对。')
             if st.button('确认批次设置', key=f'v11_activate_lot_config_{config_id}', type='primary', disabled=bool(errors)):
@@ -173,7 +185,8 @@ def _begin_create(template_id):
 
 def _creation_values():
     return {key: value for key, value in st.session_state.items()
-        if key.startswith(('create_material_', 'v12_create_cv_', 'v12_create_cv_source_')) or key == 'v11_create_config_name'}
+        if (key.startswith(('create_material_', 'v12_create_cv_', 'v12_create_cv_source_')) or key == 'v11_create_config_name')
+        and not key.endswith(('_new_product', '_new_lot'))}
 
 
 @st.dialog('新增批次', width='large', dismissible=False)
@@ -204,6 +217,8 @@ def _render_creation_dialog():
         st.session_state['batch_table_version'] = st.session_state.get('batch_table_version', 0) + 1
         st.rerun(scope='app')
     registering = render_material_config_creation(ctx['template_id'], on_created=created)
+    if registering:
+        return
     if 'initial' not in ctx:
         ctx['initial'] = _creation_values()
     if st.button('取消', key='batch_create_cancel', disabled=registering):
@@ -215,18 +230,24 @@ def _render_creation_dialog():
         st.rerun(scope='app')
 
 
-def render_pending_batch_dialogs():
+def render_pending_batch_dialogs(*, render_target_dialogs=True):
     from ui.batch_dialogs import MODAL_KEY, render_batch_item_dialog
     from ui.config_confirmation import render_pending_batch_confirmation
     if st.session_state.get(_CREATE_KEY):
         _render_creation_dialog()
     elif st.session_state.get(MODAL_KEY):
         render_batch_item_dialog()
+    elif render_target_dialogs and st.session_state.get('target_profile_dialog'):
+        from ui.target_profile_workspace import render_pending_target_profile_dialog
+        render_pending_target_profile_dialog()
     else:
+        if render_target_dialogs:
+            from ui.target_profile_workspace import render_pending_target_profile_dialog
+            render_pending_target_profile_dialog()
         render_pending_batch_confirmation()
 
 
-def render_batch_workspace():
+def render_batch_workspace(*, render_target_dialogs=True):
     if st.session_state.pop('batch_clear_search_pending', False):
         st.session_state['batch_search'] = ''
     notice = st.session_state.pop('v11_copy_notice', '')
@@ -234,7 +255,7 @@ def render_batch_workspace():
         st.success(notice)
     projects = {int(row['id']): row for row in list_project_templates(include_disabled=True).to_dict('records')}
     search, project_column, include_column = st.columns([2, 2, 1.2])
-    query = search.text_input('搜索批次', key='batch_search', help=SEARCH_HELP, placeholder='批次名称、批号或检验项目')
+    query = search.text_input('搜索批次', key='batch_search', help=SEARCH_HELP, placeholder='产品、原厂批号或检验项目')
     if st.session_state.get('batch_project_filter') not in [None, *projects]:
         st.session_state['batch_project_filter'] = None
     project = project_column.selectbox('项目', [None, *projects], key='batch_project_filter',
@@ -258,9 +279,9 @@ def render_batch_workspace():
             names = {int(row.id): ' '.join(list_lot_config_items(int(row.id)).test_item_name.astype(str)) for _, row in configs.iterrows()}
             text = configs.apply(lambda row: ' '.join([str(row.config_name), summaries[int(row.id)], names[int(row.id)]]), axis=1)
             configs = configs[text.map(lambda value: fuzzy_match(query, value))]
-        display = configs[['config_name','template_name','instrument_name','status','item_count']].copy()
+        display = configs[['template_name','instrument_name','status','item_count']].copy()
         display['status'] = display.status.map(_STATUS_LABELS)
-        display['质控品批号'] = [summaries[int(row.id)] for _, row in configs.iterrows()]
+        display['质控品与原厂批号'] = [summaries[int(row.id)] for _, row in configs.iterrows()]
         display = display.rename(columns={'config_name':'批次名称','template_name':'项目','instrument_name':'仪器','status':'状态','item_count':'检验项目数'})
     state_key = 'v11_selected_lot_config_id'
     if st.session_state.get(state_key) not in configs.id.tolist():
@@ -272,4 +293,4 @@ def render_batch_workspace():
         selected = _table(configs, display, state_key, 'batch_configs')
         if selected is not None:
             render_batch_detail(selected)
-    render_pending_batch_dialogs()
+    render_pending_batch_dialogs(render_target_dialogs=render_target_dialogs)

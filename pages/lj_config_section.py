@@ -35,6 +35,30 @@ def _clean(value: object, fallback: str = "-") -> str:
     return text or fallback
 
 
+def _actual_material_label(row, method='lj'):
+    row = dict(row)
+    import json
+    from database import get_connection
+    from services.material_workflow_service import config_material_summary, material_label
+    config_id = row.get('v11_lot_config_id')
+    with get_connection() as connection:
+        binding = connection.execute('SELECT lot_config_id,source_snapshot_json FROM qc_workbench_bindings WHERE qc_method=? AND runtime_batch_id=?',
+                                     (method, int(row['id']))).fetchone()
+    if binding:
+        source = json.loads(binding['source_snapshot_json'] or '{}')
+        if source.get('levels'):
+            fallback = (dict(generic_name=source.get('qc_material_name'),
+                             manufacturer_name=source.get('qc_material_manufacturer_name'))
+                        if len(source['levels']) == 1 else {})
+            return '；'.join(dict.fromkeys(material_label({**fallback, **level}) for level in source['levels']))
+    if config_id is None or pd.isna(config_id):
+        config_id = binding['lot_config_id'] if binding else None
+    if config_id is not None:
+        return config_material_summary(int(config_id))
+    return '｜'.join(_clean(row.get(field)) for field in ('qc_material', 'lot_no', 'expiry_date')
+                    if _clean(row.get(field)) != '-') or '未记录质控品批号'
+
+
 def _is_from_instant(row: pd.Series) -> bool:
     source_method = str(row.get("source_method") or "").strip().lower()
     return source_method == "instant" or int(row.get("is_from_instant") or 0) == 1
@@ -124,6 +148,9 @@ def render_lj_v12_configuration_selection(
     batches: pd.DataFrame,
     selected_batch_id: int | None,
 ) -> None:
+    batches = batches.copy()
+    if not batches.empty:
+        batches['v11_config_name'] = [_actual_material_label(row) for row in batches.to_dict('records')]
     with manage_tab:
         render_section_intro(
             title="L-J 项目与批次选择",
@@ -210,7 +237,7 @@ def render_lj_v12_configuration_selection(
             ),
             items=[
                 ("检验项目", selected["project_name"]),
-                ("批次名称", _clean(selected["v11_config_name"])),
+                ("质控品与原厂批号", _clean(selected["v11_config_name"])),
                 ("仪器", selected["instrument"]),
                 ("试剂", selected["reagent"]),
                 ("质控品", selected["qc_material"]),
@@ -253,7 +280,7 @@ def render_lj_v12_configuration_selection(
             ].rename(
                 columns={
                     "project_name": "检验项目",
-                    "v11_config_name": "批次名称",
+                    "v11_config_name": "质控品与原厂批号",
                     "lot_no": "质控品批号",
                     "expiry_date": "效期",
                     "instrument": "仪器",

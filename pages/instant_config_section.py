@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from pages.lj_config_section import _clean, _ensure_selected_id, _selector_index, _render_batch_setup_action
+from pages.lj_config_section import _clean, _ensure_selected_id, _selector_index, _render_batch_setup_action, _actual_material_label
 from services.value_type_service import get_input_value_type_label
 from services.instant_workbench_service import (
     list_instant_workbench_batches, list_instant_workbench_projects, sync_instant_workbench_bindings,
@@ -22,6 +22,9 @@ def prepare_instant_v12_project_batch_context():
 
 def render_instant_v12_configuration_selection(selection_area, projects, project_id, batches, batch_id, issues):
     """Safe fallback for a missing context, not a second selector in the workbench."""
+    batches = batches.copy()
+    if not batches.empty:
+        batches['v11_config_name'] = [_actual_material_label(row, 'instant') for row in batches.to_dict('records')]
     with selection_area:
         render_section_intro(
             title="选择即时法批次",
@@ -32,7 +35,7 @@ def render_instant_v12_configuration_selection(selection_area, projects, project
             st.warning(f"有 {len(issues)} 项批次设置需要检查，请按下方清单到“资料与批次 → 项目/批次管理”核对。"
                 + ("设置已确认的其他批次仍可选择。" if not projects.empty else "请先完成并确认所需批次，再回到这里选择。"))
             with st.expander("查看待检查项目", expanded=projects.empty):
-                st.dataframe(pd.DataFrame(issues).rename(columns={"config_name": "批次名称", "test_item_name": "检验项目", "lot_no": "质控品批号", "issue": "说明"}), hide_index=True)
+                st.dataframe(pd.DataFrame(issues).rename(columns={"config_name": "设置记录", "test_item_name": "检验项目", "lot_no": "质控品批号", "issue": "说明"}), hide_index=True)
         if projects.empty:
             st.info("尚无可用的即时法项目。请先添加检验项目、选择质控品批号并确认批次设置。")
             _render_batch_setup_action('instant_empty_setup')
@@ -46,7 +49,7 @@ def render_instant_v12_configuration_selection(selection_area, projects, project
             project_map[label] = row["id"]
         batch_map = {"请选择设置已确认的批次": None}
         for row in batches.to_dict("records"):
-            label = f"质控批号：{row['lot_no']}｜{_clean(row['v11_config_name'])}｜效期 {_clean(row['v11_expiry_date'])}"
+            label = _clean(row['v11_config_name'])
             if label in batch_map:
                 label += f"｜#{row['id']}"
             batch_map[label] = row["id"]
@@ -72,6 +75,6 @@ def render_instant_v12_configuration_selection(selection_area, projects, project
             display = batches.copy()
             display["transfer_status"] = display["transfer_status"].map({"transferred": "已转入 L-J", "not_transferred": "未转入"}).fillna("未转入")
             st.dataframe(display[["project_name", "v11_config_name", "lot_no", "instrument", "reagent", "qc_material", "unit_symbol", "method_name", "target_n", "transfer_status"]].rename(columns={
-                "project_name": "检验项目", "v11_config_name": "批次名称", "lot_no": "质控品批号",
+                "project_name": "检验项目", "v11_config_name": "质控品与原厂批号", "lot_no": "质控品批号",
                 "instrument": "仪器", "reagent": "试剂", "qc_material": "质控品", "unit_symbol": "单位", "method_name": "检测方法", "target_n": "转入所需有效点数", "transfer_status": "转入状态",
             }), hide_index=True, width="stretch")

@@ -121,7 +121,6 @@ def _render_selector():
         from services.project_config_service import get_project_template
         template=dict(get_project_template(template_id))
         st.session_state['entry_instrument']=template['lab_instrument_id']
-        st.session_state['entry_product']=template['qc_material_id']
         if 'entry_lot' not in st.session_state and _draft():
             st.session_state['entry_lot']=_draft()['context']['selection']['qc_material_lot_id']
     if not choices['instruments']:
@@ -139,8 +138,13 @@ def _render_selector():
         if st.session_state.get('entry_instrument') not in instruments:st.session_state['entry_instrument']=None
         instrument=c[0].selectbox('仪器',[None,*instruments],key='entry_instrument',disabled=template_id is not None,format_func=lambda i:'请选择' if i is None else instruments[i]['name'])
         products={i['id']:i for i in choices['materials'] if instrument in i.get('instrument_ids',[])}
-        if st.session_state.get('entry_product') not in products:st.session_state['entry_product']=None
-        product=c[1].selectbox('质控品',[None,*products],key='entry_product',disabled=template_id is not None,format_func=lambda i:'请选择' if i is None else products[i]['name'])
+        if 'entry_product' not in st.session_state or st.session_state['entry_product'] not in [None,*products]:
+            preferred=template['qc_material_id'] if template_id is not None else None
+            st.session_state['entry_product']=(preferred if preferred in products else next(iter(products),None)) if template_id is not None else None
+        from ui.control_selection import control_products
+        from services.qc_product_display_service import product_choice_label
+        product_labels={identifier:product_choice_label(row) for identifier,row in control_products().items() if identifier in products}
+        product=c[1].selectbox('质控品',[None,*products],key='entry_product',format_func=lambda i:'请选择' if i is None else product_labels.get(i,products[i]['name']))
         lots={i['id']:i for i in choices['lots'] if i['qc_material_id']==product and instrument in i.get('instrument_ids',[])}
         if st.session_state.get('entry_lot') not in lots:st.session_state['entry_lot']=None
         lot=c[2].selectbox('本次主批号',[None,*lots],key='entry_lot',format_func=lambda i:'请选择明确的实际批号' if i is None else lots[i]['lot_no'])
@@ -156,7 +160,9 @@ def _render_selector():
                         and selection['qc_material_id']==product and selection['qc_material_lot_id']==lot):
                     st.session_state[key]=selection['lot_config_id']
             if st.session_state.get(key) not in combinations:st.session_state[key]=None
-            combination=st.selectbox('本次材料组合',[None,*combinations],key=key,format_func=lambda v:'请选择项目批次与完整水平组合' if v is None else combinations[v]['name'])
+            from services.material_workflow_service import config_material_summary
+            combination_labels={identifier:config_material_summary(identifier) for identifier in combinations}
+            combination=st.selectbox('本次材料组合',[None,*combinations],key=key,format_func=lambda v:'请选择项目批次与完整水平组合' if v is None else combination_labels[v])
             if combination is None:return
             context=get_daily_context(instrument,product,lot,when,template_id=template_id,lot_config_id=combination)
         if context.get('issues'):_errors(context['issues'])
@@ -164,7 +170,7 @@ def _render_selector():
             st.info('此批号还没有可录入的检验项目。请核对检验项目和各水平批号并确认批次设置。')
             _setup_action(template_id,'entry_unavailable_setup')
             return
-        st.caption(f"本组共 {len(context['items'])} 个检验项目。开始录入前，请逐水平核对实际使用的批号。")
+        st.caption(f"本组 {len(context['items'])} 个检验项目，请核对各水平实际批号。")
         if st.button('展开本组录入',type='primary',key='entry_start'):
             if _draft():st.session_state['daily_pending_context']=context
             else:_activate(context)
@@ -180,7 +186,7 @@ def _render_selector():
 def _receipt(draft):
     receipt=draft.get('receipt')
     if not receipt:return False
-    st.success('本组已全部保存。可查看保存明细，或开始下一组检测。')
+    st.success('本组已全部保存。')
     source={str(i['lot_config_item_id']):i for i in draft['context']['items']}
     st.dataframe(pd.DataFrame([{'检验项目':source[str(r['row_key'])]['test_item_name'],
         '质控方法':METHOD_LABELS[source[str(r['row_key'])]['qc_method']], '检测时间':receipt['test_time'],
@@ -250,7 +256,9 @@ def render_daily_entry():
         _setup_action(draft['context']['selection'].get('template_id'),'entry_draft_empty_setup')
         _refresh_button(draft)
         return
-    st.markdown('**本组：'+str(items[0].get('instrument_name',''))+' · '+str(items[0].get('config_name',items[0].get('project_name','')))+'**')
+    from services.material_workflow_service import material_label
+    materials='；'.join(dict.fromkeys(material_label(level) for item in items for level in item['levels']))
+    st.markdown('**本组：'+str(items[0].get('instrument_name',''))+' · '+materials+'**')
     if _receipt(draft):return
     cols=st.columns(2)
     for col,label,field in [(cols[0],'检测时间（年-月-日 时:分:秒）','test_time'),(cols[1],'检测人','operator')]:
@@ -267,7 +275,7 @@ def render_daily_entry():
     if draft.get('grid_paste_text') is not None:
         st.session_state['entry_paste_'+token]=draft.pop('grid_paste_text')
     with st.expander('从表格粘贴检测值',expanded=bool(draft.get('paste_preview'))):
-        st.caption('按上表项目和水平顺序粘贴一列检测值，或检测值、备注两列；空白会保留为未填写。先预览，再带入。')
+        st.caption('按上表顺序粘贴：一列检测值，或检测值、备注两列。空白表示未填写。')
         text=st.text_area('粘贴区域',key='entry_paste_'+token)
         if st.button('预览粘贴内容'):
             draft['paste_preview']=parse_rectangular_paste(text,rows);draft['paste_text']=text

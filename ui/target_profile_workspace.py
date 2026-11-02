@@ -5,6 +5,7 @@ from datetime import datetime
 from functools import partial
 from hashlib import sha1
 from uuid import uuid4
+import json
 
 import pandas as pd
 import streamlit as st
@@ -16,6 +17,7 @@ from services.target_profile_edit_service import (
     get_target_profile_context, list_target_profile_batches, save_target_profile_settings,
 )
 from ui.cv import render_cv_requirement, render_target_cv
+from ui.target_statistics import STATISTICS_MODE_LABELS
 
 MODAL_KEY = 'target_profile_dialog'
 _CLEANUP_KEY = 'target_profile_dialog_cleanup'
@@ -57,6 +59,19 @@ def open_target_profile_dialog(binding_id):
     st.rerun(scope='app')
 
 
+def open_target_statistics_dialog(binding_id, *, return_to=None):
+    from services.target_statistics_policy_service import get_target_statistics_policy
+    context = get_target_profile_context(binding_id)
+    if not context['editable']:
+        raise ValueError(context['read_only_reason'])
+    policy = get_target_statistics_policy('lot', context['binding']['lot_config_item_id'])
+    draft = dict(strategy=policy['mode'] or None, effective_at=context['initial_time'],
+                 evidence='', confirmed_by='', confirmed=False)
+    st.session_state[MODAL_KEY] = dict(kind='statistics', binding_id=int(binding_id), token=uuid4().hex,
+        context=context, fingerprint=context['fingerprint'], draft=draft, return_to=return_to)
+    st.rerun(scope='app')
+
+
 def _close():
     state = st.session_state.pop(MODAL_KEY, None)
     if state:
@@ -77,7 +92,12 @@ def _parameters_table(levels, context):
 
 
 def _render_profile(profile, context):
-    st.caption(f"V{profile['version_no']}｜生效时间：{profile['effective_at']}｜来源：{SOURCE_LABELS.get(profile['source'], profile['source'])}")
+    from ui.target_statistics import STATISTICS_MODE_LABELS, statistics_period
+    statistics = json.loads(profile.get('source_statistics_json') or '{}')
+    label = STATISTICS_MODE_LABELS.get(statistics.get('strategy'), SOURCE_LABELS.get(profile['source'], profile['source']))
+    st.caption(f"V{profile['version_no']}｜生效时间：{profile['effective_at']}｜来源：{label}")
+    if statistics_period(statistics):
+        st.caption('统计范围：' + statistics_period(statistics))
     st.dataframe(_parameters_table(profile['levels'], context), hide_index=True, width='stretch')
     st.write('依据：' + profile['evidence'])
     st.caption('确认人：' + profile['confirmed_by'])
@@ -111,13 +131,19 @@ def _render_detail(context):
     if current:
         _render_profile(current, context)
     elif context['editable']:
-        st.info('点击“确认均值和标准差”填写各水平参数；用本批结果建立时，可回质控工作台查看采集进度。')
+        st.info('已有参数可点“确认均值和标准差”填写；正在建靶可回质控工作台查看进度。')
     else:
         st.caption('当前尚未确认均值和标准差。')
     if not context['editable']:
         st.info(context['read_only_reason'])
-    action = '调整均值和标准差' if current else '确认均值和标准差'
-    if st.button(action, key='target_profile_open', disabled=not context['editable'], type='primary'):
+    switch, manual = st.columns(2)
+    if switch.button('切换均值和SD', key='target_statistics_open', disabled=not context['editable'], type='primary'):
+        try:
+            open_target_statistics_dialog(binding_id)
+        except ValueError as error:
+            st.error(str(error))
+    action = '人工或厂家参数' if current else '确认均值和标准差'
+    if manual.button(action, key='target_profile_open', disabled=not context['editable']):
         try:
             open_target_profile_dialog(binding_id)
         except ValueError as error:
@@ -130,7 +156,9 @@ def _render_detail(context):
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     rows = [{'版本': f"V{profile['version_no']}", '生效时间': profile['effective_at'],
              '状态': '当前生效' if current and profile['id'] == current['id'] else '尚未生效' if profile['effective_at'] > now else '历史版本',
-             '来源': SOURCE_LABELS.get(profile['source'], profile['source']), '确认人': profile['confirmed_by']}
+             '来源': STATISTICS_MODE_LABELS.get(
+                 json.loads(profile.get('source_statistics_json') or '{}').get('strategy'),
+                 SOURCE_LABELS.get(profile['source'], profile['source'])), '确认人': profile['confirmed_by']}
             for profile in profiles]
     state_key = f'target_profile_selected_version_{binding_id}'
     ids = [profile['id'] for profile in profiles]
@@ -150,7 +178,7 @@ def _filter_changed(key):
 def render_target_profile_workspace():
     contexts = list_target_profile_batches()
     if not contexts:
-        st.info('先完成单水平或多水平的批次设置，再到这里确认均值和标准差。即时法在其工作台录入并查看有效点数。')
+        st.info('尚无可设置参数的批次。请先完成L-J或多水平批次设置；即时法在其工作台查看统计。')
         return
     projects = {context['template']['id']: context['template']['template_name'] for context in contexts}
     for key, default in [('target_profile_search', ''), ('target_profile_project', None)]:
@@ -233,7 +261,7 @@ def _render_editor(state, current):
     draft['effective_at'] = st.datetime_input('生效时间', key=_key(state, 'effective_at', draft['effective_at']))
     draft['evidence'] = st.text_area('均值和标准差依据及调整原因', key=_key(state, 'evidence', draft['evidence']))
     draft['confirmed_by'] = st.text_input('确认人', key=_key(state, 'confirmed_by', draft['confirmed_by']))
-    st.caption('新的均值和标准差自所填时间开始使用，连续规则从该时刻重新累计；之前检测按原参数查看。')
+    st.caption('新参数从生效时间开始使用，连续规则重新累计；此前检测保留原参数和判读。')
     draft['confirmed'] = st.checkbox('已确认全部水平的均值、标准差适用，并核对生效时间',
         key=_key(state, 'confirmed', draft['confirmed']))
     cancel, save = st.columns(2)
@@ -269,7 +297,18 @@ def _render_dialog():
         if st.button('关闭', key='target_profile_missing_close'):
             _close()
         return
-    _render_editor(state, current)
+    if state.get('kind') == 'statistics':
+        from ui.target_statistics import render_target_statistics_switch
+        def saved(profile_id):
+            st.session_state['target_profile_selected_binding'] = state['binding_id']
+            st.session_state[f"target_profile_selected_version_{state['binding_id']}"] = profile_id
+            st.session_state['target_profile_table_version'] = int(st.session_state.get('target_profile_table_version', 0)) + 1
+            notice = 'v11_copy_notice' if state.get('return_to') == 'batch' else 'target_profile_notice'
+            st.session_state[notice] = '新均值和SD已确认，请核对生效时间。'
+            _close()
+        render_target_statistics_switch(state, current, on_cancel=_close, on_saved=saved)
+    else:
+        _render_editor(state, current)
 
 
 def render_pending_target_profile_dialog():
