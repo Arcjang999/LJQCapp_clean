@@ -178,7 +178,7 @@ def _render_project_list():
         open_project_dialog('project', selected)
     if projects.empty:
         if all_projects.empty:
-            st.info('首次使用请先登记仪器、试剂和质控品批号，再点击“新建项目”。')
+            st.info('新建项目需要仪器、试剂和质控品批号，可从“资料与批次”补充。')
             if st.button('查看首次使用步骤', key='home_first_use_guide'):
                 from ui.common import open_global_page
                 st.session_state['user_guide_practical'] = False
@@ -190,7 +190,7 @@ def _render_project_list():
     display['status'] = ['已停用' if r['is_disabled'] else ('设置已确认' if r['status']=='active' else '待完善') for r in projects.to_dict('records')]
     display = display.drop(columns=['is_disabled']).rename(columns={'template_name':'项目名称','project_group':'分组',
         'instrument_name':'仪器','item_count':'检验项目数','status':'状态'})
-    st.caption('先勾选一个项目，再点击“打开所选项目”。')
+    st.caption('打开所选项目后，可管理检验项目和批次、录入质控结果。')
     selected_id = _table(projects, display, 'home_selected_project_id', 'home_projects')
     if st.button('打开所选项目', key='home_open_project', disabled=selected_id is None):
         st.session_state['workspace_project_id'] = selected_id
@@ -223,7 +223,7 @@ def _render_workspace(template_id):
         if action.button('整组录入', key='workspace_daily_entry', type='primary', width='stretch'):
             from ui.daily_navigation import open_project_daily_entry
             open_project_daily_entry(template_id)
-        description.caption('点击“整组录入”，先核对质控品批号，再按各检验项目填写全部水平的检测值。')
+        description.caption('一次填写本项目各检验项目的全部水平质控结果。')
     st.subheader('检验项目与批次')
     items = list_template_items(template_id)
     controls = st.columns([1,1,1,1])
@@ -271,7 +271,7 @@ def _render_workspace(template_id):
         st.markdown('**当前检验项目：' + str(item.test_item_name) + '**')
         batches = list_item_batches(selected)
         if batches.empty:
-            st.info('此检验项目尚未建立批次。请先确认项目设置，再新增批次并选择质控品批号。')
+            st.info('此检验项目尚无批次。项目设置确认后，可新增批次并设置质控品批号和各水平。')
         else:
             choices = {int(r['config_item_id']):r for r in batches.to_dict('records')}
             key = f'workspace_batch_{selected}'
@@ -286,7 +286,7 @@ def _render_workspace(template_id):
             config = choices[cid]
             from services.material_workflow_service import config_material_summary
             if config['status'] != 'active':
-                st.info('此批次尚未确认。点击“批次设置”完成缺项，再点击“确认批次设置”。')
+                st.info('此批次尚未确认。到“批次设置”补齐资料并确认后可录入。')
             go, settings = st.columns(2)
             if go.button('进入当前批次', type='primary', key='home_open_batch', disabled=config['status']!='active', width='stretch'):
                 try:
@@ -378,7 +378,7 @@ def render_project_defaults(template):
         method=st.selectbox('默认方法学',options,index=options.index(template['default_method_id']) if template['default_method_id'] in options else 0,
             format_func=lambda k:'逐项选择' if k is None else names[k],key=f'default_method_{tid}')
         count=st.selectbox('质控水平数',[2,3],index=1 if template['default_level_count']==3 else 0,key=f'default_count_{tid}',disabled=way!='zscore')
-        st.caption('默认值仅用于以后新增的检验项目，保存后仍可逐项调整。')
+        st.caption('这些设置会预填到以后新增的检验项目，可在各检验项目中修改。')
         if st.button('保存默认设置',key=f'save_project_defaults_{tid}'):
             try:save_project_defaults(tid,qc_method=way,method_id=method,level_count=count,project_group=group)
             except ValueError as exc:st.error(str(exc))

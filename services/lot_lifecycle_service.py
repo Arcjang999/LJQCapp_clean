@@ -98,7 +98,7 @@ def require_writable(connection, method, batch_id, test_time=None, *, read_only=
         if (binding['binding_status']!='active' or row is None or row['status']!='active' or row['is_disabled']
             or row['template_status']!='active' or row['template_disabled'] or not row['is_enabled']
             or row['item_disabled'] or effective_qc_state(connection,binding['lot_config_item_id']) in ('ended','pending')):
-            raise ValueError('配置已变更、停用或停止使用，请刷新并重新确认；历史记录仍可查看。')
+            raise ValueError('项目或批次设置已变更、停用或停止使用。请重新打开批次，核对状态和设置后确认；历史记录仍可查看。')
         if test_time is not None and effective_qc_state(connection,binding['lot_config_item_id'],test_time) in ('ended','pending'):
             raise ValueError('检测时间不在该质控批次的可使用期间，请核对新旧批同时使用及停止使用时间。')
         current=connection.execute("""SELECT c.lab_instrument_id,c.qc_material_id,c.qc_material_lot_id,i.test_item_id,i.input_value_type,i.unit_id,i.method_id,i.reagent_id,c.material_selection_mode
@@ -124,12 +124,12 @@ def require_writable(connection, method, batch_id, test_time=None, *, read_only=
                     continue
                 identity=source['identity'][index]
                 if identity and not connection.execute(f'SELECT 1 FROM {table} WHERE id=? AND is_disabled=0',(identity,)).fetchone():
-                    raise ValueError('检测系统引用的基础资料已停用，请刷新确认。')
+                    raise ValueError('检测系统引用的基础资料已停用。请在基础资料中核对并恢复，或在新批次选择可用资料。')
         for level in source.get('levels',[]):
             if level.get('qc_level_id') and not connection.execute("""SELECT 1 FROM md_qc_levels l JOIN md_qc_material_lots q ON q.id=l.qc_material_lot_id
                 JOIN md_qc_materials p ON p.id=q.qc_material_id
                 WHERE l.id=? AND l.is_disabled=0 AND q.is_disabled=0 AND p.is_disabled=0""",(level['qc_level_id'],)).fetchone():
-                raise ValueError('当前水平或其质控批号已停用，请刷新确认。')
+                raise ValueError('当前水平或其质控批号已停用。请到“质控品管理 → 管理批次”核对，或为新批次选择可用批号。')
     return source
 
 
@@ -811,7 +811,7 @@ def report_lot_trace(method,batch_id,month,frame,*,start_date=None,end_date=None
             group['statistics_source']['level']=next((row for row in statistics.get('levels',[])
                 if row['level_id']==group['level']),{})
     return _json_safe({'actual_lots':df.to_dict('records'),'statistics_by_target_version':groups,'events':events,
-        'basis':'按本次结果保存的批号及参数版本回顾；累计判定按各版本自己的窗口，缺失历史批号显示未记录。'})
+        'basis':'按每次检测保存的批号、参数和判读查看历史；连续规则按各参数版本分别判断，缺失的历史批号显示“未记录”。'})
 
 
 def create_level_combination(*,source_batch_id,level_ids,verification_ids,operator,reason,effective_at):

@@ -131,7 +131,7 @@ def _render_detail(context):
     if current:
         _render_profile(current, context)
     elif context['editable']:
-        st.info('已有参数可点“确认均值和标准差”填写；正在建靶可回质控工作台查看进度。')
+        st.info('确认后的均值和SD用于本批次正式判读。可登记人工或厂家参数；按本批结果建靶时，可回工作台查看进度。')
     else:
         st.caption('当前尚未确认均值和标准差。')
     if not context['editable']:
@@ -214,7 +214,7 @@ def render_target_profile_workspace():
         selected_contexts.append(context)
         rows.append(row)
     ids = [context['binding']['id'] for context in selected_contexts]
-    st.caption(f'共 {len(ids)} 个批次。选择一行查看当前参数及变更记录。')
+    st.caption(f'共 {len(ids)} 个批次，可查看生效参数、适用批号及历次调整。')
     key = 'target_profile_batches_' + sha1(str((ids, st.session_state.get('target_profile_table_version', 0))).encode()).hexdigest()[:12]
     selected = _table(pd.DataFrame(rows), ids, key, 'target_profile_selected_binding')
     if selected is not None:

@@ -70,8 +70,8 @@ def render_quick_project_setup(ctx):
         return
     step = ctx.get('quick_step', 'details')
     st.subheader('新建项目')
-    st.caption({'details': '1 选择检验项目、仪器、试剂和质控品', 'quality': '2 设置质量要求',
-                'preview': '3 查看设置，保存后开始录入'}[step])
+    st.caption({'details': '1 检测设置：确定检验项目、检测系统及各水平实际质控品', 'quality': '2 质量要求：核对检测条件、适用限值及实验室要求',
+                'preview': '3 保存核对：同时建立项目和首个批次，完成后进入录入'}[step])
     if step == 'details':
         _render_details(ctx)
     elif step == 'quality':
@@ -166,7 +166,9 @@ def _render_details(ctx):
             if selected_test.get('default_unit_id') is not None and not pd.isna(selected_test['default_unit_id']):
                 draft['unit_id'] = int(selected_test['default_unit_id'])
                 st.session_state[_key(ctx, 'unit_id')] = draft['unit_id']
-        _choice(ctx, 'unit_id', '单位 *', list_units(), ['symbol', 'unit_name'])
+        with required_field(_key(ctx, 'unit_id'),
+                missing=not st.session_state.get(_key(ctx, 'unit_id')), message='请选择单位。'):
+            _choice(ctx, 'unit_id', '单位 *', list_units(), ['symbol', 'unit_name'])
         draft['input_value_type'] = st.selectbox('输入值类型', list(INPUT_VALUE_TYPE_LABELS),
             key=_key(ctx, 'input_value_type'), format_func=INPUT_VALUE_TYPE_LABELS.get)
         _qc_choices(ctx)
@@ -179,7 +181,10 @@ def _render_details(ctx):
             st.session_state[name_key] = auto_name
         ctx['quick_auto_name'] = auto_name
         ctx['quick_auto_name_item'] = draft['test_item_id']
-    _text(ctx, 'template_name', '项目名称 *')
+    with required_field(_key(ctx, 'template_name'),
+            missing=not str(st.session_state.get(_key(ctx, 'template_name')) or '').strip(),
+            message='请填写项目名称。'):
+        _text(ctx, 'template_name', '项目名称 *')
     if draft['qc_method'] == 'instant':
         draft['target_n'] = 20
     else:
@@ -295,7 +300,7 @@ def _render_quality(ctx):
         context = prepare_quick_project_details(ctx['draft'])
     except (ValueError, TypeError) as error:
         st.error(str(error))
-        st.info('点击“返回检测设置”修改上述内容。')
+        st.info('上述检测设置需要调整，请返回检测设置核对；本次填写内容已保留。')
         if st.button('返回检测设置', key='quick_invalid_back'):
             ctx['quick_step'] = 'details'
             st.rerun()
@@ -322,10 +327,10 @@ def _render_quality(ctx):
             ctx['quick_preview'] = prepare_quick_project_setup(ctx['draft'])
         except QuickSetupDetailsError as error:
             st.error(str(error))
-            st.info('点击“返回检测设置”修改上述内容。')
+            st.info('上述检测设置需要调整，请返回检测设置核对；本次填写内容已保留。')
         except (ValueError, TypeError) as error:
             st.error(str(error))
-            st.info('修改上述质量要求后，点击“下一步：查看设置”。')
+            st.info('请按上述提示补齐质量要求，再核对保存预览。')
         else:
             ctx['quick_step'] = 'preview'
             st.rerun()
@@ -364,7 +369,7 @@ def _render_preview(ctx):
                 expected_preview_hash=preview['preview_hash'], request_key=ctx['token'])
         except QuickSetupDetailsError as error:
             st.error(str(error))
-            st.info('点击“返回检测设置”修改上述内容。')
+            st.info('上述检测设置需要调整，请返回检测设置核对；本次填写内容已保留。')
         except (ValueError, TypeError) as error:
             st.error(str(error))
             st.info('质量要求有误请点击“返回质量要求”；项目、单位或批号有误请点击“返回检测设置”。')

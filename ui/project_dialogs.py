@@ -147,7 +147,7 @@ def _render_catalogue_picker(ctx):
     if not ctx.get('catalogue_open'):
         return
     with st.container(border=True):
-        st.caption('按产品编号、名称或浓度查找，再点击“使用此目录产品”。实际批号在新增批次时选择。')
+        st.caption('产品名录用于带入厂家、货号和浓度资料。可按编号、名称或浓度查找；实际批号在新增批次时选择。')
         query = st.text_input('搜索名录产品', key='project_catalogue_query_' + ctx['token'])
         matches = list_catalog_product_choices(query=query)
         if matches.empty:
@@ -205,7 +205,7 @@ def _render_project_form(ctx):
     registration_open = render_project_dependencies(ctx, kind='project', locked_identity=locked)
     relation_pending = render_pending_product_relation_notice(ctx)
     if ctx['template_id'] is None and not reviewed:
-        st.info('“保存项目”暂不可用，请先点击“确认所选质控品”。')
+        st.info('请先核对所选质控品是否适用，完成“确认所选质控品”后即可保存项目。')
     cancel, save = st.columns(2)
     if cancel.button('取消', key='project_dialog_cancel', disabled=registration_open):
         _cancel(ctx)
@@ -421,7 +421,7 @@ def _render_panel_source(ctx, template, options):
                 st.rerun()
         if chosen:
             candidates = template_item_rows(chosen)
-            st.caption('核对复制的检测方法、单位和结果类型；保存后逐项设置质量要求。')
+            st.caption('复制将带入检验项目的检测设置，便于建立相似项目。请核对方法、单位和结果类型，保存后逐项确认质量要求。')
     elif source == '导入配置清单':
         file = st.file_uploader('项目配置 XLSX', type=['xlsx'], key='panel_source_file_' + ctx['token'])
         if file:
@@ -557,7 +557,7 @@ def _render_panel_form(ctx):
                 missing.append('在“选择项目”中至少选择一项')
             if not fields:
                 missing.append('在“选择需要统一修改的内容”中至少选择一项')
-            st.caption('点击“预览统一设置”前，请先' + '，并'.join(missing) + '。')
+            st.caption('请先' + '，并'.join(missing) + '。')
         if st.button('预览统一设置', disabled=not selected or not fields, key='panel_bulk_preview'):
             ctx['bulk_preview'] = preview_panel_defaults(ctx['draft']['rows'], values,
                 selected_row_keys=selected, fields=fields, overwrite=overwrite)

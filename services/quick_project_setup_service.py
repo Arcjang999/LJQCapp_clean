@@ -223,7 +223,7 @@ def save_quick_project_setup(values, *, expected_preview_hash, request_key):
             return json.loads(old['receipt_json'])
         preview = _prepare(connection, values)
         if preview['preview_hash'] != expected_preview_hash:
-            raise ValueError('项目资料或可用质控品已修改，本次预览已失效。')
+            raise ValueError('项目资料或可用质控品已修改，请返回检测设置核对后重新查看保存预览。')
         item_values = {key: values.get(key) for key in _FIELDS}
         item_values.update(product_choice_review=_product_review(values), notes=str(values.get('item_notes') or ''))
         project_values = dict(template_name=values['template_name'], lab_instrument_id=values['lab_instrument_id'],

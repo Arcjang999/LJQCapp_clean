@@ -74,11 +74,11 @@ def render_main_entry_page() -> None:
     from ui.project_navigation import render_project_navigation
 
     if not st.session_state.get("workspace_project_id"):
-        render_module_header("项目工作台", "选择项目，开始整组录入或查看单项质控。", tone="projects", eyebrow="工作首页")
+        render_module_header("项目工作台", "管理各项目的检验项目和批次，录入并查看质控结果。", tone="projects", eyebrow="工作首页")
         modules = [
-            ("今日质控总览", "查看各项目结果与待处理事项", "daily", "home_daily_overview", "show_daily_overview_page"),
-            ("异常处理", "分析原因、关联复测并确认处理", "handling", "home_out_of_control", "show_out_of_control_page"),
-            ("批量质控报告", "按所选期间生成报告并查看历史", "reports", "home_batch_monthly", "show_batch_monthly_reports_page"),
+            ("今日质控总览", "汇总所选日期各项目的质控结论和待处理异常", "daily", "home_daily_overview", "show_daily_overview_page"),
+            ("异常处理", "保存异常原因、纠正措施、复测结果和处理结论", "handling", "home_out_of_control", "show_out_of_control_page"),
+            ("批量质控报告", "一次生成多个项目的期间报告，并下载报告与附件", "reports", "home_batch_monthly", "show_batch_monthly_reports_page"),
         ]
         for column, (title, caption, tone, key, page) in zip(st.columns(3, gap="medium"), modules):
             with column, st.container(key="home_module_" + tone, border=True):

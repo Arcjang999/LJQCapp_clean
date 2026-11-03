@@ -235,14 +235,14 @@ def render_daily_entry():
                 return_to_project_workspace()
             return
     render_module_header('整组日常录入',
-        ('当前项目：'+template['template_name']+'。' if template else '')+'核对实际批号，填写全部水平，再核对并保存。',
+        ('当前项目：'+template['template_name']+'。' if template else '')+'一次填写多个检验项目的全部水平结果，统一保存并查看质控判定。',
         tone='daily',eyebrow='日常质控')
     back,overview=st.columns(2)
     if back.button('返回项目工作台',key='entry_project_home'):
         from ui.daily_navigation import return_to_project_workspace
         return_to_project_workspace(template_id)
     if overview.button('返回今日总览',key='entry_overview'):open_global_page('show_daily_overview_page')
-    st.caption('按 Enter 或 Tab 换到下一格。填完后点“检查本组结果”，核对后再点“确认保存整组”。')
+    st.caption('按 Enter 或 Tab 换到下一格；也可从表格粘贴或用 Excel 批量填写。')
     try:_render_selector()
     except Exception as exc:
         logging.exception('Daily context read failed');st.error(str(exc) if isinstance(exc,ValueError) else '资料读取失败，请重试。')
@@ -275,7 +275,7 @@ def render_daily_entry():
     if draft.get('grid_paste_text') is not None:
         st.session_state['entry_paste_'+token]=draft.pop('grid_paste_text')
     with st.expander('从表格粘贴检测值',expanded=bool(draft.get('paste_preview'))):
-        st.caption('按上表顺序粘贴：一列检测值，或检测值、备注两列。空白表示未填写。')
+        st.caption('将复制的检测值填入上方表格：按表中顺序粘贴一列检测值，或检测值、备注两列。空白格保留为未填写。')
         text=st.text_area('粘贴区域',key='entry_paste_'+token)
         if st.button('预览粘贴内容'):
             draft['paste_preview']=parse_rectangular_paste(text,rows);draft['paste_text']=text
@@ -286,7 +286,7 @@ def render_daily_entry():
             _errors(preview['errors'])
             st.dataframe(pd.DataFrame([{'行号':r['line'],'检测值':r['value'],'备注':r['note'] or ''} for r in preview['rows']]),hide_index=True,width='stretch')
             if text!=draft.get('paste_text'):
-                st.info('粘贴区域的内容已修改，请重新点击“预览粘贴内容”，再确认带入本组。')
+                st.info('粘贴内容已修改，重新预览后可填入上方表格。')
             if st.button('确认带入本组',disabled=not preview['valid'] or text!=draft.get('paste_text')):
                 apply_paste(draft,preview);draft.pop('paste_preview',None)
                 for key in list(st.session_state):
@@ -330,7 +330,8 @@ def render_daily_entry():
     if not rows:
         st.info('请在上方“本次录入项目”中至少选择一个检验项目，再检查本组结果。')
     left,right=st.columns(2)
-    if left.button('检查本组结果',key='entry_validate',type='primary',disabled=not rows):
+    if left.button('检查本组结果',key='entry_validate',type='primary',disabled=not rows,
+            help='检查检测值、时间、人员和实际批号，列出需要补齐或修改的项目。通过后可确认保存整组。'):
         from services.daily_entry_service import validate_submission
         try:
             if draft['test_time']!=draft['context'].get('test_time'):
@@ -342,7 +343,7 @@ def render_daily_entry():
         st.rerun()
     if right.button('清空本组输入',key='entry_clear'):draft['confirm_clear']=True
     if draft.get('confirm_clear'):
-        st.warning('是否清空本组检测值和备注？取消会保留全部输入。')
+        st.warning('确认后清空本组检测值和备注，清空后可用“恢复清空前输入”找回。')
         if st.button('确认清空'):
             draft['before_clear']={'values':deepcopy(draft['values']),'notes':deepcopy(draft['notes'])}
             draft['values']={k:'' for k in draft['values']};draft['notes']={k:'' for k in draft['notes']};draft['edit_version']+=1
@@ -358,7 +359,8 @@ def render_daily_entry():
         st.rerun()
     if draft.get('frozen'):
         st.info(f"本组 {len(draft['selected'])} 项已核对，请确认检测时间 {draft['test_time']}、检测人 {draft['operator']} 和全部实际批号。")
-        if st.button('确认保存整组',type='primary',key='entry_commit'):
+        if st.button('确认保存整组',type='primary',key='entry_commit',
+                help='一次保存所选检验项目的全部水平结果，并显示各项质控判定。'):
             from services.daily_entry_service import submit_daily
             try:draft['receipt']=submit_daily(draft['frozen']);draft['errors']=[]
             except Exception as exc:

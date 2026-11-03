@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime
 from functools import wraps
@@ -348,7 +349,7 @@ def _digest_file(path: Path) -> str:
 
 
 def _managed_file_records(db_path: Path) -> list[dict]:
-    with sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True) as connection:
+    with closing(sqlite3.connect(f"{db_path.resolve().as_uri()}?mode=ro", uri=True)) as connection:
         connection.row_factory = sqlite3.Row
         tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if "qc_managed_files" not in tables:
@@ -480,7 +481,7 @@ def _read_backup_into(backup_path: Path, destination: Path) -> tuple[dict, bool]
 def _validate_supported_database(path: Path) -> None:
     if not validate_sqlite_database(path)[0]:
         raise RuntimeError("备份中的数据库检查未通过。")
-    with sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True) as connection:
+    with closing(sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)) as connection:
         tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if not {"projects", "batches", "results"}.issubset(tables):
         raise RuntimeError("此文件不包含可恢复的质控业务数据。")
@@ -585,9 +586,12 @@ def _copy_database_snapshot(source_db_path: Path, destination_db_path: Path, *, 
 
     destination_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with sqlite3.connect(str(source_path)) as source_connection:
-            with sqlite3.connect(str(destination_path)) as destination_connection:
-                source_connection.backup(destination_connection)
+        # SQLite's transaction context does not close connections. Release both
+        # handles before validating or removing temporary files on Windows.
+        with closing(sqlite3.connect(str(source_path))) as source_connection:
+            with closing(sqlite3.connect(str(destination_path))) as destination_connection:
+                with source_connection, destination_connection:
+                    source_connection.backup(destination_connection)
 
         validation = validate_sqlite_database(destination_path)
         if not validation[0]:

@@ -92,7 +92,7 @@ def _project_home() -> None:
 
 
 def _render_unit(ready: dict) -> None:
-    st.write('填写**实验室、科室、检验员和复核员**，点击**保存设置**。')
+    st.write('设置新报告中自动填写的**实验室、科室、检验员和复核员**。')
     if ready['unit']:
         st.caption('已填写实验室信息。')
     if st.button('填写实验室信息', key='onboarding_unit', type='primary', width='stretch'):
@@ -100,11 +100,11 @@ def _render_unit(ready: dict) -> None:
 
 
 def _render_materials(ready: dict) -> None:
-    st.write('登记本次要用的**仪器、试剂和质控品**，已有资料无需重填。')
+    st.write('登记**仪器、试剂和质控品**，供项目设置和检测录入选择。已有资料可直接使用。')
     actions = (
-        ('仪器', '填仪器名称、厂家和型号。', '仪器管理', 'instrument', 'onboarding_instrument'),
-        ('试剂', '填产品、批号和效期。', '试剂管理', 'reagent_lot', 'onboarding_reagent'),
-        ('质控品', '填产品、批号、效期和水平。', '质控品管理', 'qc_lot', 'onboarding_qc'),
+        ('仪器', '登记和修改仪器名称、厂家、型号等资料。', '仪器管理', 'instrument', 'onboarding_instrument'),
+        ('试剂', '管理试剂产品、实际批号、效期和使用记录。', '试剂管理', 'reagent_lot', 'onboarding_reagent'),
+        ('质控品', '管理质控品产品、原厂批号、效期和浓度水平。', '质控品管理', 'qc_lot', 'onboarding_qc'),
     )
     for column, (label, instruction, button, flag, key) in zip(st.columns(3), actions):
         with column:
@@ -116,7 +116,7 @@ def _render_materials(ready: dict) -> None:
                 _open_page('materials', 'show_qc_materials_page',
                            reference={'instrument': 'instrument', 'reagent_lot': 'reagent'}.get(flag, ''))
     st.markdown('**单位资料准备（选用）**')
-    st.caption('下载填写表，批量登记实验室、仪器、试剂和质控品。')
+    st.caption('用一份Excel批量登记实验室、仪器、试剂和质控品资料。')
     if st.button('单位资料准备：下载填写表或导入Excel', key='onboarding_checklist', width='stretch'):
         if _leave('materials'):
             from ui.common import open_global_page
@@ -126,9 +126,7 @@ def _render_materials(ready: dict) -> None:
 
 
 def _render_project(ready: dict) -> None:
-    st.markdown('1. 选择**检验项目、仪器、试剂和质控品**，填好批号和各水平。\n'
-                '2. 核对**质量要求**，点击**下一步：查看设置**。\n'
-                '3. 点击**确认保存并进入录入**。')
+    st.markdown('建立项目的**检验项目、仪器、试剂、质控品批号和各水平**，设置**质量要求**。保存后可进入结果录入。')
     if ready['project']:
         st.caption('已有项目，可继续使用。')
     if st.button('新建项目', key='onboarding_project', type='primary', width='stretch'):

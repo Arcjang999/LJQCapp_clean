@@ -58,7 +58,7 @@ def render_daily_overview():
     search=columns[2].text_input('查找检验项目',key='daily_search',help=SEARCH_HELP,on_change=_value,args=('daily_search',))
     entry_action, report_action=st.columns(2)
     if entry_action.button('整组录入',type='primary',key='overview_entry',disabled=template is None,
-            help='先在上方选择项目，再录入该项目的实际批次。'):
+            help='一次填写所选项目多个检验项目的质控结果。'):
         from ui.daily_navigation import open_project_daily_entry
         open_project_daily_entry(template)
     if template is None:st.caption('需要录入时，先选择具体项目。')
@@ -78,7 +78,7 @@ def render_daily_overview():
     items=result['items']; metrics=st.columns(3)
     metrics[0].metric('当日检测次数',result['count']);metrics[1].metric('当日曾失控项目',sum(i['ever_reject'] for i in items))
     metrics[2].metric('未完成处理',len(result['pending']['items'])+len(result['pending']['cross_day']))
-    st.caption('多水平整次检测计1次；“今日无记录”表示所选日期没有已保存结果。')
+    st.caption('每个检验项目的全部水平合计为1次检测；“今日无记录”的项目可通过整组录入补充结果。')
     frame=pd.DataFrame([{'项目':i['template_name'],'检验项目':i['test_item_name'],'仪器':i['instrument_name'],
         '质控品与原厂批号':i['material_summary'],'质控方法':METHOD_LABELS[i['qc_method']],
         '阶段':i['phase'],'当日次数':i['count'],'最新结论':(i['latest'] or {}).get('conclusion','今日无记录'),

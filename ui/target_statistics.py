@@ -8,8 +8,8 @@ from ui.required_fields import required_field
 
 STATISTICS_MODE_LABELS = {'monthly': '月度统计', 'cumulative': '累计统计'}
 STATISTICS_MODE_HELP = (
-    '月度统计：用上一个自然月的有效数据计算均值和SD。'
-    '累计统计：用同一质控品批号、同一水平，从开始到最新记录的全部有效数据计算均值和SD。'
+    '用于手动更新均值和SD。月度统计取上一个自然月的有效数据；'
+    '累计统计取同一检测系统、同一质控品批号、同一水平，从开始到最新记录的全部有效数据（含本月）。'
     '新统计值经手动确认切换后才启用。'
 )
 

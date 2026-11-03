@@ -113,7 +113,7 @@ def render_batch_monthly_reports_page():
         st.rerun()
     from ui.common import render_module_header
     render_module_header('批量质控报告',
-        '选择日期、仪器和项目，核对清单后生成报告。报告和附件一同保存；失败的报告可单独重试。',
+        '按期间批量生成所选项目的质控报告，下载PDF、处理记录和附件；未生成的报告可单独重试。',
         tone='reports',eyebrow='报告管理')
     choices = list_monthly_report_choices()
     from ui.report_period import render_report_period, render_handling_versions

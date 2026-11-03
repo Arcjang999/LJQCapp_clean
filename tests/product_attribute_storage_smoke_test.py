@@ -151,7 +151,7 @@ class ProductAttributeStorageTests(unittest.TestCase):
         self.assertTrue(row['identity_locked'])
         for field in ('concentration_code', 'concentration'):
             before = self.dump()
-            with self.assertRaisesRegex(ValueError, '不能直接修改'):
+            with self.assertRaisesRegex(ValueError, '资料已锁定'):
                 update_material_product(product_id, expected_version=row['edit_version'], **{field: '错误覆盖'})
             self.assertEqual(before, self.dump())
         update_material_product(product_id, notes='补充备注', expected_version=row['edit_version'])
@@ -183,7 +183,7 @@ class ProductAttributeStorageTests(unittest.TestCase):
                          {k: v for k, v in after.items() if k not in ('notes', 'updated_at')})
         current = get_material_product(product_id)
         before = self.dump()
-        with self.assertRaisesRegex(ValueError, '不能直接修改'):
+        with self.assertRaisesRegex(ValueError, '资料已锁定'):
             update_material_product(product_id, concentration_code='new', expected_version=current['edit_version'])
         self.assertEqual(before, self.dump())
         next_package = deepcopy(package)

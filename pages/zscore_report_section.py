@@ -22,7 +22,7 @@ def render_zscore_monthly_report_section(selected_batch_id: int) -> None:
     batch = get_zscore_batch(selected_batch_id)
     months = list_zscore_report_month_options(selected_batch_id)
     with st.container(border=True):
-        render_section_intro(title="多水平法质控报告", caption="报告、处理记录和附件一同保存。", tone="accent")
+        render_section_intro(title="多水平法质控报告", caption="汇总所选期间各水平质控图、统计和整次检测结论，保存报告及相关处理记录和附件。", tone="accent")
         st.caption(f"{batch['project_name']} · {_build_batch_display(batch)} · 正式期")
         if not months:
             st.info("本批次尚无正式期记录，暂不能生成报告。")

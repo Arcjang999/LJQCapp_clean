@@ -82,7 +82,7 @@ def render_settings_page() -> None:
     from ui.common import render_module_header
     render_module_header(
         title="系统设置",
-        caption="填写实验室、科室和人员，保存设置；数据备份和恢复在下方操作。",
+        caption="设置新报告的实验室信息、人员和声明，管理数据备份与恢复。",
         tone="settings",
     )
     render_workbench_context_bar(
@@ -100,7 +100,7 @@ def render_settings_page() -> None:
     with st.container():
         render_section_intro(
             title="实验室信息",
-            caption="用于之后生成的报告。",
+            caption="保存后自动填入新生成的报告。",
             tone="accent",
         )
         info_left, info_right = st.columns(2, gap="medium")
@@ -156,8 +156,8 @@ def render_settings_page() -> None:
         cloud_mode = _is_cloud_mode()
         render_section_intro(
             title="数据保存与备份",
-            caption=("下载完整备份，或上传备份恢复数据。" if cloud_mode else
-                     "查看或更改数据保存位置，以及备份和恢复数据。"),
+            caption=("下载检测资料、报告和附件的完整备份，或用备份恢复。" if cloud_mode else
+                     "复制数据到新文件夹、保存完整备份，或从备份恢复。"),
             badges=(["下载备份", "上传恢复"] if cloud_mode else
                     ["更改数据保存位置", "备份恢复", "重启后生效"]),
             tone="muted",
@@ -260,7 +260,7 @@ def _render_storage_section() -> None:
             else:
                 st.warning(storage_message(migration_validation[1]))
         else:
-            st.info('请点击“选择新文件夹”。')
+            st.info('选择要存放全部检测资料、报告和附件的文件夹。')
         if st.button(
             "确认更改保存位置",
             key="confirm_storage_migration",
@@ -344,7 +344,7 @@ def _render_storage_section() -> None:
     )
     restore_confirmed = bool(st.session_state.get(STORAGE_SESSION_KEYS["restore_confirmed"], False))
     if selected_restore_file is None:
-        st.info('请点击“选择备份文件”。')
+        st.info('选择之前保存的 .db 或 .zip 备份，检查通过后可恢复。')
     elif restore_ready and not restore_confirmed:
         st.info('备份文件已通过检查。请勾选上方确认项。')
     if st.button(
@@ -378,7 +378,7 @@ def _render_cloud_storage_section() -> None:
             st.error(storage_message(exc))
         else:
             st.session_state["settings_cloud_backup_path"] = str(result.target_path)
-            st.success("备份已生成，点击下方按钮下载。")
+            st.success("备份已生成，可下载到本机保管。")
     _render_cloud_backup_download("settings_cloud_backup_path", "下载完整备份", "cloud_download_backup")
     _render_cloud_backup_download(
         "settings_cloud_protection_path", "下载恢复前的数据备份", "cloud_download_protection_backup"
@@ -394,7 +394,7 @@ def _render_cloud_storage_section() -> None:
         st.session_state["settings_cloud_restore_confirmed"] = False
 
     if uploaded is None:
-        st.info('请先在“选择备份文件”中上传备份。')
+        st.info('上传之前下载的 .db 或 .zip 备份，检查通过后可恢复。')
         st.checkbox("我确认用此备份替换当前数据。", key="settings_cloud_restore_confirmed", disabled=True)
         st.button("确认恢复数据", key="cloud_confirm_restore", type="primary",
                   use_container_width=True, disabled=True)

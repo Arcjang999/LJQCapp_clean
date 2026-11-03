@@ -217,7 +217,7 @@ def _render_instant_entry_and_summary_section(
             st.session_state["instant_entry_test_time"] = local_now()
             st.session_state["instant_reset_entry_form"] = False
 
-        st.caption("填写检测时间、检测人和本次检测值。")
+        st.caption("保存本次检测值，更新SI判定和累计统计。")
         test_time = st.datetime_input(
             "检测时间",
             key="instant_entry_test_time",
@@ -279,7 +279,7 @@ def _render_instant_entry_and_summary_section(
             ("实测变异系数（%）", format_optional_float(summary["cv"], digits=2, suffix="%")),
         ]
     )
-    st.caption("均值、SD和CV仅统计未禁用的结果；疑似离群点未禁用时仍计入。")
+    st.caption("均值、SD和CV按全部未禁用结果计算，包含待核对和已保留的疑似离群点。")
 
 
 def _render_instant_transfer_section(context: dict[str, object]) -> None:
@@ -358,7 +358,7 @@ def _render_instant_si_method_explanation(summary: dict[str, object]) -> None:
                     "- 使用范围：即刻法 SI 表仅用于前 20 个有效点，超过后应转入 L-J 法。",
                     f"- 公式：`{formula}`，其中 `s` 使用样本标准差。",
                     "- 判定阈值：SI上限和 SI下限均不超过 n2s 为在控；超过 n2s 但不超过 n3s 为警告；超过 n3s 为疑似离群。",
-                    "- 疑似离群点不会自动剔除；在“检测记录”中选中后，可保留、禁用或恢复。",
+                    "- 疑似离群点由你选择保留、禁用或恢复；禁用后该点退出统计。",
                 ]
             )
         )

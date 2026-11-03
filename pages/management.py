@@ -600,7 +600,7 @@ def render_zscore_project_batch_management(
 
             st.subheader("多水平 项目列表")
             if projects_df.empty:
-                st.info("点击“创建多水平项目”，选择两个或三个水平。")
+                st.info("尚无多水平项目。新建时可配置两个或三个质控水平。")
             else:
                 project_labels, project_options = build_zscore_project_select_options(projects_df)
                 sync_selector_state(
@@ -741,7 +741,7 @@ def render_zscore_project_batch_management(
             if selected_project_id is None:
                 st.info("请先选择 多水平 项目。")
             elif batches_df.empty:
-                st.info("点击“创建多水平批次”，填写本次质控品资料。")
+                st.info("尚无多水平批次。新批次用于记录本次质控品批号、浓度水平和建靶要求。")
             else:
                 batch_labels, batch_options = build_zscore_batch_select_options(batches_df)
                 sync_selector_state(

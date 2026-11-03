@@ -153,7 +153,7 @@ def render_directory_import(*, show_published=True, expander_label='产品目录
                 st.error(str(exc))
         manufacturer_id = st.selectbox('目录所属质控品厂家',[None,*rows],format_func=lambda value:'请选择厂家' if value is None else rows[value],key='directory_manufacturer')
         uploaded = st.file_uploader('上传厂家目录文件（JSON，可选）',type=['json'],key='directory_upload')
-        st.caption('请选择质控品厂家，再点击“预览目录”。未上传更新文件时，预览现有邦德盛目录的1054项产品和252项排除记录。')
+        st.caption('选择厂家后，可预览本次新增、修改和排除的产品。未上传文件时使用现有邦德盛目录（1054项产品、252项排除记录）。')
         source_content, source_identity = _directory_source(uploaded, manufacturer_id)
         draft = st.session_state.get('directory_preview_draft')
         if draft and draft.get('source_identity') != source_identity:
@@ -288,7 +288,7 @@ def render_product_relationships(product_id):
         st.dataframe(_product_table(pd.DataFrame([product])), hide_index=True, width='stretch')
     with st.expander('适用检验项目', expanded=True):
         active=[row for row in relationship['coverage'] if not row['is_disabled']]
-        st.caption('点击“选择检验项目”，按产品说明书勾选适用项目。')
+        st.caption('按产品说明书登记适用的检验项目，保存核对人和参考资料。')
         drafts=st.session_state.setdefault('product_coverage_drafts',{})
         key=str(product_id)
         if key not in drafts:
@@ -323,7 +323,7 @@ def render_product_relationships(product_id):
         draft['actor']=actor
         evidence=st.text_area('参考资料',value=draft.get('evidence',''),placeholder='例如：产品说明书名称及页码，或厂商提供的说明',key=prefix+'_evidence')
         draft['evidence']=evidence
-        st.caption('填写核对人和参考资料后，点击“保存适用项目”。')
+        st.caption('保存后，所选项目、核对人和参考资料将记入此质控品的适用记录。')
         save,cancel=st.columns(2)
         if save.button('保存适用项目',key=prefix+'_save'):
             try:

@@ -418,7 +418,7 @@ class QuickProjectSetupUiTests(unittest.TestCase):
                 self.assertEqual('preview', app.session_state['project_workspace_dialog']['quick_step'])
                 self.assertEqual(draft, app.session_state['project_workspace_dialog']['draft'])
                 self.assertEqual(before, database_contents())
-                expected = ('项目资料或可用质控品已修改', '预览已失效') if change == 'lot' else (
+                expected = ('项目资料或可用质控品已修改', '重新查看保存预览') if change == 'lot' else (
                     '质控品资料已修改', '重新核对并确认质控品')
                 self.assertTrue(any(all(text in str(item.value) for text in expected) for item in app.error))
 

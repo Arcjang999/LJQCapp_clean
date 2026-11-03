@@ -549,16 +549,16 @@ def validate_project_template(template_id: int) -> list[str]:
     if template['is_disabled']:
         errors.append('项目已停用。')
     if template["lab_instrument_id"] is None:
-        errors.append("未选择本地仪器。")
+        errors.append("未选择本地仪器，请在“编辑项目”中选择实际使用的仪器。")
     if template["qc_material_id"] is None:
-        errors.append("未选择质控品。")
+        errors.append("未选择质控品，请在“编辑项目”中核对所用产品。")
     with get_connection() as connection:
         for field, table, label in (('lab_instrument_id', 'lab_instruments', '仪器'), ('qc_material_id', 'md_qc_materials', '质控品')):
             if template[field] is not None and not connection.execute(
                     f'SELECT id FROM {table} WHERE id=? AND is_disabled=0', (template[field],)).fetchone():
                 errors.append(f'{label}已停用，请重新核对。')
     if items.empty:
-        errors.append("至少需要配置 1 个检验项目。")
+        errors.append("至少需要配置 1 个检验项目，请在项目工作台添加。")
         return errors
 
     for index, (_, row) in enumerate(items.iterrows(), 1):
@@ -1139,7 +1139,7 @@ def validate_lot_config(lot_config_id: int) -> list[str]:
     items=items[items["is_enabled"].astype(bool)] if not items.empty else items
     errors: list[str] = []
     if not str(config["expiry_date"] or "").strip():
-        errors.append("质控品批号未填写效期。")
+        errors.append("质控品批号未填写效期，请到“质控品管理 → 管理批次”补齐后重新核对。")
     if items.empty:
         errors.append("批次没有检验项目。")
         return errors

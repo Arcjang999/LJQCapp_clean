@@ -84,7 +84,8 @@ def render_single_report(method, batch_id, *, months, preview_renderer):
     render = getattr(service, f'build_{method}_period_report_pdf')
     save = getattr(service, f'save_{method}_period_report_snapshot')
     preview_key = prefix + '_preview'
-    if st.button('核对报告', key=prefix + '_generate', width='stretch'):
+    if st.button('核对报告', key=prefix + '_generate', width='stretch',
+                 help='整理所选期间的质控图、统计和异常记录，供生成报告前查看。'):
         try:
             package = build(batch_id, period.start_date, period.end_date, report_month=period.report_month or None)
             options = _versions(package, method)

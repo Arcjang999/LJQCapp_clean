@@ -272,7 +272,7 @@ class DailyUITest(unittest.TestCase):
         app.session_state['test_upload_bytes']=files.export_daily_workbook(source)
         app.run();self.healthy(app);self.click(app,'预览结果文件');self.click(app,'取消文件预览')
         self.assertTrue(all(v=='' for v in app.session_state['daily_draft']['values'].values()))
-        self.click(app,'预览结果文件');self.click(app,'带入结果草稿')
+        self.click(app,'预览结果文件');self.click(app,'填入录入表')
         updated=app.session_state['daily_draft']
         for field in ('values','notes','reagents','operator','test_time'):self.assertEqual(source[field],updated[field])
         self.assertEqual(app.text_input(key=f'entry_note_{token}_{item}').value,source['notes'][item])

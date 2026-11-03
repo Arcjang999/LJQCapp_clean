@@ -266,7 +266,7 @@ class ReportArchiveTests(unittest.TestCase):
             path.write_bytes(b'damaged after backup')
             with db.atomic_write() as connection:
                 connection.execute("UPDATE qc_report_archive_files SET archive_bytes=x'31' WHERE export_id=?", (export_id,))
-            with self.assertRaisesRegex(ValueError, '校验不一致'):
+            with self.assertRaisesRegex(ValueError, '与保存时不一致'):
                 archives.read_report_archive(export_id)
             restore_database_from_backup_file(backup.target_path)
             self.assertEqual(snapshot, database_contents())

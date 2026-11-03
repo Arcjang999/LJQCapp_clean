@@ -298,15 +298,15 @@ def _render_import_dialog(state):
         st.info("当前批次已完成建靶，请选择正式期导入。")
     elif phase == "formal" and not _ready(method, current):
         st.info("当前批次尚未完成建靶。可以先检查文件，完成建靶后再点“确认导入”。")
-    st.caption("下载当前阶段的模板，填写后上传CSV或单工作表Excel。切换阶段须重新上传；试剂批号留空会保存为“未记录”。")
-    st.caption("建靶与正式期数据须分别导入，不能直接上传“全部”阶段的导出文件。")
+    st.caption("按当前阶段的模板批量保存检测记录，支持CSV或单工作表Excel。试剂批号留空保存为“未记录”；切换阶段后重新上传文件。")
+    st.caption("建靶期、正式期各用对应模板导入；“全部”阶段的导出文件用于汇总查看。")
     template = (build_lj_building_template_dataframe(current["input_value_type"]) if method == "lj" else
                 build_zscore_building_template_dataframe(current["level_count"], current["input_value_type"]))
     st.download_button("下载导入模板", dataframe_to_csv_bytes(template),
         file_name=f"{_file_prefix(current, batch_id)}_{PHASE_LABELS[phase]}导入模板.csv", mime="text/csv",
         key=f"qc_transfer_template_{nonce}", width="stretch")
     if method == "zscore":
-        st.caption("每行填写一整次检测的全部水平，不能只导入其中一个水平。")
+        st.caption("每行对应一次完整检测，须填写该次检测的全部水平。")
     uploaded = st.file_uploader("上传检测数据", type=["csv", "xlsx"], disabled=locked,
                                key=f"qc_transfer_upload_{nonce}_{state['upload_nonce']}")
     if uploaded is not None:
@@ -320,7 +320,7 @@ def _render_import_dialog(state):
     if data:
         st.caption("当前文件：" + state["upload_name"])
     elif not locked:
-        st.info('请先在“上传检测数据”中选择填写好的文件，再点击“检查文件并预览”。')
+        st.info('上传填写好的检测数据文件后，可检查每行内容及导入问题。')
     signature = _import_source_signature(method, current)
     if state.get("review") and state.get("source_signature") != signature:
         state.update(review=None, source_signature=None)
@@ -338,7 +338,7 @@ def _render_import_dialog(state):
         if review["summary"]["has_blocking_errors"]:
             st.error("尚未导入。请按下表修正文件，重新上传检查。")
         else:
-            st.success("检查通过。核对下表的时间、结果和试剂批号后，点击“确认导入”。")
+            st.success("检查通过。“确认导入”将保存下表中的检测时间、结果和实际试剂批号。")
         issues = build_review_issues_dataframe(review["issues"])
         if not issues.empty:
             st.dataframe(issues, hide_index=True, width="stretch")
@@ -351,7 +351,7 @@ def _render_import_dialog(state):
     allowed = bool(review and not review["summary"]["has_blocking_errors"] and review["normalized_rows"]
                    and not locked and (phase == "building" or _ready(method, current)))
     if data and not review and not locked:
-        st.info('请先点击“检查文件并预览”，核对文件内容后再点击“确认导入”。')
+        st.info('文件尚未检查。“检查文件并预览”会列出待导入记录及需修正的问题。')
     elif review and not review['summary']['has_blocking_errors'] and not review['normalized_rows']:
         st.info('文件中没有可导入的检测结果。请按“下载导入模板”填写检测时间和检测值，重新上传并检查。')
     if confirm.button("确认导入", type="primary", disabled=not allowed, key=f"qc_transfer_confirm_{nonce}", width="stretch"):

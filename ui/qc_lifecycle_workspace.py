@@ -202,7 +202,7 @@ def _state_fields(state):
             selected[lot_id] = _verification_choice(state, f'verification_{lot_id}', f"关联验证：{lot['lot_no']} *",
                 [v for v in context['verifications'] if v['qc_lot_id'] == lot_id])
     else:
-        st.caption('填写使用状态的生效时间和原因；停用后仍可查询原检测结果。')
+        st.caption('使用状态决定该批次在指定时间能否录入。请填写生效时间和原因；停止使用后原检测结果仍可查询。')
     return {'state': target, 'verification_ids': selected}
 
 
@@ -343,7 +343,7 @@ def _render_binding_detail(context):
     st.caption('均值和标准差确认状态：' + (f"已生效 V{profile['version_no']}（{profile['effective_at']}）" if profile else '按本批检测结果建立，进度在质控工作台查看'))
     plan = context['state_plan']
     if plan is None:
-        st.caption('尚无使用状态调整记录。换批先“登记批号验证”，再“调整使用状态”。')
+        st.caption('尚无使用状态调整记录。验证结论用于确认批号是否适用，使用状态用于安排开始、同时或停止使用的时间。')
     elif plan['state'] != context['state']:
         st.caption(f"另有待生效安排：{QC_USAGE_LABELS[plan['state']]}，生效时间 {plan['effective_at']}。")
     lot_rows = [{'浓度水平': '、'.join(lot['level_names']), '批号': lot['lot_no'], '效期': lot['expiry_date'],
@@ -374,7 +374,7 @@ def render_qc_lifecycle_workspace():
     notice = st.session_state.pop('qc_lifecycle_notice', None)
     if notice:
         st.success(notice)
-    st.caption('完成新旧批号比对后，登记验证和使用状态；更换质控品产品需新建项目。')
+    st.caption('在这里记录新旧质控品批号的验证结论，并安排使用时间。更换质控品产品需新建项目。')
     rows = list_qc_lifecycle_configs()
     settings = st.session_state.setdefault('qc_lifecycle_filters', {})
     projects = {row['template_id']: row['template_name'] for row in rows}

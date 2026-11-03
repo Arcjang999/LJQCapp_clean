@@ -54,7 +54,7 @@ def _period(report):
 
 def _source_ids(package, method):
     if method not in SOURCE_TYPES:
-        raise ValueError('此质控方法暂不支持完整报告归档。')
+        raise ValueError('完整质控报告支持单水平（L-J）和多水平法。')
     if method == 'lj':
         rows = package.formal_df.to_dict('records')
         identifiers = [row['id'] for row in rows]
@@ -395,5 +395,5 @@ def read_report_archive(export_id):
         raise ValueError('这份报告没有已保存的完整归档，请按原范围另存新报告。')
     data = bytes(row['archive_bytes'])
     if len(data) != row['size_bytes'] or sha256(data).hexdigest() != row['sha256']:
-        raise ValueError('完整归档校验不一致，请从完整备份恢复；未生成替代内容。')
+        raise ValueError('报告和附件内容与保存时不一致，请从完整备份恢复后下载。')
     return data

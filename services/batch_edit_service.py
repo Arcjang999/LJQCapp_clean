@@ -42,7 +42,7 @@ def get_batch_item_context(lot_config_item_id: int) -> dict:
         if config['is_disabled'] or item['is_disabled']:
             reason = '本批次或检验项目已停用，不能修改设置。'
         elif config.get('activated_at') or batch_used:
-            reason = '本批次已确认使用，原设置不能修改。请通过更换批次或均值和标准差管理调整。'
+            reason = '本批次已确认使用，原设置仅供查看。质控品换批请建立新批次，均值和SD调整请使用“均值和标准差管理”。'
         elif config['status'] != 'draft':
             reason = '本批次设置已确认，不能修改。请在新批次中设置。'
         else:

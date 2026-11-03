@@ -1413,7 +1413,7 @@ def render_zscore_batch_header(
                 </div>
             </div>
             <div class="workbench-context-caption">
-                请确认当前批次、输入值类型与阶段后，再录入本次检测结果。
+                本次检测结果将保存到此批次。
             </div>
             <div class="workbench-context-grid">
                 {''.join(cards)}
@@ -1539,7 +1539,7 @@ def format_rule_code(rule_id: str) -> str:
 
 def format_rule_description(rule_id: str) -> str:
     normalized_rule_id = str(rule_id or "").strip()
-    return RULE_DESCRIPTION_MAP.get(normalized_rule_id, "该规则已启用，请结合页面说明判读。")
+    return RULE_DESCRIPTION_MAP.get(normalized_rule_id, "规则说明暂缺，请核对当前批次的规则组合。")
 
 def format_zscore_status_label(status: Any) -> str:
     normalized_status = str(status or "").strip()

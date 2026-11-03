@@ -186,7 +186,7 @@ def render_reagent_history_workspace():
                     open_reagent_history_dialog(selected)
                 except ValueError as error:
                     st.error(str(error))
-    st.caption('更正试剂使用记录不会改写已保存检测的实际批号和判读。')
+    st.caption('用于纠正试剂换批的批号、生效时间和关联验证。更正另存，已保存检测仍显示当时的实际批号和判读。')
     _render_result_history(context)
 
 

@@ -83,10 +83,10 @@ class OperationActionFeedbackTest(unittest.TestCase):
         self.assertFalse(apply().disabled)
         app.text_area(key=key).set_value('\n'.join('102.5' for _ in draft['values'])).run()
         self.assertTrue(apply().disabled)
-        self.assertTrue(self.has_info(app, '请重新点击“预览粘贴内容”'))
+        self.assertTrue(self.has_info(app, '粘贴内容已修改，重新预览'))
         self.click(app, '预览粘贴内容')
         self.assertFalse(apply().disabled)
-        self.assertFalse(self.has_info(app, '请重新点击“预览粘贴内容”'))
+        self.assertFalse(self.has_info(app, '粘贴内容已修改，重新预览'))
         app.multiselect(key='entry_selected_'+draft['draft_id']).set_value([]).run()
         self.healthy(app)
         self.assertTrue(app.button(key='entry_validate').disabled)
@@ -100,9 +100,9 @@ class OperationActionFeedbackTest(unittest.TestCase):
         app.session_state['test_upload_bytes'] = b'new upload not previewed'
         app.run()
         self.healthy(app)
-        self.assertTrue(self.has_info(app, '上传的文件已更换'))
+        self.assertTrue(self.has_info(app, '文件已更换，重新预览'))
         self.assertTrue(any(button.label == '预览结果文件' for button in app.button))
-        self.assertFalse(any(button.label == '带入结果草稿' for button in app.button))
+        self.assertFalse(any(button.label == '填入录入表' for button in app.button))
         self.assertEqual(before, self.snapshot())
 
     def test_instant_transfer_conditions_are_visible_without_opening_an_expander(self):
@@ -179,7 +179,7 @@ with patch('pages.settings_page.st.file_uploader',return_value=file):
         app = AppTest.from_string(script).run()
         self.healthy(app)
         self.assertTrue(app.button(key='cloud_confirm_restore').disabled)
-        self.assertTrue(self.has_info(app, '请先在“选择备份文件”中上传备份'))
+        self.assertTrue(self.has_info(app, '上传之前下载的 .db 或 .zip 备份'))
         app.session_state['test_payload'] = backup
         app.run()
         self.healthy(app)
@@ -224,17 +224,17 @@ with patch('pages.project_management_page.st.file_uploader',return_value=BytesIO
         nonce = state['nonce']
         self.assertTrue(app.button(key='qc_transfer_review_'+nonce).disabled)
         self.assertTrue(app.button(key='qc_transfer_confirm_'+nonce).disabled)
-        self.assertTrue(self.has_info(app, '请先在“上传检测数据”中选择'))
+        self.assertTrue(self.has_info(app, '上传填写好的检测数据文件'))
         state.update(upload=dataframe_to_csv_bytes(file_for('lj', 2)), upload_name='本次检测.csv')
         app.run()
         self.healthy(app)
         self.assertFalse(app.button(key='qc_transfer_review_'+nonce).disabled)
         self.assertTrue(app.button(key='qc_transfer_confirm_'+nonce).disabled)
-        self.assertTrue(self.has_info(app, '请先点击“检查文件并预览”'))
+        self.assertTrue(self.has_info(app, '文件尚未检查。'))
         app.button(key='qc_transfer_review_'+nonce).click().run()
         self.healthy(app)
         self.assertFalse(app.button(key='qc_transfer_confirm_'+nonce).disabled)
-        self.assertFalse(self.has_info(app, '请先点击“检查文件并预览”'))
+        self.assertFalse(self.has_info(app, '文件尚未检查。'))
         self.assertEqual(before, self.snapshot())
 
     def test_invalid_export_dates_point_to_date_inputs_instead_of_missing_records(self):

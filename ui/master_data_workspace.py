@@ -176,7 +176,7 @@ def _render_detail(entity_type, record_id, list_row):
             st.session_state['md_selected_alias'] = None
             st.session_state['md_search_alias'] = ''
         st.markdown('**项目别名**')
-        st.caption('可用简称、英文名称或 LIS 代码搜索此检验项目。')
+        st.caption('登记别名后，可用简称、英文名称或 LIS 代码找到此检验项目。')
         render_master_data_workspace('alias', parent_id=record_id, allow_create=not record['is_disabled'])
 
 

@@ -133,7 +133,7 @@ def render_lj_building_outlier_panel(
             f"alpha={float(suspect_details['alpha']):.2f} | "
             f"状态={suspect_details['status_label']}"
         )
-    st.caption("在“检测记录”中选中一条，再点“保留”“禁用”或“恢复”。")
+    st.caption("在检测记录中保留可疑点可继续用于建靶；禁用后暂停计入，恢复后重新计入。")
 
 
 def render_lj_formal_westgard_panel(
@@ -399,7 +399,8 @@ def render_lj_entry_and_stats_section(
         lot_selection = render_result_lot_choice("lj",selected_batch_id,test_time,"lj_entry")
         render_result_lot_preparation('lj', selected_batch_id, 'lj_entry')
 
-        if st.button("保存检测结果", type="primary", width="stretch"):
+        if st.button("保存检测结果", type="primary", width="stretch",
+                help="保存本次检测，更新当前批次的质控图和判读。"):
             validation_errors: list[str] = []
             cleaned_operator = (operator or "").strip()
 
@@ -500,9 +501,7 @@ def render_lj_entry_and_stats_section(
         )
         if realtime_message:
             st.info(realtime_message)
-        st.caption(
-            "仅统计所选日期内的正式期在控结果；建靶、警告和失控结果不计入。"
-        )
+        st.caption("统计所选日期内的正式期在控结果。")
 
 
 def render_lj_chart_and_analysis_section(

@@ -63,7 +63,7 @@ def render_master_data_page():
     from ui.common import render_module_header
     render_module_header(
         title='基础资料', eyebrow='资料管理',
-        caption='先搜索并选择已有资料；缺少时点击“新增”，填写后保存。',
+        caption='新增资料保存后，可在项目和批次设置中选用。',
         tone='materials',
     )
     tabs = _tabs(['厂家', '检验项目', '仪器', '试剂', '质控品与批号', '方法学与单位'], 'md_category_tabs')

@@ -66,7 +66,7 @@ def get_record_context(method, record_id, batch_id=None):
             run = next((item for item in get_zscore_runs(actual_batch_id)
                         if int(item.get('run_id', item['id'])) == int(record_id)), None)
             if run and run.get('is_locked_for_maintenance'):
-                availability = {'allowed': False, 'reason': '该批次已完成建靶，原始检测值仅供查询，不能再编辑。'}
+                availability = {'allowed': False, 'reason': '该批次已完成建靶，原始检测值已锁定，可查看判读和维护记录。'}
         return {'method': method, 'record': record, 'batch': batch, 'source': snapshot,
             'input_value_type': snapshot.get('input_value_type') or batch.get('input_value_type') or 'raw',
             'fingerprint': _fingerprint(record), 'history': history,
@@ -119,7 +119,7 @@ def save_record_action(method, batch_id, record_id, action, *, reason, expected_
 
 def _edit_record(method, record_id, changes):
     if method not in ('lj', 'zscore'):
-        raise ValueError('该方法仅支持记录状态维护。')
+        raise ValueError('即时法记录可保留、禁用或恢复。')
     context = get_record_context(method, record_id)
     if not context['edit_allowed']:
         raise ValueError(context['edit_reason'])

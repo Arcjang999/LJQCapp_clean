@@ -46,7 +46,7 @@ def render_draft_standard_preview(draft):
     candidates = assess(item, context)
     with st.expander('查看质量标准，补充检测条件', expanded=True):
         if not item.get('method_name'):
-            st.info('请先选择方法学。保存后，在质量目标中填写检测技术、结果性质和用途。')
+            st.info('方法学用于核对质量标准的适用范围。请先选择并保存，再在质量目标中填写检测技术、结果性质和用途。')
         for row in candidates:
             if source_status(row['source']) != 'current':
                 continue
@@ -57,7 +57,7 @@ def render_draft_standard_preview(draft):
         missing = context_errors(item, context)
         if missing:
             st.caption('保存后还需填写：'+' '.join(missing))
-        st.caption('点击“保存”后进入质量目标设置。设置完成后，再确认项目设置。')
+        st.caption('质量要求用于后续批次的适用性核对，请在保存检验项目后完成质量目标设置。')
 
 
 def render_conditions(item, review, prefix, *, quick=False, settings_location=None):
@@ -177,7 +177,7 @@ def render_process_requirements(rows, review, prefix):
         st.session_state[source_key] = [identifier for identifier in st.session_state[source_key] if identifier in names]
     st.session_state[source_key] = list(dict.fromkeys(st.session_state[source_key] + newly_available))
     st.session_state[seen_key] = list(dict.fromkeys(st.session_state[seen_key] + list(names)))
-    st.caption('请将参考文字改为本实验室实际要求；可删减或留空。')
+    st.caption('下方保存本实验室实际执行的对照要求，可在参考条款基础上修改、删减或留空。')
     selected = st.multiselect('参考标准（可调整）', list(names), key=source_key, format_func=names.get)
     seed = default_process_requirements(rows, selected)['requirement_text']
     if text_key not in st.session_state:

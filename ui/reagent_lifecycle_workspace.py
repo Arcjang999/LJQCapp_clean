@@ -104,7 +104,7 @@ def _register_fields(state):
     lot_no = _field(state, 'lot_no', '试剂批号 *')
     expiry = _field(state, 'expiry', '效期 *', 'date_input')
     source = _field(state, 'source', '资料来源／厂家说明', 'text_area')
-    st.caption('已有批号请直接选用；新批号保存后需登记验证，再切换使用。')
+    st.caption('登记实际试剂批号及效期，供验证和日常检测选择。已有同批号时请直接选用。')
     return dict(reagent_id=product, lot_no=lot_no, expiry_date=expiry, source_text=source)
 
 
@@ -272,7 +272,7 @@ def render_reagent_lifecycle_workspace(*, product_id=None):
     notice = st.session_state.pop('reagent_notice', '')
     if notice and receipt_matches:
         st.success(notice)
-    st.caption('新批号使用前，先“登记批号验证”，再“切换到此试剂批号”；换批需说明原均值和SD仍适用的依据。')
+    st.caption('验证记录用于确认新试剂批号是否适用；通过后可指定检验项目和启用时间安排换批，并说明原均值和SD仍适用的依据。')
     products = {row['id']:row for row in context['all_products']}
     for key, value in [('reagent_search',''), ('reagent_product_filter',None), ('reagent_show_disabled',False)]:
         if key not in st.session_state:

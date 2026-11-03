@@ -92,7 +92,7 @@ def render_reagent_management():
         if st.button('维护试剂厂家', key='reagent_manufacturers'):
             open_reference_management('manufacturer', category='reagent')
         st.subheader('试剂产品')
-        st.caption('选中试剂后点击“管理批号”，登记实际批号、验证记录或换批安排。')
+        st.caption('“管理批号”可登记所选试剂的实际批号、验证结果和换批安排。')
         render_master_data_workspace('reagent', show_detail=False)
         selected = st.session_state.get('md_selected_reagent')
         if st.button('管理批号', key='reagent_manage_selected_lots', disabled=selected is None, width='stretch'):

@@ -194,7 +194,7 @@ def update_material_product(product_id: int, *, expected_version: str, **fields)
         changed = any(('' if fields.get(k, row[k]) is None else str(fields.get(k, row[k])).strip())
                       != str(row[k] or '') for k in keys)
         if row['identity_locked'] and changed:
-            raise ValueError('此质控品已登记批号或用于项目，不能直接修改名称、货号等资料；更换时请新增质控品。')
+            raise ValueError('此质控品的名称、货号等资料已锁定，可修改备注；更换产品资料请新增质控品。')
         if row['identity_locked']:
             # Imported source values are read for display; saving notes cannot
             # copy them into local identity fields or rewrite frozen products.

@@ -284,7 +284,7 @@ def test_configuration_copy_and_restore_switch_rollback():
         copy_target.mkdir()
         real_copyfile = shutil.copyfile
         def fail_copy(source, destination, *args, **kwargs):
-            if ".qc-migration-" in str(destination) and "/files/" in str(destination):
+            if ".qc-migration-" in str(destination) and "files" in Path(destination).parts:
                 raise OSError("injected file copy failure")
             return real_copyfile(source, destination, *args, **kwargs)
         with patch.object(shutil, "copyfile", side_effect=fail_copy):

@@ -98,7 +98,7 @@ def test_referenced_material_keeps_identity():
         material_edit(lid, concentration_note='补充厂家资料说明')
         assert get_control_material(lid)['concentration_label'] == '补充厂家资料说明'
         product = get_material_product(data['qc_material_id'])
-        rejected(lambda: update_material_product(product['id'], generic_name='错误覆盖', expected_version=product['edit_version']), '不能直接修改')
+        rejected(lambda: update_material_product(product['id'], generic_name='错误覆盖', expected_version=product['edit_version']), '资料已锁定')
         with get_connection() as c:
             assert c.execute('SELECT COUNT(*) FROM qc_lot_configs').fetchone()[0] == 1
 

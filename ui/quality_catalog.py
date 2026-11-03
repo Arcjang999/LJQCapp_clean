@@ -8,7 +8,7 @@ from ui.quality_targets import render_spec
 
 
 def render_quality_catalog():
-    st.caption('在“质量目标设置”中核对检测条件并选用要求。')
+    st.caption('查询已收录的现行标准、限值及适用条件；在“质量目标设置”中确认本次检测采用的要求。')
     section = st.radio('查看内容', ['projects', 'general'],
         format_func=lambda v: {'projects':'检验项目要求', 'general':'通用质控要求'}[v],
         horizontal=True, key='quality_catalog_section')

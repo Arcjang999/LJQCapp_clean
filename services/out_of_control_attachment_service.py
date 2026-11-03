@@ -27,7 +27,7 @@ MAX_FILE_BYTES = 20 * 1024 * 1024
 MAX_REVISION_BYTES = 100 * 1024 * 1024
 MAX_REVISION_FILES = 20
 ALLOWED_EXTENSIONS = ("pdf", "png", "jpg", "jpeg", "gif", "bmp", "tif", "tiff", "csv", "xlsx")
-UPLOAD_POLICY_TEXT = "支持PDF、PNG、JPG、GIF、BMP、TIFF、CSV和XLSX；每份不超过20MB，每次最多20份、合计不超过100MB。相同内容保留原文件，不覆盖同名资料。"
+UPLOAD_POLICY_TEXT = "保存验证表、原始记录或报告扫描件。支持PDF、PNG、JPG、GIF、BMP、TIFF、CSV和XLSX；每份不超过20MB，每次最多20份、合计不超过100MB。同名但内容不同的文件分别保留。"
 
 
 class AttachmentError(ValueError):

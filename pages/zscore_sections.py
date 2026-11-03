@@ -1208,7 +1208,7 @@ def render_zscore_entry_section(
     if notice_message:
         st.success(notice_message)
     st.caption(
-        f"一次填齐 {level_count} 个水平的{input_value_type_label}，再保存。"
+        f"一次保存全部 {level_count} 个水平的{input_value_type_label}，按整次检测给出质控结论。"
     )
     if cv_limit is not None:
         st.caption(f"本批次CV上限：{cv_limit:.2f}%")

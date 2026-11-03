@@ -416,7 +416,7 @@ def render_quality_setup(item, prior, prefix, *, levels=None, goal=None, quick=F
                 result['requirement_text'] = st.text_area('实验室实际要求',
                     key=requirement_key, max_chars=2000)
             if not simple:
-                st.caption('文字要求由实验室核查，软件不自动判读。')
+                st.caption('请按所填文字要求人工核对检测结果。')
         with required_field(prefix+'_evidence',
                 missing=mode != 'sd_cv' and not str(st.session_state.get(prefix+'_evidence', evidence)).strip(),
                 message='请说明此要求如何用于本次检测。'):
@@ -467,7 +467,7 @@ def render_adoption(scope,item_id,*,embedded=False,expected_revision=None,on_sav
         if goal and (frozen or goal['spec']['id'] in current_ids):
             render_spec(goal['spec'])
             if scope=='lot' and goal.get('pending'):
-                st.info('请检查各水平使用的质量要求，然后点击“确认本批次质量目标”。')
+                st.info('各水平的浓度和类别决定适用限值，请核对后确认本批次质量目标。')
             else:
                 st.caption(f"确认人：{goal['confirmed_by']}｜设置时间：{goal['adopted_at']}")
             if goal.get('evidence'):st.caption('设置说明：'+goal['evidence'])

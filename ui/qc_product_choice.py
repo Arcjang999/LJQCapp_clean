@@ -140,7 +140,7 @@ def render_product_choice(ctx, *, reagent_id, lab_instrument_id, test_item_id=No
             st.warning(str(error))
         else:
             valid = True
-            st.caption('本次质控品已确认。')
+            st.caption('本次选品依据已核对，随项目或批次设置一起保存。')
     if not valid:
         if current is None:
             st.info('请选择“质控品”，再点击“确认所选质控品”。')
@@ -149,7 +149,7 @@ def render_product_choice(ctx, *, reagent_id, lab_instrument_id, test_item_id=No
                        if not str(manual_review.get(name) or '').strip()]
             st.info('请填写上方的“' + '”、“'.join(missing) + '”，再点击“确认所选质控品”。')
         else:
-            st.info('请点击“确认所选质控品”。')
+            st.info('所选质控品尚待确认，确认后用于当前仪器、试剂和检测方法。')
     if allow_relation_edit:
         with st.expander('登记试剂配套的质控品'):
             st.caption('保存产品的适用范围和依据；实际批号另行登记。')
@@ -313,7 +313,7 @@ def render_panel_product_review(ctx, template):
         if missing_reagents:
             st.info('请在上方表格的“试剂”列为以下项目选择试剂：' + '、'.join(missing_reagents) + '。')
         if not checked:
-            st.info('请勾选“已确认此质控品可用于以上各项的试剂和检测方法”，再点击“确认以上项目的质控品”。')
+            st.info('勾选上方确认项后，即可确认各项目的质控品适用依据。')
         if st.button('确认以上项目的质控品', key=prefix + '_confirm', disabled=not checked):
             try:
                 proposed = []
@@ -389,7 +389,7 @@ def _render_relation_editor(ctx, scope, current_product, prefix):
         text = product_choice_label(row) if row and field == 'qc_material_id' else str(row[name]) if row else '全部'
         summaries.append(label + '：' + text)
     st.caption('｜'.join(summaries))
-    st.caption('“全部”表示不限该条件，请在下方填写适用范围和依据。')
+    st.caption('适用范围按上方条件登记；“全部”涵盖该类别的所有选项。请填写说明书或使用记录作为依据。')
     # Identity is frozen for this form, so changing the surrounding project cannot rebind it.
     if editor['action'] != 'status':
         for field, label in [('scope_note', '可使用的仪器、项目和方法'), ('evidence', '说明书或使用记录'), ('confirmed_by', '确认人')]:

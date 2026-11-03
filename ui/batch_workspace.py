@@ -72,7 +72,7 @@ def render_batch_item_detail(item_id):
         if ctx['editable']:
             st.info('尚未选择质控品水平，请点击“编辑水平设置”。')
         else:
-            st.info('尚未选择质控品水平。当前批次仅供查看，不能在这里补填；请核对批次状态后再设置可编辑的批次。')
+            st.info('该批次尚未设置质控品水平，当前仅供查看。请在批次管理中核对状态，并为可编辑批次补齐各水平。')
     profile = None
     if binding and binding['qc_method'] != 'instant':
         from services.lot_lifecycle_service import target_profile
@@ -213,7 +213,7 @@ def _render_creation_dialog():
         st.session_state.pop(_CREATE_KEY, None)
         st.session_state['v11_selected_lot_config_id'] = config_id
         st.session_state['batch_clear_search_pending'] = True
-        st.session_state['v11_copy_notice'] = '批次已建立。请选择检验项目，分别完成“编辑水平设置”和“质量目标”，再点击“确认批次设置”。'
+        st.session_state['v11_copy_notice'] = '批次已建立。请逐项核对水平设置、质控品适用性和质量目标，确认批次设置后即可录入。'
         st.session_state['batch_table_version'] = st.session_state.get('batch_table_version', 0) + 1
         st.rerun(scope='app')
     registering = render_material_config_creation(ctx['template_id'], on_created=created)
@@ -289,7 +289,7 @@ def render_batch_workspace(*, render_target_dialogs=True):
     if configs.empty:
         st.info('没有符合条件的批次。可以调整筛选条件，或选择项目后新增批次。')
     else:
-        st.caption('勾选批次行首的选择框查看详情。')
+        st.caption('批次详情集中显示各检验项目的质控品、参数和质量目标。')
         selected = _table(configs, display, state_key, 'batch_configs')
         if selected is not None:
             render_batch_detail(selected)

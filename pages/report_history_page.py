@@ -71,7 +71,7 @@ def render_report_history_page() -> None:
     from ui.common import render_module_header
     render_module_header(
         title="报告历史",
-        caption="按报告期间查看质控报告和失控处理报告。可下载当时保存的原报告，也可按当前资料生成新报告。",
+        caption="下载生成时保存的质控报告和处理报告，或按当前资料另存新报告。",
         eyebrow="报告管理",
         tone="reports",
     )
@@ -348,7 +348,7 @@ def _render_event_report_card(record: ReportHistoryRecord) -> None:
         st.caption(f"仪器：{package['instrument_name']}｜原检测：{record.report_period_label}｜实际质控批号：{record.batch_label}")
         with st.expander("查看生成报告时的处理记录"):
             content = event.get("content") or {}
-            st.caption(f"采用第 {package['revision_no']} 版处理记录，之后的修改不影响此报告。")
+            st.caption(f"本报告保存的是第 {package['revision_no']} 版处理记录。")
             for key, label in (("cause_analysis", "原因分析"), ("corrective_action", "纠正措施"),
                                ("effect_description", "处理效果"), ("handler_text", "处理人"),
                                ("confirmer_text", "确认人"), ("confirmed_at", "确认时间")):
@@ -366,4 +366,4 @@ def _render_event_report_card(record: ReportHistoryRecord) -> None:
             else:
                 st.download_button("下载当前处理记录的报告", result.pdf_bytes, file_name=result.file_name,
                                    mime="application/pdf", key=f"report_history_event_new_{record.export_id}")
-                st.caption("处理记录未修改，继续使用已保存报告；修改后可生成新报告。")
+                st.caption("本版处理报告已保存，可从“报告历史”下载。")

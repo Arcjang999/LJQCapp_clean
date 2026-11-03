@@ -224,7 +224,7 @@ def _render_dialog():
         from ui.material_registration import open_material_registration
         open_material_registration(context['config']['qc_material_id'], key=registration_key,
                                    preserve_prefixes=('qcr_' + state['token'] + '_',))
-    st.caption('保存后需确认新批次的均值、SD和质量目标。旧检测数据不带入。')
+    st.caption('新批次重新收集检测结果。确认各水平的均值、SD和质量目标后，方可录入。')
     registering = bool(st.session_state.get(registration_key + '_registration'))
     left, right = st.columns(2)
     if left.button('取消', key='qc_replace_cancel', width='stretch', disabled=registering):
@@ -252,7 +252,7 @@ def render_pending_qc_replacement_dialog():
 
 
 def render_qc_replacement_workspace():
-    st.caption('选择原批次后点击“更换质控品批次”。旧批次及检测记录保留。')
+    st.caption('沿用原批次的检测设置，为新质控品批号建立待核对批次；旧批次及检测记录保留。')
     settings = st.session_state.setdefault('qc_replace_filters', {})
     projects = {int(row['id']): row['template_name'] for row in list_project_templates(include_disabled=True).to_dict('records')}
     for key, default in (('qc_replace_search', ''), ('qc_replace_project', None)):

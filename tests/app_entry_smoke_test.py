@@ -1,4 +1,5 @@
 """One regular application entry and plain operational help."""
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 from tempfile import TemporaryDirectory
@@ -14,7 +15,7 @@ from ui.user_guide import load_operation_guide
 
 def stored_business_state():
     """Compare every schema and row, except the known bootstrap touch metadata."""
-    with sqlite3.connect(db.get_db_path()) as connection:
+    with closing(sqlite3.connect(db.get_db_path())) as connection:
         connection.row_factory = sqlite3.Row
         builtin_sources = {row['source_code']: row['id'] for row in connection.execute(
             "SELECT id,source_code FROM md_sources WHERE source_code IN "

@@ -237,7 +237,8 @@ def _render_attachments(event, ctx, *, disabled):
         upload = st.file_uploader('选择附件', type=list(ALLOWED_EXTENSIONS), max_upload_size=20,
             key=f"ooc_upload_{ctx['token']}")
         description = st.text_input('附件说明', key=f"ooc_upload_description_{ctx['token']}")
-        if st.button('加入附件草稿', key=f"ooc_stage_{ctx['token']}", disabled=upload is None):
+        if st.button('加入本次处理', key=f"ooc_stage_{ctx['token']}", disabled=upload is None,
+                help='将文件加入本次处理的附件清单，随处理记录一并保存。'):
             try:
                 result = stage_attachment(event['event_id'], upload.name, upload.getvalue(),
                     uploaded_by=ctx['content'].get('handler_text', ''), description=description)
@@ -246,7 +247,7 @@ def _render_attachments(event, ctx, *, disabled):
                 ctx['content']['attachment_ids'] = ids
                 st.rerun()
             except Exception as exc: show_error(exc)
-        st.caption('加入附件后，请保存处理记录。此前已保存的处理记录中使用过的附件仍可查阅。')
+        st.caption('附件随本次处理记录保存，历史处理记录中的附件继续保留。')
     if disabled: ids = list(event.get('attachment_ids') or [])
     for attachment in attachments:
         identifier = attachment.get('attachment_id', attachment.get('file_id', attachment.get('id')))
@@ -382,11 +383,13 @@ def render_event_detail(selection):
         _text(ctx, field, multiline=True, disabled=disabled)
     if event['status'] in ('pending', 'in_progress'):
         if event['status'] == 'pending' and not stale:
-            st.info('请先点击“保存处理草稿”，再点击“提交效果确认”。')
+            st.info('保存原因、纠正措施和相关资料后，处理状态更新为“处理中”，可继续补充或提交效果确认。')
         a, b = st.columns(2)
-        if a.button('保存处理草稿', type='primary', disabled=stale): _save(event, ctx, 'save_draft')
+        if a.button('保存处理草稿', type='primary', disabled=stale,
+                help='保存当前处理内容，稍后可继续补充原因、措施和复测依据。'): _save(event, ctx, 'save_draft')
         if b.button('提交效果确认', disabled=stale or event['status'] == 'pending',
-            help='请先保存处理草稿，再提交效果确认。' if event['status'] == 'pending' else None):
+            help='将本次处理内容交给确认人核对处理效果；请先保存处理草稿。' if event['status'] == 'pending'
+                else '将本次处理内容交给确认人核对处理效果。'):
             _save(event, ctx, 'submit')
     elif event['status'] == 'pending_confirmation':
         st.markdown('**人工确认**')

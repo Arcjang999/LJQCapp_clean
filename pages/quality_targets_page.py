@@ -23,13 +23,13 @@ def render_quality_targets_page():
                 JOIN qc_project_templates t ON t.id=i.template_id JOIN md_test_items m ON m.id=i.test_item_id
                 WHERE i.is_disabled=0 AND t.is_disabled=0 ORDER BY t.id,i.id''').fetchall()
         selected_item=_selector(rows,'project')
-        st.caption('设置或查看某个批次的质量要求，请进入“批次管理”，选择批次和检验项目后点击“质量目标”。')
+        st.caption('这里设置检验项目的默认质量要求，供新批次带入核对；具体批次的要求在“批次管理 → 质量目标”中查看或确认。')
         if st.button('前往批次管理',key='quality_open_lot_management'):
             from ui.project_navigation import open_project_setup
             selected=next((row for row in rows if row['id']==selected_item),None)
             open_project_setup(selected['template_id'] if selected is not None else None)
     with custom:
-        st.caption('多套限值在此登记；单项CV在“质量目标设置”中填写。已确认批次的要求不变。')
+        st.caption('在此登记可反复选用的实验室限值，或用CSV批量导入；单项CV在“质量目标设置”中填写。')
         if st.button('新增实验室自定要求',key='quality_custom_open'):
             _custom_requirement_dialog()
         st.download_button('下载质量要求导入模板',custom_template_csv(),'质量要求导入模板.csv','text/csv')
@@ -49,7 +49,7 @@ def render_quality_targets_page():
                 st.dataframe(catalog_table(preview),hide_index=True,width='stretch')
                 checked=st.checkbox('已检查预览中的要求、文件名称和确认人',key='quality_import_confirm')
                 if not checked:
-                    st.info('请核对上方预览，并勾选“已检查预览中的要求、文件名称和确认人”，再点击“确认导入质量要求”。')
+                    st.info('请核对预览中的限值、依据文件和确认人，再勾选确认。')
                 if st.button('确认导入质量要求',disabled=not checked):
                     try:n=import_custom_csv(uploaded.getvalue())
                     except ValueError as e:st.error(str(e))
@@ -94,7 +94,7 @@ def _custom_requirement_dialog():
             stream=io.StringIO();writer=csv.DictWriter(stream,fieldnames=IMPORT_COLUMNS);writer.writeheader();writer.writerow(values)
             try:import_custom_csv(stream.getvalue().encode('utf-8'))
             except ValueError as e:st.error(str(e))
-            else:st.success('已保存实验室自定要求。');st.rerun()
+            else:st.success('已保存，可在“质量目标设置”的“选用已登记限值”中选用。');st.rerun()
     if st.button('取消',key='quality_custom_cancel'):
         st.rerun()
 

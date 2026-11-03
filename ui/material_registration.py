@@ -80,7 +80,7 @@ def render_material_registration_shortcut(product_id, *, key: str) -> bool:
 
     with st.container(border=True):
         st.markdown('**登记质控品批号**')
-        st.info('请先保存或取消本次登记。')
-        st.caption('每个浓度水平分别按包装登记。项目和批次已填内容会保留。')
+        st.info('每个浓度水平分别按包装登记。保存后，回到项目或批次设置中选择。')
+        st.caption('项目和批次已填内容会保留。')
         _material_editor(state, on_saved=saved, on_cancel=close)
     return True

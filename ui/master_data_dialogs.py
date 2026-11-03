@@ -172,7 +172,7 @@ def _render_field(state, field, locked):
     elif field == 'categories':
         draft[field] = st.multiselect(label, list(MANUFACTURER_CATEGORIES), key=key, disabled=locked,
             format_func=MANUFACTURER_CATEGORIES.get, placeholder='请选择厂家业务类别，可多选')
-        st.caption('厂家业务类别至少选择一类，可多选。')
+        st.caption('至少选择一类。厂家将出现在对应的仪器、试剂或质控品选择列表中。')
     elif field == 'alias_type':
         draft[field] = st.selectbox(label, list(ALIAS_TYPE_LABELS), key=key, disabled=locked,
                                     format_func=ALIAS_TYPE_LABELS.get, placeholder='请选择别名类型')
@@ -217,7 +217,7 @@ def _render_edit(state, current, *, on_saved=None, on_cancel=None):
     elif current and current['lock_reason']:
         st.info(current['lock_reason'])
     if current and current['fingerprint'] != state['fingerprint']:
-        st.warning('此记录已被修改，请关闭后重新打开。当前填写内容保留。')
+        st.warning('此记录已被修改。请先记下当前填写内容，再关闭并重新打开，核对最新资料。')
     if entity == 'alias':
         st.caption('检验项目：' + state['parent']['chinese_name'])
     if entity == 'lab_instrument':

@@ -205,14 +205,14 @@ def _render_levels(state, current):
             key=_key(state, f'{level_id}_confirmed', row['target_confirmed']))
         row['notes'] = st.text_area('备注', key=_key(state, f'{level_id}_notes', row['notes']))
         if row['target_source'] == 'building':
-            st.caption('按本批质控结果建立均值和标准差。')
+            st.caption('录入达到本批次要求的有效建靶点数后，按有效结果建立均值和标准差。')
     if update_cv:
         from ui.cv import CV_REQUIREMENT_HELP
         draft['cv_limit'] = st.number_input('允许不精密度（CV%，选填）', min_value=0.0, format='%.4f',
             help=CV_REQUIREMENT_HELP, key=_key(state, 'cv', draft['cv_limit']))
         draft['cv_source'] = st.text_input('允许不精密度依据（选填）', key=_key(state, 'cv_source', draft['cv_source']))
     else:
-        st.caption('本检验项目已设置质量目标，请通过“质量目标”查看或调整。')
+        st.caption('本检验项目的CV要求随质量目标保存，请通过“质量目标”核对。')
     cancel, save = st.columns(2)
     if cancel.button('取消', key='batch_levels_cancel', width='stretch'):
         if _dirty(state):

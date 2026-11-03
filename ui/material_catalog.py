@@ -83,7 +83,7 @@ def _material_editor(state: dict, *, on_saved=None, on_cancel=None) -> None:
     product = get_material_product(product_id)
     st.caption('质控品：' + product_choice_label(product))
     if locked:
-        st.info('此批号已使用，只能修改备注。更换批号、效期或浓度水平，请返回列表点击“新增质控品批号”。')
+        st.info('此批号的包装资料已锁定，可修改备注。新批号、效期或浓度水平请通过“新增质控品批号”登记。')
     spec_id = None
     defaults = dict(level_name=record.get('level_name', ''), level_code=record.get('level_code', ''),
         catalog_no=record.get('specification_catalog_no', '') if edit else product.get('catalog_no', ''),
@@ -195,7 +195,7 @@ def _product_editor(state: dict, *, on_saved=None, on_cancel=None) -> None:
             format_func=lambda value: '请选择厂家' if value is None else manufacturers[value],
             disabled=edit, key=f'{prefix}_manufacturer')
     if locked:
-        st.info('此质控品已登记批号或用于项目，只能修改备注。需要更换产品资料，请返回列表点击“新增质控品”。')
+        st.info('产品名称、货号等资料已锁定，可修改备注；更换产品资料请通过“新增质控品”登记。')
     elif edit:
         st.caption('更换厂家需返回列表点击“新增质控品”。')
     labels = {'generic_name': '质控品名称 *', 'catalog_no': '产品货号',
@@ -325,7 +325,7 @@ def _render_usage_navigation(product_id: int, *, include_batches: bool = True) -
         return
     configs = {int(row['id']): row for row in list_lot_configs(template_id, include_disabled=True).to_dict('records')}
     if not configs:
-        st.caption('点击“打开关联项目”，在“批次管理”中新增批次。')
+        st.caption('此项目尚无批次。打开关联项目后，可在“批次管理”中新增。')
         return
     config_key = f'material_usage_config_{product_id}_{template_id}'
     if st.session_state.get(config_key) not in configs:

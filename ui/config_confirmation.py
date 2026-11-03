@@ -25,7 +25,7 @@ def _render_batch_status(config_id: int, *, disabled: bool, expected_revision: i
     config = get_lot_config(config_id)
     action = '停用' if disabled else '恢复'
     st.write(f"{action}批次：{config['config_name']}")
-    st.caption('检测记录、历次设定的均值和标准差及报告保留。' + ('恢复后请重新确认批次设置。' if not disabled else '停用后不再用于新增检测。'))
+    st.caption('检测记录、历次设定的均值和标准差及报告保留。' + ('恢复后请重新确认批次设置。' if not disabled else '停用后该批次退出日常录入，可保留查阅历史资料。'))
     reason = st.text_input('停用原因 *', key=f'batch_status_reason_{config_id}_{disabled}') if disabled else ''
     left, right = st.columns(2)
     if left.button('取消', type='primary', key='batch_status_cancel'):

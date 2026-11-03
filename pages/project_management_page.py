@@ -532,7 +532,7 @@ def _render_template_default_reagent(template) -> None:
     )
     current = by_id.get(template["default_reagent_id"])
     with st.expander("项目默认试剂", expanded=current is None):
-        st.caption("仅用于新增检验项目，不改变已有项目的试剂。")
+        st.caption("此试剂会预填到以后新增的检验项目中，已有项目沿用各自的设置。")
         if current is None:
             st.warning("请选择默认试剂。")
         selected = st.selectbox(
@@ -738,7 +738,7 @@ def _render_copy_tab() -> None:
 def _render_import_export_tab() -> None:
     st.markdown("**批量导入项目配置**")
     st.caption(
-        "填写模板，选择目标项目并上传。核对预览后确认导入，再设置各检验项目的质量要求。"
+        "用同一份表批量新增或调整检验项目的检测设置。核对导入预览后保存，再逐项确认质量要求。"
     )
     st.download_button(
         "下载项目配置导入模板",
@@ -849,7 +849,7 @@ def _render_import_export_tab() -> None:
 
     st.divider()
     st.markdown("**导出批次**")
-    st.caption("此文件包含批号、检验项目、各水平的均值和SD及修改记录。检测结果和质控图请在工作台或“报告历史”中查看。")
+    st.caption("用于核对和归档本批次的批号、检验项目、各水平均值和SD及修改记录。检测结果和质控图可从工作台导出，已存报告在“报告历史”中下载。")
     configs = list_lot_configs()
     config_labels, config_map, _ = _option_map(
         configs,
@@ -890,8 +890,8 @@ def render_project_management_page() -> None:
         title="项目 / 批次管理",
         eyebrow="资料管理",
         caption=(
-            "先选择已登记的仪器、试剂和质控品建立项目；"
-            "再为具体质控品批号建立批次，设置水平、均值和标准差。各检验项目可分别调整试剂。"
+            "项目保存仪器、试剂及检验项目的常用设置；"
+            "批次记录本次各水平使用的质控品、原厂批号和均值、标准差。各检验项目可分别设置试剂。"
         ),
         tone="projects",
     )

@@ -357,4 +357,4 @@ def monthly_job_summary(job_id):
                 requirement='未采用可自动评价的 CV 要求', decision=quality.get('evaluation_reason') or '仅登记依据，暂不自动评价 CV'))
         events.extend(dict(base, **row) for row in handling)
     return dict(reports=reports, cv_rows=cv_rows, events=events,
-        scope_note='仅所选常规正式期；多水平法以完整检测计数，处理完成不改变原判读。临时质控不合并。')
+        scope_note='取数范围为所选期间的常规正式期记录（临时质控除外），多水平按完整检测计数。失控统计采用原检测判读，处理进度另列。')

@@ -1169,7 +1169,7 @@ def read_report_history_pdf(record_or_export_id: ReportHistoryRecord | int) -> b
     with get_connection() as connection:
         row = connection.execute("SELECT pdf_bytes,sha256 FROM report_export_files WHERE export_id=?", (record.export_id,)).fetchone()
     if row is None or not row["pdf_bytes"]:
-        raise ValueError("这份历史报告没有可读取的原PDF文件；重新生成会另存新报告，不会替代原文件。")
+        raise ValueError("这份历史报告未保存原PDF文件。可按当前数据和设置另存新报告。")
     data = bytes(row["pdf_bytes"])
     if sha256(data).hexdigest() != row["sha256"]:
         raise ValueError("归档报告校验不一致，请从完整备份恢复。")

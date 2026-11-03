@@ -250,7 +250,7 @@ class RecordMaintenanceTransactionTests(unittest.TestCase):
             selected = context("instant", batch_id, ids[1])
             self.assertFalse(selected["edit_allowed"])
             before = dump_database()
-            with self.assertRaisesRegex(ValueError, "仅支持记录状态维护"):
+            with self.assertRaisesRegex(ValueError, "即时法记录可保留、禁用或恢复"):
                 save_record_action("instant", batch_id, ids[1], "edit", reason="不应支持原值覆盖",
                     expected_fingerprint=selected["fingerprint"], request_key="instant-edit", changes={})
             self.assertEqual(before, dump_database())

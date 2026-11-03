@@ -15,7 +15,7 @@ from services.quality_target_service import finite_number
 
 SD_REQUIREMENT = ('按本批次确认的均值和标准差，使用所选质控方法的现有规则判断结果；'
                   'L-J及多水平按SD位置和连续规则判读，即时法使用格拉布斯检验。'
-                  'SD控制不代表长期精密度达标。')
+                  '长期精密度需按适用标准或实验室要求另行评价。')
 
 
 def catalog_fingerprint():
@@ -40,7 +40,7 @@ def quality_setup_plan(item, context):
     elif len(numeric) > 1:
         state, reason = 'blocked', '匹配到多个数值标准，请先核对单位和适用条件。'
     elif numeric:
-        state, spec, reason = 'standard', numeric[0]['spec'], '直接引用已匹配的现行数值标准。'
+        state, spec, reason = 'standard', numeric[0]['spec'], '已匹配适用的现行数值标准，可核对各水平限值和标准原文。'
     return dict(state=state, numeric_spec=spec, reason=reason, cv_supported=cv_supported, assessments=rows)
 
 

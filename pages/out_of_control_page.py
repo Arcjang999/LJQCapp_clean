@@ -32,7 +32,7 @@ def render_out_of_control_page():
         st.rerun()
     from ui.common import render_module_header
     render_module_header('异常处理',
-        '单击记录行首的选择框，再点“处理”查看原结果、填写措施和关联复测。',
+        '查看异常原结果，登记原因和纠正措施，关联复测并确认处理效果。',
         tone='handling',eyebrow='异常跟进')
     a, b = st.columns(2)
     search = a.text_input('查找项目或仪器', key='ooc_search', help=SEARCH_HELP)
@@ -99,7 +99,7 @@ def _rows(items, prefix):
         return
     fingerprint = hashlib.sha256(repr(identities).encode()).hexdigest()[:12]
     table_key = f'ooc_list_table_{prefix}_{fingerprint}'
-    st.caption(f'共 {len(items)} 项。勾选记录后点“处理”；多水平按整次检测列出。')
+    st.caption(f'共 {len(items)} 项。“处理”可登记原因、措施和复测；多水平按整次检测列出。')
     st.dataframe(pd.DataFrame([{'检测时间': r.get('test_time'), '项目': r.get('project_name'),
         '仪器': r.get('instrument_name'), '质控方法': _method_label(r), '原检测结论': display(r.get('original_classification', r.get('classification'))),
         '处理状态': STATUS_LABELS.get(r.get('status'), '待处理'), '最近处理时间': r.get('last_handled_at') or '未处理'}

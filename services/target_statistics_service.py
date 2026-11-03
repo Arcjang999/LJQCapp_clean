@@ -14,7 +14,7 @@ from services.time_service import local_now
 
 STRATEGIES = ('monthly', 'cumulative')
 RULE = ('纳入有效建靶结果和正式期在控结果；多水平正式期按整次在控纳入。'
-        '按同检测系统、实际产品批号和物理水平统计，参数版本变化不截断累计；SD使用样本标准差。')
+        '按同一检测系统、同一实际质控品及批号、同一水平统计；更换均值和SD版本后仍连续累计。SD使用样本标准差。')
 _TABLES = {'lj': ('results', 'lj_result_id'), 'zscore': ('zscore_runs', 'zscore_run_id')}
 
 
@@ -191,7 +191,7 @@ def _candidate(connection, binding_id, strategy, as_of):
         if snapshot.get('input_value_type') == 'raw' and (average is None or average <= 0):
             ready = False
         if not ready:
-            issues.append(f"{material['level_name']}的有效结果不足2次，或均值、SD不能用于启用。")
+            issues.append(f"{material['level_name']}的有效结果不足2次，或均值、SD不满足启用要求。请补齐有效结果，并核对原始结果及SD。")
         levels.append({**material, 'n': len(values), 'count': len(values), 'days': len({value[:10] for value in times}),
             'input_value_type': snapshot.get('input_value_type', 'raw'), 'unit_symbol': snapshot.get('unit_symbol', ''),
             'start': min(times) if times else None, 'end': max(times) if times else None,
