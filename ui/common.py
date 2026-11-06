@@ -1580,6 +1580,9 @@ def render_latest_analysis_card(
 ) -> None:
     status_label = display_generated_text(status_label)
     summary_text = display_generated_text(summary_text)
+    tone_key = {'success': 'accept', 'danger': 'reject'}.get(tone_key, tone_key)
+    if 'Ct提醒' in status_label:
+        tone_key = 'reject' if '失控' in status_label or tone_key in ('reject', 'danger') else 'warning'
     palette = {
         "符合质控": {"background": "#edf8ef", "border": "#59a14f", "text": "#1d5f2a", "badge": "#59a14f"},
         "在控": {"background": "#edf8ef", "border": "#59a14f", "text": "#1d5f2a", "badge": "#59a14f"},
@@ -1623,7 +1626,7 @@ def render_latest_analysis_card(
             "
         >
             <div class="analysis-card-top">
-                <span class="analysis-card-badge" style="background:{style['badge']};">
+                <span class="analysis-card-badge" title="绿色为在控；黄色为质控警告或Ct提醒；红色为失控。具体原因见记录详情。" style="background:{style['badge']};">
                     {html_escape(status_label or '状态未知')}
                 </span>
                 {

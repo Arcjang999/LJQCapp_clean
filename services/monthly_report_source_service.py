@@ -123,7 +123,7 @@ def versioned_quality_summary(method, batch_id, month, formal_records, *, existi
     from services.quality_target_service import evaluate_cv, requirement_text
     goal = existing.get('goal') or {}
     if not goal:
-        return dict(existing, evaluation_reason='未采用可自动评价的 CV 要求；已登记的依据仅供查阅。') if existing else {}
+        return dict(existing, evaluation_reason='未设置CV上限；请按已登记要求核查。') if existing else {}
     samples, profiles = {}, set()
     for record in formal_records:
         profile = record.get('target_profile_id')

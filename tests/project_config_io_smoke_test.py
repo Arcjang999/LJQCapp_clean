@@ -157,7 +157,7 @@ def test_quality_review_export_is_readable_but_cannot_confirm_an_import() -> Non
         assert source['要求内容'] == original['recorded']['requirement_text']
         assert source['确认人'] == original['confirmed_by']
         assert source['适用依据'] == original['evidence']
-        assert source['来源类型'] == '实验室自定要求（不自动评价）'
+        assert source['来源类型'] == '实验室自定要求'
         candidate = sheets['标准适用情况（供查阅）'].iloc[0]
         assert candidate['适用情况'] == '不适用'
         assert candidate['说明'] == original['candidates'][0]['reason']

@@ -103,6 +103,16 @@ def _details(context):
             for level in row['level_results']]), hide_index=True, width='stretch')
     else:
         st.metric(label, f"{float(row['value']):.4f}")
+    evaluation = context.get('evaluation') or {}
+    judged = evaluation.get('result', evaluation)
+    ct = judged.get('ct_evaluation') or {}
+    if ct.get('enabled'):
+        from ui.common import render_latest_analysis_card
+        render_latest_analysis_card(judged.get('display_status', '待判读'),
+            judged.get('ct_alert_detail') or ct.get('requirement', ''),
+            [('Ct要求', ct.get('requirement', '')), ('质控判读',
+              judged.get('run_status', judged.get('status', '待判读')))],
+            tone_key=judged.get('display_tone'))
     if row.get('manual_note'):
         st.markdown('**备注**')
         st.write(row['manual_note'])

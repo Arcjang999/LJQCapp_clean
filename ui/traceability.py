@@ -58,6 +58,11 @@ def evaluation_tables(payload, input_value_type='raw', level_names=None):
         return _display(value)
     summary=[{'项目':label,'记录内容':saved_value(key,result[key])} for key,label in fields
              if key in result and not (formal and key == 'is_building_included')]
+    ct = result.get('ct_evaluation') or {}
+    if ct.get('enabled'):
+        summary.extend([{'项目': 'Ct要求', '记录内容': ct.get('requirement', '')},
+                        {'项目': 'Ct提醒', '记录内容': '触发' if ct.get('alert') else '符合要求' if ct.get('evaluated') else '待核对'},
+                        {'项目': '判读', '记录内容': result.get('display_status', '')}])
     for key,label in [('target_mean','判读所用均值'),('target_sd','判读所用SD')]:
         if key in payload:summary.append({'项目':label,'记录内容':_display(payload[key])})
     levels=[]
@@ -68,6 +73,9 @@ def evaluation_tables(payload, input_value_type='raw', level_names=None):
             value_label:level.get('raw_value'), '设定均值':level.get('target_mean'),
             'SD':level.get('target_sd'),'Z-score':level.get('zscore'),
             '状态':_display(level.get('status')),
+            **({'Ct要求': level['ct_evaluation'].get('requirement', ''),
+                'Ct提醒': '触发' if level['ct_evaluation'].get('alert') else '符合要求'}
+               if level.get('ct_evaluation', {}).get('enabled') else {}),
             '触发规则':_display(level.get('rule_hits_local',[])),
             '参与参数建立':'不适用（正式期）' if formal else saved_value('is_building_included',level.get('is_building_included')),
             '人工处理状态':saved_value('manual_status',level.get('manual_status')),

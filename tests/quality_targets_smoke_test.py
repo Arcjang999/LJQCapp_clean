@@ -106,7 +106,7 @@ def test_sd_adoption_does_not_claim_automatic_cv_evaluation():
             selected=next(r for r in reviewed['candidates'] if r['id']=='wst403-2024-082')
             assert selected['automatic_evaluation'] is expected
             if not expected:
-                assert evaluate_cv(goal,1,3,count=20)=='标准SD上限仅展示，暂不自动比较'
+                assert evaluate_cv(goal,1,3,count=20)=='标准SD上限请按实验室验证记录核查'
 
 
 def test_adoption_freezes_batch_and_copied_goal_requires_confirmation():

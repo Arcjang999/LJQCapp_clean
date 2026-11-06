@@ -360,7 +360,7 @@ def _render_binding_detail(context):
         if context['config']['status'] == 'draft':
             st.info('请点击上方“打开批次设置”，完成各水平设置并点击“确认批次设置”，再进行“部分水平换批”。')
         else:
-            st.info('“部分水平换批”暂不可用。请点击上方“打开批次设置”查看具体原因，并按提示核对项目、仪器和质控品状态；已被替代的批次请改选当前批次。')
+            st.info('请在“打开批次设置”中核对项目、仪器和质控品状态；已被替代的批次请改选当前批次。')
     if context['verifications']:
         lot_names = {lot['id']: lot['lot_no'] for lot in context['lots']}
         history = [{'批号': lot_names.get(v['qc_lot_id'], '未记录'), '结论': '通过' if v['conclusion'] == 'pass' else '未通过',

@@ -85,7 +85,8 @@ def render_daily_overview():
         '最新检测时间':(i['latest'] or {}).get('test_time',''),'今日曾失控':'是' if i['ever_reject'] else '否',
         '未完成处理':len(i['pending'])} for i in items])
     if frame.empty:st.info('没有符合筛选条件的项目。');return
-    st.dataframe(frame,hide_index=True,width='stretch')
+    from ui.record_workspace import style_judgment_columns
+    st.dataframe(style_judgment_columns(frame, ['最新结论']),hide_index=True,width='stretch')
     choices={i['overview_key']:i for i in items};_restore('daily_selected')
     if st.session_state.get('daily_selected') not in [None,*choices]:st.session_state['daily_selected']=None
     selected=st.selectbox('查看项目详情',[None,*choices],key='daily_selected',format_func=lambda k:'请选择' if k is None else
@@ -107,6 +108,9 @@ def render_daily_overview():
             expand_key=f"daily_record_{record['source_type']}_{record['source_id']}";_restore(expand_key)
             with st.expander(f"{record['test_time']} · {record['conclusion']} · 检测 {record['source_id']}",expanded=True,
                     key=expand_key,on_change=_value,args=(expand_key,)):
+                if record.get('ct_alert'):
+                    (st.error if record.get('display_tone') == 'danger' else st.warning)(
+                        record['conclusion'] + '：' + record.get('ct_alert_detail', ''))
                 st.dataframe(pd.DataFrame([{'水平':v['level_name'] or f"水平{v['level_order']}",'检测值':v['value'],'实际质控品批号':v['lot_no']} for v in record['values']]),hide_index=True,width='stretch')
                 if record['phase']=='formal' and record['classification'] in ('reject','warning'):
                     from ui.out_of_control import render_abnormal_entry

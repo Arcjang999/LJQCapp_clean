@@ -72,7 +72,7 @@ def render_batch_item_detail(item_id):
         if ctx['editable']:
             st.info('尚未选择质控品水平，请点击“编辑水平设置”。')
         else:
-            st.info('该批次尚未设置质控品水平，当前仅供查看。请在批次管理中核对状态，并为可编辑批次补齐各水平。')
+            st.info('该批次尚未设置质控品水平。请在批次管理中核对状态，并为可编辑批次补齐各水平。')
     profile = None
     if binding and binding['qc_method'] != 'instant':
         from services.lot_lifecycle_service import target_profile
@@ -268,9 +268,9 @@ def render_batch_workspace(*, render_target_dialogs=True):
         if project is None:
             st.caption('请先在上方“项目”中选择一个设置已确认的项目，再点击“新增批次”。')
         elif projects[project]['is_disabled']:
-            st.info('“新增批次”暂不可用：所选项目已停用。请点击顶部“返回主页”，打开该项目，在“编辑项目”中恢复，再确认项目设置。')
+            st.info('项目已停用。请返回主页，在“编辑项目”中恢复并确认项目设置，再新增批次。')
         else:
-            st.info('“新增批次”暂不可用：所选项目的设置尚未确认。请点击顶部“返回主页”，打开该项目，按页面提示补齐后点击“确认项目设置”。')
+            st.info('项目设置尚未确认。请返回主页，打开该项目，补齐资料后点击“确认项目设置”。')
     configs = list_lot_configs(template_id=project, include_disabled=include)
     if not configs.empty:
         from services.material_workflow_service import config_material_summary

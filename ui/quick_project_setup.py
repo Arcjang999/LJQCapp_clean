@@ -43,7 +43,9 @@ def _quality_context_identity(context):
 def _use_quality_context(ctx, context):
     identity = _quality_context_identity(context)
     if ctx.get('quick_quality_identity') != identity:
-        ctx['draft']['quality'] = {}
+        ct_alert = deepcopy((ctx['draft'].get('quality') or {}).get('ct_alert'))
+        ctx['draft']['quality'] = ({'ct_alert': ct_alert}
+            if context['item'].get('input_value_type') == 'ct' and ct_alert else {})
         ctx.pop('quick_quality_inputs', None)
         ctx.pop('quick_preview', None)
         ctx['quick_quality_identity'] = identity

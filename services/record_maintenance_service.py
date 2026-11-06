@@ -57,6 +57,10 @@ def get_record_context(method, record_id, batch_id=None):
             WHERE ''' + {'lj': 'lj_result_id', 'zscore': 'zscore_run_id', 'instant': 'instant_result_id'}[method] + '=?',
             (int(record_id),)).fetchone()
         snapshot = json.loads(source[0]) if source else {}
+        saved_evaluation = connection.execute('''SELECT e.evaluation_json FROM qc_result_evaluations e
+            JOIN qc_result_contexts x ON x.id=e.context_id WHERE x.''' +
+            {'lj': 'lj_result_id', 'zscore': 'zscore_run_id', 'instant': 'instant_result_id'}[method] +
+            '=? ORDER BY e.id DESC LIMIT 1', (int(record_id),)).fetchone()
         history = [dict(row) for row in connection.execute('''SELECT action,reason,created_at
             FROM qc_record_maintenance_events WHERE qc_method=? AND record_id=? ORDER BY id DESC''',
             (method, int(record_id)))]
@@ -68,6 +72,7 @@ def get_record_context(method, record_id, batch_id=None):
             if run and run.get('is_locked_for_maintenance'):
                 availability = {'allowed': False, 'reason': '该批次已完成建靶，原始检测值已锁定，可查看判读和维护记录。'}
         return {'method': method, 'record': record, 'batch': batch, 'source': snapshot,
+            'evaluation': json.loads(saved_evaluation[0]) if saved_evaluation else {},
             'input_value_type': snapshot.get('input_value_type') or batch.get('input_value_type') or 'raw',
             'fingerprint': _fingerprint(record), 'history': history,
             'edit_allowed': availability['allowed'], 'edit_reason': availability['reason']}

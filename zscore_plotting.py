@@ -162,7 +162,13 @@ def _plot_zscore_single_level_impl(
     y_axis_mode: str = "标准视图",
     standard_sd_limit: float = 4.0,
     y_axis_label: str = "检测值",
+    ct_alert: dict | None = None,
 ):
+    from plotting import resolve_ct_chart_config, expand_ct_chart_limits, ct_chart_policies, plot_ct_requirement_lines, plot_ct_alert_points
+    ct_config = resolve_ct_chart_config(plot_df, ct_alert)
+    if ct_config and 'ct_evaluation' not in plot_df:
+        from services.ct_alert_service import annotate_zscore_frame
+        plot_df = annotate_zscore_frame(plot_df, ct_config)
     normalized_scope = _normalize_phase_scope(phase_scope)
     normalized_y_axis_mode = _normalize_y_axis_mode(y_axis_mode)
     scoped_df = filter_zscore_plot_df(plot_df, normalized_scope)
@@ -178,12 +184,12 @@ def _plot_zscore_single_level_impl(
     prepared_df = _prepare_plot_dataframe(level_df)
     reference_mode = _resolve_reference_mode(prepared_df, normalized_scope)
     show_reference_lines = reference_mode != "none"
-    y_limits = _get_value_y_limits(
+    y_limits = expand_ct_chart_limits(_get_value_y_limits(
         prepared_df,
         normalized_y_axis_mode,
         float(standard_sd_limit),
         reference_mode,
-    )
+    ), ct_chart_policies(prepared_df, ct_config))
     display_df = _build_display_dataframe(prepared_df, y_limits)
     level_color = LEVEL_COLORS.get(level_id, "#4e79a7")
     display_level = format_level_id_display(level_id)
@@ -203,6 +209,8 @@ def _plot_zscore_single_level_impl(
         _plot_phase_line(axis, display_df, level_color, display_level)
         _plot_status_points(axis, display_df, level_color)
 
+    plot_ct_requirement_lines(axis, display_df, ct_config, 'run_index')
+    plot_ct_alert_points(axis, display_df, 'run_index', 'display_value')
     if y_limits is not None:
         axis.set_ylim(y_limits)
         _plot_out_of_range_markers(axis, display_df, y_limits)
@@ -226,6 +234,7 @@ def plot_zscore_single_level(
     y_axis_mode: str = "\u6807\u51c6\u89c6\u56fe",
     standard_sd_limit: float = 4.0,
     y_axis_label: str = "\u68c0\u6d4b\u503c",
+    ct_alert: dict | None = None,
 ):
     with profile_timer(
         "plot_zscore_single_level",
@@ -242,6 +251,7 @@ def plot_zscore_single_level(
             y_axis_mode=y_axis_mode,
             standard_sd_limit=standard_sd_limit,
             y_axis_label=y_axis_label,
+            ct_alert=ct_alert,
         )
 
 
@@ -253,7 +263,13 @@ def _plot_zscore_overlay_impl(
     y_axis_mode: str = "标准视图",
     standard_sd_limit: float = 4.0,
     y_axis_label: str = "检测值",
+    ct_alert: dict | None = None,
 ):
+    from plotting import resolve_ct_chart_config, expand_ct_chart_limits, ct_chart_policies, plot_ct_requirement_lines, plot_ct_alert_points
+    ct_config = resolve_ct_chart_config(plot_df, ct_alert)
+    if ct_config and 'ct_evaluation' not in plot_df:
+        from services.ct_alert_service import annotate_zscore_frame
+        plot_df = annotate_zscore_frame(plot_df, ct_config)
     normalized_scope = _normalize_phase_scope(phase_scope)
     normalized_y_axis_mode = _normalize_y_axis_mode(y_axis_mode)
     scoped_df = filter_zscore_plot_df(plot_df, normalized_scope)
@@ -271,12 +287,12 @@ def _plot_zscore_overlay_impl(
     prepared_df = _prepare_plot_dataframe(overlay_df)
     reference_mode = _resolve_reference_mode(prepared_df, normalized_scope)
     show_reference_lines = reference_mode != "none"
-    y_limits = _get_value_y_limits(
+    y_limits = expand_ct_chart_limits(_get_value_y_limits(
         prepared_df,
         normalized_y_axis_mode,
         float(standard_sd_limit),
         reference_mode,
-    )
+    ), ct_chart_policies(prepared_df, ct_config))
     display_df = _build_display_dataframe(prepared_df, y_limits)
 
     for current_level_id in display_df["level_id"].drop_duplicates().tolist():
@@ -299,6 +315,8 @@ def _plot_zscore_overlay_impl(
     if normalized_scope == "all":
         _plot_phase_separator(axis, display_df)
 
+    plot_ct_requirement_lines(axis, display_df, ct_config, 'run_index')
+    plot_ct_alert_points(axis, display_df, 'run_index', 'display_value')
     if y_limits is not None:
         axis.set_ylim(y_limits)
         _plot_out_of_range_markers(axis, display_df, y_limits)
@@ -328,6 +346,7 @@ def plot_zscore_overlay(
     y_axis_mode: str = "\u6807\u51c6\u89c6\u56fe",
     standard_sd_limit: float = 4.0,
     y_axis_label: str = "\u68c0\u6d4b\u503c",
+    ct_alert: dict | None = None,
 ):
     with profile_timer(
         "plot_zscore_overlay",
@@ -344,6 +363,7 @@ def plot_zscore_overlay(
             y_axis_mode=y_axis_mode,
             standard_sd_limit=standard_sd_limit,
             y_axis_label=y_axis_label,
+            ct_alert=ct_alert,
         )
 
 
@@ -480,6 +500,9 @@ def _plot_phase_separator(axis, plot_df: pd.DataFrame) -> None:
 def _plot_status_points(axis, plot_df: pd.DataFrame, level_color: str) -> None:
     for _, point in plot_df.iterrows():
         status = str(point.get("plot_status", point.get("status", "accept")))
+        adopted_ct = point.get('ct_alert_config')
+        if isinstance(adopted_ct, dict) and adopted_ct.get('enabled') and point.get('display_tone') == 'danger':
+            status = 'reject'
         is_preview = bool(point.get("is_preview", False))
         style = STATUS_POINT_STYLES.get(status, STATUS_POINT_STYLES["pending"])
         marker = "D" if is_preview else style["marker"]
@@ -719,6 +742,9 @@ def _add_manual_legends(
 
     legends = []
     status_handles = _build_status_legend_handles(display_df, _has_out_of_range_points(display_df))
+    plotted_handles, plotted_labels = axis.get_legend_handles_labels()
+    status_handles.extend(handle for handle, label in zip(plotted_handles, plotted_labels)
+                          if label == 'Ct提醒')
     if status_handles:
         status_legend = axis.legend(
             handles=status_handles,
@@ -734,6 +760,9 @@ def _add_manual_legends(
         visible_phases=visible_phases,
         show_reference_lines=show_reference_lines,
     )
+    ct_handles, ct_labels = axis.get_legend_handles_labels()
+    phase_handles.extend(handle for handle, label in zip(ct_handles, ct_labels)
+                         if label.startswith('实验室自定 Ct 线'))
     if phase_handles:
         phase_legend = axis.legend(
             handles=phase_handles,

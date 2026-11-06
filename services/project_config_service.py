@@ -310,6 +310,11 @@ def _normalize_template_item(row: dict[str, object], sort_order: int) -> dict[st
         raise ValueError("L-J 和 Z-score 参数建立有效点数必须在 5 至 20 之间。")
 
     cv_limit = normalize_cv_limit(row.get("cv_limit"))
+    ct_fields = {}
+    if row.get('ct_alert_provided') or ('ct_alert' in row and 'ct_alert_provided' not in row):
+        from services.ct_alert_service import normalize_ct_alert
+        ct_fields = dict(ct_alert_provided=True,
+            ct_alert=normalize_ct_alert(row.get('ct_alert'), input_value_type=input_value_type, allow_incomplete=True))
 
     return {
         "test_item_id": int(row["test_item_id"]),
@@ -326,6 +331,7 @@ def _normalize_template_item(row: dict[str, object], sort_order: int) -> dict[st
            if 'target_statistics_mode' in row else {}),
         "sort_order": int(row.get("sort_order") or sort_order),
         "notes": _clean_optional(row.get("notes")),
+        **ct_fields,
         **{key: row[key] for key in ('product_choice_review', 'manual_product_review', 'product_recommendation_revision') if key in row},
     }
 
@@ -401,6 +407,8 @@ def preview_panel_defaults(rows: list[dict], values: dict, *, selected_row_keys:
                 before, after = row.get(field), values.get(field)
                 if after is not None and before != after and (overwrite or before in (None, '')):
                     row[field] = after
+                    if field == 'input_value_type' and after != 'ct' and row.get('ct_alert_provided'):
+                        row['ct_alert'] = None
                     changes.append(dict(row_key=row['row_key'], test_item_name=row.get('test_item_name', ''),
                                         field=field, before=before, after=after))
         proposed.append(row)
@@ -529,6 +537,19 @@ def save_template_items(template_id: int, rows: list[dict[str, object]], *, expe
                 from services.quality_review_service import pending_review_copy
                 connection.execute('UPDATE qc_project_template_items SET quality_review_json=? WHERE id=?',
                                    (pending_review_copy(old['quality_review_json']), old['id']))
+            if row.get('ct_alert_provided'):
+                from services.quality_review_service import pending_review_copy
+                saved = connection.execute('''SELECT id,quality_review_json FROM qc_project_template_items
+                    WHERE template_id=? AND test_item_id=? AND qc_method=? AND input_value_type=?''',
+                    (int(template_id), *template_item_key(row))).fetchone()
+                review = json.loads(pending_review_copy(saved['quality_review_json']))
+                review.update(status='pending', levels=[])
+                if row.get('ct_alert'):
+                    review['ct_alert'] = row['ct_alert']
+                else:
+                    review.pop('ct_alert', None)
+                connection.execute('UPDATE qc_project_template_items SET quality_review_json=? WHERE id=?',
+                                   (json.dumps(review, ensure_ascii=False), saved['id']))
 
         connection.execute(
             """

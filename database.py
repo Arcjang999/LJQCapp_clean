@@ -3017,16 +3017,25 @@ def export_batch_results(
         export_df[column_name] = column_value
 
     ordered_prefix = list(metadata_columns.keys())
-    remaining_columns = [column for column in export_df.columns if column not in ordered_prefix]
+    ct_columns = ['ct_requirement', 'ct_alert', 'display_status', 'ct_alert_detail']
+    ct_enabled = 'ct_requirement' in export_df and bool(export_df['ct_requirement'].fillna('').astype(str).str.len().any())
+    internal_ct = {'ct_evaluation', 'ct_alert_config', 'ct_threshold', 'ct_operator', 'display_tone'}
+    if not ct_enabled:
+        internal_ct.update(ct_columns)
+    elif 'ct_alert' in export_df:
+        export_df['ct_alert'] = ['触发' if bool(alert) else '符合要求' if requirement else '未启用'
+                                 for alert, requirement in zip(export_df['ct_alert'], export_df['ct_requirement'])]
+    remaining_columns = [column for column in export_df.columns if column not in ordered_prefix and column not in internal_ct]
     ordered_df = export_df[ordered_prefix + remaining_columns]
     if included_columns is not None:
-        selected_columns = [column for column in [*included_columns,"actual_reagent_lot","target_profile_id","context_id","target_mean_used","target_sd_used"] if column in ordered_df.columns]
+        selected_columns = [column for column in [*included_columns,"actual_reagent_lot","target_profile_id","context_id","target_mean_used","target_sd_used", *(ct_columns if ct_enabled else [])] if column in ordered_df.columns]
         ordered_df = ordered_df[selected_columns]
     input_value_type = normalize_input_value_type(batch["input_value_type"] if "input_value_type" in batch.keys() else None)
     measurement_label = get_measurement_label(input_value_type)
     if not should_show_auxiliary_log_column(input_value_type) and "log_value" in ordered_df.columns:
         ordered_df = ordered_df.drop(columns=["log_value"])
     column_mapping = {
+        'ct_requirement': 'Ct要求', 'ct_alert': 'Ct提醒', 'display_status': '判读', 'ct_alert_detail': 'Ct明细',
         "actual_reagent_lot":"实际试剂批号", "target_profile_id":"靶值版本ID", "context_id":"上下文ID", "target_mean_used":"本次靶均值", "target_sd_used":"本次SD",
         "manual_note": "备注",
         "project_id": "项目ID",

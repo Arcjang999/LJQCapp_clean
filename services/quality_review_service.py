@@ -10,6 +10,9 @@ import json
 from datetime import datetime
 
 from database import atomic_write, get_connection
+from services.ct_alert_service import normalize_ct_alert
+
+_CT_UNSET = object()
 
 
 def _json(value):
@@ -83,7 +86,8 @@ def normalize_process_requirements(value, candidates, *, draft=False):
 
 def build_review(connection, item, *, source_spec=None, confirmed_by, evidence,
                  exclusions=None, recorded=None, context=None, search_record=None,
-                 adopted_standard_ids=None, registered_standards=None, process_requirements=None):
+                 adopted_standard_ids=None, registered_standards=None, process_requirements=None,
+                 ct_alert=_CT_UNSET):
     """Build one review for every entry point; free-text exclusions cannot waive it."""
     from services.quality_target_service import source_label
     from services.quality_applicability_service import (assess, context_errors,
@@ -91,6 +95,9 @@ def build_review(connection, item, *, source_spec=None, confirmed_by, evidence,
     confirmed_by = _text(confirmed_by, '确认人', 80)
     evidence = _text(evidence, '适用依据')
     context = dict(context or {})
+    if ct_alert is _CT_UNSET:
+        ct_alert = _json(item.get('quality_review_json')).get('ct_alert')
+    ct_alert = normalize_ct_alert(ct_alert, item.get('input_value_type'))
     problems = context_errors(item, context)
     if problems:
         raise ValueError('适用条件待补充：' + ' '.join(problems))
@@ -156,7 +163,7 @@ def build_review(connection, item, *, source_spec=None, confirmed_by, evidence,
             recorded['setup_mode'] = setup_mode
     if not source_spec and not recorded:
         raise ValueError('请选择分析质量要求，或填写实验室自定要求及依据。')
-    return dict(version=2, status='confirmed', identity=_identity(item), context=context,
+    result = dict(version=2, status='confirmed', identity=_identity(item), context=context,
                 goal_fingerprint=_digest(_json(item.get('quality_goal_json'))),
                 confirmed_by=confirmed_by, evidence=evidence,
                 reviewed_at=datetime.now().isoformat(timespec='seconds'),
@@ -166,10 +173,13 @@ def build_review(connection, item, *, source_spec=None, confirmed_by, evidence,
                 candidates=reviewed, recorded=recorded or {}, levels=levels,
                 process_requirements=local_process,
                 search_record=search, registered_standards=registered)
+    if ct_alert:
+        result.update(ct_alert=ct_alert, ct_alert_fingerprint=_digest(ct_alert))
+    return result
 
 
 def save_pending_review(scope, item_id, *, context, search_record=None, registered_standards=None,
-                        draft_recorded=None, process_requirements=None):
+                        draft_recorded=None, process_requirements=None, ct_alert=_CT_UNSET):
     """Save incomplete conditions explicitly as a draft, never an authorization."""
     from services.quality_target_service import item_context, _require_draft
     with atomic_write() as connection:
@@ -177,6 +187,13 @@ def save_pending_review(scope, item_id, *, context, search_record=None, register
         if scope == 'lot':
             _require_draft(connection, item)
         review = _json(item.get('quality_review_json'))
+        policy = normalize_ct_alert(review.get('ct_alert') if ct_alert is _CT_UNSET else ct_alert,
+                                    item.get('input_value_type'), allow_incomplete=True)
+        review.pop('ct_alert_fingerprint', None)
+        if policy:
+            review['ct_alert'] = policy
+        else:
+            review.pop('ct_alert', None)
         review.update(version=2, status='pending', context=context,
                       search_record=search_record or {}, registered_standards=registered_standards or [])
         if process_requirements is not None:
@@ -239,7 +256,8 @@ def pending_review_copy(value):
 def save_recorded_requirement(scope, item_id, *, source_name, source_version,
                               requirement_text, confirmed_by, evidence, exclusions=None,
                               context=None, search_record=None, adopted_standard_ids=None,
-                              registered_standards=None, process_requirements=None, setup_mode=None):
+                              registered_standards=None, process_requirements=None, setup_mode=None,
+                              ct_alert=_CT_UNSET):
     """Record unsupported/no-applicable-source requirements; adds no new evaluator."""
     from services.quality_target_service import item_context, _require_draft
     if scope not in ('project', 'lot'):
@@ -261,7 +279,8 @@ def save_recorded_requirement(scope, item_id, *, source_name, source_version,
         review = build_review(connection, item, confirmed_by=confirmed_by, evidence=evidence,
                               exclusions=exclusions, recorded=recorded, context=context,
                               search_record=search_record, adopted_standard_ids=adopted_standard_ids,
-                              registered_standards=registered_standards, process_requirements=process_requirements)
+                              registered_standards=registered_standards, process_requirements=process_requirements,
+                              ct_alert=ct_alert)
         save_review(connection, scope, item_id, review)
         if scope == 'lot':
             from services.project_config_service import _save_snapshot
@@ -305,6 +324,13 @@ def validate_quality_review(scope, item_id, connection=None):
             return ['质量目标已修改，请重新确认。']
         if not review.get('confirmed_by') or not review.get('evidence'):
             return ['请填写质量目标确认人和适用依据。']
+        try:
+            policy = normalize_ct_alert(review.get('ct_alert'), item.get('input_value_type'))
+        except ValueError as error:
+            return [str(error)]
+        if ((policy and (policy != review.get('ct_alert') or review.get('ct_alert_fingerprint') != _digest(policy)))
+                or (policy is None and (review.get('ct_alert') is not None or review.get('ct_alert_fingerprint')))):
+            return ['Ct要求已修改，请重新确认质量目标。']
         if scope == 'lot' and review.get('levels') != _levels(connection, item):
             return ['质控品已更换，请重新核对各水平的质量目标。']
         reviewed = {row['id']: row for row in review.get('candidates', [])}
@@ -335,6 +361,7 @@ def validate_quality_review(scope, item_id, connection=None):
                 context=review.get('context'), search_record=review.get('search_record'),
                 recorded=review.get('recorded'), registered_standards=review.get('registered_standards'),
                 process_requirements=review.get('process_requirements'),
+                ct_alert=review.get('ct_alert'),
                 adopted_standard_ids=[r['id'] for r in review.get('candidates', [])
                     if r.get('kind') != 'numeric' and r.get('disposition') == 'adopted'])
         except (ValueError, KeyError, TypeError) as error:
@@ -342,7 +369,7 @@ def validate_quality_review(scope, item_id, connection=None):
         if rebuilt['candidates'] != review.get('candidates') or rebuilt['registered_standards'] != review.get('registered_standards'):
             return ['标准条款、适用条件或来源时效已变化，请重新确认。']
         if review.get('context', {}).get('result_scale') == 'qualitative':
-            return ['已登记定性依据；当前工作台尚不支持阳性 / 阴性结果录入与判读，不能启用为数值质控。']
+            return ['本工作台要求录入数值结果，请核对项目的输入值类型和结果尺度。']
         return []
 
     if connection is not None:

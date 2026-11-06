@@ -48,7 +48,7 @@ class ReportPeriodTests(unittest.TestCase):
             self.assertEqual(0, package.report.statistics.in_control_count)
             self.assertIn('待判读', package.report.overview_text)
             self.assertNotIn('整体运行稳定', package.report.overview_text)
-            self.assertIn('尚不能确认全部检测在控', package.report.conclusion)
+            self.assertIn('待判读，请核对适用控制参数和原检测结论', package.report.conclusion)
             pdf = build_zscore_period_report_pdf(package)
             self.assertIn('待判读检测记录数', ''.join(page.extract_text() for page in PdfReader(BytesIO(pdf)).pages))
 

@@ -146,6 +146,7 @@ def _quality_issues(c, item, source):
             evidence=review.get('evidence'), context=review.get('context'), search_record=review.get('search_record'),
             recorded=review.get('recorded'), registered_standards=review.get('registered_standards'),
             process_requirements=review.get('process_requirements'),
+            ct_alert=review.get('ct_alert'),
             adopted_standard_ids=[r['id'] for r in review.get('candidates', []) if r['kind'] != 'numeric' and r['disposition'] == 'adopted'])
         if rebuilt['candidates'] != review.get('candidates') or rebuilt['registered_standards'] != review.get('registered_standards'):
             raise ValueError('标准条款或适用条件已变化，请重新核对质量要求。')
@@ -201,6 +202,26 @@ def _item(c, item, config, when):
     table = 'instant_batches' if method == 'instant' else 'batches'
     batch_row = c.execute(f'SELECT * FROM {table} WHERE id=?', (binding.get('runtime_batch_id'),)).fetchone()
     batch = dict(batch_row) if batch_row else {}
+    transfer_chain = None
+    if method == 'instant' and batch.get('transfer_status') == 'transferred':
+        # The configured binding remains the frozen Instant source. Daily entry
+        # must follow its owned LJ target without rewriting that source binding.
+        from services.target_binding_service import resolve_target_binding
+        try:
+            target_id = int(batch.get('transferred_to_lj_batch_id') or 0)
+            target = resolve_target_binding(c, -target_id)
+            transfer_chain = target.get('transfer_chain')
+            if not transfer_chain or transfer_chain['source_binding_id'] != binding['id']:
+                raise ValueError('即时法转入来源不属于当前检验项目。')
+        except (ValueError, TypeError, KeyError):
+            problem('即时法转入的单水平批次关联不完整，请核对本项批次设置。', 'binding')
+        else:
+            binding = target
+            method = 'lj'
+            batch = dict(c.execute('SELECT * FROM batches WHERE id=?', (target_id,)).fetchone())
+            if not c.execute('SELECT 1 FROM projects WHERE id=? AND is_disabled=0',
+                             (binding['runtime_project_id'],)).fetchone():
+                problem('转入后的单水平项目已停用，请核对项目状态。', 'binding')
     if not batch or batch.get('is_disabled') or batch.get('transfer_status') == 'transferred':
         problem('批次未准备、已停用或已转入单水平法，不能保存新检测。', 'binding')
     profile_row = c.execute('''SELECT * FROM qc_target_profiles WHERE qc_method=? AND batch_id=? AND effective_at<=?
@@ -234,9 +255,12 @@ def _item(c, item, config, when):
         product_recommendation = {'revision': None, 'candidates': []}
         problem(str(exc), 'product_choice')
     # Complete row hashes also notice supported maintenance and changes without a revision counter.
-    revision = _digest(dict(config=config, item=item, levels=levels, binding=binding, batch=batch,
+    revision_context = dict(config=config, item=item, levels=levels, binding=binding, batch=batch,
         profiles=profiles, history=history, level_history=level_history, latest_evaluation_id=latest_eval,
-        reagent=reagent, state=state, product_recommendation=product_recommendation, issues=issues))
+        reagent=reagent, state=state, product_recommendation=product_recommendation, issues=issues)
+    if transfer_chain:
+        revision_context['transfer_chain'] = transfer_chain
+    revision = _digest(revision_context)
     return dict(row_key=row_key, lot_config_item_id=item['id'], template_item_id=item['source_template_item_id'],
         template_id=config['template_id'], lot_config_id=config['id'], qc_method=method,
         runtime_project_id=binding.get('runtime_project_id'), runtime_batch_id=binding.get('runtime_batch_id'),
@@ -248,6 +272,7 @@ def _item(c, item, config, when):
         quality_review=_decode(source.get('quality_review_json')), source_snapshot=source,
         product_choice_review=_decode(item.get('product_choice_review_json')),
         product_recommendation=product_recommendation,
+        transfer_source_batch_id=(transfer_chain or {}).get('source_instant_batch_id'),
         revision=revision, config_revision=config['revision_no'], template_revision=config['template_revision'],
         **reagent, writable=not issues, issues=issues)
 

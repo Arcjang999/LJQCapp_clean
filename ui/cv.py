@@ -5,15 +5,15 @@ import streamlit as st
 from services.cv_service import calculate_cv_percent
 
 
-CV_REQUIREMENT_HELP = "填写CV百分比上限，留空表示未设置。标准中的绝对SD上限和允许总误差含义不同，请不要填在这里。"
+CV_REQUIREMENT_HELP = "填写CV上限（%），留空表示未设置。"
 
 
 def render_target_cv(mean, sd, cv_limit=None, *, input_value_type="raw", pending=False):
     cv = calculate_cv_percent(mean, sd)
     st.metric("参考变异系数（%）（待确认）" if pending else "设定变异系数（%）", "—" if cv is None else f"{cv:.2f}%",
-        help="CV% = SD ÷ 设定均值 × 100，均值须大于0。CV不用于单次失控判定。")
+        help="CV% = SD ÷ 设定均值 × 100，均值须大于0。")
     if input_value_type in {"ct", "log"}:
-        st.caption("Ct、log值的CV不能与浓度CV限值比较。")
+        st.caption("Ct、log结果按本批次确认的均值、SD和质控规则核对。")
     if cv_limit is not None and cv is not None:
         message = f"要求 ≤ {cv_limit:g}% · {'满足' if cv <= cv_limit else '超出'}"
         if cv > cv_limit:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from services.cv_service import calculate_cv_percent
+from services.terminology_service import display_quality_record
 
 from collections import OrderedDict
 import hashlib
@@ -61,7 +62,33 @@ PROJECT_IMPORT_COLUMNS = [
 # Optional stable identities are emitted on export; the blank hand-entry template
 # stays small. Database integer IDs are never used to resolve cross-database rows.
 PROJECT_IDENTITY_COLUMNS = ['检验项目标识', '单位标识', '方法学标识', '试剂标识', '试剂厂家标识', '试剂厂家类别']
-PROJECT_OPTIONAL_COLUMNS = ['均值和SD统计方式']
+CT_ALERT_COLUMNS = ['启用实验室自定Ct线', 'Ct要求', 'Ct界值']
+PROJECT_OPTIONAL_COLUMNS = ['均值和SD统计方式', *CT_ALERT_COLUMNS]
+
+
+def _ct_alert_columns(review):
+    alert = review.get('ct_alert') or {}
+    enabled = bool(alert.get('enabled'))
+    return {'启用实验室自定Ct线': '是' if enabled else '',
+            'Ct要求': {'<=': '≤', '>=': '≥'}.get(alert.get('operator'), alert.get('operator', '')) if enabled else '',
+            'Ct界值': alert.get('threshold', '') if enabled else ''}
+
+
+def _import_ct_alert(row, input_value_type):
+    from services.ct_alert_service import normalize_ct_alert
+    text = _text(row.get('启用实验室自定Ct线')).casefold()
+    if text not in ('', '否', 'false', '0', '是', 'true', '1'):
+        raise ValueError('启用实验室自定Ct线请填写“是”或“否”。')
+    enabled = text in ('是', 'true', '1')
+    operator = _text(row.get('Ct要求'))
+    threshold = _text(row.get('Ct界值'))
+    if not enabled:
+        if operator or threshold:
+            raise ValueError('未启用Ct线时，请清空Ct要求和Ct界值。')
+        return None
+    operator = {'≤': '<=', '≥': '>='}.get(operator, operator)
+    return normalize_ct_alert(dict(enabled=True, operator=operator, threshold=threshold),
+                              input_value_type=input_value_type, allow_incomplete=True)
 
 
 def _statistics_mode(value):
@@ -136,6 +163,7 @@ def _instructions_dataframe() -> pd.DataFrame:
             ["水平数", "L-J/即时法固定 1；Z-score 填 2 或 3。"],
             ["参数建立点数", "L-J/Z-score 填 5–20；即时法固定按 20 个有效点。"],
             ["均值和SD统计方式", "填写月度统计或累计统计；空白保留为待选择。仅手动确认切换后启用新参数。"],
+            ["实验室自定Ct线（选填）", "Ct输入项目可在启用列填写“是”，并填写Ct要求（>、≥、<、≤）和Ct界值；比较关系表示应满足的条件。导入后核对并确认质量目标。"],
             ["新增资料", "未登记的检验项目、单位、方法学、试剂及厂家会新增到基础资料中，请先核对名称，避免重复登记。"],
             ["导入方式", "合并会保留未出现在文件中的原检验项目；替换会以文件内容作为完整的检验项目表。"],
             ["设置确认", "导入后项目保持待确认。请回到项目设置，逐项核对后确认。"],
@@ -171,6 +199,8 @@ def build_project_import_template_xlsx() -> bytes:
         columns=PROJECT_IMPORT_COLUMNS,
     )
     example['均值和SD统计方式'] = ''
+    for column in CT_ALERT_COLUMNS:
+        example[column] = ''
     return dataframes_to_xlsx_bytes(
         OrderedDict(
             [
@@ -213,6 +243,7 @@ def _project_items_export_dataframe(template_id: int) -> pd.DataFrame:
                 "质量目标来源": _text(row["quality_target_source_text"]),
                 "备注": _text(row["notes"]),
                 "均值和SD统计方式": _statistics_label(row.get('target_statistics_mode')),
+                **_ct_alert_columns(json.loads(row.get('quality_review_json') or '{}')),
             }
         )
     with get_connection() as connection:
@@ -239,8 +270,8 @@ def _quality_review_export_sheets(items: pd.DataFrame) -> list[tuple[str, pd.Dat
     review_rows = []
     candidate_rows = []
     for item in items.to_dict('records'):
-        review = decode(item.get('quality_review_json'))
-        goal = decode(item.get('quality_goal_json'))
+        review = display_quality_record(decode(item.get('quality_review_json')))
+        goal = display_quality_record(decode(item.get('quality_goal_json')))
         spec = goal.get('spec', {})
         recorded = review.get('recorded', {})
         conditions = '；'.join(CONTEXT_LABELS.get(k,k)+'：'+CONTEXT_OPTIONS.get(k,{}).get(v,str(v))
@@ -259,11 +290,12 @@ def _quality_review_export_sheets(items: pd.DataFrame) -> list[tuple[str, pd.Dat
             '单位': _text(item.get('unit_symbol')), '方法学': _text(item.get('method_name')),
             '核对状态': state,
             '来源类型': {'standard': '标准', 'custom': '实验室自定要求',
-                       'record_only': '实验室自定要求（不自动评价）'}.get(review.get('decision'),
+                       'record_only': '实验室自定要求'}.get(review.get('decision'),
                            '原质量目标' if goal else '未确认'),
             '来源名称': recorded.get('source_name') or spec.get('standard', ''),
             '来源版本或编号': recorded.get('source_version') or spec.get('version', ''),
             '要求内容': content,
+            **_ct_alert_columns(review),
             '本实验室对照与质控要求': review.get('process_requirements', {}).get('requirement_text', ''),
             '来源条款': spec.get('source_clause', ''), '适用范围': spec.get('scope', ''),
             '来源实施日期': spec.get('effective_date', ''),
@@ -273,7 +305,7 @@ def _quality_review_export_sheets(items: pd.DataFrame) -> list[tuple[str, pd.Dat
             '结构化适用条件': conditions,
             '标准查找复核': '；'.join(str(search.get(k,'')) for k in ('query','official_url','checked_on','conclusion','rationale')) if search else '',
             '实验室更严CV': goal.get('supplement',{}).get('cv',''),
-            '用途说明': '供查阅；本表不参与导入，导入后请重新确认质量目标。',
+            '用途说明': '质量目标核对资料；导入项目后请重新确认质量目标。',
         })
         for candidate in review.get('candidates', []):
             candidate_rows.append({
@@ -291,12 +323,12 @@ def _quality_review_export_sheets(items: pd.DataFrame) -> list[tuple[str, pd.Dat
             candidate_rows.append({'检验项目':_text(item['test_item_name']),
                 '输入值类型':INPUT_VALUE_TYPE_LABELS.get(_text(item['input_value_type']),''),
                 '标准名称及版本':source['standard']+' / '+source['version'],
-                '适用情况':'补充登记，未自动评价','说明':source['source_clause']+'；'+source['requirement_text'],
+                '适用情况':'补充依据','说明':source['source_clause']+'；'+source['requirement_text'],
                 '核对状态':state,'确认人':source['verified_by'],'确认时间':source['checked_on']})
     return [
         ('质量目标（供查阅）', pd.DataFrame(review_rows, columns=[
             '检验项目', '输入值类型', '单位', '方法学', '核对状态', '来源类型', '来源名称',
-            '来源版本或编号', '要求内容', '本实验室对照与质控要求', '来源条款', '适用范围', '来源实施日期', '确认人',
+            '来源版本或编号', '要求内容', *CT_ALERT_COLUMNS, '本实验室对照与质控要求', '来源条款', '适用范围', '来源实施日期', '确认人',
             '确认时间', '适用依据', '结构化适用条件', '标准查找复核', '实验室更严CV', '用途说明'])),
         ('标准适用情况（供查阅）', pd.DataFrame(candidate_rows, columns=[
             '检验项目', '输入值类型', '标准名称及版本', '适用情况', '说明', '核对状态', '确认人', '确认时间'])),
@@ -405,6 +437,9 @@ def build_lot_config_xlsx(lot_config_id: int) -> bytes:
         item_export["质控方法"] = item_export["质控方法"].map(QC_METHOD_LABELS)
         item_export["输入值类型"] = item_export["输入值类型"].map(INPUT_VALUE_TYPE_LABELS)
         item_export['均值和SD统计方式'] = item_export['均值和SD统计方式'].map(_statistics_label)
+        for column in CT_ALERT_COLUMNS:
+            item_export[column] = [_ct_alert_columns(json.loads(row.get('quality_review_json') or '{}'))[column]
+                                   for row in items.to_dict('records')]
     item_columns = [
         "检验项目",
         "质控方法",
@@ -418,6 +453,7 @@ def build_lot_config_xlsx(lot_config_id: int) -> bytes:
         "允许不精密度(CV%)",
         "质量目标来源",
         "均值和SD统计方式",
+        *CT_ALERT_COLUMNS,
     ]
     item_export = item_export.reindex(columns=item_columns)
 
@@ -523,6 +559,7 @@ def preview_project_template_xlsx(data: bytes) -> tuple[pd.DataFrame, list[str]]
             input_value_type = _INPUT_VALUE_TYPE_BY_TEXT.get(_key(row["输入值类型*"]))
             if input_value_type is None:
                 raise ValueError("输入值类型必须为真实检测值、Ct值或log值。")
+            ct_alert = _import_ct_alert(row, input_value_type)
             identity = _text(row.get("检验项目标识")) or _key(row["标准编码"]) or item_name.casefold()
             row_key = (identity, qc_method, input_value_type)
             if row_key in seen_names:
@@ -566,6 +603,7 @@ def preview_project_template_xlsx(data: bytes) -> tuple[pd.DataFrame, list[str]]
                     "质量目标来源": _text(row["质量目标来源"]),
                     "备注": _text(row["备注"]),
                     "均值和SD统计方式": _statistics_label(_statistics_mode(row.get('均值和SD统计方式'))),
+                    **_ct_alert_columns({'ct_alert': ct_alert}),
                 }
             )
         except (TypeError, ValueError) as exc:
@@ -581,6 +619,7 @@ def _normalized_import_rows(data: bytes) -> list[dict[str, object]]:
     preview, errors = preview_project_template_xlsx(data)
     if errors:
         raise ValueError("导入文件校验未通过：\n" + "\n".join(f"- {item}" for item in errors))
+    ct_alert_provided = any(column in xlsx_bytes_to_dataframes(data)['项目配置'].columns for column in CT_ALERT_COLUMNS)
     result: list[dict[str, object]] = []
     for _, row in preview.iterrows():
         result.append(
@@ -608,6 +647,8 @@ def _normalized_import_rows(data: bytes) -> list[dict[str, object]]:
                 "quality_target_source_text": _text(row["质量目标来源"]),
                 "notes": _text(row["备注"]),
                 "target_statistics_mode": _statistics_mode(row.get('均值和SD统计方式')),
+                "ct_alert_provided": ct_alert_provided,
+                "ct_alert": _import_ct_alert(row, _INPUT_VALUE_TYPE_BY_TEXT[_key(row["输入值类型"])]),
             }
         )
     return result
@@ -699,6 +740,7 @@ class _ImportResolver:
                                                 trade_name=row['reagent_trade_name']))
                 test_item_id = self.test_item(row, unit_id)
                 rows.append(dict(test_item_id=test_item_id, unit_id=unit_id, method_id=method_id, reagent_id=reagent_id,
+                    ct_alert=row.get('ct_alert'), ct_alert_provided=row.get('ct_alert_provided', False),
                     **({'target_statistics_mode': row['target_statistics_mode']} if row.get('target_statistics_mode') else {}),
                     **{k: row[k] for k in ('qc_method', 'input_value_type', 'level_count', 'target_n', 'cv_limit',
                                           'quality_target_source_text', 'notes')}, sort_order=order))
@@ -918,6 +960,13 @@ def import_project_template_xlsx(template_id: int, data: bytes, *, mode='merge',
             existing = connection.execute('''SELECT id,quality_review_json FROM qc_project_template_items
                 WHERE template_id=? AND test_item_id=? AND qc_method=? AND input_value_type=? AND is_disabled=0''',
                 (template_id, *template_item_key(row))).fetchone()
+            pending = json.loads(pending_review_copy(existing['quality_review_json']))
+            if row.get('ct_alert_provided'):
+                pending.update(status='pending', levels=[])
+                if row.get('ct_alert'):
+                    pending['ct_alert'] = row['ct_alert']
+                else:
+                    pending.pop('ct_alert', None)
             connection.execute('UPDATE qc_project_template_items SET quality_review_json=? WHERE id=?',
-                (pending_review_copy(existing['quality_review_json']), existing['id']))
+                (json.dumps(pending, ensure_ascii=False), existing['id']))
         return dict(imported_count=len(imported), saved_count=len(rows), mode=mode, created=resolver.created)

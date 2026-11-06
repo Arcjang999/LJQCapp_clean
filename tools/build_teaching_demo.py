@@ -90,10 +90,10 @@ def confirm_quality(scope, item_id, plan):
     candidates = assess(item, context)
     numerical = [r for r in candidates if r["kind"] == "numeric" and r["status"] == "applicable"]
     process_ids = [r["id"] for r in candidates if r["kind"] == "process" and r["status"] == "applicable"] if assay_code == "HIV1" else []
-    local_process = "每次分析前核对质控品及试剂批号、有效期和仪器状态；异常时登记原因、纠正措施及复测记录。此文本为本次实验室要求。"
+    local_process = "每次分析前核对质控品及试剂批号、有效期和仪器状态；异常时登记原因、纠正措施及复测记录。"
     if assay_code == "HIV1":
         local_process += "HIV-1 RNA定量先将copies/mL结果换算为Log10后录入；内外部质控随样本经历提取与扩增全过程，确认失控后先恢复在控再重新检测相应样本。"
-    common = dict(confirmed_by="资料核对员", evidence="依据本软件已核查目录匹配项目、单位及尺度；" + NOTICE,
+    common = dict(confirmed_by="资料核对员", evidence="按所选方法、单位及结果尺度核对质量要求。",
                   context=context, process_requirements=dict(source_ids=process_ids, requirement_text=local_process))
     if numerical:
         assert len(numerical) == 1, numerical
@@ -104,10 +104,10 @@ def confirm_quality(scope, item_id, plan):
         quality.adopt_requirement(scope, item_id, numerical[0]["id"], levels=levels, **common)
     else:
         review.save_recorded_requirement(scope, item_id, source_name="实验室质控方案", source_version="QC-2026-09",
-            requirement_text="采用完整水平结果、20个有效建靶点和当前质控规则；Ct/Log用于数值信号稳定性监测，不自动判定病原体阴阳性；均值和SD按本批次参数管理。",
+            requirement_text="各水平累计20个有效建靶点后确定均值和SD；正式期按本批次参数及已启用质控规则判读。",
             search_record=dict(query=plan["name"] + "；数值监测；" + item["input_value_type"],
                 official_url="https://www.nhc.gov.cn/wjw/s9492/wsbz.shtml", checked_on="2026-09-28",
-                conclusion="no_numeric" if any(r["status"] == "applicable" for r in candidates) else "no_applicable", rationale="已在软件所附已核查目录中核对；当前输入尺度没有直接适用的自动数值限值，过程条款按适用情况参考，不宣称完成临床标准检索。"), **common)
+                conclusion="no_numeric" if any(r["status"] == "applicable" for r in candidates) else "no_applicable", rationale="收录标准中未找到此结果尺度的数值限值；采用实验室质控方案，并核对适用的对照要求。"), **common)
 
 
 def equipment():

@@ -130,7 +130,7 @@ class SimpleQualitySetupTests(unittest.TestCase):
                     self.assertEqual('local_catalog', search['scope'])
                     self.assertEqual('no_numeric', search['conclusion'])
                     self.assertNotIn('official_url', search)
-                    self.assertIn('不表示已查询全部', search['rationale'])
+                    self.assertIn('已核对当前目录', search['rationale'])
                     if limit is None:
                         self.assertEqual({}, goal)
                         self.assertEqual('record_only', review['decision'])
@@ -142,13 +142,13 @@ class SimpleQualitySetupTests(unittest.TestCase):
                         self.assertIn('未设置CV上限', batch_quality_summary(method, batch)['statistics_scope'])
                     else:
                         self.assertEqual('custom', goal['spec']['origin'])
-                        self.assertIn('非国家数值标准', goal['spec']['notes'])
+                        self.assertIn('实验室确认的CV上限', goal['spec']['notes'])
                         self.assertEqual('sd_cv', goal['spec']['setup_mode'])
                         basis = goal['spec']['laboratory_basis']
                         self.assertEqual(values['quality']['source_name'], basis['source_name'])
                         self.assertEqual(values['quality']['source_version'], basis['source_version'])
                         self.assertIn(values['quality']['requirement_text'], basis['requirement_text'])
-                        self.assertEqual(1, basis['requirement_text'].count('实验室自定义CV上限为'))
+                        self.assertEqual(1, basis['requirement_text'].count('实验室CV上限：'))
                         self.assertEqual(list(range(1, levels+1)), [row['level_order'] for row in goal['levels']])
                         self.assertEqual(values['level_ids'], [row['qc_level_id'] for row in goal['levels']])
                         self.assertTrue(all(row['rule'] == dict(kind='cv', value=3.0, operator='<=', unit='%') for row in goal['levels']))
@@ -208,7 +208,7 @@ class SimpleQualitySetupTests(unittest.TestCase):
             old_text = json.loads(item_context('project', project_item)['quality_goal_json'])['spec']['source_clause']
             save_simple_quality('project', project_item, **setup_args(values, 3.0), requirement_text=old_text)
             current_text = json.loads(item_context('project', project_item)['quality_goal_json'])['spec']['source_clause']
-            self.assertEqual(1, current_text.count('实验室自定义CV上限为'))
+            self.assertEqual(1, current_text.count('实验室CV上限：'))
             self.assertIn('≤3%', current_text)
             self.assertNotIn('≤4%', current_text)
             with db.read_snapshot() as connection:
@@ -217,7 +217,7 @@ class SimpleQualitySetupTests(unittest.TestCase):
             self.assertIsNone(item_context('project', project_item)['cv_limit'])
             self.assertEqual('{}', item_context('project', project_item)['quality_goal_json'])
             recorded_text = json.loads(item_context('project', project_item)['quality_review_json'])['recorded']['requirement_text']
-            self.assertNotIn('实验室自定义CV上限为', recorded_text)
+            self.assertNotIn('实验室CV上限：', recorded_text)
             with db.read_snapshot() as connection:
                 current = item_context('project', project_item, connection)
                 review = json.loads(current['quality_review_json'])
@@ -337,7 +337,7 @@ class SimpleQualitySetupTests(unittest.TestCase):
             self.assert_rejected_without_writes(lambda: prepare_quick_project_setup(omitted), '适用的全部')
             with_cv = deepcopy(values)
             with_cv['quality']['cv_limit'] = 10
-            self.assert_rejected_without_writes(lambda: prepare_quick_project_setup(with_cv), '结果类型')
+            self.assert_rejected_without_writes(lambda: prepare_quick_project_setup(with_cv), 'CV上限比较适用于原始定量结果')
             preview = prepare_quick_project_setup(values)
             receipt = save(values, preview)
             review = runtime_review('lj', receipt['binding']['runtime_batch_id'])

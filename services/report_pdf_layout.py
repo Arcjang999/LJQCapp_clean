@@ -18,6 +18,8 @@ from matplotlib.font_manager import FontProperties
 from matplotlib.lines import Line2D
 from matplotlib.legend import Legend
 from chart_layout import arrange_control_line_labels
+from services.terminology_service import display_quality_record
+from services.ct_alert_service import format_ct_number
 
 from plotting import CONFIGURED_FONT_FALLBACKS as PLOT_CONFIGURED_FONT_FALLBACKS, plot_lj_chart
 from zscore_logic import format_level_id_display
@@ -108,6 +110,7 @@ def render_lj_monthly_report_pdf(package: Any, font_name: str) -> bytes:
 
             pages.extend((figure,"批号与参数追溯") for figure in _build_lot_trace_pages(report))
             pages.extend((figure,"分析质量要求") for figure in _build_quality_pages(report))
+            pages.extend((figure,"Ct提醒明细") for figure in _build_ct_alert_pages(report))
             _write_pages(pdf, pages, report)
     return buffer.getvalue()
 
@@ -142,6 +145,7 @@ def render_zscore_monthly_report_pdf(package: Any, font_name: str) -> bytes:
 
             pages.extend((figure,"批号与参数追溯") for figure in _build_lot_trace_pages(report))
             pages.extend((figure,"分析质量要求") for figure in _build_quality_pages(report))
+            pages.extend((figure,"Ct提醒明细") for figure in _build_ct_alert_pages(report))
             _write_pages(pdf, pages, report)
     return buffer.getvalue()
 
@@ -360,6 +364,9 @@ def _build_lj_summary_pages(report: Any) -> list[Any]:
         ["实测变异系数（%）", _format_lj_metric(report.statistics, "cv"), "适用设定均值", _format_float(report.statistics.target_mean)],
         ["适用设定 SD", _format_float(report.statistics.target_sd), "批次允许不精密度（CV）", _format_float(report.statistics.cv_limit, digits=2, suffix="%")],
     ]
+    ct = report.quality_summary.get('ct_alert') or {}
+    if ct:
+        summary_rows.append(['Ct要求', ct['requirement'], 'Ct提醒次数', str(ct['alert_count'])])
 
     return _build_summary_pages(
         report, basic_rows=basic_rows, basic_font_size=8.8,
@@ -452,6 +459,9 @@ def _build_zscore_summary_pages(report: Any) -> list[Any]:
     ]
     if report.statistics.pending_count:
         run_summary_rows.append(['待判读检测记录数', str(report.statistics.pending_count), '', ''])
+    ct = report.quality_summary.get('ct_alert') or {}
+    if ct:
+        run_summary_rows.append(['Ct要求', ct['requirement'], 'Ct提醒次数', str(ct['alert_count'])])
 
     return _build_summary_pages(
         report, basic_rows=basic_rows, basic_font_size=8.6,
@@ -1061,13 +1071,14 @@ def _quality_section(title, paragraphs):
 
 def _process_requirement_report_sections(review):
     """Keep locally recorded process text separate from untouched source text."""
+    review = display_quality_record(review)
     process = review.get('process_requirements')
     if not isinstance(process, dict):
         return []
     requirement = str(process.get('requirement_text') or '').strip()
     title = ('本实验室对照与质控要求（待确认）' if review.get('status') == 'pending'
              else '本实验室实际对照与质控要求')
-    sections = [(title, [requirement or '本实验室实际要求尚未填写。下方条款为参考，请按实验室实际情况核对。'])]
+    sections = [(title, [requirement or '未填写实验室对照与质控要求。'])]
     selected_ids = set(process.get('source_ids') or [])
     references = []
     for source in review.get('candidates', []):
@@ -1084,23 +1095,23 @@ def _process_requirement_report_sections(review):
 
 
 def _build_quality_pages(report):
-    summary=getattr(report,'quality_summary',{})
+    summary=display_quality_record(getattr(report,'quality_summary',{}))
     if not summary:return []
     review=summary.get('review',{})
     evidence=[]
     for source in review.get('candidates',[]):
         if source.get('disposition')=='adopted':
             evidence.append(source['source']+'；PDF 页码 '+source.get('pages','')+'。'+
-                '；'.join(source.get('requirements',[]))+
-                ('；仅登记依据，尚无自动评价。' if source.get('kind')!='numeric' else ''))
+                '；'.join(source.get('requirements',[])))
     for source in review.get('registered_standards',[]):
-        evidence.append(f"{source['standard']} / {source['version']}；{source['source_clause']}；PDF {source['source_page']}。{source['requirement_text']}；仅登记依据，尚无自动评价。")
+        evidence.append(f"{source['standard']} / {source['version']}；{source['source_clause']}；PDF {source['source_page']}。{source['requirement_text']}")
     recorded=review.get('recorded',{})
     if recorded:
-        comparison = ('未设置CV上限，未进行CV目标比较。'
+        comparison = ('未设置CV上限。'
                       if review.get('search_record', {}).get('scope') == 'local_catalog'
-                      else '仅登记依据，尚无自动评价。')
-        evidence.append(f"{recorded['source_name']} / {recorded['source_version']}：{recorded['requirement_text']}；{comparison}")
+                      else '')
+        evidence.append(f"{recorded['source_name']} / {recorded['source_version']}：{recorded['requirement_text']}" +
+                        (f'；{comparison}' if comparison else ''))
     if review:
         evidence.append(f"确认人 {review.get('confirmed_by','')}；确认时间 {review.get('reviewed_at','')}；适用依据：{review.get('evidence','')}")
         from services.quality_applicability_service import CONTEXT_OPTIONS, CONTEXT_LABELS
@@ -1114,6 +1125,11 @@ def _build_quality_pages(report):
     extra=[_quality_section('适用标准及补充依据',evidence)] if evidence else []
     extra.extend(_quality_section(title, paragraphs)
                  for title, paragraphs in _process_requirement_report_sections(review))
+    ct = summary.get('ct_alert') or {}
+    if ct:
+        extra.append(_quality_section('实验室自定 Ct 线', [
+            f"Ct要求：{ct['requirement']}；Ct提醒次数：{ct['alert_count']}；已核对正式期检测：{ct['evaluated_count']}次。"
+        ]))
     goal=summary.get('goal')
     if not goal:
         return _build_text_pages(report_title=report.title,page_title='质量目标采用依据',
@@ -1133,6 +1149,39 @@ def _build_quality_pages(report):
                 *([f"实验室依据：{spec['laboratory_basis']['source_name']} / {spec['laboratory_basis']['source_version']}。"]
                     if spec.get('laboratory_basis') else []),
                 f"确认人 {goal['confirmed_by']}；采用时间 {goal['adopted_at']}；依据：{goal['evidence']}"]),
-            _quality_section('不精密度比较',rows+[summary['statistics_scope']+'。此处列出实测CV与所选上限的比较。标准要求的完整验证，请结合实验室验证记录核对。']),
-            _quality_section('其他要求（未自动评价）',[f"允许偏倚：{spec['bias_text'] or ('原条款未规定' if spec['origin']=='builtin' else '未设置')}",
+            _quality_section('不精密度比较',rows+[summary['statistics_scope']+'。完整验证结果见实验室验证记录。']),
+            _quality_section('偏倚与总误差要求（人工核查）',[f"允许偏倚：{spec['bias_text'] or ('原条款未规定' if spec['origin']=='builtin' else '未设置')}",
                 f"允许总误差/可比性偏差：{spec['tea_text'] or ('原条款未规定' if spec['origin']=='builtin' else '未设置')}",spec['notes'] or '无补充说明']),*extra])
+
+
+def _build_ct_alert_pages(report):
+    ct = getattr(report, 'quality_summary', {}).get('ct_alert') or {}
+    records = ct.get('records') or []
+    if not records:
+        return []
+    rows = []
+    for record in records:
+        original = record['qc_status']
+        status = ('失控；Ct提醒' if original in ('reject', '失控') else
+                  '警告；Ct提醒' if original in ('warning', '警告') else 'Ct提醒')
+        values = '；'.join(f"{row['level']}：{format_ct_number(row['value'])}" for row in record['values'])
+        requirement = '；'.join(dict.fromkeys(row['requirement'] for row in record['values']))
+        rows.append([_wrap_text(record['test_time'], 18), _wrap_text(values, 20),
+                     _wrap_text(requirement, 16), status])
+    pages = []
+    for chunk in _chunk_rows_by_height(rows, max_height=_full_page_table_max_height(), include_header=True):
+        canvas = _new_canvas(report_title=report.title, page_title='Ct提醒明细', subtitle_lines=[
+            f"项目：{report.basic_info.project_name} / {report.report_month_label}",
+            f"Ct提醒次数：{ct['alert_count']} / 已核对正式期检测：{ct['evaluated_count']}次",
+        ])
+        _draw_table_section(canvas, title='Ct提醒记录', cell_text=chunk,
+            col_labels=['检测时间', '实测Ct', 'Ct要求', '判读'],
+            col_widths=[.25, .25, .23, .27], font_size=8.5)
+        for table in canvas.axis.tables:
+            for (row_index, column_index), cell in table.get_celld().items():
+                if row_index and column_index == 3:
+                    rejected = '失控' in cell.get_text().get_text()
+                    cell.set_facecolor('#fde9e7' if rejected else '#fff3c4')
+                    cell.get_text().set_color('#a52622' if rejected else '#825900')
+        pages.append(canvas.figure)
+    return pages

@@ -12,7 +12,7 @@ from services.project_config_service import _normalize_template_item
 _FIELDS = ('test_item_id', 'qc_method', 'input_value_type', 'unit_id', 'method_id',
            'reagent_id', 'level_count', 'target_n', 'cv_limit', 'quality_target_source_text', 'target_statistics_mode')
 _QUALITY_ARGS = ('confirmed_by', 'evidence', 'context', 'search_record',
-                 'adopted_standard_ids', 'registered_standards', 'process_requirements')
+                 'adopted_standard_ids', 'registered_standards', 'process_requirements', 'ct_alert')
 
 
 class QuickSetupDetailsError(ValueError):
@@ -181,6 +181,7 @@ def _prepare(connection, values):
         raise ValueError('请选择质量要求来源。')
     source_fingerprint = _hash(dict(references=context['references'], levels=context['levels'],
                                     product_choice=choice, spec=spec,
+                                    ct_alert=args.get('ct_alert'),
                                     catalog_review=payload['search_record'] if mode == 'sd_cv' else None))
     summary = [
         ('项目', name), ('仪器', context['references']['lab_instrument_id']['display_name']),
@@ -199,6 +200,9 @@ def _prepare(connection, values):
         summary.append(('质量要求', '本批次SD控制' + (f"；实验室CV≤{payload['cv_limit']:g}%" if payload['cv_limit'] is not None else '；未设置CV上限')))
     elif spec:
         summary.append(('质量要求', spec['standard'] + ' / ' + spec['version'] + '；' + spec['imprecision_text']))
+    if args.get('ct_alert'):
+        from services.ct_alert_service import ct_requirement_text
+        summary.append(('实验室自定 Ct 线', ct_requirement_text(args['ct_alert'])))
     return dict(summary=summary, material_labels=[material_label(row) for row in context['levels']],
                 source_fingerprint=source_fingerprint,
                 preview_hash=_hash(dict(values=values, source_fingerprint=source_fingerprint)))

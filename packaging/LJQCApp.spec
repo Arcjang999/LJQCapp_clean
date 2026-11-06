@@ -37,6 +37,8 @@ PROJECT_HELP_FILES = [
     "docs/images/first-use/01-navigation.png",
     "docs/images/first-use/02-new-project.png",
     "docs/images/first-use/03-quality-standard.png",
+    "docs/images/first-use/04-ct-alert-settings.jpg",
+    "docs/images/first-use/05-ct-alert-judgment.jpg",
 ]
 
 

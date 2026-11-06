@@ -148,25 +148,25 @@ def render_zscore_latest_analysis_panel(
     phase_label = display_generated_text(str(latest_run.get("phase_label") or get_phase_label(latest_run.get("phase", overall_phase))))
     badge_text = phase_label if is_building_phase else format_zscore_status_label(status)
     trigger_rule_text = (
-        "参数建立期不启用正式规则"
+        "完成建靶后启用"
         if is_building_phase
         else format_zscore_rule_hits(latest_run.get("rule_hits_run", []))
     )
     summary_text = (
-        "本次结果用于建靶，尚不判定正式质控结论。"
+        "本次结果用于建立各水平的均值和SD。"
         if is_building_phase
         else str(latest_run.get("analysis_prompt", "") or "暂无分析提示。").splitlines()[0].strip()
     )
     render_latest_analysis_card(
-        status_label=badge_text,
-        summary_text=summary_text,
+        status_label=latest_run.get('display_status', badge_text) if latest_run.get('ct_alert') else badge_text,
+        summary_text=summary_text + (' ' + str(latest_run.get('ct_alert_detail') or '') if latest_run.get('ct_alert') else ''),
         meta_items=[
             ("当前阶段", phase_label),
             ("触发规则", trigger_rule_text),
             ("误差类型", format_error_type_label(latest_run.get("error_type_hint", "unknown"))),
         ],
         source_text=source_text,
-        tone_key=status,
+        tone_key=latest_run.get('display_tone', status) if latest_run.get('ct_alert') else status,
     )
 
 def render_zscore_abnormal_note_quick_entry(latest_run: dict[str, Any] | None) -> None:
@@ -226,7 +226,7 @@ def render_zscore_vendor_reference_editor(
     required_n: int,
     profile: dict[str, Any],
 ) -> None:
-    with st.expander("厂家参考值（仅作参考）", expanded=False):
+    with st.expander("厂家参考值", expanded=False):
         render_zscore_vendor_reference_editor_body(
             batch_id=batch_id,
             template_id=template_id,
@@ -418,7 +418,7 @@ def _build_zscore_run_records_dataframe(
             "阶段": display_generated_text(str(run.get("phase_label") or get_phase_label(run.get("phase")))),
             "检测时间": _format_zscore_export_datetime(run.get("test_time")),
             "检测人": str(run.get("operator", "") or ""),
-            "本次判定结果": format_zscore_status_label(run.get("run_status", "pending")),
+            "本次判定结果": run.get('display_status', format_zscore_status_label(run.get("run_status", "pending"))),
             "触发规则": format_zscore_rule_hits(run.get("rule_hits_run", [])),
             "误差类型": format_error_type_label(run.get("error_type_hint", "unknown")),
             "分析提示": display_generated_text(str(run.get("analysis_prompt", "") or "")),
@@ -1022,6 +1022,9 @@ def build_zscore_phase_export_dataframe(
         )
 
     export_columns.extend(["实际试剂批号","参数版本ID","上下文ID"])
+    include_ct = any(run.get('ct_alert_config') for run in export_runs)
+    if include_ct:
+        export_columns.extend(['Ct要求', 'Ct提醒', '判读', 'Ct明细'])
     rows: list[dict[str, Any]] = []
     for run in export_runs:
         level_results_by_id = {
@@ -1055,6 +1058,10 @@ def build_zscore_phase_export_dataframe(
             row["分析提示"] = display_generated_text(str(run.get("analysis_prompt", "") or ""))
         row["备注"] = str(run.get("manual_note", "") or "")
         row["阶段"] = display_generated_text(str(run.get("phase_label") or get_phase_label(run.get("phase"))))
+        if include_ct:
+            row.update({'Ct要求': run.get('ct_requirement', ''),
+                'Ct提醒': '触发' if run.get('ct_alert') else '符合要求' if run.get('ct_alert_config') else '未启用',
+                '判读': run.get('display_status', ''), 'Ct明细': run.get('ct_alert_detail', '')})
         rows.append(row)
 
     return pd.DataFrame(rows, columns=export_columns)
@@ -1134,6 +1141,8 @@ def build_zscore_workbench_context(selected_batch_id: int) -> dict[str, object]:
         required_level_ids = list(batch_context["required_level_ids"])
         level_label_map = dict(batch_context["level_label_map"])
         history_runs = get_zscore_runs(selected_batch_id, template_id)
+        from services.ct_alert_service import annotate_runtime_runs, annotate_runtime_frame
+        history_runs = annotate_runtime_runs(selected_batch_id, history_runs)
         operator_options = build_zscore_operator_options(history_runs)
         required_n = int(batch_context["required_n"])
         level_target_profiles = get_zscore_level_targets(selected_batch_id, template_id, required_n=required_n)
@@ -1161,7 +1170,8 @@ def build_zscore_workbench_context(selected_batch_id: int) -> dict[str, object]:
             "overall_phase_label": overall_phase_label,
             "formal_rules_enabled": formal_rules_enabled,
             "default_phase_scope": default_phase_scope,
-            "plot_df": build_zscore_plot_dataframe(history_runs, None, display_phase=None),
+            "plot_df": annotate_runtime_frame('zscore', selected_batch_id,
+                build_zscore_plot_dataframe(history_runs, None, display_phase=None)),
             "latest_run": get_latest_zscore_run_for_display(history_runs),
         }
 

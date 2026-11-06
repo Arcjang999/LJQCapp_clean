@@ -28,7 +28,7 @@ def get_latest_status_context(qc_df: pd.DataFrame) -> tuple[str, str]:
         return "\u6682\u65e0\u6570\u636e", "\u6682\u65e0\u68c0\u6d4b\u7ed3\u679c\uff0c\u8bf7\u5148\u5f55\u5165\u8d28\u63a7\u6570\u636e\u3002"
 
     latest_row = qc_df.sort_values(["test_time", "id"]).iloc[-1]
-    return str(latest_row.get("status", "")), str(latest_row.get("analysis_prompt", "")).strip()
+    return str(latest_row.get("display_status", latest_row.get("status", ""))), str(latest_row.get("analysis_prompt", "")).strip()
 
 def get_latest_result_panel_content(qc_df: pd.DataFrame, fallback_message: str) -> tuple[str, str]:
     if qc_df.empty:
@@ -142,7 +142,7 @@ def render_lj_formal_westgard_panel(
     latest_rule_hits: str,
     latest_source_text: str,
 ) -> None:
-    st.markdown("**Westgard 判读**")
+    st.markdown("**判读**")
     render_status_panel(
         latest_status,
         latest_compact_message,
@@ -265,8 +265,13 @@ def build_lj_workbench_context(selected_batch_id: int) -> dict[str, object]:
             level=confirmed['levels'][0]
             stats.update(target_ready=True,mean=level['mean'],sd=level['sd'],cv=calculate_cv_percent(level['mean'], level['sd']),
                 target_profile_id=confirmed['id'],message='控制参数已确认，可录入正式质控结果。')
+        from services.ct_alert_service import annotate_runtime_frame
+        qc_df = annotate_runtime_frame('lj', selected_batch_id, qc_df)
         latest_status, latest_status_message = get_latest_status_context(qc_df)
         latest_rule_hits, latest_compact_message = get_latest_result_panel_content(qc_df, latest_status_message)
+        latest_ct = get_latest_qc_row(qc_df)
+        if latest_ct is not None and latest_ct.get('ct_alert'):
+            latest_compact_message += ' ' + str(latest_ct.get('ct_alert_detail') or '')
         return {
             "batch": batch,
             "input_value_type": normalize_input_value_type(batch["input_value_type"]),
@@ -586,6 +591,8 @@ def render_lj_chart_and_analysis_section(
         analysis_mode = resolve_lj_latest_analysis_mode(stats)
         if analysis_mode == "building":
             render_lj_building_outlier_panel(stats, latest_source_text)
+            if latest_row is not None and latest_row.get('ct_alert'):
+                st.warning('Ct提醒：' + str(latest_row.get('ct_alert_detail') or ''))
         else:
             render_lj_formal_westgard_panel(
                 latest_status,
@@ -604,7 +611,7 @@ def render_lj_chart_and_analysis_section(
 
 def render_lj_rule_summary_section(stats: dict[str, object]) -> None:
     if not bool(stats.get("target_ready")):
-        st.info("建靶尚未完成，暂不汇总Westgard规则。")
+        st.info("完成建靶后显示Westgard规则汇总。")
         return
 
     st.markdown("**本批次规则汇总**")
@@ -654,7 +661,8 @@ def render_lj_records_section(qc_df: pd.DataFrame, input_value_type: str, *, con
             '检测人': row.get('operator') or '-',
             get_input_value_type_label(input_value_type): row['value'],
             '阶段': '参数建立期' if row['phase'] == '建靶数据' else '正式期',
-            '判定': _get_lj_building_record_current_status_label(row) if row['phase'] == '建靶数据' else row['status'],
+            '判定': (row.get('display_status') if row.get('ct_alert') else
+                     _get_lj_building_record_current_status_label(row) if row['phase'] == '建靶数据' else row['status']),
             '规则': row.get('rule_hits') or '-',
         } for _, row in records.iterrows()])
         selected_id = render_record_selection(display, records['id'].astype(int).tolist(), scope=scope)

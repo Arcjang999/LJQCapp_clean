@@ -16,7 +16,8 @@ sys.path.insert(0, str(ROOT))
 from streamlit.testing.v1 import AppTest
 from ui import user_guide
 
-PICTURE_NAMES = ('01-navigation.png', '02-new-project.png', '03-quality-standard.png')
+PICTURE_NAMES = ('01-navigation.png', '02-new-project.png', '03-quality-standard.png',
+                 '04-ct-alert-settings.jpg', '05-ct-alert-judgment.jpg')
 
 HELP_APP = '''
 import streamlit as st
@@ -147,7 +148,7 @@ class UserGuideSmokeTest(unittest.TestCase):
             self.pictures[0].write_bytes(b'not a PNG')
             app.run()
             self.assertFalse(list(app.exception))
-            self.assertEqual(len(app.get('image')), 2)
+            self.assertEqual(len(app.get('image')), len(self.pictures) - 1)
             self.assertTrue(any('暂时无法显示' in item.value for item in app.caption))
             self.assertFalse(app.button(key='user_guide_home').disabled)
             self.assertTrue(any('## 首次使用' in item.value for item in app.markdown))

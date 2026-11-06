@@ -10,6 +10,7 @@ from matplotlib.lines import Line2D
 from matplotlib.ticker import FixedLocator
 import pandas as pd
 from services.profiling import profile_timer
+from services.ct_alert_service import format_ct_number
 from chart_layout import (
     CHART_LEGEND_SIZE, CONTROL_LINE_COLORS, add_control_line_labels,
     control_parameter_segments, finish_chart_layout, mark_control_parameter_change,
@@ -108,6 +109,84 @@ CONFIGURED_FONT_FALLBACKS = configure_matplotlib_fonts()
 print(f"[plotting] CONFIGURED_FONT_FALLBACKS={CONFIGURED_FONT_FALLBACKS}")
 
 MANUAL_NOTE_EDGE_COLOR = "#2f4858"
+CT_ALERT_COLOR = "#d79b00"
+
+
+def resolve_ct_chart_config(frame, ct_alert=None):
+    """Read the explicitly adopted Ct setting without changing source results."""
+    from services.ct_alert_service import normalize_ct_alert
+    config = ct_alert if ct_alert is not None else getattr(frame, 'attrs', {}).get('ct_alert')
+    return normalize_ct_alert(config, input_value_type='ct')
+
+
+def ct_chart_policies(frame, config=None):
+    values = frame['ct_alert_config'].tolist() if 'ct_alert_config' in frame else [config]
+    unique = []
+    for value in values:
+        if isinstance(value, dict) and value.get('enabled') and value not in unique:
+            unique.append(value)
+    return unique
+
+
+def expand_ct_chart_limits(limits, config):
+    if limits is None or not config:
+        return limits
+    lower, upper = limits
+    policies = config if isinstance(config, list) else [config]
+    thresholds = [row['threshold'] for row in policies if row]
+    if not thresholds or all(lower < value < upper for value in thresholds):
+        return limits
+    lower, upper = min(lower, *thresholds), max(upper, *thresholds)
+    padding = max((upper - lower) * .06, max(abs(v) for v in thresholds) * .005, 1e-6)
+    return lower - padding, upper + padding
+
+
+def plot_ct_requirement_line(axis, config):
+    if not config:
+        return
+    symbol = {'<=': '≤', '>=': '≥', '<': '<', '>': '>'}[config['operator']]
+    axis.axhline(config['threshold'], color=CT_ALERT_COLOR, linewidth=1.45,
+                 linestyle='-.', zorder=2,
+                 label=f"实验室自定 Ct 线（{symbol}{format_ct_number(config['threshold'])}）")
+
+
+def plot_ct_requirement_lines(axis, frame, config, x_column):
+    if 'ct_alert_config' not in frame:
+        plot_ct_requirement_line(axis, config)
+        return
+    points = frame[[x_column, 'ct_alert_config']].sort_values(x_column)
+    groups = []
+    for x, adopted in points.itertuples(index=False, name=None):
+        if groups and groups[-1]['config'] == adopted:
+            groups[-1]['right'] = float(x)
+        else:
+            groups.append(dict(config=adopted, left=float(x), right=float(x)))
+    shown = set()
+    for group in groups:
+        adopted = group['config']
+        if not isinstance(adopted, dict) or not adopted.get('enabled'):
+            continue
+        symbol = {'<=': '≤', '>=': '≥', '<': '<', '>': '>'}[adopted['operator']]
+        label = f"实验室自定 Ct 线（{symbol}{format_ct_number(adopted['threshold'])}）"
+        axis.plot([group['left'] - .35, group['right'] + .35], [adopted['threshold']] * 2,
+            color=CT_ALERT_COLOR, linewidth=1.45, linestyle='-.', zorder=2,
+            label=label if label not in shown else '_nolegend_')
+        shown.add(label)
+
+
+def plot_ct_alert_points(axis, frame, x_column, y_column):
+    if frame.empty or 'ct_alert' not in frame:
+        return
+    mask = frame['ct_alert'].fillna(False).astype(bool)
+    if 'status' in frame:
+        mask &= ~frame['status'].isin(['失控', 'reject', '疑似离群'])
+    if 'display_tone' in frame:
+        mask &= ~frame['display_tone'].isin(['reject', 'danger'])
+    points = frame.loc[mask]
+    if not points.empty:
+        scatter_chart_points(axis, points[x_column], points[y_column],
+            color=CT_ALERT_COLOR, marker='^', s=76, edgecolors='#ffffff',
+            linewidths=.7, label='Ct提醒', zorder=5)
 
 
 def plot_lj_chart(
@@ -118,6 +197,7 @@ def plot_lj_chart(
     y_axis_mode: str = "\u6807\u51c6\u89c6\u56fe",
     standard_sd_limit: float = 4.0,
     y_axis_label: str = "检测值",
+    ct_alert: dict | None = None,
 ):
     with profile_timer(
         "plot_lj_chart",
@@ -127,6 +207,10 @@ def plot_lj_chart(
     ):
         figure, axis = plt.subplots(figsize=(9.4, 5.9), dpi=150)
         plot_df = _filter_view_data(qc_df, view_mode)
+        ct_config = resolve_ct_chart_config(qc_df, ct_alert)
+        if ct_config and 'ct_evaluation' not in plot_df:
+            from services.ct_alert_service import annotate_lj_frame
+            plot_df = annotate_lj_frame(plot_df, ct_config)
 
         if plot_df.empty:
             axis.text(
@@ -141,7 +225,8 @@ def plot_lj_chart(
             finish_chart_layout(figure, axis, title)
             return figure
 
-        y_limits = _get_y_limits(plot_df, stats, y_axis_mode, standard_sd_limit)
+        y_limits = expand_ct_chart_limits(
+            _get_y_limits(plot_df, stats, y_axis_mode, standard_sd_limit), ct_chart_policies(plot_df, ct_config))
         display_df = _build_display_dataframe(plot_df, y_limits)
         x_values = display_df["sequence"]
         y_values = display_df["display_value"]
@@ -164,6 +249,8 @@ def plot_lj_chart(
 
         if stats.get("target_ready"):
             _plot_versioned_control_lines(axis, display_df, stats)
+        plot_ct_requirement_lines(axis, display_df, ct_config, 'sequence')
+        plot_ct_alert_points(axis, display_df, 'sequence', 'display_value')
         if y_limits is not None:
             axis.set_ylim(y_limits)
             _plot_out_of_range_markers(axis, display_df, y_limits)
@@ -444,7 +531,12 @@ def plot_instant_chart(
     title: str,
     *,
     y_axis_label: str = "检测值",
+    ct_alert: dict | None = None,
 ):
+    ct_config = resolve_ct_chart_config(analysis_df, ct_alert)
+    if ct_config and 'ct_evaluation' not in analysis_df:
+        from services.ct_alert_service import annotate_lj_frame
+        analysis_df = annotate_lj_frame(analysis_df, ct_config)
     figure, axis = plt.subplots(figsize=(9.2, 5.6), dpi=150)
     if analysis_df.empty:
         axis.text(
@@ -548,6 +640,8 @@ def plot_instant_chart(
             axis.axhline(upper, color="#76b7b2", linewidth=1.0, linestyle="--", label="+1SD")
             axis.axhline(lower, color="#76b7b2", linewidth=1.0, linestyle="--", label="-1SD")
 
+    plot_ct_requirement_lines(axis, plot_df, ct_config, 'effective_sequence')
+    plot_ct_alert_points(axis, plot_df, 'effective_sequence', 'value')
     _configure_instant_x_axis(axis, plot_df)
     axis.set_xlabel("有效点序号")
     axis.set_ylabel(y_axis_label)

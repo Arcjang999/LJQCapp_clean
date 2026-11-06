@@ -7,6 +7,7 @@ import streamlit as st
 from database import atomic_write, get_connection
 from services.quality_target_service import (adopt_requirement, clear_requirement, decode, item_context,
     suggested_requirements, source_label, validate_spec_for_item, batch_quality_summary)
+from services.terminology_service import display_quality_record, display_quality_text
 
 
 def catalog_table(records):
@@ -19,6 +20,7 @@ def catalog_table(records):
 
 
 def render_spec(spec):
+    spec = display_quality_record(spec)
     st.caption(source_label(spec)+f"｜实施：{spec['effective_date']}")
     st.write('允许不精密度：'+spec['imprecision_text'])
     st.write('允许偏倚：'+(spec['bias_text'] or '原条款未规定'))
@@ -47,6 +49,14 @@ def _current_source(source):
 def render_review_summary(review, *, historical=False):
     if not review:
         return
+    review = display_quality_record(review)
+    if (review.get('ct_alert') or {}).get('enabled'):
+        from services.ct_alert_service import ct_requirement_text
+        try:
+            label = ct_requirement_text(review['ct_alert'])
+        except ValueError:
+            label = '待填写'
+        st.write('实验室自定 Ct 线：' + label)
     if review.get('status') == 'pending':
         st.info('质量要求还没有确认。请填写检测条件和确认人，然后保存质量目标。')
     recorded = review.get('recorded', {})
@@ -71,7 +81,7 @@ def render_review_summary(review, *, historical=False):
         st.caption(f"补充文件：{source['standard']} / {source['version']}；{source['source_clause']}；{source['requirement_text']}（请按条款检查检测结果）")
     search=review.get('search_record')
     if search:
-        label = '本软件已收录标准的检查记录' if search.get('scope') == 'local_catalog' else '标准查找记录'
+        label = '收录标准查找记录' if search.get('scope') == 'local_catalog' else '标准查找记录'
         st.caption(label+'：'+search.get('checked_on','')+'｜'+search.get('rationale',''))
 
 
@@ -202,6 +212,11 @@ def quality_validation_issues(item, result, plan, spec=None, *, quick=False, set
     if mode != 'sd_cv' and not str(result.get('evidence') or '').strip():
         add('evidence', '要求与文件依据', '请在“要求与文件依据”中填写“说明此要求如何用于本次检测”。')
     try:
+        from services.ct_alert_service import normalize_ct_alert
+        normalize_ct_alert(result.get('ct_alert'), input_value_type=item.get('input_value_type'))
+    except ValueError as error:
+        add('ct_alert', '实验室自定 Ct 线', str(error))
+    try:
         registered = validate_registered_sources(result.get('registered_standards'), context)
         if plan['state'] != 'blocked' and plan['state'] != 'standard':
             search = validate_search_record(result.get('search_record'), confirmed_by=result.get('confirmed_by', ''),
@@ -214,6 +229,50 @@ def quality_validation_issues(item, result, plan, spec=None, *, quick=False, set
     return issues
 
 
+def _render_ct_alert_settings(item, prior, prefix, *, quick=False):
+    """Keep the typed Ct requirement independent of laboratory prose and QC rules."""
+    if item.get('input_value_type') != 'ct':
+        return None
+    from ui.required_fields import required_field
+    prior_alert = prior.get('ct_alert') or {}
+    cache = st.session_state.setdefault(prefix + '_ct_alert_values', dict(prior_alert))
+    for field in ('enabled', 'operator', 'threshold'):
+        widget_key = prefix + '_ct_alert_' + field
+        if widget_key in st.session_state:
+            cache[field] = st.session_state[widget_key]
+    confirmed_key = prefix + ('_checked' if quick else '_confirmed')
+    def changed():
+        st.session_state[confirmed_key] = False
+        if quick:
+            dialog = st.session_state.get('project_workspace_dialog')
+            if isinstance(dialog, dict):
+                dialog.pop('quick_preview', None)
+    enabled = st.checkbox('实验室自定 Ct 线', value=bool(cache.get('enabled')),
+        key=prefix + '_ct_alert_enabled', on_change=changed,
+        help='录入结果后核对所设Ct要求。不符合时显示黄色提醒；质控失控时显示红色。')
+    cache['enabled'] = enabled
+    if not enabled:
+        return None
+    options = {'': '请选择', '>': '>', '>=': '≥', '<': '<', '<=': '≤'}
+    with st.container(border=True):
+        relation, boundary = st.columns(2)
+        with relation, required_field(prefix + '_ct_alert_operator',
+                missing=not cache.get('operator'), message='请选择Ct要求。'):
+            operator = st.selectbox('Ct要求', list(options),
+                index=list(options).index(cache.get('operator', '')) if cache.get('operator', '') in options else 0,
+                format_func=options.get, key=prefix + '_ct_alert_operator', on_change=changed,
+                help='≤、≥包含界值；<、>在等于界值时触发提醒。')
+        with boundary, required_field(prefix + '_ct_alert_threshold',
+                missing=cache.get('threshold') is None, message='请填写Ct界值。'):
+            threshold = st.number_input('Ct界值',
+                value=float(cache['threshold']) if cache.get('threshold') is not None else None,
+                format='%s',
+                key=prefix + '_ct_alert_threshold', on_change=changed,
+                help='按说明书或实验室文件确定，支持小数。')
+    cache.update(operator=operator, threshold=threshold)
+    return dict(enabled=True, operator=operator, threshold=threshold, version=1)
+
+
 def render_quality_setup(item, prior, prefix, *, levels=None, goal=None, quick=False, actor='', settings_location=None):
     """One quality form for quick creation, project settings and editable lots."""
     from services.quality_setup_service import SD_REQUIREMENT, quality_setup_plan, local_catalog_review
@@ -221,6 +280,20 @@ def render_quality_setup(item, prior, prefix, *, levels=None, goal=None, quick=F
     from ui.quality_applicability import render_conditions
     from ui.required_fields import required_field
 
+    prior = display_quality_record(prior)
+    goal = display_quality_record(goal)
+    for suffix in ('_recorded', '_recorded_text', '_evidence', '_process_text'):
+        key = prefix + suffix
+        if key in st.session_state:
+            current = st.session_state[key]
+            display = display_quality_text(current)
+            if display != current:
+                st.session_state[key] = display
+    cache_key = prefix + '_manual_values'
+    if cache_key in st.session_state:
+        st.session_state[cache_key] = {
+            key: display_quality_text(value) for key, value in st.session_state[cache_key].items()
+        }
     condition_args, assessments = render_conditions(item, prior, prefix, quick=quick, settings_location=settings_location)
     plan = quality_setup_plan(item, condition_args['context'])
     if plan['state'] == 'sd_cv' and not condition_args['search_record']:
@@ -243,7 +316,7 @@ def render_quality_setup(item, prior, prefix, *, levels=None, goal=None, quick=F
             value = recorded[field]
             if field == 'requirement_text' and (simple_goal or previous_mode == 'sd_cv'):
                 import re
-                value = re.sub(r'\s*实验室自定义CV上限为≤[^。]*。', '', str(value))
+                value = re.sub(r'\s*(?:实验室自定义CV上限为≤[^。]*。|实验室CV上限：≤[^%]+%；比较正式期在控结果的实测CV。)', '', str(value))
             cache[suffix] = value
     for suffix in ('_cv_limit', '_source_name', '_source_version', '_recorded' if quick else '_recorded_text'):
         if prefix+suffix in st.session_state:
@@ -375,7 +448,7 @@ def render_quality_setup(item, prior, prefix, *, levels=None, goal=None, quick=F
                 cv = item.get('cv_limit')
             manual_value('_cv_limit', cv)
             result['cv_limit'] = st.number_input('实验室CV上限（选填，%）', min_value=0.0, value=None,
-                key=prefix+'_cv_limit', help='按百分数填写，留空不比较。以正式期在控结果的CV与此上限比较。')
+                key=prefix+'_cv_limit', help='填写百分数后，与正式期在控结果的CV比较。')
             if result['cv_limit'] is not None:
                 mode = result['mode'] = st.session_state[prefix+'_mode'] = 'sd_cv'
         else:
@@ -388,7 +461,8 @@ def render_quality_setup(item, prior, prefix, *, levels=None, goal=None, quick=F
         if old_auto != evidence and st.session_state.get(prefix+'_evidence', '') in ('', old_auto):
             st.session_state[prefix+'_evidence'] = evidence
         st.session_state[prefix+'_auto_evidence'] = evidence
-    with st.expander('要求与文件依据', expanded=mode == 'recorded'):
+    with st.expander('要求与文件依据', expanded=mode == 'recorded' or bool(prior.get('ct_alert'))):
+        result['ct_alert'] = _render_ct_alert_settings(item, prior, prefix, quick=quick)
         if mode in ('sd_cv', 'recorded'):
             simple = mode == 'sd_cv'
             manual_value('_source_name', recorded.get('source_name') or ('本实验室SD质控方案' if simple else ''))
@@ -408,7 +482,7 @@ def render_quality_setup(item, prior, prefix, *, levels=None, goal=None, quick=F
             # must not survive a change to that limit or become its input source.
             if simple:
                 import re
-                text = re.sub(r'\s*实验室自定义CV上限为≤[^。]*。', '', text)
+                text = re.sub(r'\s*(?:实验室自定义CV上限为≤[^。]*。|实验室CV上限：≤[^%]+%；比较正式期在控结果的实测CV。)', '', text)
             manual_value('_recorded' if quick else '_recorded_text', text)
             requirement_key = prefix+('_recorded' if quick else '_recorded_text')
             with required_field(requirement_key, missing=not str(st.session_state[requirement_key]).strip(),
@@ -416,7 +490,7 @@ def render_quality_setup(item, prior, prefix, *, levels=None, goal=None, quick=F
                 result['requirement_text'] = st.text_area('实验室实际要求',
                     key=requirement_key, max_chars=2000)
             if not simple:
-                st.caption('请按所填文字要求人工核对检测结果。')
+                st.caption('按所填要求核对质控结果。')
         with required_field(prefix+'_evidence',
                 missing=mode != 'sd_cv' and not str(st.session_state.get(prefix+'_evidence', evidence)).strip(),
                 message='请说明此要求如何用于本次检测。'):
@@ -435,8 +509,9 @@ def render_quality_setup(item, prior, prefix, *, levels=None, goal=None, quick=F
     result['blocked'] = plan['state'] == 'blocked'
     result['validation_issues'] = quality_validation_issues(item, result, plan, spec, quick=quick,
                                                         settings_location=settings_location)
+    result['blocked'] = result['blocked'] or any(row['field'] == 'ct_alert' for row in result['validation_issues'])
     from services.quality_applicability_service import missing_context_fields
-    inline_fields = {'confirmed_by', 'checked', *missing_context_fields(result['context'])}
+    inline_fields = {'confirmed_by', 'checked', 'ct_alert', *missing_context_fields(result['context'])}
     if mode in ('sd_cv', 'recorded'):
         inline_fields.add('requirement_text')
     if mode == 'recorded':
@@ -470,7 +545,7 @@ def render_adoption(scope,item_id,*,embedded=False,expected_revision=None,on_sav
                 st.info('各水平的浓度和类别决定适用限值，请核对后确认本批次质量目标。')
             else:
                 st.caption(f"确认人：{goal['confirmed_by']}｜设置时间：{goal['adopted_at']}")
-            if goal.get('evidence'):st.caption('设置说明：'+goal['evidence'])
+            if goal.get('evidence'):st.caption('设置说明：'+display_quality_text(goal['evidence']))
             if goal.get('levels'):
                 st.dataframe(pd.DataFrame([{'水平':v['level_order'],'浓度':v['concentration'],'类别':v['category'],
                     '要求':f"{v['rule']['operator']} {v['rule']['value']:g}{v['rule']['unit']}"} for v in goal['levels']]),hide_index=True)
@@ -495,7 +570,7 @@ def render_adoption(scope,item_id,*,embedded=False,expected_revision=None,on_sav
     result = render_quality_setup(item, review, prefix, levels=levels, goal=goal,
                                   settings_location=_quality_settings_location(scope, item_id))
     condition_args = {key: result[key] for key in ('context', 'search_record', 'adopted_standard_ids',
-                                                   'registered_standards', 'process_requirements')}
+                                                   'registered_standards', 'process_requirements', 'ct_alert')}
     def check_current():
         if scope == 'lot' and expected_revision is not None:
             from services.batch_edit_service import get_batch_item_context
@@ -524,7 +599,8 @@ def render_adoption(scope,item_id,*,embedded=False,expected_revision=None,on_sav
                     supplemental_cv=result.get('supplemental_cv'))
                 save_pending_review(scope, item_id, context=result['context'], search_record=search,
                     registered_standards=result['registered_standards'],
-                    process_requirements=result['process_requirements'], draft_recorded=draft_recorded)
+                    process_requirements=result['process_requirements'], draft_recorded=draft_recorded,
+                    ct_alert=result.get('ct_alert'))
         except ValueError as error:
             st.error(str(error))
         else:
@@ -572,5 +648,5 @@ def render_batch_quality(method,batch_id,month=None):
             return
         render_spec(summary['goal']['spec'])
         st.caption(f"统计范围：{summary['period']}；{summary['statistics_scope']}。下表显示实测CV与CV上限的比较；标准中的其他要求请另行检查。")
-        st.caption(f"确认人：{summary['goal']['confirmed_by']}；依据：{summary['goal']['evidence']}")
+        st.caption(f"确认人：{summary['goal']['confirmed_by']}；依据：{display_quality_text(summary['goal']['evidence'])}")
         st.dataframe(pd.DataFrame(summary['rows']).rename(columns={'level':'水平','requirement':'采用要求','category':'水平类别','concentration':'采用浓度','count':'在控点数','days':'检测日数','cv':'实测变异系数（%）','decision':'比较结果'}),hide_index=True,width='stretch')

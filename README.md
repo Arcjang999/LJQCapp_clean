@@ -1,5 +1,7 @@
 # 实验室室内质控工作台使用说明
 
+2026-11-06实验室自定Ct线已本地完成：仅Ct输入项目显示，勾选后在“要求与文件依据”展开独立设置框。三方法判读、记录、整组回执、今日总览、图表、导出和报告同步；Ct提醒黄色，失控红色优先，原质控统计及历史采用条件保持，见[交付记录](docs/execution/deliveries/CT_ALERT_LINE_2026-11-06.md)。[使用说明](docs/OPERATION_GUIDE.md)已按近期功能更新为18节并加入Ct配图，见[说明回看](docs/execution/notes/USER_GUIDE_REVIEW_2026-11-06.md)。此前[文案清理](docs/execution/deliveries/WORDING_DEFAULTS_AUDIT_2026-11-06.md)保留。本轮未提交推送或更新云端。
+
 2026-11-02云端已同步本轮文案、多产品流程和月度／累计参数修改，运行代码08bf27e。原数据、4个附件及24份报告已核对保留，两份备份有效，服务正常；18套111项、报告字体和公网检查通过，见[云端更新记录](docs/execution/deliveries/CLOUD_CONTROL_STATISTICS_2026-11-02.md)。下文“未更新云端”为此前本地验收状态。
 
 2026-11-02提交推送：用户已授权将本轮反馈修改、月度／累计参数、相关测试及使用说明提交推送至 `codex/project-workflow-alignment`。验收及提交范围见[交付记录](docs/execution/deliveries/TARGET_STATISTICS_2026-11-02.md#提交推送)；本次不更新云端。下方“未提交推送”为本地验收时状态。

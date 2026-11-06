@@ -215,6 +215,14 @@ def _receipt_item(c, prepared, result_id):
             value=value['value'], raw_value=value['value'], log_value=value['log_value'],
             input_value_type=item['input_value_type'], unit_symbol=item['unit_symbol'],
             status=measured.get('status'), rule_hits=measured.get('rule_hits', [])))
+    ct = result.get('ct_evaluation') or {}
+    ct_fields = {}
+    if ct.get('enabled'):
+        from services.ct_alert_service import combined_ct_status
+        shown, tone = combined_ct_status(conclusion, ct.get('alert', False))
+        conclusion = shown
+        ct_fields = dict(ct_evaluation=ct, display_tone=tone, ct_alert=ct.get('alert', False),
+                         ct_requirement=ct.get('requirement', ''), ct_alert_detail=result.get('ct_alert_detail', ''))
     return dict(row_key=item['row_key'], lot_config_item_id=item['lot_config_item_id'], qc_method=method, method=method,
         runtime_project_id=item['runtime_project_id'], runtime_batch_id=item['runtime_batch_id'],
         source_type=source_type, source_id=result_id, result_id=result_id,
@@ -222,7 +230,7 @@ def _receipt_item(c, prepared, result_id):
         classification=classification, phase=result.get('phase', 'building' if method == 'instant' else None), level_count=item['level_count'],
         conclusion=conclusion,
         levels=level_evidence,
-        test_item_name=item['test_item_name'], target_profile_id=context['target_profile_id'])
+        test_item_name=item['test_item_name'], target_profile_id=context['target_profile_id'], **ct_fields)
 
 
 def get_submission(submission_id):

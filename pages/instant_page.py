@@ -100,7 +100,7 @@ def _render_instant_transfer_dialog(batch_id: int) -> None:
     target_batch_summary = str(transfer_state.get("target_batch_lot_no") or "").strip() or "系统将新建 L-J 批次"
 
     st.caption(
-        "确认后新建L-J批次，带入有效检测值；后续在L-J批次录入，原即时法记录仅供查询。"
+        "确认后新建L-J批次，带入有效检测值；后续检测在L-J批次录入，原即时法记录保留在当前批次。"
     )
 
     if transfer_state.get("is_transferred"):
@@ -288,7 +288,7 @@ def _render_instant_transfer_section(context: dict[str, object]) -> None:
     is_transferred = bool(transfer_state.get("is_transferred"))
 
     if is_transferred:
-        st.success("已转入 L-J 法；原记录仅供查询，请在对应 L-J 批次继续录入。")
+        st.success("已转入 L-J 法，请在对应 L-J 批次继续录入。原即时法记录保留在当前批次。")
         if st.button(
             "前往对应 L-J 批次",
             key="instant_go_to_transferred_lj_batch",
@@ -354,8 +354,8 @@ def _render_instant_si_method_explanation(summary: dict[str, object]) -> None:
                 [
                     f"- 当前采用：`{method_label}`。",
                     "- 使用同一批质控品中尚未禁用的检测值进行判定。",
-                    "- 起判条件：有效点数 `n < 3` 时不判定，`n >= 3` 时开始判定。",
-                    "- 使用范围：即刻法 SI 表仅用于前 20 个有效点，超过后应转入 L-J 法。",
+                    "- 起判条件：达到 3 个有效点后开始判定。",
+                    "- 适用点数：前 20 个有效点；达到 20 个后可确认转入 L-J 法。",
                     f"- 公式：`{formula}`，其中 `s` 使用样本标准差。",
                     "- 判定阈值：SI上限和 SI下限均不超过 n2s 为在控；超过 n2s 但不超过 n3s 为警告；超过 n3s 为疑似离群。",
                     "- 疑似离群点由你选择保留、禁用或恢复；禁用后该点退出统计。",
@@ -387,11 +387,13 @@ def _render_instant_chart_analysis_section(context: dict[str, object]) -> object
         else "当前批次最近记录"
     )
     render_latest_analysis_card(
-        status_label=str(summary["latest_status"]),
-        summary_text=str(summary["latest_message"]),
+        status_label=str(latest_row.get('display_status', summary['latest_status'])) if latest_row is not None else str(summary['latest_status']),
+        summary_text=str(summary["latest_message"]) + (
+            ' ' + str(latest_row.get('ct_alert_detail') or '') if latest_row is not None and latest_row.get('ct_alert') else ''),
         meta_items=list(summary.get("latest_meta", [])),
         source_text=latest_source_text,
-        tone_key=_resolve_instant_tone_key(str(summary["latest_status"])),
+        tone_key=(latest_row.get('display_tone') if latest_row is not None and latest_row.get('ct_alert')
+                  else _resolve_instant_tone_key(str(summary["latest_status"]))),
     )
     return figure
 
@@ -428,6 +430,8 @@ def _build_instant_display_dataframe(
         lambda value: "-" if value is None or pd.isna(value) else f"{float(value):.4f}"
     )
     display_df["manual_status"] = display_df["manual_status"].map(get_instant_manual_status_label)
+    if 'display_status' in display_df:
+        display_df['status'] = display_df['display_status']
     ordered_columns = [
         "sequence",
         "effective_sequence",

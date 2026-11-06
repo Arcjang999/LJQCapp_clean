@@ -1714,7 +1714,7 @@ def evaluate_zscore_run_with_phase(
         current_run["run_status"] = PHASE_TARGET_BUILDING
         current_run["rule_hits_run"] = []
         current_run["error_type_hint"] = "not_applicable"
-        current_run["analysis_prompt"] = "当前处于建靶阶段，本次检测仅用于累计靶值，不进行正式规则判读。"
+        current_run["analysis_prompt"] = "本次结果计入建靶统计。"
         for level_result in current_run["level_results"]:
             level_result["rule_hits_local"] = []
             level_result["status"] = PHASE_TARGET_BUILDING
@@ -1789,7 +1789,7 @@ def build_zscore_analysis_prompt(
     if status == "pending":
         return "请完整录入当前批次要求的所有水平结果后再进行分析。"
     if phase != PHASE_FORMAL_QC:
-        return "当前处于建靶阶段，本次检测仅用于累计靶值和观察趋势，不进行正式规则判读。"
+        return "本次结果计入建靶统计，可查看各水平趋势。"
     if status == "accept":
         return "本次检测未触发已启用的 Z-score 规则，可继续观察后续检测趋势。"
     if status == "warning":

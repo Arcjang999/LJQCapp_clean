@@ -485,6 +485,72 @@ def build_lj_period_report_package(batch_id, start_date, end_date, *, report_mon
         return _build_lj_report_package(batch_id, period, handling_versions=handling_versions)
 
 
+def _adopted_ct_report_config(method, batch):
+    if normalize_input_value_type(batch['input_value_type']) != 'ct':
+        return None
+    from services.ct_alert_service import runtime_ct_alert
+    return runtime_ct_alert(method, int(batch['id']))
+
+
+def _with_ct_report_summary(summary, method, config, records):
+    """Keep Ct reminders separate from the original QC statistics/events."""
+    configs = []
+    for record in records:
+        adopted = record.get('ct_alert_config', config)
+        if adopted and adopted not in configs:
+            configs.append(adopted)
+    if not configs:
+        return summary
+    from services.ct_alert_service import evaluate_ct_alert, ct_requirement_text
+    requirement = '；'.join(ct_requirement_text(adopted) for adopted in configs)
+    reminders = []
+    evaluated_count = 0
+    for record in records:
+        adopted = record.get('ct_alert_config', config)
+        levels = ([dict(level_id='Level 1', raw_value=record.get('value'))]
+                  if method == 'lj' else record.get('level_results', []))
+        results = []
+        for level in levels:
+            checked = evaluate_ct_alert(level.get('raw_value'), adopted)
+            if checked['evaluated']:
+                results.append((level, checked))
+        if results:
+            evaluated_count += 1
+        alerts = [(level, checked) for level, checked in results if checked['alert']]
+        if alerts:
+            reminders.append(dict(
+                source_id=int(record.get('run_id') or record.get('id')),
+                test_time=str(record['test_time']),
+                qc_status=str(record.get('status') if method == 'lj' else record.get('run_status')),
+                values=[dict(level=format_level_id_display(level['level_id']),
+                             value=checked['value'], requirement=checked['requirement'])
+                        for level, checked in alerts],
+            ))
+    return dict(summary, ct_alert=dict(config=dict(config) if config else None,
+        configs=configs, requirement=requirement,
+        evaluated_count=evaluated_count, alert_count=len(reminders), records=reminders))
+
+
+def _ct_report_conclusion(report):
+    ct = report.quality_summary.get('ct_alert') or {}
+    if not ct.get('alert_count'):
+        return report
+    count = ct['alert_count']
+    text = f'Ct提醒{count}次，请核对对应检测记录。'
+    pending = getattr(report.statistics, 'pending_count', 0) or getattr(report.statistics, 'undetermined_count', 0)
+    if not report.statistics.out_of_control_count and not report.statistics.warning_count and not pending:
+        conclusion = '质控规则判读在控；' + text
+    else:
+        conclusion = report.conclusion + ' ' + text
+    overview = report.overview_text.replace('本月未发现警告或失控记录，整体运行稳定。', '质控规则判读在控。').replace(
+        '本月未发现异常检测记录，整体运行稳定。', '质控规则判读在控。')
+    fields = dict(overview_text=overview + ' ' + text, conclusion=conclusion)
+    if not report.abnormal_records:
+        fields.update(corrective_actions_empty_text='Ct提醒记录及采用要求见Ct提醒明细。',
+                      abnormal_summary_text='Ct提醒记录及采用要求见Ct提醒明细。')
+    return replace(report, **fields)
+
+
 def _build_lj_report_package(batch_id, period, *, monthly=False, handling_versions=None):
     normalized_month = period.report_month
     batch = get_batch(batch_id)
@@ -493,6 +559,10 @@ def _build_lj_report_package(batch_id, period, *, monthly=False, handling_versio
     formal_df = filter_frame_to_period(qc_df[qc_df['phase'] == LJ_FORMAL_PHASE_LABEL], period)
     if formal_df.empty:
         raise ValueError("所选月份无正式期数据，无法生成单水平（L-J法）月报。" if monthly else "所选报告期间无正式期数据，无法生成单水平（L-J法）质控报告。")
+    ct_config = _adopted_ct_report_config('lj', batch)
+    if normalize_input_value_type(batch['input_value_type']) == 'ct':
+        from services.ct_alert_service import annotate_runtime_frame
+        formal_df = annotate_runtime_frame('lj', batch_id, formal_df)
 
     input_value_type = normalize_input_value_type(batch["input_value_type"])
     input_value_type_label = get_input_value_type_label(input_value_type)
@@ -584,7 +654,9 @@ def _build_lj_report_package(batch_id, period, *, monthly=False, handling_versio
         source_version=monthly_source_version('lj', batch_id, normalized_month) if monthly and handling_versions is None else range_source_version(
             'lj',batch_id,period.start_date,period.end_date,handling_versions=handling_versions),
         quality_summary=versioned_quality_summary('lj', batch_id, normalized_month, formal_df.to_dict('records'), existing=report.quality_summary))
-    report=replace(report,handling_versions=report.source_version['handling_versions'])
+    report=replace(report,handling_versions=report.source_version['handling_versions'],
+        quality_summary=_with_ct_report_summary(report.quality_summary, 'lj', ct_config, formal_df.to_dict('records')))
+    report = _ct_report_conclusion(report)
     if not monthly:
         report=replace(report,overview_text=_periodize_text(report.overview_text),conclusion=_periodize_text(report.conclusion),
             corrective_actions_empty_text=_periodize_text(report.corrective_actions_empty_text),
@@ -694,7 +766,12 @@ def build_lj_monthly_preview_summary(report: LjMonthlyReportData) -> list[tuple[
         ("当前设定均值", _format_float(statistics.target_mean)),
         ("当前设定 SD", _format_float(statistics.target_sd)),
         ("批次允许不精密度（CV）", _format_float(statistics.cv_limit, digits=2, suffix="%")),
-    ]
+    ] + _ct_preview_summary(report)
+
+
+def _ct_preview_summary(report):
+    ct = report.quality_summary.get('ct_alert') or {}
+    return [('Ct要求', ct['requirement']), ('Ct提醒次数', str(ct['alert_count']))] if ct else []
 
 
 def list_zscore_report_month_options(batch_id: int) -> list[str]:
@@ -744,6 +821,10 @@ def _build_zscore_report_package(batch_id, period, *, monthly=False, handling_ve
     monthly_formal_runs = _filter_zscore_period_formal_runs(history_runs, period)
     if not monthly_formal_runs:
         raise ValueError("所选月份无正式期数据，无法生成多水平（Z-score法）月报。" if monthly else "所选报告期间无正式期数据，无法生成多水平（Z-score法）质控报告。")
+    ct_config = _adopted_ct_report_config('zscore', batch)
+    if normalize_input_value_type(batch['input_value_type']) == 'ct':
+        from services.ct_alert_service import annotate_runtime_runs
+        monthly_formal_runs = annotate_runtime_runs(batch_id, monthly_formal_runs)
 
     input_value_type = normalize_input_value_type(batch["input_value_type"])
     input_value_type_label = get_input_value_type_label(input_value_type)
@@ -843,6 +924,9 @@ def _build_zscore_report_package(batch_id, period, *, monthly=False, handling_ve
     )
     full_plot_df = build_zscore_plot_dataframe_logic(history_runs, draft_run=None, display_phase=None)
     monthly_plot_df = filter_frame_to_period(full_plot_df[full_plot_df.phase == PHASE_FORMAL_QC], period)
+    if normalize_input_value_type(batch['input_value_type']) == 'ct':
+        from services.ct_alert_service import annotate_runtime_frame
+        monthly_plot_df = annotate_runtime_frame('zscore', batch_id, monthly_plot_df)
     from services.lot_lifecycle_service import report_lot_trace
     formal_plot=monthly_plot_df[monthly_plot_df.phase==PHASE_FORMAL_QC]
     trace=report_lot_trace('zscore',batch_id,normalized_month,formal_plot,start_date=period.start_date,end_date=period.end_date)
@@ -867,7 +951,9 @@ def _build_zscore_report_package(batch_id, period, *, monthly=False, handling_ve
         source_version=monthly_source_version('zscore', batch_id, normalized_month) if monthly and handling_versions is None else range_source_version(
             'zscore',batch_id,period.start_date,period.end_date,handling_versions=handling_versions),
         quality_summary=versioned_quality_summary('zscore', batch_id, normalized_month, monthly_formal_runs, existing=report.quality_summary))
-    report=replace(report,handling_versions=report.source_version['handling_versions'])
+    report=replace(report,handling_versions=report.source_version['handling_versions'],
+        quality_summary=_with_ct_report_summary(report.quality_summary, 'zscore', ct_config, monthly_formal_runs))
+    report = _ct_report_conclusion(report)
     if not monthly:
         report=replace(report,overview_text=_periodize_text(report.overview_text),conclusion=_periodize_text(report.conclusion),
             corrective_actions_empty_text=_periodize_text(report.corrective_actions_empty_text),
@@ -900,7 +986,7 @@ def build_zscore_monthly_preview_summary(report: ZScoreMonthlyReportData) -> lis
         ("当前规则组合", statistics.template_label),
         ("当前阶段", statistics.current_phase_label),
         ("全部水平已完成均值和标准差建立", "是" if statistics.all_levels_ready else "否"),
-    ]
+    ] + _ct_preview_summary(report)
 
 
 def list_report_history_records() -> list[ReportHistoryRecord]:
@@ -1841,7 +1927,7 @@ def _build_zscore_monthly_overview(
     elif statistics.warning_count > 0:
         summary += " 本月存在警告检测记录，建议持续观察。"
     elif statistics.pending_count > 0:
-        summary += f" 本月有 {statistics.pending_count} 次检测待判读，尚不能确认全部检测在控。"
+        summary += " 请核对待判读记录的控制参数和原检测结论。"
     else:
         summary += " 本月未发现异常检测记录，整体运行稳定。"
     return summary
@@ -1849,7 +1935,7 @@ def _build_zscore_monthly_overview(
 
 def _build_zscore_monthly_conclusion(statistics: ZScoreMonthlyReportStatistics) -> str:
     if statistics.pending_count:
-        return f'本月有 {statistics.pending_count} 次检测待判读，需核对适用控制参数和原检测结论；尚不能确认全部检测在控。'
+        return f'本月有 {statistics.pending_count} 次检测待判读，请核对适用控制参数和原检测结论。'
     if statistics.out_of_control_count > 0:
         return "本月存在失控检测记录，需结合原因与纠正措施复核。"
     if statistics.warning_count > 0:

@@ -57,6 +57,87 @@ def confirm(app, prefix):
 
 
 class QualitySimpleUiTests(unittest.TestCase):
+    def test_saved_generated_quality_prose_is_displayed_briefly_without_rewriting_json(self):
+        old_sd = ('按本批次确认的均值和标准差，使用所选质控方法的现有规则判断结果；'
+                  'L-J及多水平按SD位置和连续规则判读，即时法使用格拉布斯检验。'
+                  '长期精密度需按适用标准或实验室要求另行评价。')
+        old_teaching = ('采用完整水平结果、20个有效建靶点和当前质控规则；'
+                        'Ct/Log用于数值信号稳定性监测，不自动判定病原体阴阳性；'
+                        '均值和SD按本批次参数管理。')
+        cases = [
+            (old_teaching, None,
+             '各水平累计20个有效建靶点后确定均值和SD；正式期按本批次参数及已启用质控规则判读。'),
+            (old_sd + ' 实验室自定义CV上限为≤4.25%，另行比较正式期在控结果的精密度，不替代SD失控判读。',
+             4.25, 'L-J及多水平法按本批次确认的均值、标准差和所选质控规则判读；即时法采用格拉布斯检验。'),
+        ]
+        for requirement, cv, expected in cases:
+            with self.subTest(cv=cv), IsolatedDatabase():
+                _, item = draft('已保存默认文案隔离项目')
+                prefix = f'quality_project_{item}'
+                review = dict(status='pending', context=context(),
+                    draft_recorded=dict(mode='sd_cv', source_name='实验室质控方案',
+                        source_version='QC-2026-09', requirement_text=requirement,
+                        cv_limit=cv, evidence='依据本软件已核查目录匹配项目、单位及尺度；'),
+                    search_record=dict(scope='local_catalog',
+                        rationale='已核对当前软件收录的项目、方法、尺度和单位；未匹配适用数值限值。此记录不表示已查询全部国家标准。'))
+                original_json = json.dumps(review, ensure_ascii=False)
+                with get_connection() as connection:
+                    connection.execute('UPDATE qc_project_template_items SET quality_review_json=? WHERE id=?',
+                                       (original_json, item))
+                app = screen('project', item)
+                assert_clean(app)
+                self.assertEqual(expected, app.text_area(key=prefix+'_recorded_text').value)
+                self.assertEqual('按所选方法、单位及结果尺度核对质量要求。',
+                                 app.text_area(key=prefix+'_evidence').value)
+                self.assertEqual('已核对当前目录中的项目、方法、结果尺度和单位；未匹配适用数值限值。',
+                                 app.text_area(key=prefix+'_search_rationale').value)
+                self.assertEqual(cv, app.number_input(key=prefix+'_cv_limit').value)
+                self.assertEqual(original_json, item_context('project', item)['quality_review_json'])
+
+                written = requirement + ' 经本实验室核对后执行。'
+                evidence = '本实验室记录：依据本软件已核查目录匹配项目、单位及尺度；'
+                app.text_area(key=prefix+'_recorded_text').set_value(written)
+                app.text_area(key=prefix+'_evidence').set_value(evidence).run()
+                app.run()
+                assert_clean(app)
+                self.assertEqual(written, app.text_area(key=prefix+'_recorded_text').value)
+                self.assertEqual(evidence, app.text_area(key=prefix+'_evidence').value)
+                self.assertEqual(original_json, item_context('project', item)['quality_review_json'])
+
+    def test_quality_display_copy_preserves_original_evidence_and_user_authored_text(self):
+        from services.terminology_service import display_quality_record, display_quality_text
+        old = ('按本批次确认的均值和标准差，使用所选质控方法的现有规则判断结果；'
+               'L-J及多水平按SD位置和连续规则判读，即时法使用格拉布斯检验。'
+               '长期精密度需按适用标准或实验室要求另行评价。')
+        suffix = ' 实验室自定义CV上限为≤4.25%，另行比较正式期在控结果的精密度，不替代SD失控判读。'
+        user_text = '本实验室另定的核对要求。' + suffix
+        process = ('每次分析前核对质控品及试剂批号、有效期和仪器状态；'
+                   '异常时登记原因、纠正措施及复测记录。')
+        hiv = ('HIV-1 RNA定量先将copies/mL结果换算为Log10后录入；'
+               '内外部质控随样本经历提取与扩增全过程，确认失控后先恢复在控再重新检测相应样本。')
+        original = dict(recorded=dict(requirement_text=old+suffix),
+            candidates=[dict(evidence='依据本软件已核查目录匹配项目、单位及尺度；')],
+            draft_recorded=dict(requirement_text=user_text),
+            process_requirements=dict(requirement_text=process+'此文本为本次实验室要求。'+hiv),
+            source_fingerprint='原确认指纹', source_snapshot_json=json.dumps(dict(requirement_text=old)),
+            notes=old, source_clause=old)
+        original_json = json.dumps(original, ensure_ascii=False)
+        displayed = display_quality_record(original)
+        self.assertEqual('L-J及多水平法按本批次确认的均值、标准差和所选质控规则判读；'
+                         '即时法采用格拉布斯检验。 实验室CV上限：≤4.25%；比较正式期在控结果的实测CV。',
+                         displayed['recorded']['requirement_text'])
+        self.assertEqual(user_text, displayed['draft_recorded']['requirement_text'])
+        self.assertEqual(process+hiv, displayed['process_requirements']['requirement_text'])
+        self.assertEqual(process, display_quality_text(process+'此文本为本次实验室要求。'))
+        for key in ('source_fingerprint', 'source_snapshot_json', 'notes', 'source_clause'):
+            self.assertEqual(original[key], displayed[key])
+        self.assertEqual(displayed, display_quality_record(displayed))
+        self.assertEqual('人工补充：'+old, display_quality_text('人工补充：'+old))
+        self.assertEqual(old+suffix+' 人工补充。', display_quality_text(old+suffix+' 人工补充。'))
+        displayed['recorded']['requirement_text'] = '仅修改显示副本'
+        displayed['candidates'][0]['evidence'] = '显示副本中的修改'
+        self.assertEqual(original_json, json.dumps(original, ensure_ascii=False))
+
     def test_unique_uniform_standard_is_automatic_and_needs_no_level_concentration(self):
         with IsolatedDatabase():
             _, item = draft()
@@ -348,7 +429,7 @@ class QualitySimpleUiTests(unittest.TestCase):
                 spec = decode(item_context('project', item)['quality_goal_json'])['spec']
                 self.assertEqual(basis['source_name'], spec['laboratory_basis']['source_name'])
                 self.assertEqual(basis['source_version'], spec['laboratory_basis']['source_version'])
-                self.assertEqual(1, spec['laboratory_basis']['requirement_text'].count('实验室自定义CV上限为'))
+                self.assertEqual(1, spec['laboratory_basis']['requirement_text'].count('实验室CV上限：'))
                 self.assertIn('≤3%', spec['laboratory_basis']['requirement_text'])
 
     def test_quick_sd_cv_all_methods_preview_zero_writes_and_back_cancel_preserve_cv(self):

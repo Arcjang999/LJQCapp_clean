@@ -60,8 +60,9 @@ def _fresh_import_context(method, batch_id):
         )
         resolved = resolve_zscore_batch_context(batch_id)
         targets = get_zscore_level_targets(batch_id, resolved["template_id"], required_n=resolved["required_n"])
+        from services.ct_alert_service import annotate_runtime_runs
         return dict(resolved, input_value_type=resolved["batch"]["input_value_type"],
-                    history_runs=get_zscore_runs(batch_id, resolved["template_id"]),
+                    history_runs=annotate_runtime_runs(batch_id, get_zscore_runs(batch_id, resolved["template_id"])),
                     effective_building_count=get_effective_building_run_count(targets, resolved["required_level_ids"]),
                     overall_phase=determine_zscore_phase(targets, resolved["required_level_ids"]),
                     formal_rules_enabled=should_enable_formal_rules(targets, resolved["required_level_ids"]))

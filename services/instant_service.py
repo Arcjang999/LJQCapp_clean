@@ -406,7 +406,7 @@ def analyze_instant_results(results_df: pd.DataFrame) -> tuple[pd.DataFrame, dic
             analysis_df.loc[analysis_df["is_effective"] == 1, "status"] = "有效点"
             analysis_df.loc[analysis_df["is_effective"] == 1, "analysis_prompt"] = zero_variation_message
         elif si_result.get("status") == "warning":
-            warning_message = "即刻法 SI 值超过 n2s 但未超过 n3s，当前判定为警告；系统不自动禁用记录。"
+            warning_message = "即刻法 SI 值超过 n2s、未超过 n3s，判定为警告。请复核该记录。"
             analysis_df.loc[analysis_df["is_effective"] == 1, "status"] = "警告"
             analysis_df.loc[analysis_df["is_effective"] == 1, "analysis_prompt"] = warning_message
             analysis_df.loc[analysis_df["is_effective"] == 1, "is_outlier_suspect"] = 0
@@ -842,6 +842,8 @@ def build_instant_workbench_context(batch_id: int) -> dict[str, object]:
     batch = get_instant_batch(batch_id)
     results_df = get_instant_results(batch_id, include_manual_note=True)
     analysis_df, summary = analyze_instant_results(results_df)
+    from services.ct_alert_service import annotate_runtime_frame
+    analysis_df = annotate_runtime_frame('instant', batch_id, analysis_df)
     latest_row = get_latest_instant_row(analysis_df)
     transfer_state = _build_instant_transfer_state(batch, analysis_df, summary)
     summary["transfer_status"] = transfer_state["status"]

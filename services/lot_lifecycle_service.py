@@ -393,11 +393,25 @@ def context_dataframe(method,batch_id):
 
 
 def append_evaluation(method,result_id,payload,reason='current_review'):
-    data=json.dumps(_json_safe(payload),ensure_ascii=False,sort_keys=True,allow_nan=False)
     with get_connection() as c:
-        context=c.execute(f'SELECT id,provenance FROM qc_result_contexts WHERE {CONTEXT_COLUMNS[method]}=?',(result_id,)).fetchone()
+        context=c.execute(f'SELECT id,provenance,config_snapshot_json FROM qc_result_contexts WHERE {CONTEXT_COLUMNS[method]}=?',(result_id,)).fetchone()
         if context is None:
             return
+        from services.ct_alert_service import ct_alert_from_source, annotate_lj_frame, annotate_zscore_runs
+        policy = ct_alert_from_source(context['config_snapshot_json'])
+        if policy:
+            from copy import deepcopy
+            payload = deepcopy(payload)
+            target = payload.get('result', payload)
+            if method == 'zscore':
+                annotated = annotate_zscore_runs([target], policy)[0]
+                target['level_results'] = annotated.get('level_results', [])
+            else:
+                annotated = annotate_lj_frame(pd.DataFrame([target]), policy).iloc[0].to_dict()
+            for key in ('ct_alert', 'ct_evaluation', 'ct_alert_config', 'ct_requirement',
+                        'ct_alert_detail', 'display_status', 'display_tone'):
+                target[key] = annotated[key]
+        data=json.dumps(_json_safe(payload),ensure_ascii=False,sort_keys=True,allow_nan=False)
         previous=c.execute('SELECT id,evaluation_json FROM qc_result_evaluations WHERE context_id=? ORDER BY id DESC LIMIT 1',(context[0],)).fetchone()
         if previous and previous['evaluation_json']==data:
             return

@@ -11,11 +11,13 @@ from datetime import date
 from database import atomic_write
 from services.quality_applicability_service import assess, context_errors, catalog_index
 from services.quality_target_service import finite_number
+from services.ct_alert_service import normalize_ct_alert
+
+_CT_UNSET = object()
 
 
-SD_REQUIREMENT = ('按本批次确认的均值和标准差，使用所选质控方法的现有规则判断结果；'
-                  'L-J及多水平按SD位置和连续规则判读，即时法使用格拉布斯检验。'
-                  '长期精密度需按适用标准或实验室要求另行评价。')
+SD_REQUIREMENT = ('L-J及多水平法按本批次确认的均值、标准差和所选质控规则判读；'
+                  '即时法采用格拉布斯检验。')
 
 
 def catalog_fingerprint():
@@ -33,7 +35,7 @@ def quality_setup_plan(item, context):
     numeric = [r for r in rows if r['kind'] == 'numeric' and r['status'] == 'applicable']
     cv_supported = (item.get('input_value_type') == 'raw' and context.get('result_scale') == 'concentration'
                     and context.get('result_kind') == 'quantitative')
-    state, spec, reason = 'sd_cv', None, '软件已收录的标准中，尚未找到适合本项目的数值限值。按所选质控方法判断结果，有实验室CV要求时可另填上限。'
+    state, spec, reason = 'sd_cv', None, '当前目录未匹配适用数值限值。'
     if problems or pending:
         state = 'blocked'
         reason = ' '.join(problems + [r['reason'] for r in pending])
@@ -50,12 +52,13 @@ def local_catalog_review(item, context):
         raise ValueError(plan['reason'] if plan['state'] == 'blocked' else '已有明确适用数值标准，请直接引用。')
     return dict(scope='local_catalog', query=str(item.get('test_item_name') or ''),
                 checked_on=local_today().isoformat(), conclusion='no_numeric',
-                rationale='已核对当前软件收录的项目、方法、尺度和单位；未匹配适用数值限值。此记录不表示已查询全部国家标准。',
+                rationale='已核对当前目录中的项目、方法、结果尺度和单位；未匹配适用数值限值。',
                 catalog_fingerprint=catalog_fingerprint())
 
 
 def simple_quality_payload(item, condition_args, *, cv_limit=None, confirmed_by='', evidence='',
-                           levels=None, requirement_text=None, source_name=None, source_version=None):
+                           levels=None, requirement_text=None, source_name=None, source_version=None,
+                           ct_alert=_CT_UNSET):
     context = dict(condition_args.get('context') or {})
     plan = quality_setup_plan(item, context)
     if plan['state'] != 'sd_cv':
@@ -65,18 +68,20 @@ def simple_quality_payload(item, condition_args, *, cv_limit=None, confirmed_by=
         if limit <= 0:
             raise ValueError('实验室CV上限须大于0。')
         if not plan['cv_supported']:
-            raise ValueError('这种结果类型暂不能自动比较CV上限。请按所选质控方法判断结果，并参考说明书或实验室要求。')
+            raise ValueError('CV上限比较适用于原始定量结果，请核对检测结果性质和结果尺度。')
     defaults = dict(context=context,
         search_record=condition_args.get('search_record') or local_catalog_review(item, context),
         adopted_standard_ids=condition_args.get('adopted_standard_ids'),
         registered_standards=condition_args.get('registered_standards'),
-        process_requirements=condition_args.get('process_requirements'))
+        process_requirements=condition_args.get('process_requirements'),
+        ct_alert=normalize_ct_alert(condition_args.get('ct_alert') if ct_alert is _CT_UNSET else ct_alert,
+                                    item.get('input_value_type')))
     text = SD_REQUIREMENT if requirement_text is None else str(requirement_text).strip()
     if not text:
         raise ValueError('请保留SD控制说明或填写本实验室的实际要求。')
-    text = re.sub(r'\s*实验室自定义CV上限为≤[^%]+%，另行比较正式期在控结果的精密度，不替代SD失控判读。', '', text).strip() or SD_REQUIREMENT
+    text = re.sub(r'\s*(?:实验室自定义CV上限为≤[^%]+%，另行比较正式期在控结果的精密度，不替代SD失控判读。|实验室CV上限：≤[^%]+%；比较正式期在控结果的实测CV。)', '', text).strip() or SD_REQUIREMENT
     if limit is not None:
-        cv_text = f'实验室自定义CV上限为≤{limit:g}%，另行比较正式期在控结果的精密度，不替代SD失控判读。'
+        cv_text = f'实验室CV上限：≤{limit:g}%；比较正式期在控结果的实测CV。'
         if cv_text not in text:
             text += ' ' + cv_text
     return dict(defaults, mode='sd_cv', cv_limit=limit, confirmed_by=confirmed_by,
@@ -102,7 +107,7 @@ def simple_cv_spec(item, payload):
         imprecision=[dict(kind='cv', value=limit, operator='<=', unit='%')],
         imprecision_text=f'CV ≤{limit:g}%', bias_text='', tea_text='', source_url='',
         source_clause=payload['requirement_text'], source_page=None,
-        notes='实验室确认的CV上限；非国家数值标准，SD控制规则另行使用。')
+        notes='实验室确认的CV上限，按正式期在控结果比较。')
     # Version labels may be a laboratory code on reopening; the effective date
     # remains the date of the actual setup, never a fabricated SOP version.
     try:
@@ -117,7 +122,7 @@ def simple_cv_spec(item, payload):
 def save_simple_quality(scope, item_id, *, cv_limit=None, confirmed_by, evidence='', context,
                         search_record=None, adopted_standard_ids=None, registered_standards=None,
                         process_requirements=None, levels=None, requirement_text=None,
-                        source_name=None, source_version=None):
+                        source_name=None, source_version=None, ct_alert=None):
     from services.quality_target_service import item_context, adopt_requirement, _require_draft
     from services.quality_review_service import save_recorded_requirement
     with atomic_write() as connection:
@@ -128,9 +133,9 @@ def save_simple_quality(scope, item_id, *, cv_limit=None, confirmed_by, evidence
             adopted_standard_ids=adopted_standard_ids, registered_standards=registered_standards,
             process_requirements=process_requirements), cv_limit=cv_limit, confirmed_by=confirmed_by,
             evidence=evidence, levels=levels, requirement_text=requirement_text,
-            source_name=source_name, source_version=source_version)
+            source_name=source_name, source_version=source_version, ct_alert=ct_alert)
         args = {key: payload[key] for key in ('confirmed_by', 'evidence', 'context', 'search_record',
-            'adopted_standard_ids', 'registered_standards', 'process_requirements')}
+            'adopted_standard_ids', 'registered_standards', 'process_requirements', 'ct_alert')}
         spec = simple_cv_spec(item, payload)
         if spec is not None:
             connection.execute('INSERT OR IGNORE INTO qc_quality_catalog(id,origin,payload_json) VALUES(?,?,?)',

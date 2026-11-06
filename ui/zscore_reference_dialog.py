@@ -70,7 +70,7 @@ def _render_reference_dialog():
         if discard.button('放弃修改', key='zscore_reference_discard'):
             _close()
         return
-    st.caption('厂家参考值供核对各水平参数时查阅，各项可留空。正式判读使用本批次已确认的均值和SD。')
+    st.caption('保存各水平的厂家均值、SD和来源，供参数核对时查阅；各项选填。')
     for level_id in state['level_ids']:
         st.markdown('**' + state['labels'].get(level_id, level_id) + '**')
         left, right = st.columns(2)
@@ -119,7 +119,7 @@ def render_zscore_reference_summary(batch_id, template_id, required_n, profiles,
     notice = st.session_state.pop('zscore_reference_notice', None)
     if notice:
         st.success(notice)
-    with st.expander('厂家参考值（仅作参考）', expanded=False):
+    with st.expander('厂家参考值', expanded=False):
         st.dataframe(pd.DataFrame([{
             '水平': labels.get(level_id, level_id),
             '参考均值': format_optional_float(profiles[level_id].get('vendor_reference_mean')),
@@ -134,7 +134,7 @@ def render_zscore_reference_summary(batch_id, template_id, required_n, profiles,
             writable = True
         except ValueError as error:
             writable = False
-            st.info('厂家参考值当前仅供查看：' + str(error))
+            st.info(str(error))
         busy = any(st.session_state.get(key) for key in ('qc_record_dialog', 'qc_transfer_dialog', REFERENCE_DIALOG_KEY))
         if writable and busy:
             st.info('请先完成或取消当前打开的记录、导入或导出窗口，再编辑厂家参考值。')

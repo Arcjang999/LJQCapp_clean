@@ -121,7 +121,7 @@ def render_conditions(item, review, prefix, *, quick=False, settings_location=No
         for row in process:
             st.caption('；'.join(row['spec']['requirements']))
             st.link_button('查看 '+row['source']['standard']+' 原文', row['source']['source_url'])
-        st.info('请按以上条款检查对照设置和结果。浓度CV统计使用质控品检测值，阴性对照按条款单独检查。')
+        st.info('按以上条款核对对照设置、检测结果及异常处理要求。')
     else:
         adopted = []
     search = None
@@ -177,7 +177,6 @@ def render_process_requirements(rows, review, prefix):
         st.session_state[source_key] = [identifier for identifier in st.session_state[source_key] if identifier in names]
     st.session_state[source_key] = list(dict.fromkeys(st.session_state[source_key] + newly_available))
     st.session_state[seen_key] = list(dict.fromkeys(st.session_state[seen_key] + list(names)))
-    st.caption('下方保存本实验室实际执行的对照要求，可在参考条款基础上修改、删减或留空。')
     selected = st.multiselect('参考标准（可调整）', list(names), key=source_key, format_func=names.get)
     seed = default_process_requirements(rows, selected)['requirement_text']
     if text_key not in st.session_state:

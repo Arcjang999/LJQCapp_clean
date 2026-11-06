@@ -104,7 +104,7 @@ def validate_spec_for_item(spec, item):
         raise ValueError('该分析质量要求适用于原始检测值，不能直接用于 Ct 或 log 值。')
     if not item['unit_symbol']: raise ValueError('请先设置测量单位。')
     if spec.get('measurement_unit') and normalize_unit(spec['measurement_unit']) != normalize_unit(item['unit_symbol']):
-        raise ValueError(f"单位不匹配：要求使用 {spec['measurement_unit']}，当前为 {item['unit_symbol']}；本版不自动换算。")
+        raise ValueError(f"单位不匹配：要求使用 {spec['measurement_unit']}，当前为 {item['unit_symbol']}。请核对项目单位后重新选择要求。")
     if date.fromisoformat(spec['effective_date']) > local_today():
         raise ValueError('该标准或实验室要求尚未到实施日期，暂不能采用。')
 
@@ -127,7 +127,8 @@ def common_cv(goal):
 
 def adopt_requirement(scope, item_id, requirement_id, *, confirmed_by, evidence, levels=None, exclusions=None,
                       context=None, search_record=None, adopted_standard_ids=None,
-                      registered_standards=None, supplemental_cv=None, process_requirements=None):
+                      registered_standards=None, supplemental_cv=None, process_requirements=None,
+                      ct_alert=None):
     if not str(confirmed_by).strip() or not str(evidence).strip():
         raise ValueError('请填写确认人和适用依据。')
     spec=get_requirement(requirement_id)
@@ -171,7 +172,8 @@ def adopt_requirement(scope, item_id, requirement_id, *, confirmed_by, evidence,
         review=build_review(c,reviewed_item,source_spec=spec,confirmed_by=confirmed_by,
                             evidence=evidence,exclusions=exclusions,context=context,
                             search_record=search_record,adopted_standard_ids=adopted_standard_ids,
-                            registered_standards=registered_standards,process_requirements=process_requirements)
+                            registered_standards=registered_standards,process_requirements=process_requirements,
+                            ct_alert=ct_alert)
         save_review(c,scope,item_id,review)
         if scope=='lot':
             from services.project_config_service import _save_snapshot
@@ -233,7 +235,7 @@ def runtime_goal(method,batch_id):
 def evaluate_cv(goal,level_order,cv,*,count,days=None):
     entry=next((r for r in goal.get('levels',[]) if r['level_order']==level_order),None)
     if not entry or goal.get('pending'):return '未确认适用要求'
-    if entry['rule']['kind']!='cv':return '标准SD上限仅展示，暂不自动比较'
+    if entry['rule']['kind']!='cv':return '标准SD上限请按实验室验证记录核查'
     if count<2 or cv is None or not math.isfinite(float(cv)):return '数据不足，暂不评价'
     if goal['spec']['scope'].startswith('日间') and (days is None or days<2):return '不足两个检测日，暂不评价日间 CV'
     threshold=entry['rule']['value']
@@ -245,8 +247,8 @@ def batch_quality_summary(method,batch_id,month=None):
     from services.quality_review_service import runtime_review
     review=runtime_review(method,batch_id)
     if not goal:
-        scope = ('本批次SD控制；未设置CV上限，未进行CV目标比较'
-                 if review.get('search_record', {}).get('scope') == 'local_catalog' else '仅登记依据，尚无自动评价')
+        scope = ('本批次SD控制；未设置CV上限'
+                 if review.get('search_record', {}).get('scope') == 'local_catalog' else '按已登记要求核查')
         return dict(goal={},review=review,rows=[],period=month or '本批次全部正式期',statistics_scope=scope) if review else {}
     values={r['level_order']:[] for r in goal.get('levels',[])};dates={k:set() for k in values}
     def add(order,value,when):

@@ -77,9 +77,8 @@ def render_result_lot_choice(method,batch_id,test_time,key):
     if st.session_state.get(choice_key) not in choices:
         st.session_state[choice_key] = None
     if not choices and not options['revision']:
-        st.caption('当前没有可选的试剂批号，保存后本次批号为“未记录”。'
-                   '如需记录实际批号，请先登记试剂批号和验证，再返回选择。'
-                   '后续登记不会补改已保存的检测记录。')
+        st.caption('当前没有可选的试剂批号，保存时本次批号记为“未记录”。'
+                   '需记录实际批号时，请在保存检测前登记批号和验证，再返回选择。')
         return {'expected_revision':options['revision']}
     if not choices:
         st.info('所填检测时间没有可选的试剂批号。请先核对批号验证的完成时间、结论和效期，再返回选择。')

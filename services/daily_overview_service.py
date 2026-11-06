@@ -84,6 +84,12 @@ def _record(row, method, levels):
         manual_note=row.get('manual_note',''),levels=levels)
     item['values'] = [{'level_order':r.get('level_order',index+1),'value':r.get('log_value') if row.get('input_value_type')=='log' else r.get('raw_value',r.get('value')),
                        'lot_no':r.get('lot_no',''),'level_name':r.get('level_name',''),'qc_level_id':r.get('qc_level_id')} for index,r in enumerate(levels)]
+    ct = data.get('ct_evaluation') or {}
+    if ct.get('enabled'):
+        from services.ct_alert_service import combined_ct_status
+        item['conclusion'], item['display_tone'] = combined_ct_status(item['conclusion'], ct.get('alert', False))
+        item.update(ct_evaluation=ct, ct_alert=ct.get('alert', False), ct_requirement=ct.get('requirement', ''),
+                    ct_alert_detail=data.get('ct_alert_detail', ''))
     return item
 
 
@@ -156,6 +162,9 @@ def get_daily_overview(day=None, *, lab_instrument_id=None, template_id=None, qc
                         else:conclusion='即时法检验'
                     record.update(phase='instant',classification=None,conclusion=conclusion,
                         effective_sequence=sequence,analysis_prompt=evaluation.get('analysis_prompt',''))
+                    if record.get('ct_alert'):
+                        from services.ct_alert_service import combined_ct_status
+                        record['conclusion'], record['display_tone'] = combined_ct_status(conclusion, True)
                 item['phase']='即时法过渡期'
                 item['stage_note']=summary.get('transfer_message') or f"{summary['effective_count']} 个有效点"
             elif records:

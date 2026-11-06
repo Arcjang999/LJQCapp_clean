@@ -194,7 +194,7 @@ def _apply_lj_building_outlier_snapshot(
     dataframe["status"] = "待建靶"
     dataframe["rule_hits"] = ""
     dataframe["error_type"] = "无"
-    dataframe["analysis_prompt"] = "建靶未完成，暂不进行 Westgard 判定。"
+    dataframe["analysis_prompt"] = "本次结果计入建靶统计。"
     dataframe["is_outlier_suspect"] = 0
     dataframe["outlier_method"] = ""
     dataframe["grubbs_statistic"] = pd.NA
@@ -313,7 +313,7 @@ def _calculate_qc_results_impl(results_df: pd.DataFrame, target_count: int) -> t
 
     if math.isclose(float(stats["sd"]), 0.0, abs_tol=1e-12):
         dataframe.loc[formal_mask, "status"] = "无法判定（SD=0）"
-        dataframe.loc[formal_mask, "analysis_prompt"] = "建靶已完成，但 SD=0，暂时无法进行 Westgard 规则分析。"
+        dataframe.loc[formal_mask, "analysis_prompt"] = "标准差为0，请核对建靶结果并继续采集。"
         stats["message"] = "已收齐建靶数据，但标准差为0。请检查结果并继续采集，待标准差可用后判断失控。"
         if formal_mask.any():
             stats["latest_analysis"] = dataframe.loc[formal_mask, "analysis_prompt"].iloc[-1]

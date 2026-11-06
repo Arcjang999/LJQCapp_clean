@@ -14,6 +14,43 @@ from ui.common import open_global_page
 def _draft():return st.session_state.get('daily_draft')
 
 
+def _follow_instant_transfer(draft, context=None):
+    """Follow only a transferred runtime route, retaining the unsaved input."""
+    if draft.get('receipt') or not any(item['qc_method']=='instant' for item in draft['context']['items']):
+        return False
+    from services.daily_context_service import get_daily_context
+    selection=draft['context']['selection']
+    if context is None or context['selection']!=selection:
+        context=get_daily_context(test_time=draft['context']['test_time'],**selection)
+    current={item['row_key']:item for item in context['items']}
+    if not any(item['qc_method']=='instant' and current.get(item['row_key'],{}).get('qc_method')=='lj'
+            and item.get('runtime_batch_id') is not None
+            and current[item['row_key']].get('transfer_source_batch_id')==item['runtime_batch_id']
+            for item in draft['context']['items']):
+        return False
+    # The selector reads today's choices. Keep the draft's detection time when
+    # obtaining applicable parameters and verified reagent lots for its route.
+    try:when=_entry_time(draft['test_time'])
+    except ValueError:when=draft['context']['test_time']
+    if context['test_time']!=when:
+        context=get_daily_context(test_time=when,**selection)
+    draft['context']=context
+    for row in draft_rows(draft):draft['values'].setdefault(row['key'],'')
+    available={item['row_key'] for item in context['items']}
+    draft['selected']=[key for key in draft['selected'] if key in available]
+    for item in context['items']:
+        key=item['row_key']
+        if draft['reagents'].get(key) not in {row['id'] for row in item.get('reagent_options',[])}:
+            draft['reagents'][key]=None
+        st.session_state.pop(f"entry_reagent_{draft['draft_id']}_{key}",None)
+    st.session_state['entry_selected_'+draft['draft_id']]=draft['selected']
+    draft['frozen']=None;draft['errors']=[];draft['edit_version']+=1
+    for key in ('paste_preview','paste_text','file_preview','grid_paste_text'):
+        draft.pop(key,None)
+    draft['transfer_recheck_required']=True
+    return True
+
+
 def _setup_action(template_id, key):
     label='打开本项目批次设置' if template_id is not None else '打开项目与批次'
     if st.button(label,key=key):
@@ -24,7 +61,7 @@ def _setup_action(template_id, key):
 def _discard_controls(draft):
     if st.button('放弃本组草稿',key='entry_discard'):draft['confirm_discard']=True
     if not draft.get('confirm_discard'):return
-    st.warning('是否放弃本组尚未保存的输入？已保存的检测记录不受影响。')
+    st.warning('是否放弃本组尚未保存的输入？')
     left,right=st.columns(2)
     if left.button('取消放弃',key='entry_discard_cancel'):
         draft.pop('confirm_discard',None);st.rerun()
@@ -108,7 +145,9 @@ def _activate(context):
         drafts.pop(selection_key,None)
         drafts[selection_key]=deepcopy(old)
     existing=drafts.get(str(context['selection']))
-    st.session_state['daily_draft']=deepcopy(existing) if existing else new_draft(context,operator=(old or {}).get('operator',''))
+    draft=deepcopy(existing) if existing else new_draft(context,operator=(old or {}).get('operator',''))
+    _follow_instant_transfer(draft,context)
+    st.session_state['daily_draft']=draft
     st.session_state.pop('daily_pending_context',None)
     st.rerun()
 
@@ -116,6 +155,7 @@ def _activate(context):
 def _render_selector():
     from services.daily_context_service import list_daily_choices,get_daily_context
     template_id=st.session_state.get('daily_entry_template_id')
+    context=None
     choices=list_daily_choices(template_id=template_id)
     if template_id is not None:
         from services.project_config_service import get_project_template
@@ -147,7 +187,7 @@ def _render_selector():
         product=c[1].selectbox('质控品',[None,*products],key='entry_product',format_func=lambda i:'请选择' if i is None else product_labels.get(i,products[i]['name']))
         lots={i['id']:i for i in choices['lots'] if i['qc_material_id']==product and instrument in i.get('instrument_ids',[])}
         if st.session_state.get('entry_lot') not in lots:st.session_state['entry_lot']=None
-        lot=c[2].selectbox('本次主批号',[None,*lots],key='entry_lot',format_func=lambda i:'请选择明确的实际批号' if i is None else lots[i]['lot_no'])
+        lot=c[2].selectbox('本次主批号',[None,*lots],key='entry_lot',format_func=lambda i:'请选择本次使用批号' if i is None else lots[i]['lot_no'])
         if None in (instrument,product,lot):return
         when=local_now().strftime('%Y-%m-%d %H:%M:%S')
         context=get_daily_context(instrument,product,lot,when,template_id=template_id)
@@ -181,6 +221,7 @@ def _render_selector():
         if a.button('保留草稿并切换'):_activate(pending)
         if b.button('取消切换'):
             st.session_state.pop('daily_pending_context',None);st.session_state['daily_restore_selection']=True;st.rerun()
+    return context
 
 
 def _receipt(draft):
@@ -188,14 +229,22 @@ def _receipt(draft):
     if not receipt:return False
     st.success('本组已全部保存。')
     source={str(i['lot_config_item_id']):i for i in draft['context']['items']}
-    st.dataframe(pd.DataFrame([{'检验项目':source[str(r['row_key'])]['test_item_name'],
+    from ui.record_workspace import style_judgment_columns
+    receipt_frame = pd.DataFrame([{'检验项目':source[str(r['row_key'])]['test_item_name'],
         '质控方法':METHOD_LABELS[source[str(r['row_key'])]['qc_method']], '检测时间':receipt['test_time'],
         '本次结论':r.get('conclusion') or CLASS_LABELS.get(r.get('classification'),'参数建立或即时法检验'),
-        '检测值':'；'.join(str(l.get('value','')) for l in r.get('levels',[]))} for r in receipt['items']]),hide_index=True,width='stretch')
+        '检测值':'；'.join(str(l.get('value','')) for l in r.get('levels',[]))} for r in receipt['items']])
+    st.dataframe(style_judgment_columns(receipt_frame, ['本次结论']), hide_index=True, width='stretch')
     rows={str(r['row_key']):r for r in receipt['items']}
     selected=st.selectbox('查看本次保存明细',[None,*rows],format_func=lambda k:'请选择检验项目' if k is None else source[k]['test_item_name'],key='receipt_selected_'+draft['draft_id'])
     if selected is not None:
         row=rows[selected];item=source[selected]
+        if row.get('ct_evaluation', {}).get('enabled'):
+            message = row.get('ct_alert_detail') or row.get('ct_requirement', '')
+            if row.get('ct_alert'):
+                (st.error if row.get('display_tone') == 'danger' else st.warning)(row['conclusion'] + '：' + message)
+            else:
+                st.caption(message)
         st.dataframe(pd.DataFrame([{'水平':l['level_name'],'检测值':l['value'],'实际质控品批号':l['lot_no'],'单位':l['unit_symbol']} for l in row.get('levels',[])]),hide_index=True,width='stretch')
         columns=st.columns(2)
         if columns[0].button('查看本次记录与质控图',key='receipt_chart_'+str(row['row_key'])):
@@ -243,11 +292,17 @@ def render_daily_entry():
         return_to_project_workspace(template_id)
     if overview.button('返回今日总览',key='entry_overview'):open_global_page('show_daily_overview_page')
     st.caption('按 Enter 或 Tab 换到下一格；也可从表格粘贴或用 Excel 批量填写。')
-    try:_render_selector()
+    selector_context=None
+    try:selector_context=_render_selector()
     except Exception as exc:
         logging.exception('Daily context read failed');st.error(str(exc) if isinstance(exc,ValueError) else '资料读取失败，请重试。')
     draft=_draft()
     if not draft:return
+    try:_follow_instant_transfer(draft,selector_context)
+    except Exception as exc:
+        logging.exception('Daily transfer route read failed')
+        st.error(str(exc) if isinstance(exc,ValueError) else '转入后的批次资料读取失败，请重试。')
+        return
     if not draft.get('receipt'):_discard_controls(draft)
     token=draft['draft_id'];items=draft['context']['items'];item_map={str(i['lot_config_item_id']):i for i in items}
     if not items:
@@ -260,6 +315,8 @@ def render_daily_entry():
     materials='；'.join(dict.fromkeys(material_label(level) for item in items for level in item['levels']))
     st.markdown('**本组：'+str(items[0].get('instrument_name',''))+' · '+materials+'**')
     if _receipt(draft):return
+    if draft.get('transfer_recheck_required'):
+        st.info('此检验项目已转入 L-J 法，尚未保存的输入已保留。请重新检查本组结果，再确认保存。')
     cols=st.columns(2)
     for col,label,field in [(cols[0],'检测时间（年-月-日 时:分:秒）','test_time'),(cols[1],'检测人','operator')]:
         key=f'daily_{field}_{token}'
@@ -338,6 +395,7 @@ def render_daily_entry():
                 from services.daily_context_service import get_daily_context
                 draft['context']=get_daily_context(test_time=_entry_time(draft['test_time']),**draft['context']['selection'])
             validation=validate_submission(build_request(draft));draft['errors']=validation['errors'];draft['frozen']=validation.get('frozen_request') if validation['valid'] else None
+            if validation['valid']:draft.pop('transfer_recheck_required',None)
         except Exception as exc:
             logging.exception('Daily validation failed');draft['errors']=[str(exc) if isinstance(exc,ValueError) else '核对未完成，请重试。']
         st.rerun()

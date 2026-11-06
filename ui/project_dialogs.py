@@ -200,7 +200,7 @@ def _render_project_form(ctx):
         st.caption('已添加检验项目或批次；更换仪器或质控品需新建项目。')
     _text(ctx, 'project_group', '分组', placeholder='例如：血筛、生化、分子')
     _qc_choices(ctx, defaults=True)
-    st.caption('默认设置仅用于以后新增的检验项目。')
+    st.caption('所选默认方法将预填到新添加的检验项目中。')
     _text(ctx, 'notes', '项目备注', multiline=True)
     registration_open = render_project_dependencies(ctx, kind='project', locked_identity=locked)
     relation_pending = render_pending_product_relation_notice(ctx)
@@ -233,7 +233,7 @@ def _render_project_form(ctx):
 
 def _render_disabled_project(ctx):
     saved = ctx['initial']
-    st.info('项目已停用，资料仅供查看。恢复后请重新确认项目设置。')
+    st.info('项目已停用。恢复后请重新确认项目设置。')
     for field, label in [('template_name', '项目名称'), ('instrument_name', '仪器'),
                          ('qc_material_name', '质控品'), ('default_reagent_name', '默认试剂'),
                          ('project_group', '分组'), ('notes', '项目备注')]:

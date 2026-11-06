@@ -111,7 +111,7 @@ def _preview_item(row, period, handling_versions=None):
     if row['batch_id'] is None:
         return dict(item, eligible=False, unit_key=f"config:{row['lot_config_item_id']}:{period.key}", reason='批次配置尚未确认并开始使用，不能生成正式期报告。')
     if row['qc_method'] not in ('lj', 'zscore'):
-        return dict(item, eligible=False, reason='即时法不直接生成正式期报告；转入 L-J 后，在对应 L-J 批次生成报告。')
+        return dict(item, eligible=False, reason='即时法转入 L-J 后，可在对应 L-J 批次生成正式期报告。')
     try:
         from services.report_archive_service import list_report_handling_versions
         package = _build(row['qc_method'], row['batch_id'], period=period)
@@ -354,7 +354,7 @@ def monthly_job_summary(job_id):
             cv_rows.extend(dict(base, **row) for row in quality['rows'])
         else:
             cv_rows.append(dict(base, level='各水平', parameter_version='未评价', count=None, days=None, cv=None,
-                requirement='未采用可自动评价的 CV 要求', decision=quality.get('evaluation_reason') or '仅登记依据，暂不自动评价 CV'))
+                requirement='未设置CV上限', decision=quality.get('evaluation_reason') or '请按已登记要求核查。'))
         events.extend(dict(base, **row) for row in handling)
     return dict(reports=reports, cv_rows=cv_rows, events=events,
         scope_note='取数范围为所选期间的常规正式期记录（临时质控除外），多水平按完整检测计数。失控统计采用原检测判读，处理进度另列。')
