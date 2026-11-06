@@ -47,8 +47,8 @@ class SoftwareDownloadsTest(unittest.TestCase):
         self.assertFalse(list(app.exception), [item.message for item in app.exception])
         return app
 
-    def test_shipping_catalog_has_no_placeholder_links_or_release_versions(self):
-        catalog = get_software_download_catalog()
+    def test_unavailable_catalog_has_no_placeholder_links_or_release_versions(self):
+        catalog = self.catalog({"windows-x86_64": None, "macos-arm64": None})
         self.assertTrue(catalog.readable)
         self.assertEqual([item.target for item in catalog.downloads], ["windows-x86_64", "macos-arm64"])
         self.assertTrue(all(item.release is None for item in catalog.downloads))
@@ -86,6 +86,9 @@ class SoftwareDownloadsTest(unittest.TestCase):
             {"size_bytes": True},
             {"size_bytes": 0},
             {"version": ""},
+            {"build_number": True},
+            {"build_number": 0},
+            {"build_number": "2026110604"},
         ]
         mac = published()
         mac["url"] = "https://downloads.example.org/releases/1.2.3/macos-arm64.dmg"
@@ -97,6 +100,23 @@ class SoftwareDownloadsTest(unittest.TestCase):
                 self.assertIsNone(catalog.downloads[0].release)
                 self.assertEqual(catalog.downloads[1].release.url, mac["url"])
                 self.assertTrue(catalog.readable)
+
+    def test_development_installation_help_exposes_package_identity(self):
+        windows = published(build_number=2026110604)
+        mac = published(build_number=2026110604, sha256="b" * 64,
+                        url="https://downloads.example.org/releases/1.2.3/macos-arm64.dmg")
+        catalog = self.catalog({"windows-x86_64": windows, "macos-arm64": mac})
+        app = self.app(catalog)
+        self.assertEqual(len(app.get("link_button")), 2)
+        self.assertEqual([item.value for item in app.code], ["a" * 64, "b" * 64])
+        self.assertTrue(all("构建 2026110604" in item.value
+                            for item in app.caption if "版本 " in item.value))
+        text = "\n".join(item.value for item in app.markdown)
+        for expected in ("当前提供开发版", "更多信息 → 仍要运行", "系统设置 → 隐私与安全",
+                         "SHA-256", "support.apple.com/zh-cn/102445",
+                         "learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation"):
+            self.assertIn(expected, text)
+        self.assertTrue(any("停止安装" in item.value for item in app.caption))
 
     def test_unpublished_or_incomplete_records_never_create_links(self):
         for value in ({"published": True}, {**published(), "published": False},

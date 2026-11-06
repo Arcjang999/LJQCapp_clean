@@ -27,6 +27,7 @@ class PublishedDownload:
     url: str
     sha256: str
     size_bytes: int
+    build_number: int | None = None
 
 
 @dataclass(frozen=True)
@@ -76,7 +77,10 @@ def _published_download(value: object, target: str) -> PublishedDownload | None:
     size = value.get("size_bytes")
     if type(size) is not int or size <= 0:
         raise ValueError("Invalid package size")
-    return PublishedDownload(version, published_at, url, digest.lower(), size)
+    build_number = value.get("build_number")
+    if build_number is not None and (type(build_number) is not int or build_number <= 0):
+        raise ValueError("Invalid build number")
+    return PublishedDownload(version, published_at, url, digest.lower(), size, build_number)
 
 
 def get_software_download_catalog(path: Path | None = None) -> SoftwareDownloadCatalog:
