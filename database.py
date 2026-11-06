@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 from contextvars import ContextVar
 from contextlib import contextmanager
+from services.storage_paths import get_storage_paths, read_storage_config
+from services.schema_compatibility import inspect_database, assert_supported_connection
 
 import pandas as pd
 from services.time_service import validate_detection_time
@@ -46,35 +48,27 @@ PROJECT_METHOD_ZSCORE = "zscore"
 
 
 def _get_persistent_data_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        executable = Path(sys.executable).resolve()
-        # Keep mutable data outside PyInstaller extraction folders and .app bundles.
-        for parent in executable.parents:
-            if parent.suffix.lower() == ".app":
-                return parent.parent / "data"
-        return executable.parent / "data"
-    return PROJECT_DATA_DIR
+    paths = get_storage_paths(base_dir=BASE_DIR)
+    return paths.data_dir if paths.uses_stable_root else PROJECT_DATA_DIR
 
 
 DATA_DIR = _get_persistent_data_dir()
 DEFAULT_DB_PATH = DATA_DIR / "qc_lj_app.db"
-STORAGE_CONFIG_PATH = DATA_DIR / "storage_config.json"
+STORAGE_CONFIG_PATH = get_storage_paths(base_dir=BASE_DIR).storage_config_path
 LEGACY_DB_CANDIDATES = [
     PROJECT_DB_PATH,
     PROJECT_LEGACY_DB_PATH,
     DEFAULT_DB_PATH,
 ]
+if get_storage_paths(base_dir=BASE_DIR).uses_stable_root:
+    # A new installation never guesses which old package contains the user's DB.
+    # The launcher must call the explicit complete-storage adoption API instead.
+    LEGACY_DB_CANDIDATES = []
 DB_PATH = DEFAULT_DB_PATH
 
 
 def _read_storage_config_payload() -> dict[str, object]:
-    if not STORAGE_CONFIG_PATH.exists():
-        return {}
-    try:
-        payload = json.loads(STORAGE_CONFIG_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
+    return read_storage_config(STORAGE_CONFIG_PATH)
 
 
 def _extract_configured_db_path(payload: dict[str, object] | None = None) -> Path | None:
@@ -139,15 +133,17 @@ def _ensure_db_parent() -> None:
 
 
 def _migrate_legacy_db_file() -> None:
-    _ensure_db_parent()
     if DB_PATH.exists():
         return
 
     for legacy_db_path in LEGACY_DB_CANDIDATES:
         if not legacy_db_path.exists() or legacy_db_path.resolve() == DB_PATH.resolve():
             continue
+        inspect_database(legacy_db_path)
+        _ensure_db_parent()
         shutil.move(str(legacy_db_path), str(DB_PATH))
         return
+    _ensure_db_parent()
 
 
 def reset_database() -> None:
@@ -223,6 +219,8 @@ def get_connection() -> sqlite3.Connection:
     existing = _transaction_connection.get()
     if existing is not None:
         return existing
+    _read_storage_config_payload()
+    inspect_database(DB_PATH)
     _migrate_legacy_db_file()
     connection = sqlite3.connect(DB_PATH, check_same_thread=False, factory=_DatabaseConnection)
     connection.row_factory = sqlite3.Row
@@ -231,6 +229,8 @@ def get_connection() -> sqlite3.Connection:
 
 
 def init_db() -> None:
+    _read_storage_config_payload()
+    inspect_database(DB_PATH)
     _migrate_legacy_db_file()
     with get_connection() as connection:
         connection.execute("PRAGMA foreign_keys = ON")
@@ -508,11 +508,12 @@ def _get_existing_zscore_project_ids(connection: sqlite3.Connection) -> set[int]
 
 
 def _projects_table_needs_rebuild(connection: sqlite3.Connection) -> bool:
+    assert_supported_connection(connection)
     existing_columns = {
         row["name"] for row in connection.execute("PRAGMA table_info(projects)").fetchall()
     }
     expected_columns = {"id", "name", "method_type", "input_value_type", "is_disabled", "created_at"}
-    if existing_columns != expected_columns:
+    if not expected_columns.issubset(existing_columns):
         return True
 
     table_row = connection.execute(
@@ -731,6 +732,7 @@ def _ensure_batches_table(connection: sqlite3.Connection) -> None:
 
 
 def _ensure_results_table(connection: sqlite3.Connection) -> None:
+    assert_supported_connection(connection)
     table_exists = connection.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'results'"
     ).fetchone()
@@ -761,7 +763,7 @@ def _ensure_results_table(connection: sqlite3.Connection) -> None:
         "manual_note",
         "created_at",
     }
-    if existing_columns == expected_columns:
+    if expected_columns.issubset(existing_columns):
         return
 
     connection.execute("ALTER TABLE results RENAME TO results_legacy")

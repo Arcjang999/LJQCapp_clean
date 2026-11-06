@@ -9,6 +9,11 @@ from database import get_app_settings, read_snapshot, save_app_settings
 
 STEP_IDS = ('unit', 'materials', 'project')
 ONBOARDING_SETTINGS_KEY = 'first_use_onboarding'
+ONBOARDING_METHOD_SETTINGS_KEY = 'first_use_method'
+WORKBENCH_TUTORIAL_SETTINGS_KEYS = {
+    'lj': 'first_use_tutorial_lj',
+    'zscore': 'first_use_tutorial_zscore',
+}
 STATE_VERSION = 1
 _STATUSES = ('new', 'active', 'skipped', 'completed')
 _PROJECT_TABLES = ('qc_project_templates', 'projects', 'instant_projects', 'zscore_projects')
@@ -27,21 +32,72 @@ def _normalize_state(value: object) -> dict:
     }
 
 
-def get_onboarding_state() -> dict:
-    stored = get_app_settings((ONBOARDING_SETTINGS_KEY,)).get(ONBOARDING_SETTINGS_KEY, '')
+def _read_setting(key: str) -> dict:
+    stored = get_app_settings((key,)).get(key, '')
     try:
         value = json.loads(stored)
     except (TypeError, ValueError, RecursionError):
         value = {}
-    return _normalize_state(value)
+    return value if isinstance(value, dict) else {}
+
+
+def get_onboarding_state() -> dict:
+    return _normalize_state(_read_setting(ONBOARDING_SETTINGS_KEY))
 
 
 def save_onboarding_progress(step: str, *, status: str = 'active') -> dict:
     if step not in STEP_IDS or status not in _STATUSES:
         raise ValueError('引导进度未保存，请重新打开首次引导后重试。')
-    state = {'version': STATE_VERSION, 'step': step, 'status': status}
+    state = {**_read_setting(ONBOARDING_SETTINGS_KEY), **get_onboarding_state(),
+             'version': STATE_VERSION, 'step': step, 'status': status}
     save_app_settings({ONBOARDING_SETTINGS_KEY: json.dumps(state, ensure_ascii=False)})
     return state
+
+
+def get_onboarding_method() -> str | None:
+    method = _read_setting(ONBOARDING_METHOD_SETTINGS_KEY).get('method')
+    return method if method in ('lj', 'zscore') else None
+
+
+def save_onboarding_method(method: str) -> str:
+    """Choose a first draft without creating projects or confirming any material."""
+    if method not in ('lj', 'zscore'):
+        raise ValueError('请选择单水平或多水平法。')
+    if has_existing_projects():
+        raise ValueError('已有项目，请在项目设置中选择各检验项目的质控方法。')
+    choice = {**_read_setting(ONBOARDING_METHOD_SETTINGS_KEY),
+              'version': 1, 'method': method, 'tutorials_enabled': True}
+    state = {**_read_setting(ONBOARDING_SETTINGS_KEY), **get_onboarding_state(), 'status': 'active'}
+    save_app_settings({
+        ONBOARDING_METHOD_SETTINGS_KEY: json.dumps(choice, ensure_ascii=False),
+        ONBOARDING_SETTINGS_KEY: json.dumps(state, ensure_ascii=False),
+    })
+    return method
+
+
+def first_project_method() -> str | None:
+    """The preference expires as soon as any project, including a draft, exists."""
+    method = get_onboarding_method()
+    return method if method and not has_existing_projects() else None
+
+
+def should_show_workbench_tutorial(method: str) -> bool:
+    if method not in WORKBENCH_TUTORIAL_SETTINGS_KEYS:
+        return False
+    preference = _read_setting(ONBOARDING_METHOD_SETTINGS_KEY)
+    # Missing tutorial settings on an existing business library are not first use.
+    if preference.get('method') not in ('lj', 'zscore') or preference.get('tutorials_enabled') is not True:
+        return False
+    state = _read_setting(WORKBENCH_TUTORIAL_SETTINGS_KEYS[method])
+    return state.get('seen') is not True
+
+
+def mark_workbench_tutorial_seen(method: str) -> None:
+    if method not in WORKBENCH_TUTORIAL_SETTINGS_KEYS:
+        raise ValueError('请选择单水平或多水平法教程。')
+    key = WORKBENCH_TUTORIAL_SETTINGS_KEYS[method]
+    state = {**_read_setting(key), 'version': 1, 'seen': True}
+    save_app_settings({key: json.dumps(state, ensure_ascii=False)})
 
 
 def _tables(connection: sqlite3.Connection) -> set[str]:

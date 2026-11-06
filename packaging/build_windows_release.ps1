@@ -1,260 +1,166 @@
 param(
-    [string]$ZipPath = ""
+    [string]$PythonExe = "",
+    [string]$OutputRoot = "",
+    [string]$InnoCompiler = "",
+    [string]$ChineseMessagesFile = "",
+    [string]$ZipPath = "",
+    [switch]$SkipInstaller
 )
 
 $ErrorActionPreference = "Stop"
-
+Set-StrictMode -Version Latest
+if ($env:OS -ne "Windows_NT") { throw "Build the Windows installer on a Windows x64 computer." }
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$ServiceSpecFile = Join-Path $RepoRoot "packaging\LJQCApp.spec"
-$QtSpecFile = Join-Path $RepoRoot "packaging\LJQCAppQt.spec"
-$PythonExe = Join-Path $RepoRoot ".venv\Scripts\python.exe"
-$AssetWriter = Join-Path $RepoRoot "packaging\write_release_assets.py"
-$ZipWriter = Join-Path $RepoRoot "packaging\create_release_zip.py"
+if (-not $PythonExe) { $PythonExe = Join-Path $RepoRoot ".venv\Scripts\python.exe" }
+if (-not (Test-Path -LiteralPath $PythonExe -PathType Leaf)) { throw "Python not found: $PythonExe" }
+if (-not $OutputRoot) { $OutputRoot = Join-Path $RepoRoot "release" }
+$OutputRoot = [IO.Path]::GetFullPath($OutputRoot)
 
-if ([string]::IsNullOrWhiteSpace($ZipPath)) {
-    $compatName = "LJQCApp_windows_$([char]0x517C)$([char]0x5BB9)$([char]0x7248).zip"
-    $ZipPath = Join-Path $RepoRoot (Join-Path "release" $compatName)
-}
-$ZipPath = [System.IO.Path]::GetFullPath($ZipPath)
-$ZipDirectory = Split-Path -Parent $ZipPath
-
+# Each invocation uses new directories. Previous installers and work evidence stay intact.
+$RunId = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ") + "-" + [guid]::NewGuid().ToString("N").Substring(0, 8)
 $LocalAppData = [Environment]::GetFolderPath("LocalApplicationData")
-if ([string]::IsNullOrWhiteSpace($LocalAppData)) {
-    $LocalAppData = [System.IO.Path]::GetTempPath()
+if (-not $LocalAppData) { throw "The current user's LocalApplicationData directory is unavailable." }
+$WorkRoot = Join-Path $LocalAppData "LJQCAppBuild\$RunId"
+New-Item -ItemType Directory -Path $WorkRoot | Out-Null
+$MetadataPath = Join-Path $WorkRoot "build_info.json"
+Push-Location $RepoRoot
+try {
+    & $PythonExe -c "import platform,sys; assert sys.platform == 'win32' and platform.architecture()[0] == '64bit' and platform.machine().lower() in ('amd64','x86_64'), 'Use Windows x64 Python'"
+    if ($LASTEXITCODE -ne 0) { throw "A Windows x64 Python runtime is required." }
+    & $PythonExe -m services.release_info --output $MetadataPath --target windows-x86_64
+    if ($LASTEXITCODE -ne 0) { throw "Failed to capture the release source identity." }
+} finally { Pop-Location }
+$Metadata = Get-Content -LiteralPath $MetadataPath -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($Metadata.version -notmatch '^\d+\.\d+\.\d+$' -or $Metadata.source_digest -notmatch '^[0-9a-f]{64}$' -or $Metadata.git_commit -notmatch '^[0-9a-f]{40}$') {
+    throw "The canonical release metadata is incomplete."
 }
-$WorkRoot = Join-Path $LocalAppData "LJQCApp\compat_release_packaging"
+$PayloadId = "$($Metadata.version)-$($Metadata.build_number)-$($Metadata.source_digest.Substring(0, 12))"
+$ArtifactDir = Join-Path $OutputRoot "$($Metadata.version)\$($Metadata.build_number)\windows-x86_64\$RunId"
+New-Item -ItemType Directory -Path $ArtifactDir | Out-Null
+Copy-Item -LiteralPath $MetadataPath -Destination (Join-Path $ArtifactDir "build_info.json")
 $ServiceDist = Join-Path $WorkRoot "service_dist"
-$ServiceWork = Join-Path $WorkRoot "service_work"
 $QtDist = Join-Path $WorkRoot "qt_dist"
-$QtWork = Join-Path $WorkRoot "qt_work"
-$ReleaseStaging = Join-Path $WorkRoot "LJQCApp_compat_release"
+$ReleaseStaging = Join-Path $WorkRoot "payload"
 
-function Remove-TreeSafely {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$TargetPath,
-        [Parameter(Mandatory = $true)]
-        [string[]]$AllowedRoots
-    )
-
-    if (-not (Test-Path -LiteralPath $TargetPath)) {
-        return
-    }
-
-    $resolvedTarget = (Resolve-Path -LiteralPath $TargetPath).Path
-    $isAllowed = $false
-    foreach ($allowedRoot in $AllowedRoots) {
-        if (-not (Test-Path -LiteralPath $allowedRoot)) {
-            continue
-        }
-        $resolvedRoot = (Resolve-Path -LiteralPath $allowedRoot).Path.TrimEnd("\")
-        if ($resolvedTarget.Equals($resolvedRoot, [StringComparison]::OrdinalIgnoreCase) -or
-            $resolvedTarget.StartsWith("$resolvedRoot\", [StringComparison]::OrdinalIgnoreCase)) {
-            $isAllowed = $true
-            break
+if (-not $SkipInstaller -and -not $InnoCompiler) {
+    $FoundCompiler = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+    if ($FoundCompiler) { $InnoCompiler = $FoundCompiler.Source }
+    if (-not $InnoCompiler) {
+        foreach ($Candidate in @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe")) {
+            if (Test-Path -LiteralPath $Candidate -PathType Leaf) { $InnoCompiler = $Candidate; break }
         }
     }
-
-    if (-not $isAllowed) {
-        throw "Refusing to remove path outside allowed roots: $resolvedTarget"
+}
+if (-not $SkipInstaller -and (-not $InnoCompiler -or -not (Test-Path -LiteralPath $InnoCompiler -PathType Leaf))) {
+    throw "Install Inno Setup 6 from its official source, or pass -InnoCompiler PATH. No previous artifacts were removed."
+}
+if (-not $SkipInstaller) {
+    $InnoCompiler = (Resolve-Path -LiteralPath $InnoCompiler).Path
+    $CompilerVersion = (Get-Item -LiteralPath $InnoCompiler).VersionInfo.FileVersion
+    if ($CompilerVersion -notmatch '^6\.(\d+)' -or [int]$Matches[1] -lt 5) {
+        throw "Inno Setup 6.5 or newer within version 6 is required; found $CompilerVersion."
     }
-
-    Remove-Item -LiteralPath $resolvedTarget -Recurse -Force
+    if (-not $ChineseMessagesFile) { $ChineseMessagesFile = Join-Path (Split-Path -Parent $InnoCompiler) "Languages\ChineseSimplified.isl" }
+    if (-not (Test-Path -LiteralPath $ChineseMessagesFile -PathType Leaf)) {
+        throw "The Simplified Chinese language file is missing. In GitHub Actions run packaging/prepare_windows_ci.ps1 and pass its LJQC_CI_CHINESE_MESSAGES path with -ChineseMessagesFile."
+    }
+    $ChineseMessagesFile = (Resolve-Path -LiteralPath $ChineseMessagesFile).Path
 }
 
-function Remove-ItemWithRetry {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$TargetPath,
-        [switch]$Recurse
-    )
-
-    if (-not (Test-Path -LiteralPath $TargetPath)) {
-        return
-    }
-
-    $lastError = $null
-    for ($attempt = 1; $attempt -le 8; $attempt += 1) {
-        try {
-            if ($Recurse) {
-                Remove-Item -LiteralPath $TargetPath -Recurse -Force -ErrorAction Stop
-            }
-            else {
-                Remove-Item -LiteralPath $TargetPath -Force -ErrorAction Stop
-            }
-            return
-        }
-        catch {
-            $lastError = $_
-            Start-Sleep -Seconds 3
-        }
-    }
-
-    throw $lastError
-}
-
-function Ensure-CleanDirectory {
-    param([string]$TargetPath)
-
-    New-Item -ItemType Directory -Path (Split-Path -Parent $TargetPath) -Force | Out-Null
-    if (Test-Path -LiteralPath $TargetPath) {
-        $resolvedTarget = (Resolve-Path -LiteralPath $TargetPath).Path
-        $isAllowed = $false
-        foreach ($allowedRoot in @($WorkRoot, $ZipDirectory)) {
-            if (-not (Test-Path -LiteralPath $allowedRoot)) {
-                continue
-            }
-            $resolvedRoot = (Resolve-Path -LiteralPath $allowedRoot).Path.TrimEnd("\")
-            if ($resolvedTarget.Equals($resolvedRoot, [StringComparison]::OrdinalIgnoreCase) -or
-                $resolvedTarget.StartsWith("$resolvedRoot\", [StringComparison]::OrdinalIgnoreCase)) {
-                $isAllowed = $true
-                break
-            }
-        }
-
-        if (-not $isAllowed) {
-            throw "Refusing to remove path outside allowed roots: $resolvedTarget"
-        }
-        Remove-ItemWithRetry -TargetPath $resolvedTarget -Recurse
-    }
-    New-Item -ItemType Directory -Path $TargetPath -Force | Out-Null
-}
-
-function Invoke-PyInstallerBuild {
-    param(
-        [string]$SpecFile,
-        [string]$DistPath,
-        [string]$WorkPath,
-        [string]$AppName,
-        [string]$BundleMode,
-        [string]$Console
-    )
-
-    Ensure-CleanDirectory -TargetPath $DistPath
-    Ensure-CleanDirectory -TargetPath $WorkPath
-
+function Invoke-PackageBuild([string]$Spec, [string]$Dist, [string]$Work, [string]$Name, [string]$Console) {
     Push-Location $RepoRoot
     try {
-        $env:LJQCAPP_BUNDLE_MODE = $BundleMode
-        $env:LJQCAPP_APP_NAME = $AppName
-        $env:LJQCAPP_QT_APP_NAME = $AppName
+        $env:LJQCAPP_BUNDLE_MODE = "onedir"
+        $env:LJQCAPP_APP_NAME = $Name
+        $env:LJQCAPP_QT_APP_NAME = $Name
         $env:LJQCAPP_CONSOLE = $Console
-
-        & $PythonExe -m PyInstaller --clean -y --distpath $DistPath --workpath $WorkPath $SpecFile
-        if ($LASTEXITCODE -ne 0) {
-            throw "PyInstaller build failed for $AppName."
+        $env:LJQCAPP_BUILD_METADATA = $MetadataPath
+        & $PythonExe -m PyInstaller --clean -y --distpath $Dist --workpath $Work $Spec
+        if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed: $Name" }
+    } finally {
+        foreach ($NameToClear in @("LJQCAPP_BUNDLE_MODE", "LJQCAPP_APP_NAME", "LJQCAPP_QT_APP_NAME", "LJQCAPP_CONSOLE", "LJQCAPP_BUILD_METADATA")) {
+            Remove-Item "Env:\$NameToClear" -ErrorAction SilentlyContinue
         }
-    }
-    finally {
-        Remove-Item Env:LJQCAPP_BUNDLE_MODE -ErrorAction SilentlyContinue
-        Remove-Item Env:LJQCAPP_APP_NAME -ErrorAction SilentlyContinue
-        Remove-Item Env:LJQCAPP_QT_APP_NAME -ErrorAction SilentlyContinue
-        Remove-Item Env:LJQCAPP_CONSOLE -ErrorAction SilentlyContinue
         Pop-Location
     }
 }
 
-function Copy-DirectoryMirror {
-    param(
-        [string]$SourcePath,
-        [string]$TargetPath
-    )
-
-    New-Item -ItemType Directory -Path $TargetPath -Force | Out-Null
-    robocopy $SourcePath $TargetPath /MIR | Out-Null
-    if ($LASTEXITCODE -ge 8) {
-        throw "Failed to copy $SourcePath to $TargetPath."
-    }
+function Copy-Package([string]$Source, [string]$Destination) {
+    if (-not (Test-Path -LiteralPath $Source -PathType Container)) { throw "Package not found: $Source" }
+    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    Get-ChildItem -LiteralPath $Source -Force | Copy-Item -Destination $Destination -Recurse
 }
 
-function New-ReleaseFiles {
-    Ensure-CleanDirectory -TargetPath $ReleaseStaging
-
-    $qtPackage = Join-Path $QtDist "LJQCApp"
-    $qtExe = Join-Path $qtPackage "LJQCApp.exe"
-    if (-not (Test-Path -LiteralPath $qtExe)) {
-        throw "Expected Qt launcher exe not found: $qtExe"
-    }
-    Copy-DirectoryMirror -SourcePath $qtPackage -TargetPath $ReleaseStaging
-
-    $servicePackage = Join-Path $ServiceDist "LJQCAppService"
-    $serviceExe = Join-Path $servicePackage "LJQCAppService.exe"
-    if (-not (Test-Path -LiteralPath $serviceExe)) {
-        throw "Expected service exe not found: $serviceExe"
-    }
-    Copy-DirectoryMirror -SourcePath $servicePackage -TargetPath (Join-Path $ReleaseStaging "_internal\app")
-
-    $runtimeSource = Join-Path $RepoRoot "packaging\runtime"
-    if (Test-Path -LiteralPath $runtimeSource) {
-        Copy-DirectoryMirror -SourcePath $runtimeSource -TargetPath (Join-Path $ReleaseStaging "_internal\runtime")
-    }
-
-    $gitCommit = ""
-    try {
-        $gitCommit = (& git -C $RepoRoot rev-parse --short HEAD).Trim()
-    }
-    catch {
-        $gitCommit = ""
-    }
-    $buildTime = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-    & $PythonExe $AssetWriter --staging $ReleaseStaging --git-commit $gitCommit --build-time $buildTime
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to write release assets."
-    }
+Invoke-PackageBuild (Join-Path $PSScriptRoot "LJQCApp.spec") $ServiceDist (Join-Path $WorkRoot "service_work") "LJQCAppService" "true"
+Invoke-PackageBuild (Join-Path $PSScriptRoot "LJQCAppQt.spec") $QtDist (Join-Path $WorkRoot "qt_work") "LJQCApp" "false"
+Copy-Package (Join-Path $QtDist "LJQCApp") $ReleaseStaging
+Copy-Package (Join-Path $ServiceDist "LJQCAppService") (Join-Path $ReleaseStaging "_internal\app")
+foreach ($Executable in @((Join-Path $ReleaseStaging "LJQCApp.exe"), (Join-Path $ReleaseStaging "_internal\app\LJQCAppService.exe"))) {
+    if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) { throw "Assembled executable is missing: $Executable" }
 }
+& $PythonExe (Join-Path $PSScriptRoot "write_release_assets.py") --staging $ReleaseStaging --metadata $MetadataPath
+if ($LASTEXITCODE -ne 0) { throw "Release resource and payload verification failed." }
+Copy-Item -LiteralPath (Join-Path $ReleaseStaging "release_payload_manifest.json") -Destination (Join-Path $ArtifactDir "release_payload_manifest.json")
+& $PythonExe -m pip freeze | Out-File -LiteralPath (Join-Path $ArtifactDir "windows-build-environment.txt") -Encoding utf8
+if ($LASTEXITCODE -ne 0) { throw "Failed to record the Windows build environment." }
 
-function Compress-Release {
-    New-Item -ItemType Directory -Path $ZipDirectory -Force | Out-Null
-    foreach ($item in Get-ChildItem -LiteralPath $ZipDirectory -Force -ErrorAction SilentlyContinue) {
-        Remove-ItemWithRetry -TargetPath $item.FullName -Recurse:($item.PSIsContainer)
+# Exercise both frozen entry points before declaring a successful build. The
+# version command must not create a business database, even on a build account.
+$OriginalDataRoot = $env:LJQC_DATA_ROOT
+$OriginalPythonUtf8 = $env:PYTHONUTF8
+$CliDataRoot = Join-Path $WorkRoot "cli-verification-data"
+try {
+    $env:LJQC_DATA_ROOT = $CliDataRoot
+    $env:PYTHONUTF8 = "1"
+    foreach ($Executable in @((Join-Path $ReleaseStaging "LJQCApp.exe"), (Join-Path $ReleaseStaging "_internal\app\LJQCAppService.exe"))) {
+        $OutputPath = Join-Path $ArtifactDir ((Split-Path -Leaf $Executable) + "-version.txt")
+        $ErrorPath = Join-Path $ArtifactDir ((Split-Path -Leaf $Executable) + "-version-error.txt")
+        # The outer launcher is a GUI executable; '&' does not reliably wait for
+        # it under PowerShell. A held process handle gives its real exit status.
+        $VersionProcess = Start-Process -FilePath $Executable -ArgumentList @("--version") -Wait -PassThru -RedirectStandardOutput $OutputPath -RedirectStandardError $ErrorPath
+        if ($VersionProcess.ExitCode -ne 0) { throw "Frozen version command failed: $Executable (exit $($VersionProcess.ExitCode)). See $ErrorPath" }
     }
-
-    & $PythonExe $ZipWriter --source $ReleaseStaging --output $ZipPath --work-dir $WorkRoot
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to create release zip."
+    if ((Test-Path -LiteralPath $CliDataRoot) -and (Get-ChildItem -LiteralPath $CliDataRoot -Recurse -File -Filter "*.db")) {
+        throw "A frozen version command unexpectedly created a database."
     }
+} finally {
+    if ($null -eq $OriginalDataRoot) { Remove-Item Env:\LJQC_DATA_ROOT -ErrorAction SilentlyContinue }
+    else { $env:LJQC_DATA_ROOT = $OriginalDataRoot }
+    if ($null -eq $OriginalPythonUtf8) { Remove-Item Env:\PYTHONUTF8 -ErrorAction SilentlyContinue }
+    else { $env:PYTHONUTF8 = $OriginalPythonUtf8 }
 }
-
-foreach ($requiredPath in @($PythonExe, $ServiceSpecFile, $QtSpecFile, $AssetWriter, $ZipWriter)) {
-    if (-not (Test-Path -LiteralPath $requiredPath)) {
-        throw "Required build file not found: $requiredPath"
-    }
+$FinalMetadataPath = Join-Path $WorkRoot "source-after-build.json"
+Push-Location $RepoRoot
+try {
+    & $PythonExe -m services.release_info --output $FinalMetadataPath --target windows-x86_64
+    if ($LASTEXITCODE -ne 0) { throw "Failed to verify source identity after packaging." }
+} finally { Pop-Location }
+$FinalMetadata = Get-Content -LiteralPath $FinalMetadataPath -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($FinalMetadata.source_digest -ne $Metadata.source_digest -or $FinalMetadata.git_commit -ne $Metadata.git_commit) {
+    throw "Source changed during packaging. This work directory is retained; no installer is accepted."
 }
+if (-not $ZipPath) { $ZipPath = Join-Path $ArtifactDir "LJQCApp-$PayloadId-windows-x64.zip" }
+$ZipPath = [IO.Path]::GetFullPath($ZipPath)
+if (Test-Path -LiteralPath $ZipPath) { throw "An existing output file must not be overwritten: $ZipPath" }
+& $PythonExe (Join-Path $PSScriptRoot "create_release_zip.py") --source $ReleaseStaging --output $ZipPath --work-dir $WorkRoot
+if ($LASTEXITCODE -ne 0) { throw "Release ZIP creation failed." }
 
-New-Item -ItemType Directory -Path $WorkRoot -Force | Out-Null
-Remove-TreeSafely -TargetPath (Join-Path $RepoRoot "build") -AllowedRoots @($RepoRoot)
-Remove-TreeSafely -TargetPath (Join-Path $RepoRoot "dist") -AllowedRoots @($RepoRoot)
-Remove-TreeSafely -TargetPath (Join-Path $RepoRoot "__pycache__") -AllowedRoots @($RepoRoot)
-Remove-TreeSafely -TargetPath (Join-Path $RepoRoot ".pytest_cache") -AllowedRoots @($RepoRoot)
-Remove-TreeSafely -TargetPath (Join-Path $RepoRoot "packaging\desktop_launcher\bin") -AllowedRoots @($RepoRoot)
-Remove-TreeSafely -TargetPath (Join-Path $RepoRoot "packaging\desktop_launcher\obj") -AllowedRoots @($RepoRoot)
-
-Invoke-PyInstallerBuild `
-    -SpecFile $ServiceSpecFile `
-    -DistPath $ServiceDist `
-    -WorkPath $ServiceWork `
-    -AppName "LJQCAppService" `
-    -BundleMode "onedir" `
-    -Console "true"
-
-Invoke-PyInstallerBuild `
-    -SpecFile $QtSpecFile `
-    -DistPath $QtDist `
-    -WorkPath $QtWork `
-    -AppName "LJQCApp" `
-    -BundleMode "onedir" `
-    -Console "false"
-
-New-ReleaseFiles
-Compress-Release
-
-Remove-TreeSafely -TargetPath (Join-Path $RepoRoot "build") -AllowedRoots @($RepoRoot)
-Remove-TreeSafely -TargetPath (Join-Path $RepoRoot "dist") -AllowedRoots @($RepoRoot)
-Remove-TreeSafely -TargetPath (Join-Path $RepoRoot "__pycache__") -AllowedRoots @($RepoRoot)
-Remove-TreeSafely -TargetPath (Join-Path $RepoRoot ".pytest_cache") -AllowedRoots @($RepoRoot)
-Remove-TreeSafely -TargetPath (Join-Path $RepoRoot "packaging\desktop_launcher\bin") -AllowedRoots @($RepoRoot)
-Remove-TreeSafely -TargetPath (Join-Path $RepoRoot "packaging\desktop_launcher\obj") -AllowedRoots @($RepoRoot)
-
+$InstallerPath = $null
+if (-not $SkipInstaller) {
+    $InstallerBase = "LJQCApp-$PayloadId-windows-x64-Setup"
+    $CompilerArgs = @("/DSourceDir=$ReleaseStaging", "/DOutputDir=$ArtifactDir", "/DOutputBase=$InstallerBase", "/DAppVersion=$($Metadata.version)", "/DBuildNumber=$($Metadata.build_number)", "/DPayloadId=$PayloadId", "/DChineseMessagesFile=$ChineseMessagesFile", (Join-Path $PSScriptRoot "windows_installer.iss"))
+    & $InnoCompiler @CompilerArgs
+    if ($LASTEXITCODE -ne 0) { throw "Windows installer compilation failed." }
+    $InstallerPath = Join-Path $ArtifactDir "$InstallerBase.exe"
+    if (-not (Test-Path -LiteralPath $InstallerPath -PathType Leaf)) { throw "The compiled installer was not found." }
+}
+$Artifacts = @([ordered]@{path=$ZipPath; sha256=(Get-FileHash -LiteralPath $ZipPath -Algorithm SHA256).Hash.ToLowerInvariant()})
+if ($InstallerPath) { $Artifacts += [ordered]@{path=$InstallerPath; sha256=(Get-FileHash -LiteralPath $InstallerPath -Algorithm SHA256).Hash.ToLowerInvariant()} }
+$Compiler = if ($SkipInstaller) { $null } else { [ordered]@{path=$InnoCompiler; version=$CompilerVersion; chinese_messages_sha256=(Get-FileHash -LiteralPath $ChineseMessagesFile -Algorithm SHA256).Hash.ToLowerInvariant()} }
+$Receipt = [ordered]@{status=$(if ($SkipInstaller) {"payload_built"} else {"installer_built"}); release=$Metadata; payload_id=$PayloadId; staging=$ReleaseStaging; artifacts=$Artifacts; compiler=$Compiler; frozen_version_commands="passed"; native_installation_validation="pending"; code_signing="not_configured"; mutable_data_included=$false}
+$Receipt | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $ArtifactDir "build_receipt.json") -Encoding UTF8
 Write-Output "BUILD_OK"
+Write-Output "INSTALLER_PATH=$InstallerPath"
 Write-Output "ZIP_PATH=$ZipPath"
 Write-Output "RELEASE_STAGING=$ReleaseStaging"
+Write-Output "BUILD_RECEIPT=$(Join-Path $ArtifactDir 'build_receipt.json')"

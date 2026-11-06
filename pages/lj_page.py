@@ -66,6 +66,8 @@ def render_lj_page() -> None:
         else:
             render_pending_transfer_dialog('lj')
         return
+    from ui.workbench_tutorial import render_workbench_tutorial
+    render_workbench_tutorial('lj')
     if st.session_state.get('lj_workbench_tabs') in ('LJ 月报', '月度报告'):
         st.session_state['lj_workbench_tabs'] = '质控报告'
     if st.session_state.get('lj_workbench_tabs') not in (TEXT["current_batch"], "质控报告"):

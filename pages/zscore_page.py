@@ -203,6 +203,8 @@ def render_zscore_page() -> None:
         else:
             render_pending_zscore_reference_dialog()
         return
+    from ui.workbench_tutorial import render_workbench_tutorial
+    render_workbench_tutorial('zscore')
     tab_names = [TEXT["current_batch"], "质控报告"]
     if st.session_state.get('zscore_workbench_tabs') in ('Z-score 月报', '月度报告'):
         st.session_state['zscore_workbench_tabs'] = '质控报告'

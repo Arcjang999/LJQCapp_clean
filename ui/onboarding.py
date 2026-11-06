@@ -7,9 +7,10 @@ import sqlite3
 import streamlit as st
 
 from database import get_db_path
+from ui.workbench_tutorial import METHOD_DESCRIPTIONS
 from services.onboarding_service import (
-    STEP_IDS, get_onboarding_readiness, get_onboarding_state,
-    save_onboarding_progress, should_auto_show_onboarding,
+    STEP_IDS, get_onboarding_method, get_onboarding_readiness, get_onboarding_state,
+    save_onboarding_method, save_onboarding_progress, should_auto_show_onboarding,
 )
 
 
@@ -136,17 +137,52 @@ def _render_project(ready: dict) -> None:
             open_project_dialog('project')
 
 
+def _render_method_choice(state: dict) -> None:
+    st.subheader('选择质控方法')
+    st.caption('按本实验室的质控方案选择，后续项目可另选。')
+    identity = str(get_db_path().resolve())
+    if st.session_state.get('onboarding_method_choice_database') != identity:
+        st.session_state['onboarding_method_choice_database'] = identity
+        st.session_state.pop('onboarding_method_choice', None)
+    choice = st.radio('本次设置', ['lj', 'zscore'], index=None,
+        format_func=lambda value: '单水平（L-J）' if value == 'lj' else '多水平法',
+        horizontal=True, key='onboarding_method_choice')
+    for label, description in METHOD_DESCRIPTIONS.values():
+        st.markdown(f'**{label}**：{description}')
+    later, proceed = st.columns(2)
+    if later.button('稍后再做', key='onboarding_skip', width='stretch'):
+        if _save(state['step'], 'skipped'):
+            st.session_state['onboarding_open'] = False
+            st.session_state.pop('onboarding_return_pending', None)
+            st.rerun(scope='app')
+    if proceed.button('继续设置', key='onboarding_method_continue', type='primary',
+                      width='stretch', disabled=choice is None):
+        try:
+            save_onboarding_method(choice)
+        except (sqlite3.Error, OSError, ValueError):
+            logging.exception('First-use method choice could not be saved')
+            st.error('本次选择未保存，请重试。')
+        else:
+            st.rerun(scope='app')
+
+
 @st.dialog('首次引导', width='large', dismissible=False)
 def _render_dialog() -> None:
     try:
         state = get_onboarding_state()
         ready = get_onboarding_readiness()
+        method = get_onboarding_method()
     except (sqlite3.Error, OSError, ValueError):
         logging.exception('First-use guide could not be read')
         st.error('引导暂时无法打开，请关闭后重试。')
         if st.button('关闭', key='onboarding_read_close'):
             st.session_state['onboarding_open'] = False
             st.rerun(scope='app')
+        return
+    # Old active progress resumes at its saved step. Ask for a method when that
+    # flow reaches project setup; skipped/completed progress never auto-restarts.
+    if not ready['project'] and method is None and (state['status'] == 'new' or state['step'] == 'project'):
+        _render_method_choice(state)
         return
     step = state['step']
     index = STEP_IDS.index(step)

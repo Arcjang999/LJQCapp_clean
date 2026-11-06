@@ -1102,6 +1102,8 @@ def inject_global_styles() -> None:
 
 GLOBAL_PAGE_SESSION_KEYS = (
     "show_user_guide_page",
+    "show_workbench_tutorial_page",
+    "show_software_downloads_page",
     "show_batch_monthly_reports_page",
     "show_daily_overview_page",
     "show_daily_entry_page",
@@ -1165,6 +1167,17 @@ def _open_user_guide_page(practical: bool = False) -> None:
     open_global_page("show_user_guide_page", rerun=False)
 
 
+def _open_software_downloads_page() -> None:
+    st.session_state["global_help_menu"] = False
+    open_global_page("show_software_downloads_page", rerun=False)
+
+
+def _open_workbench_tutorial_page() -> None:
+    st.session_state["global_help_menu"] = False
+    from ui.workbench_tutorial import open_workbench_tutorial
+    open_workbench_tutorial(rerun=False)
+
+
 def open_reference_management(kind: str, *, category=None, rerun=True, close_menu=True) -> None:
     if kind not in ('manufacturer', 'instrument', 'reagent'):
         raise ValueError('请选择要维护的资料。')
@@ -1179,6 +1192,8 @@ def open_reference_management(kind: str, *, category=None, rerun=True, close_men
 def _active_module_tone() -> str:
     routes = (
         ("show_user_guide_page", "guide"),
+        ("show_workbench_tutorial_page", "guide"),
+        ("show_software_downloads_page", "guide"),
         ("show_batch_monthly_reports_page", "reports"),
         ("show_daily_overview_page", "daily"),
         ("show_daily_entry_page", "daily"),
@@ -1252,8 +1267,12 @@ def render_page_chrome() -> None:
                     with st.container(key="module_nav_help"):
                         with st.popover("帮助", width="stretch", key="global_help_menu", on_change="rerun"):
                             st.button("使用说明", key="open_user_guide_page", width="stretch", on_click=_open_user_guide_page)
+                            st.button("新手教程", key="open_workbench_tutorial_page", width="stretch",
+                                      on_click=_open_workbench_tutorial_page)
                             st.button("操作说明", key="open_operation_guide_page", width="stretch",
                                       on_click=_open_user_guide_page, args=(True,))
+                            st.button("软件下载", key="open_software_downloads_page", width="stretch",
+                                      on_click=_open_software_downloads_page)
                             st.link_button(
                                 "问题反馈",
                                 "https://docs.qq.com/sheet/DY3V4b0FqS3psbkdK?tab=BB08J2",

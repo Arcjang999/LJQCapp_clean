@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+import os
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
@@ -27,17 +28,17 @@ APP_FILE_PATH = str(PROJECT_ROOT / "app.py")
 
 
 def test_default_storage_stays_beside_source_or_packaged_application() -> None:
-    with patch.object(sys, "frozen", False, create=True):
+    with patch.dict(os.environ, {'LJQC_DATA_ROOT': '', 'LJQC_DEPLOYMENT_MODE': ''}), patch.object(sys, "frozen", False, create=True):
         assert database._get_persistent_data_dir() == PROJECT_ROOT / "data"
 
     with TemporaryDirectory() as tempdir:
         root = Path(tempdir).resolve()
-        with patch.object(sys, "frozen", True, create=True):
+        with patch.dict(os.environ, {'LJQC_DATA_ROOT': str(root / 'persistent')}), patch.object(sys, "frozen", True, create=True):
             with patch.object(sys, "executable", str(root / "LJQCApp.exe")):
                 with patch.object(sys, "_MEIPASS", str(root / "temporary-extraction"), create=True):
-                    assert database._get_persistent_data_dir() == root / "data"
+                    assert database._get_persistent_data_dir() == root / "persistent" / "data"
             with patch.object(sys, "executable", str(root / "LJQCApp.app/Contents/MacOS/LJQCApp")):
-                assert database._get_persistent_data_dir() == root / "data"
+                assert database._get_persistent_data_dir() == root / "persistent" / "data"
 
 
 class TemporaryStorageContext:

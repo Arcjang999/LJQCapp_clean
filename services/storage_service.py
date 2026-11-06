@@ -19,6 +19,8 @@ from uuid import uuid4
 import zipfile
 
 import database
+from services.storage_paths import get_storage_paths, read_storage_config, StoragePathError
+from services.schema_compatibility import inspect_database
 
 
 BACKUP_FILE_PREFIX = "qc_lj_app_backup"
@@ -51,6 +53,161 @@ class StorageOperationResult:
     config_path: Path | None = None
     protection_backup_path: Path | None = None
     warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class StorageAdoptionResult:
+    adopted: bool
+    database_path: Path
+    config_path: Path
+    kept_custom_path: bool
+    source_directory: Path | None
+
+
+def _external_file_inventory(root: Path) -> dict:
+    """Retain even unregistered old files; reject links before following them."""
+    if not root.exists():
+        return {'exists': False, 'entries': {}}
+    if root.is_symlink() or not root.is_dir():
+        raise RuntimeError('原附件目录无效，请核对原资料；未执行接入。')
+    entries = {}
+    for path in sorted(root.rglob('*')):
+        if path.is_symlink():
+            raise RuntimeError('原附件目录包含链接，请核对原资料；未执行接入。')
+        relative = path.relative_to(root).as_posix()
+        if path.is_dir():
+            entries[relative] = {'kind': 'directory'}
+        elif path.is_file():
+            entries[relative] = {'kind': 'file', 'size': path.stat().st_size, 'sha256': _digest_file(path)}
+        else:
+            raise RuntimeError('原附件目录包含无法读取的资料，未执行接入。')
+    return {'exists': True, 'entries': entries}
+
+
+def _database_dump_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    with closing(sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True)) as connection:
+        for line in connection.iterdump():
+            digest.update(line.encode('utf-8'))
+            digest.update(b'\n')
+    return digest.hexdigest()
+
+
+def adopt_legacy_storage(legacy_data_dir: Path) -> StorageAdoptionResult:
+    """Explicit first desktop adoption; caller must close the old application.
+
+    The argument is the known old *data directory*, never a disk search root.
+    A writer reservation protects the final source snapshot. This function does
+    not initialize/migrate a schema, stop processes, or implement upgrade rollback.
+    Existing stable configuration is authoritative and never imported twice.
+    """
+    paths = get_storage_paths()
+    if not paths.uses_stable_root:
+        raise StoragePathError('首次资料接入仅用于固定桌面资料目录。')
+    config = paths.storage_config_path
+    if config.exists():
+        existing = read_storage_config(config)
+        active = Path(existing['database_path']).expanduser()
+        inspect_database(active, check_integrity=True, require_business_schema=True)
+        return StorageAdoptionResult(False, active, config,
+            active.resolve() != paths.default_db_path.resolve(), None)
+    source_dir = Path(legacy_data_dir).expanduser().resolve()
+    if not source_dir.is_dir():
+        raise StoragePathError('未找到所选原软件资料文件夹，未建立替代空库。')
+    old_config = source_dir / 'storage_config.json'
+    old_payload = read_storage_config(old_config)
+    source = Path(old_payload['database_path']).expanduser() if old_payload else source_dir / 'qc_lj_app.db'
+    inspect_database(source, check_integrity=True, require_business_schema=True)
+    old_config_bytes = old_config.read_bytes() if old_config.exists() else None
+    custom = source.resolve() != (source_dir / 'qc_lj_app.db').resolve()
+    destination = source if custom else paths.default_db_path
+    source_files = source.with_name(source.stem + '_files')
+    target_files = destination.with_name(destination.stem + '_files')
+    if not custom and (destination.exists() or target_files.exists()):
+        raise StoragePathError('固定资料目录已有资料，请核对保存位置；未覆盖现有文件。')
+    config.parent.mkdir(parents=True, exist_ok=True)
+    lock = config.parent / '.legacy-adoption.lock'
+    try:
+        descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError as error:
+        raise StoragePathError('资料接入正在进行或上次尚未完成，请先核对接入记录。') from error
+    created_database = created_files = False
+    temporary_config = config.with_name('.storage_config.' + uuid4().hex + '.tmp')
+    try:
+        with os.fdopen(descriptor, 'w') as handle:
+            handle.write(str(source) + '\n')
+            handle.flush()
+            os.fsync(handle.fileno())
+        if config.exists():
+            raise StoragePathError('保存位置已由其他操作设置，请重新打开软件后核对。')
+        # No migration or INSERT is executed against the source. The reservation
+        # blocks other writers while the SQLite backup includes committed WAL.
+        with closing(sqlite3.connect(source, timeout=0)) as reservation:
+            try:
+                reservation.execute('BEGIN IMMEDIATE')
+            except sqlite3.OperationalError as error:
+                raise RuntimeError('原程序仍在写入资料，请正常关闭原程序后重新接入。') from error
+            try:
+                before = _database_dump_digest(source)
+                inventory = _external_file_inventory(source_files)
+                from services.out_of_control_attachment_service import resolve_managed_path
+                for entry in _deduplicate_manifest(_managed_file_records(source)):
+                    _verify_file(resolve_managed_path(entry['path'], db_path=source), entry)
+                if not custom:
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    with tempfile.TemporaryDirectory(prefix='.legacy-adoption-', dir=destination.parent) as temporary:
+                        staging = Path(temporary)
+                        candidate = staging / 'data.db'
+                        with closing(sqlite3.connect(source.resolve().as_uri() + '?mode=ro', uri=True)) as reader:
+                            with closing(sqlite3.connect(candidate)) as writer:
+                                reader.backup(writer)
+                        inspect_database(candidate, check_integrity=True, require_business_schema=True)
+                        if _database_dump_digest(candidate) != before:
+                            raise RuntimeError('原数据复制核对未通过，未切换保存位置。')
+                        if inventory['exists']:
+                            shutil.copytree(source_files, staging / 'files')
+                            if _external_file_inventory(staging / 'files') != inventory:
+                                raise RuntimeError('原附件复制核对未通过，未切换保存位置。')
+                        if destination.exists() or target_files.exists():
+                            raise StoragePathError('目标位置出现其他资料，未覆盖现有文件。')
+                        if inventory['exists']:
+                            (staging / 'files').replace(target_files)
+                            created_files = True
+                        candidate.replace(destination)
+                        created_database = True
+                    if _database_dump_digest(destination) != before or _external_file_inventory(target_files) != inventory:
+                        raise RuntimeError('接入后资料核对未通过，未切换保存位置。')
+                if _database_dump_digest(source) != before or _external_file_inventory(source_files) != inventory:
+                    raise RuntimeError('原资料在接入期间发生变化，未切换保存位置。')
+                current_config = old_config.read_bytes() if old_config.exists() else None
+                if current_config != old_config_bytes:
+                    raise RuntimeError('原保存位置在接入期间改变，请重新核对。')
+                payload = {'database_path': str(destination), 'legacy_adoption': {
+                    'source_directory': str(source_dir), 'kept_custom_path': custom,
+                    'database_contents_sha256': before, 'source_preserved': True}}
+                with temporary_config.open('x', encoding='utf-8') as handle:
+                    json.dump(payload, handle, ensure_ascii=False, indent=2)
+                    handle.write('\n')
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                if config.exists():
+                    raise StoragePathError('保存位置已由其他操作设置，未覆盖配置。')
+                temporary_config.replace(config)
+            finally:
+                reservation.rollback()
+    except BaseException:
+        # Only paths created by this attempt are eligible for cleanup. The old
+        # DB, WAL, attachments and old configuration are never removed/restored.
+        if not config.exists():
+            if created_database:
+                _cleanup_paths([destination, *_iter_db_sidecar_paths(destination)])
+            if created_files:
+                shutil.rmtree(target_files)
+        raise
+    finally:
+        temporary_config.unlink(missing_ok=True)
+        lock.unlink(missing_ok=True)
+    return StorageAdoptionResult(True, destination, config, custom, source_dir)
 
 
 def get_database_location_status() -> DatabaseLocationStatus:
@@ -92,6 +249,9 @@ def get_database_location_status() -> DatabaseLocationStatus:
 
 
 def get_default_backup_dir() -> Path:
+    paths = get_storage_paths()
+    if paths.uses_stable_root and database.get_storage_config_path().resolve() == paths.storage_config_path.resolve():
+        return paths.root / 'backups'
     return database.get_storage_config_path().parent / "backups"
 
 

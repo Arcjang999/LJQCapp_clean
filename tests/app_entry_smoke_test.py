@@ -93,7 +93,7 @@ class AppEntryTest(unittest.TestCase):
         self.assertIn(guide.introduction, rendered)
         heading_positions = [rendered.index('## ' + title) for title, _ in guide.sections]
         self.assertEqual(heading_positions, sorted(heading_positions))
-        self.assertEqual(len(app.get('image')), 3)
+        self.assertEqual(len(app.get('image')), 5)
         app.button(key='open_user_guide_page').click().run()
         self.assertFalse(app.session_state['user_guide_practical'])
         self.assertFalse(list(app.exception))
@@ -101,6 +101,29 @@ class AppEntryTest(unittest.TestCase):
         app.button(key='user_guide_home').click().run()
         self.assertFalse(list(app.exception))
         self.assertFalse(app.session_state['show_user_guide_page'])
+        self.assertEqual(before, stored_business_state())
+
+    def test_software_downloads_help_entry_preserves_data_and_session_drafts(self):
+        app = AppTest.from_file(str(ROOT / 'app.py'), default_timeout=30).run()
+        self.assertFalse(list(app.exception))
+        if any(button.key == 'onboarding_skip' for button in app.button):
+            app.button(key='onboarding_skip').click().run()
+        draft = {'draft_id': 'download-navigation-draft', 'values': {'one': '123.45'}}
+        app.session_state['daily_saved_drafts'] = {'retained': draft}
+        before = stored_business_state()
+
+        app.button(key='open_software_downloads_page').click().run()
+        self.assertFalse(list(app.exception))
+        self.assertTrue(app.session_state['show_software_downloads_page'])
+        self.assertFalse(app.session_state['show_user_guide_page'])
+        self.assertEqual({'retained': draft}, app.session_state['daily_saved_drafts'])
+        self.assertEqual(before, stored_business_state())
+
+        app.button(key='software_downloads_home').click().run()
+        self.assertFalse(list(app.exception))
+        self.assertFalse(app.session_state['show_software_downloads_page'])
+        self.assertTrue(any(button.key == 'home_create_project' for button in app.button))
+        self.assertEqual({'retained': draft}, app.session_state['daily_saved_drafts'])
         self.assertEqual(before, stored_business_state())
 
 

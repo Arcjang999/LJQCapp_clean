@@ -30,7 +30,8 @@ def open_project_dialog(kind, template_id=None, item_id=None):
     template = _plain(get_project_template(template_id)) if template_id is not None else {}
     if kind == 'quick':
         from ui.quick_project_setup import new_quick_setup_draft
-        draft = new_quick_setup_draft()
+        from services.onboarding_service import first_project_method
+        draft = new_quick_setup_draft(first_project_method() or 'lj')
     elif kind == 'panel':
         draft = {'rows': [], 'stage': 'source'}
     elif kind in ('item', 'remove_item', 'quality'):

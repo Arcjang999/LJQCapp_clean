@@ -74,6 +74,16 @@ if bool(st.session_state.get("show_user_guide_page", False)):
     render_user_guide_page()
     st.stop()
 
+if bool(st.session_state.get("show_workbench_tutorial_page", False)):
+    from ui.workbench_tutorial import render_workbench_tutorial_page
+    render_workbench_tutorial_page()
+    st.stop()
+
+if bool(st.session_state.get("show_software_downloads_page", False)):
+    from ui.software_downloads import render_software_downloads_page
+    render_software_downloads_page()
+    st.stop()
+
 if bool(st.session_state.get("show_batch_monthly_reports_page", False)):
     from ui.batch_monthly_reports import render_batch_monthly_reports_page
     render_batch_monthly_reports_page()

@@ -1,6 +1,6 @@
 # Windows 和 Mac 安装更新及网页统一发布方案
 
-日期：2026-11-06。状态：改造方案，程序功能尚未实施。
+日期：2026-11-06。状态：稳定桌面资料、最小兼容防线、首次方法选择与教程、两平台构建配方已本地实现；Mac 待签名 DMG 已生成，Windows 源码构建资料已导出、Setup 待原生执行。完整升级协调/自动在线更新和统一发布仍待实施。实际范围见[首轮安装包交付](deliveries/DESKTOP_INSTALLERS_2026-11-06.md)。
 
 本轮确定 Windows 10/11 与 macOS 分别发行，桌面启动时检查服务器版本，网页与桌面采用同一轮正式版本发布。建议先建立独立数据目录、安装包和完整程序包升级，再接在线更新与统一发布。首版更新完整程序；差量补丁在发行结构稳定后加入。
 
@@ -12,24 +12,31 @@ Windows 10/11 共用一份 x64 安装包。用户已确定 Mac 仅支持 Apple �
 
 | 项目 | 现状 | 改造含义 |
 | --- | --- | --- |
-| 代码基线 | 本地 `codex/project-workflow-alignment`，`5e9a5f103a81df9afb34862d1f92048fabbe510b` | 同一正式版本的网页和平台包从同一完整提交构建。 |
-| 网页部署记录 | 2026-11-04 已验收上述提交，见[本地回执](../../output/cloud-actions-release-2026-11-04/deployment-receipt.json) | 后续部署前重新核对服务器；11月2日文档属于较早记录。 |
+| 代码基线 | 本地及远端 `codex/project-workflow-alignment` 均为 `1b1a717ebba46f54702a9605a14f6e1fd375d56e`，功能提交为 `463e31a` | 同一正式版本的网页和平台包从同一完整提交构建。 |
+| 网页部署记录 | 2026-11-06 功能 `463e31a` 已验收上线，后续仅文档排版与发布记录收口，见[云端交付](deliveries/CLOUD_CT_RELEASE_2026-11-06.md) | 后续部署前重新核对服务器实时资料，不恢复旧快照。 |
 | Windows 包 | Qt 桌面窗口和本机 Streamlit 服务，正式配方使用 PyInstaller 目录包 | 可以保留现有业务运行方式，新增独立启动与更新协调层。 |
 | Mac 包 | 当前常用源码启动入口；正式 Mac `.app` 和 DMG 配方需补齐 | 与 Windows 分别制作、签名和测试。 |
 | 版本信息 | 多处固定 `1.0.0`，服务读取构建信息的位置与生成位置未完全对齐 | 增加唯一版本源，统一显示版本、构建序号和来源提交。 |
 | 默认存储 | 数据库及 `storage_config.json` 默认跟随服务程序目录；Mac 使用 `.app` 旁的 `data` | 更换安装目录可能换库或丢失自选库指针，必须先固定配置位置。 |
 | 初始化与迁移 | 多个迁移入口，迁移登记不完整；部分表以列集合完全相等判断是否重建 | 升级前需要只读兼容检查、候选库验证和独立的切换日志。 |
+| 最近功能及帮助 | Ct提醒、即时法转入后的整组续录；帮助已更新为18节主文、目录和5张配图 | 两平台构建携带当前完整代码和离线帮助，验收新增业务关联与冻结历史。 |
 
 源码入口：[Windows 构建](../../packaging/build_windows_release.ps1)、[桌面启动器](../../packaging/desktop_qt_launcher.py)、[服务入口](../../run_app.py)、[数据库](../../database.py)、[完整备份与迁移](../../services/storage_service.py)。
 
 ## 2 用户安装和更新体验
 
-下载页分别提供“Windows 10/11 64位”和“Mac Apple 芯片”两个入口；Mac 页面说明可在“关于本机”查看芯片信息。安装后由客户端根据自身构建目标选择更新，不能只依靠浏览器识别系统。
+客户从“帮助 → 软件下载”进入下载页，分别选择“Windows 10/11 64位”或“Mac Apple 芯片”。Mac 页面说明可在“关于本机”查看芯片信息。安装后由客户端根据自身构建目标选择更新，不能只依靠浏览器识别系统。
 
 | 用户电脑 | 首次安装包 | 后续更新目标 |
 | --- | --- | --- |
 | Windows 10/11 64位 | `LJQCApp-Setup-<version>-windows-x64.exe` | `windows-x86_64` |
 | Mac Apple 芯片 | `LJQCApp-<version>-macos-arm64.dmg` | `macos-arm64` |
+
+开发改造方案保存在本文件 `docs/execution/DESKTOP_UPDATE_AND_RELEASE_PLAN_2026-11-06.md`，通过项目交接文档和 `AGENTS.md` 索引。客户下载页只呈现平台、正式版本、发布日期、包大小和下载入口。
+
+当前尚无这两种正式安装包。页面为未发布平台显示“安装包准备中”，不提供占位或旧试用包链接。新增 `resources/software_downloads.json` 保存经发布流程核对的安装包展示信息；`services/software_download_service.py` 校验各平台记录，`ui/software_downloads.py` 展示，主路由和帮助菜单提供入口。清单缺失或损坏时仍能返回主页；单个平台坏记录不隐藏另一平台的有效发布记录。
+
+该展示清单用于呈现正式下载地址，在线更新器仍须实现第二轮的签名及版本校验。真正的安装包继续放服务器独立发行目录；产品页面、发行程序和客户业务资料分别管理。
 
 ### 空库首次设置与新手教程
 
@@ -153,6 +160,10 @@ Mac 构建固定为 arm64，Python、Qt 和全部原生依赖均需具备该架�
 
 首次使用专项需覆盖：安装产物无预置客户或示例项目；内置参考目录不抑制空库引导；两种方法均能从空库走完实际设置；未保存的选择不写业务资料；教程简短且与最终方法匹配，包括首次选单水平但保存前改为多水平；稍后、继续、完成及数据库切换正确保留进度；升级不再次写入示例、不重置客户选择或引导状态，旧库缺少新增教程状态也不会被当成全新用户。可复用 `tests/onboarding_service_smoke_test.py`、`tests/onboarding_ui_smoke_test.py` 以及快捷建项和三方法关联检查，再补两平台真实首次启动验收。
 
+以当前功能版为起点，还需在 Windows 和 Mac 实包验证：Ct四种条件及等值和小数边界、黄色提醒与原失控红色优先、原统计和历史来源冻结、配置和检测导出字段、图表/PNG/PDF及完整恢复；即时法转入 L-J 后整组草稿保留、目标批次重新核对、原即时记录保持及重复请求保护。复用本轮 `ct_alert_*`、`ct_chart_report_smoke_test`、`instant_daily_transfer_smoke_test`、`instant_daily_transfer_ui_smoke_test` 等对应验证。两平台离线帮助包含18节主文、目录和5张原图，PDF中Ct小数保留当前精度。
+
+软件下载专项验证未发布时没有假链接或假版本、发布记录完整且地址有效时才显示下载、错误平台和无效地址不产生下载链接、帮助入口与返回保留当前资料及未保存草稿、打包资源包含下载清单和新页面模块。
+
 第一轮可以开始处理公共基础，同时分别建立 Windows 与 Mac 构建环境；第三轮成功后再优化差量下载。对外上线前落实域名和 HTTPS、平台签名及 Mac 公证所需账号、签名密钥的保管和恢复方式、各目标实机环境。费用和账号操作另按实际选择处理。
 
 ## 8 预计源码改动位置
@@ -162,6 +173,7 @@ Mac 构建固定为 arm64，Python、Qt 和全部原生依赖均需具备该架�
 | 文件或目录 | 改造职责 |
 | --- | --- |
 | `release.json`、`services/release_info.py` | 唯一版本、构建信息读取及各端显示。 |
+| `resources/software_downloads.json`、`services/software_download_service.py`、`ui/software_downloads.py`、`ui/common.py`、`app.py` | 正式安装包展示信息、“帮助 → 软件下载”入口、下载页面和返回导航。 |
 | `services/storage_paths.py`、`database.py`、`services/storage_service.py` | 固定配置目录、保留自选位置、完整资料首次接入及受控切换。 |
 | `services/schema_compatibility.py`、`migrations/` | 初始化前只读门槛、完整迁移账本和明确的版本兼容范围。 |
 | `desktop/bootstrap/`、`desktop/updater/`、`desktop/instance_control.py` | 启动、版本选择、可信下载、平台安装、维护锁和阶段恢复；更新基础层避免依赖业务数据库初始化。 |
@@ -172,4 +184,4 @@ Mac 构建固定为 arm64，Python、Qt 和全部原生依赖均需具备该架�
 | `packaging/build_macos_release.sh`、Mac `.spec` 及签名配置 | Apple 芯片 arm64 `.app`、DMG、签名公证与完整包更新。 |
 | `scripts/prepare_release.py`、`scripts/update_cloud.sh`、`scripts/publish_release.py` | 产物核对、保留现有资料的网页更新、最后发布正式客户端入口。 |
 
-本轮交付为方案与实施顺序，未修改业务程序、生成安装包或变更服务器。网页和桌面的质控算法、历史报告原件及各端数据归属沿用现有规则。
+安装和更新按上述顺序实施。“帮助 → 软件下载”及未发布状态已完成本地接入，具体检查见[软件下载入口交付](deliveries/SOFTWARE_DOWNLOADS_2026-11-06.md)。本轮未生成安装包、实施首次设置改造或变更服务器。网页和桌面的质控算法、历史报告原件及各端数据归属沿用现有规则。

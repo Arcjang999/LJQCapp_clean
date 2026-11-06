@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 from pathlib import Path
+import sys
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+from services.release_info import get_release_info
+from release_payload import write_payload_manifest
 
-APP_VERSION = "1.0.0"
+APP_VERSION = get_release_info().version
 
 
 def write_text(path: Path, content: str) -> None:
@@ -200,7 +206,7 @@ set "EXIT_CODE=%ERRORLEVEL%"
 if not "%EXIT_CODE%"=="0" (
   echo.
   echo 内置浏览器模式启动失败。
-  echo 请双击“打不开先点我_修复运行环境.bat”，或双击“生成诊断包_发给开发者.bat”。
+  echo 请重新运行安装程序，或双击“生成诊断包_发给开发者.bat”。
 )
 
 echo.
@@ -235,37 +241,24 @@ exit /b 0
 
 
 def build_readme() -> str:
-    return """LJQCApp 运行说明
+    return """LJQCApp Windows 运行说明
 
-正常使用：
-双击 LJQCApp.exe。
+适用系统：Windows 10/11 64 位。
+安装后从桌面或开始菜单打开 LJQCApp，首次使用按窗口中的引导建立项目。
+本机内置浏览器随程序安装，无需另行安装 Python、Edge 或 WebView2。
 
-如果打不开：
-第一步：双击 打不开先点我_修复运行环境.bat
-第二步：再双击 LJQCApp.exe
-第三步：如果还是打不开，双击 备用启动_内置浏览器模式.bat
-第四步：如果仍失败，再双击 备用启动_浏览器模式.bat
-第五步：如果仍失败，双击 生成诊断包_发给开发者.bat，然后把桌面的 LJQCApp_诊断包.zip 发给开发者。
+资料保存：
+默认资料保存在当前用户的 LocalAppData\\LJQCApp 目录。
+在软件“系统设置”选择的保存位置继续生效；安装、更新和普通卸载保留资料。
+升级前请在“系统设置”生成完整备份，再关闭软件并运行新安装包。
+已有旧版资料时，请按交付说明明确选择原软件的 data 文件夹完成接入。
 
-数据操作：
-清空数据：双击 清除数据库.bat
-写入演示数据：双击 写入演示数据.bat
+打不开时：
+重新运行安装程序。仍无法打开时，运行安装目录中的“生成诊断包_发给开发者.bat”。
+“备用启动_浏览器模式.bat”提供另一种打开方式；使用结束后按窗口提示停止服务。
+诊断包可能包含本机配置，请核对后再交给维护人员。
 
-浏览器说明：
-不建议使用 IE。
-不建议使用 360/搜狗的兼容模式。
-如果浏览器页面空白，说明浏览器太旧或系统组件不完整。
-备用启动_浏览器模式.bat 会先使用内置浏览器；如果改用本机浏览器，会先显示浏览器检测页。
-
-老系统说明：
-Windows 7、盗版系统、Ghost 精简系统可能缺少必要组件。
-本兼容版默认使用随包携带的 QtWebEngine 桌面窗口，不要求电脑预装 Edge 或 WebView2。
-Windows 7 属于过旧系统，本软件仅提供有限兼容，不保证稳定运行。
-如果修复运行环境后仍无法启动，建议换 Windows 10/11 完整系统，或先使用备用浏览器模式。
-最推荐 Windows 10/11 完整系统。
-
-请不要手动查找系统日志。
-请不要手动输入复杂命令。
+关闭软件后请等待本机服务正常退出，再安装其他版本。
 """
 
 
@@ -306,7 +299,7 @@ def build_browser_check_html() -> str:
       }
       if (isOld || missing.length) {
         msg.className = "bad";
-        msg.innerHTML = "当前浏览器太旧或处于兼容模式，无法运行 LJQCApp。请关闭此页面，双击【备用启动_内置浏览器模式.bat】或【打不开先点我_修复运行环境.bat】。";
+        msg.innerHTML = "当前浏览器太旧或处于兼容模式，请关闭此页面并从桌面快捷方式重新打开软件。";
         return;
       }
       var target = "";
@@ -333,6 +326,8 @@ def build_browser_check_html() -> str:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--staging", required=True)
+    parser.add_argument("--metadata", type=Path)
+    parser.add_argument("--target", default="windows-x86_64")
     parser.add_argument("--git-commit", default="")
     parser.add_argument("--build-time", default="")
     return parser.parse_args()
@@ -341,38 +336,40 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     staging = Path(args.staging)
-    build_time = args.build_time or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    build_info = {
-        "app_version": APP_VERSION,
-        "build_time": build_time,
-        "git_commit": args.git_commit or "",
+    build_info = (json.loads(args.metadata.read_text(encoding="utf-8")) if args.metadata
+                  else get_release_info(include_source_state=True).as_dict())
+    if build_info.get("target") not in (None, "", args.target):
+        raise ValueError("Build metadata target differs from the requested payload")
+    if not build_info.get("version") or not build_info.get("source_digest"):
+        raise ValueError("A version and source input digest are required for a release payload")
+    if args.git_commit and not str(build_info.get("git_commit", "")).startswith(args.git_commit):
+        raise ValueError("Legacy Git argument differs from the canonical build metadata")
+    build_info.update({
+        "app_version": build_info["version"],
+        "build_time": build_info.get("build_time") or args.build_time or datetime.now(timezone.utc).isoformat(),
+        "target": args.target,
         "desktop_shell": "QtWebEngine",
         "webview2_required": False,
         "default_browser_required": False,
         "browser_check_page": True,
         "browser_strategy": "bundled QtWebEngine first, installed modern browser second, default browser last",
-        "win7_support": "limited",
+        "win7_support": False,
         "x86_support": False,
         "x64_support": True,
-    }
+        "supported_windows": ["10", "11"],
+        "business_data_included": False,
+    })
 
-    write_text(staging / "清除数据库.bat", build_reset_bat())
-    write_text(staging / "写入演示数据.bat", build_seed_bat())
-    write_text(staging / "打不开先点我_修复运行环境.bat", build_repair_bat())
     write_text(staging / "备用启动_浏览器模式.bat", build_browser_bat())
     write_text(staging / "备用启动_内置浏览器模式.bat", build_internal_browser_bat())
     write_text(staging / "生成诊断包_发给开发者.bat", build_diagnose_bat())
     write_text(staging / "README_运行说明.txt", build_readme())
     write_text(staging / "_internal" / "browser_check.html", build_browser_check_html())
     write_text(staging / "_internal" / "app" / "browser_check.html", build_browser_check_html())
-    write_json(staging / "_internal" / "build_info.json", build_info)
-    (staging / "_internal" / "runtime").mkdir(parents=True, exist_ok=True)
-    (staging / "_internal" / "logs").mkdir(parents=True, exist_ok=True)
-    (staging / "_internal" / "runtime" / "README.txt").write_text(
-        "可在此目录放置 WebView2 和 VC++ Runtime 安装包。\n"
-        "文件名建议：MicrosoftEdgeWebView2RuntimeInstaller.exe、VC_redist.x64.exe、VC_redist.x86.exe。\n",
-        encoding="utf-8",
-    )
+    for location in (staging, staging / "_internal", staging / "_internal" / "app",
+                     staging / "_internal" / "app" / "_internal"):
+        write_json(location / "build_info.json", build_info)
+    write_payload_manifest(staging, build_info)
     return 0
 
 

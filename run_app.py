@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import atexit
+import _thread
 import json
 import os
 from pathlib import Path
@@ -10,13 +12,18 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import traceback
+import uuid
 from urllib.parse import quote
 import zipfile
 
 
-APP_VERSION = "1.0.0"
+from services.release_info import get_release_info
+from services.storage_paths import get_storage_paths
+
+APP_VERSION = get_release_info().version
 DEFAULT_SERVER_ADDRESS = "127.0.0.1"
 DEFAULT_SERVER_PORT = int(os.environ.get("LJQCAPP_PORT", "8501"))
 OLD_BROWSER_MESSAGE = (
@@ -48,6 +55,11 @@ BROWSER_CANDIDATES = [
 
 
 def _get_log_dir() -> Path:
+    paths = get_storage_paths()
+    if paths.uses_stable_root:
+        log_dir = paths.root / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        return log_dir
     local_app_data = os.environ.get("LOCALAPPDATA")
     if local_app_data:
         log_dir = Path(local_app_data) / "LJQCApp"
@@ -100,14 +112,7 @@ def _resolve_build_info_path(base_dir: Path) -> Path | None:
 
 
 def _read_build_info() -> dict[str, object]:
-    info_path = _resolve_build_info_path(_get_base_dir())
-    if info_path is None:
-        return {}
-    try:
-        payload = json.loads(info_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
+    return get_release_info().as_dict()
 
 
 def _configure_import_paths(base_dir: Path, app_path: Path) -> None:
@@ -146,6 +151,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--diagnose-output", default="")
     parser.add_argument("--browser-mode", action="store_true")
     parser.add_argument("--version", action="store_true")
+    parser.add_argument("--adopt-from", type=Path, help="接入已关闭的原软件data资料文件夹")
     parser.add_argument("--demo-profile", "--profile", dest="demo_profile", choices=("basic", "full"), default="full")
     return parser.parse_args(argv)
 
@@ -211,6 +217,27 @@ def print_version() -> int:
     return 0
 
 
+def _start_shutdown_watcher() -> tuple[threading.Event, threading.Thread | None, Path | None]:
+    stopped = threading.Event()
+    value = os.environ.get("LJQC_SHUTDOWN_FILE", "").strip()
+    if not value:
+        return stopped, None, None
+    path = Path(value).resolve()
+    paths = get_storage_paths()
+    runtime = (paths.root / "runtime" if paths.uses_stable_root else _get_log_dir() / "runtime").resolve()
+    import re
+    if path.parent != runtime or re.fullmatch(r"shutdown-[a-f0-9]{32}\.request", path.name) is None or path.exists():
+        raise RuntimeError("关闭请求位置无效，请重新打开软件。")
+    def watch() -> None:
+        while not stopped.wait(0.2):
+            if path.is_file():
+                _thread.interrupt_main()
+                return
+    thread = threading.Thread(target=watch, name="desktop-shutdown", daemon=True)
+    thread.start()
+    return stopped, thread, path
+
+
 def run_streamlit_service(*, port: int, address: str) -> int:
     base_dir = _get_base_dir()
     app_path = _resolve_app_path(base_dir)
@@ -233,6 +260,7 @@ def run_streamlit_service(*, port: int, address: str) -> int:
     os.chdir(base_dir)
     _configure_import_paths(base_dir, app_path)
     sys.argv = _build_streamlit_argv(app_path, port=port, address=address)
+    stopped, watcher, shutdown_path = _start_shutdown_watcher()
     try:
         from streamlit.web.cli import main as streamlit_main
 
@@ -243,6 +271,12 @@ def run_streamlit_service(*, port: int, address: str) -> int:
         _write_log("Unhandled Streamlit exception:")
         _write_log(error_trace)
         return 1
+    finally:
+        stopped.set()
+        if watcher is not None:
+            watcher.join(timeout=1)
+        if shutdown_path is not None:
+            shutdown_path.unlink(missing_ok=True)
 
 
 def _get_free_loopback_port() -> int:
@@ -288,18 +322,19 @@ def _wait_for_health(port: int, *, process: subprocess.Popen[object] | None = No
     return False
 
 
-def _stop_process_tree(process: subprocess.Popen[object] | None) -> None:
+def _stop_process_tree(process: subprocess.Popen[object] | None, *, shutdown_file: Path) -> None:
     if process is None or process.poll() is not None:
         return
-    if os.name == "nt":
-        subprocess.run(
-            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-        return
-    process.terminate()
+    shutdown_file.write_text("stop\n", encoding="ascii")
+    try:
+        process.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        print("软件还在完成保存和关闭，请等待本窗口退出。")
+        _write_log("Browser service is finishing shutdown; waiting without forced termination.")
+        process.wait()
+    finally:
+        if process.poll() is not None:
+            shutdown_file.unlink(missing_ok=True)
 
 
 def _is_excluded_browser_path(path: Path | str) -> bool:
@@ -452,6 +487,8 @@ def _open_browser_check_page(target_url: str) -> tuple[bool, str]:
     try:
         if os.name == "nt":
             os.startfile(check_url)  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", check_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         else:
             subprocess.Popen(["xdg-open", check_url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True, "未找到明确的现代浏览器，已用系统默认浏览器打开检测页。若提示浏览器过旧，请改用内置浏览器模式。"
@@ -468,6 +505,11 @@ def run_browser_mode() -> int:
     print("正在启动 LJQCApp 备用浏览器模式，请稍候...")
     print("请不要关闭本窗口；关闭本窗口后，软件会停止运行。")
     _write_log(f"Browser mode command: {' '.join(command)}")
+    paths = get_storage_paths()
+    runtime = (paths.root if paths.uses_stable_root else _get_log_dir()) / "runtime"
+    runtime.mkdir(parents=True, exist_ok=True, mode=0o700)
+    shutdown_file = runtime / ("shutdown-" + uuid.uuid4().hex + ".request")
+    environment = {**os.environ, "LJQC_SHUTDOWN_FILE": str(shutdown_file)}
 
     with log_path.open("a", encoding="utf-8") as log_file:
         process = subprocess.Popen(
@@ -476,6 +518,8 @@ def run_browser_mode() -> int:
             stdout=log_file,
             stderr=subprocess.STDOUT,
             text=True,
+            env=environment,
+            start_new_session=(os.name != "nt"),
         )
     try:
         if not _wait_for_health(port, process=process, timeout_seconds=90):
@@ -494,7 +538,7 @@ def run_browser_mode() -> int:
         print("正在关闭 LJQCApp 备用浏览器模式...")
         return 0
     finally:
-        _stop_process_tree(process)
+        _stop_process_tree(process, shutdown_file=shutdown_file)
 
 
 def _detect_webview2() -> str:
@@ -613,15 +657,39 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     if args.version:
         return print_version()
-    if args.reset_db:
-        return reset_configured_database()
-    if args.seed_demo:
-        return seed_demo_database(profile=args.demo_profile, replace_demo=bool(args.replace_demo))
     if args.diagnose:
         return generate_diagnostics(args.diagnose_output)
     if args.browser_mode:
         return run_browser_mode()
-    return run_streamlit_service(port=args.port, address=args.address)
+    paths = get_storage_paths()
+    lock = None
+    try:
+        if paths.uses_stable_root:
+            from services.runtime_lock import ServiceLock
+            lock = ServiceLock(paths.root / "runtime")
+            lock.acquire()
+        if args.adopt_from is not None:
+            from services.storage_service import adopt_legacy_storage
+            result = adopt_legacy_storage(args.adopt_from)
+            print(f"资料接入完成：{result.database_path}")
+            return 0
+        if args.reset_db:
+            return reset_configured_database()
+        if args.seed_demo:
+            return seed_demo_database(profile=args.demo_profile, replace_demo=bool(args.replace_demo))
+        if lock is not None:
+            # Python joins non-daemon Streamlit script threads before atexit.
+            # Keep the data-root lock held while their pending saves finish.
+            atexit.register(lock.close)
+            lock = None
+        return run_streamlit_service(port=args.port, address=args.address)
+    except RuntimeError as error:
+        print(str(error))
+        _write_log(str(error))
+        return 1
+    finally:
+        if lock is not None:
+            lock.close()
 
 
 if __name__ == "__main__":

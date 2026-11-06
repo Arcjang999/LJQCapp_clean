@@ -70,6 +70,10 @@ def collect_project_source_datas() -> list[tuple[str, str]]:
 
 
 project_source_datas = collect_project_source_datas()
+project_source_datas.append((str(PROJECT_ROOT / "release.json"), "."))
+metadata = os.environ.get("LJQCAPP_BUILD_METADATA", "")
+if metadata:
+    project_source_datas.append((metadata, "."))
 streamlit_datas = collect_data_files("streamlit")
 matplotlib_datas = collect_data_files("matplotlib")
 streamlit_metadata = copy_metadata("streamlit")

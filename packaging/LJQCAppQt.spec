@@ -9,6 +9,10 @@ from PyInstaller.utils.hooks import collect_data_files
 PROJECT_ROOT = Path(SPECPATH).resolve().parent
 APP_NAME = os.environ.get("LJQCAPP_QT_APP_NAME", "LJQCApp").strip() or "LJQCApp"
 APP_ICON = str(PROJECT_ROOT / "assets" / "app_icon.ico")
+release_datas = [(str(PROJECT_ROOT / "release.json"), ".")]
+metadata = os.environ.get("LJQCAPP_BUILD_METADATA", "")
+if metadata:
+    release_datas.append((metadata, "."))
 
 qt_datas = (
     collect_data_files("PySide6")
@@ -30,7 +34,7 @@ a = Analysis(
     [str(PROJECT_ROOT / "packaging" / "desktop_qt_launcher.py")],
     pathex=[str(PROJECT_ROOT)],
     binaries=[],
-    datas=qt_datas,
+    datas=qt_datas + release_datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

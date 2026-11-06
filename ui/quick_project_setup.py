@@ -16,13 +16,16 @@ from services.quick_project_setup_service import (
 )
 
 
-def new_quick_setup_draft():
+def new_quick_setup_draft(qc_method='lj'):
+    if qc_method not in ('lj', 'zscore', 'instant'):
+        raise ValueError('请选择可用的质控方法。')
+    count = 2 if qc_method == 'zscore' else 1
     return dict(template_name='', lab_instrument_id=None, qc_material_id=None,
         test_item_id=None, reagent_id=None, method_id=None, unit_id=None,
-        qc_method='lj', input_value_type='raw', level_count=1, target_n=20,
+        qc_method=qc_method, input_value_type='raw', level_count=count, target_n=20,
         target_statistics_mode=None,
         cv_limit=None, quality_target_source_text='', project_group='', notes='',
-        level_ids=[None], level_product_ids=[None], product_choice_reviews={}, product_choice_review={},
+        level_ids=[None] * count, level_product_ids=[None] * count, product_choice_reviews={}, product_choice_review={},
         product_manual_drafts={}, config_name='', quality={})
 
 

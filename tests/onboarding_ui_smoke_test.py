@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import database as db
-from services.onboarding_service import get_onboarding_state
+from services.onboarding_service import get_onboarding_method, get_onboarding_state, save_onboarding_progress
 from services.settings_service import get_report_settings
 from tests.app_entry_smoke_test import stored_business_state
 
@@ -51,9 +51,12 @@ class OnboardingUiTests(unittest.TestCase):
         db.DB_PATH = db.DEFAULT_DB_PATH = self.root / (name + '.db')
         db.init_db()
 
-    def app(self):
+    def app(self, *, choose_method=True):
         app = AppTest.from_file(str(ROOT / 'app.py'), default_timeout=30).run()
         self.assert_clean(app)
+        if choose_method and any(widget.key == 'onboarding_method_choice' for widget in app.radio):
+            app.radio(key='onboarding_method_choice').set_value('lj').run()
+            self.click(app, 'onboarding_method_continue')
         return app
 
     def assert_clean(self, app):
@@ -93,6 +96,79 @@ class OnboardingUiTests(unittest.TestCase):
         self.click(app, 'onboarding_back')
         self.assert_guide(app, 'unit')
         self.assert_guide(self.app(), 'unit')
+        self.assertEqual(before, business_state())
+
+    def test_first_open_requires_a_customer_method_choice_without_business_writes(self):
+        app = self.app(choose_method=False)
+        # First application load prepares reference catalogues; choosing a method
+        # must not add customer records or otherwise change that prepared state.
+        before = business_state()
+        self.assertEqual(None, app.radio(key='onboarding_method_choice').value)
+        self.assertTrue(app.button(key='onboarding_method_continue').disabled)
+        self.assertFalse(any((button.key or '').startswith('onboarding_step_') for button in app.button))
+        self.assertIsNone(get_onboarding_method())
+        self.assertEqual(before, business_state())
+        app.radio(key='onboarding_method_choice').set_value('zscore').run()
+        self.click(app, 'onboarding_method_continue')
+        self.assertEqual('zscore', get_onboarding_method())
+        self.assert_guide(app, 'unit')
+        self.assert_guide(self.app(), 'unit')
+        self.assertEqual(before, business_state())
+
+    def test_skip_before_method_choice_preserves_the_skip_without_creating_projects(self):
+        app = self.app(choose_method=False)
+        before = business_state()
+        self.click(app, 'onboarding_skip')
+        self.assert_no_guide(app)
+        self.assertEqual('skipped', get_onboarding_state()['status'])
+        self.assertIsNone(get_onboarding_method())
+        self.assert_no_guide(self.app(choose_method=False))
+        self.assertEqual(before, business_state())
+
+    def test_method_choice_save_failure_retains_selection_and_original_progress(self):
+        app = self.app(choose_method=False)
+        app.radio(key='onboarding_method_choice').set_value('zscore').run()
+        before = business_state()
+        state = get_onboarding_state()
+        with patch('ui.onboarding.save_onboarding_method',
+                   side_effect=sqlite3.OperationalError('injected method write failure')):
+            self.click(app, 'onboarding_method_continue')
+        self.assertEqual('zscore', app.radio(key='onboarding_method_choice').value)
+        self.assertIsNone(get_onboarding_method())
+        self.assertEqual(state, get_onboarding_state())
+        self.assertEqual(before, business_state())
+        self.assertTrue(any(item.value == '本次选择未保存，请重试。' for item in app.error))
+
+    def test_old_materials_progress_resumes_and_asks_method_when_it_reaches_project(self):
+        save_onboarding_progress('materials')
+        app = self.app(choose_method=False)
+        self.assert_guide(app, 'materials')
+        self.assertFalse(any(widget.key == 'onboarding_method_choice' for widget in app.radio))
+        self.click(app, 'onboarding_next')
+        self.assertEqual('project', get_onboarding_state()['step'])
+        self.assertIsNone(app.radio(key='onboarding_method_choice').value)
+        app.radio(key='onboarding_method_choice').set_value('zscore').run()
+        self.click(app, 'onboarding_method_continue')
+        self.assert_guide(app, 'project')
+
+    def test_first_draft_prefills_multilevel_but_the_customer_can_change_it_to_instant(self):
+        app = self.app(choose_method=False)
+        app.radio(key='onboarding_method_choice').set_value('zscore').run()
+        self.click(app, 'onboarding_method_continue')
+        before = business_state()
+        self.click(app, 'onboarding_step_project')
+        self.click(app, 'onboarding_project')
+        context = app.session_state['project_workspace_dialog']
+        self.assertEqual('zscore', context['draft']['qc_method'])
+        self.assertEqual(2, context['draft']['level_count'])
+        self.assertEqual('多水平', app.radio(key='project_kind_' + context['token']).value)
+        app.radio(key='project_kind_' + context['token']).set_value('单水平').run()
+        self.assert_clean(app)
+        app.checkbox(key='project_instant_' + context['token']).check().run()
+        self.assert_clean(app)
+        self.assertEqual('instant', app.session_state['project_workspace_dialog']['draft']['qc_method'])
+        self.assertEqual(1, app.session_state['project_workspace_dialog']['draft']['level_count'])
+        self.assertEqual('zscore', get_onboarding_method())
         self.assertEqual(before, business_state())
 
     def test_guide_has_three_concrete_steps_and_finishes_at_new_project(self):
@@ -296,6 +372,32 @@ class OnboardingUiTests(unittest.TestCase):
         self.assert_guide(app, 'project')
         self.assertEqual(saved, business_state())
         self.assert_no_guide(self.app())
+
+    def test_tutorial_follows_the_saved_method_when_first_choice_is_changed(self):
+        from services.onboarding_service import should_show_workbench_tutorial
+        from services.quick_project_setup_service import prepare_quick_project_setup
+        from tests.quick_project_setup_smoke_test import metadata_values
+
+        values = metadata_values('zscore', 2)
+        app = self.app()
+        self.assertEqual('lj', get_onboarding_method())
+        self.click(app, 'onboarding_step_project')
+        self.click(app, 'onboarding_project')
+        context = app.session_state['project_workspace_dialog']
+        context.update(draft=values, quick_step='preview',
+                       quick_preview=prepare_quick_project_setup(values))
+        app.run()
+        self.assert_clean(app)
+        self.click(app, 'quick_save')
+        self.assertEqual('多水平法', app.session_state['top_level_method_selector'])
+        self.assertTrue(any(button.key == 'workbench_tutorial_seen_zscore' for button in app.button))
+        self.assertFalse(any(button.key == 'workbench_tutorial_seen_lj' for button in app.button))
+        before = business_state()
+        self.click(app, 'workbench_tutorial_seen_zscore')
+        self.assertFalse(should_show_workbench_tutorial('zscore'))
+        self.assertTrue(should_show_workbench_tutorial('lj'))
+        self.assertFalse(any(button.key == 'workbench_tutorial_seen_zscore' for button in app.button))
+        self.assertEqual(before, business_state())
 
     def test_completion_stays_closed_and_can_still_be_opened_manually(self):
         app = self.app()
