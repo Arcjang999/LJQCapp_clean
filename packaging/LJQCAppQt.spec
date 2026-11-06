@@ -48,7 +48,7 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    [],
+    [("X utf8=1", None, "OPTION")],
     exclude_binaries=True,
     name=APP_NAME,
     debug=False,

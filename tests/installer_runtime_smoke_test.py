@@ -17,6 +17,16 @@ import run_app
 
 
 class InstallerRuntimeTests(unittest.TestCase):
+    def test_version_command_survives_redirected_windows_ansi_output(self):
+        with TemporaryDirectory() as folder:
+            result = subprocess.run([sys.executable, str(ROOT / 'run_app.py'), '--version'],
+                cwd=ROOT, env={**os.environ, 'PYTHONIOENCODING': 'cp1252',
+                    'PYTHONUTF8': '0', 'LJQC_DATA_ROOT': folder},
+                capture_output=True, timeout=8)
+            self.assertEqual(0, result.returncode, result.stderr.decode('utf-8', errors='replace'))
+            self.assertIn('LJQCApp 版本：', result.stdout.decode('utf-8'))
+            self.assertFalse(list(Path(folder).rglob('*.db')))
+
     def test_embedded_identity_is_available_without_git_or_database(self):
         with TemporaryDirectory() as folder:
             root = Path(folder)

@@ -126,7 +126,7 @@ if BUNDLE_MODE == "onefile":
         a.binaries,
         a.zipfiles,
         a.datas,
-        [],
+        [("X utf8=1", None, "OPTION")],
         name=APP_NAME,
         debug=False,
         bootloader_ignore_signals=False,
@@ -144,7 +144,7 @@ else:
     exe = EXE(
         pyz,
         a.scripts,
-        [],
+        [("X utf8=1", None, "OPTION")],
         exclude_binaries=True,
         name=APP_NAME,
         debug=False,

@@ -653,7 +653,16 @@ def generate_diagnostics(output_path: str = "") -> int:
     return 0
 
 
+def _configure_standard_streams() -> None:
+    # Frozen interpreters may ignore PYTHONUTF8 and inherit a Windows ANSI
+    # encoding when output is redirected. The desktop launcher decodes UTF-8.
+    for stream in (sys.stdout, sys.stderr):
+        if stream is not None and hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+
+
 def main(argv: list[str] | None = None) -> int:
+    _configure_standard_streams()
     args = parse_args(argv)
     if args.version:
         return print_version()
