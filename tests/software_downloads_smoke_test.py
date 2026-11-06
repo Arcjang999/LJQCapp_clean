@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import date
 import json
+import os
 from pathlib import Path
 import sqlite3
 import sys
@@ -41,11 +42,24 @@ class SoftwareDownloadsTest(unittest.TestCase):
         return get_software_download_catalog(self.path)
 
     def app(self, catalog):
-        with patch("ui.software_downloads.get_software_download_catalog", return_value=catalog), \
+        with patch.dict(os.environ, {"LJQC_DEPLOYMENT_MODE": "cloud"}), \
+                patch("ui.software_downloads.get_software_download_catalog", return_value=catalog), \
                 patch.object(sqlite3, "connect", side_effect=AssertionError("Download page opened SQLite")):
             app = AppTest.from_string(PAGE, default_timeout=15).run()
         self.assertFalse(list(app.exception), [item.message for item in app.exception])
         return app
+
+    def test_download_renderer_does_not_expose_links_outside_web_edition(self):
+        for mode in ("desktop", ""):
+            with self.subTest(mode=mode), \
+                    patch.dict(os.environ, {"LJQC_DEPLOYMENT_MODE": mode}), \
+                    patch("ui.software_downloads.get_software_download_catalog",
+                          side_effect=AssertionError("A non-web edition read the download catalog")), \
+                    patch.object(sqlite3, "connect", side_effect=AssertionError("Download page opened SQLite")):
+                app = AppTest.from_string(PAGE, default_timeout=15).run()
+                self.assertFalse(list(app.exception))
+                self.assertEqual(len(app.get("link_button")), 0)
+                self.assertFalse(app.session_state["show_software_downloads_page"])
 
     def test_unavailable_catalog_has_no_placeholder_links_or_release_versions(self):
         catalog = self.catalog({"windows-x86_64": None, "macos-arm64": None})

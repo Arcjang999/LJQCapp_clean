@@ -1,10 +1,12 @@
 """One-click home navigation through the real app, using isolated business data."""
 from copy import deepcopy
+import os
 from pathlib import Path
 import shutil
 import sys
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -97,6 +99,7 @@ class HomeNavigationTest(unittest.TestCase):
         self.healthy(app)
         self.assertEqual(self.fixture['template_id'], app.session_state['workspace_project_id'])
 
+    @patch.dict(os.environ, {"LJQC_DEPLOYMENT_MODE": "cloud"})
     def test_all_global_pages_return_to_initial_home_in_one_click(self):
         app = self.app()
         for page in GLOBAL_PAGE_SESSION_KEYS:

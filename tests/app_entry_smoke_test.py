@@ -1,16 +1,31 @@
 """One regular application entry and plain operational help."""
 from contextlib import closing
 from pathlib import Path
+import os
 import sqlite3
 from tempfile import TemporaryDirectory
 import sys
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import database as db
 from streamlit.testing.v1 import AppTest
 from ui.user_guide import load_operation_guide
+from services.release_info import get_release_info
+from services.runtime_edition import get_runtime_edition
+
+
+class RuntimeEditionTest(unittest.TestCase):
+    def test_packaged_desktop_cannot_become_web_from_its_parent_environment(self):
+        self.assertEqual(get_runtime_edition(environ={"LJQC_DEPLOYMENT_MODE": "cloud"}, frozen=True), "desktop")
+
+    def test_explicit_modes_and_plain_source_are_distinct(self):
+        for mode, expected in (("cloud", "web"), ("desktop", "desktop"),
+                               (" CLOUD ", "web"), ("", "source"), ("unknown", "source")):
+            with self.subTest(mode=mode):
+                self.assertEqual(get_runtime_edition(environ={"LJQC_DEPLOYMENT_MODE": mode}, frozen=False), expected)
 
 
 def stored_business_state():
@@ -103,9 +118,11 @@ class AppEntryTest(unittest.TestCase):
         self.assertFalse(app.session_state['show_user_guide_page'])
         self.assertEqual(before, stored_business_state())
 
+    @patch.dict(os.environ, {"LJQC_DEPLOYMENT_MODE": "cloud"})
     def test_software_downloads_help_entry_preserves_data_and_session_drafts(self):
         app = AppTest.from_file(str(ROOT / 'app.py'), default_timeout=30).run()
         self.assertFalse(list(app.exception))
+        self.assertTrue(any('网页版 · 版本 ' in item.value for item in app.markdown))
         if any(button.key == 'onboarding_skip' for button in app.button):
             app.button(key='onboarding_skip').click().run()
         draft = {'draft_id': 'download-navigation-draft', 'values': {'one': '123.45'}}
@@ -125,6 +142,34 @@ class AppEntryTest(unittest.TestCase):
         self.assertTrue(any(button.key == 'home_create_project' for button in app.button))
         self.assertEqual({'retained': draft}, app.session_state['daily_saved_drafts'])
         self.assertEqual(before, stored_business_state())
+
+    @patch.dict(os.environ, {"LJQC_DEPLOYMENT_MODE": "desktop"})
+    def test_desktop_has_no_download_entry_and_discards_stale_download_route(self):
+        app = AppTest.from_file(str(ROOT / 'app.py'), default_timeout=30).run()
+        self.assertFalse(list(app.exception))
+        if any(button.key == 'onboarding_skip' for button in app.button):
+            app.button(key='onboarding_skip').click().run()
+        self.assertFalse(any(button.key == 'open_software_downloads_page' for button in app.button))
+        release = get_release_info()
+        self.assertTrue(any(f'桌面版 · 版本 {release.version} · 构建 {release.build_number}' in item.value
+                            for item in app.markdown))
+        draft = {'retained': {'draft_id': 'desktop-stale-route', 'values': {'one': '321'}}}
+        app.session_state['daily_saved_drafts'] = draft
+        before = stored_business_state()
+        app.session_state['show_software_downloads_page'] = True
+        app.run()
+        self.assertFalse(list(app.exception))
+        self.assertFalse(app.session_state['show_software_downloads_page'])
+        self.assertTrue(any(button.key == 'home_create_project' for button in app.button))
+        self.assertEqual(app.session_state['daily_saved_drafts'], draft)
+        self.assertEqual(before, stored_business_state())
+
+    @patch.dict(os.environ, {"LJQC_DEPLOYMENT_MODE": ""})
+    def test_plain_source_is_labeled_separately_and_has_no_download_entry(self):
+        app = AppTest.from_file(str(ROOT / 'app.py'), default_timeout=30).run()
+        self.assertFalse(list(app.exception))
+        self.assertTrue(any('源码运行版 · 版本 ' in item.value for item in app.markdown))
+        self.assertFalse(any(button.key == 'open_software_downloads_page' for button in app.button))
 
 
 if __name__ == '__main__':

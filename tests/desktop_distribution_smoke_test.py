@@ -46,8 +46,10 @@ class DistributionTests(unittest.TestCase):
             with patch.dict(os.environ, {}, clear=True):
                 with patch.object(launcher, "get_storage_paths", return_value=SimpleNamespace(root=root, uses_stable_root=False)):
                     self.assertNotIn("LJQC_DATA_ROOT", launcher._service_environment())
+                    self.assertEqual(launcher._service_environment()["LJQC_DEPLOYMENT_MODE"], "desktop")
                 with patch.object(launcher, "get_storage_paths", return_value=SimpleNamespace(root=root, uses_stable_root=True)):
                     self.assertEqual(launcher._service_environment()["LJQC_DATA_ROOT"], str(root))
+                    self.assertEqual(launcher._service_environment()["LJQC_DEPLOYMENT_MODE"], "desktop")
 
     def test_held_instance_lock_prevents_second_launcher(self):
         with tempfile.TemporaryDirectory() as directory:

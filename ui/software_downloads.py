@@ -4,6 +4,7 @@ from __future__ import annotations
 import streamlit as st
 
 from services.software_download_service import get_software_download_catalog
+from services.runtime_edition import software_downloads_available
 from ui.common import go_to_home_page
 from ui.module_styles import render_module_header
 
@@ -43,6 +44,9 @@ def _package_size(size_bytes: int) -> str:
 
 
 def render_software_downloads_page() -> None:
+    if not software_downloads_available():
+        go_to_home_page(rerun=False)
+        return
     render_module_header("软件下载", "选择适合你电脑的安装包。", tone="guide", eyebrow="帮助")
     st.button("返回主页", key="software_downloads_home", on_click=go_to_home_page,
               kwargs={"rerun": False})

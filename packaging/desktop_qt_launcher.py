@@ -72,6 +72,7 @@ def _resource_roots() -> list[Path]:
 
 def _service_environment() -> dict[str, str]:
     env = os.environ.copy()
+    env["LJQC_DEPLOYMENT_MODE"] = "desktop"
     paths = get_storage_paths()
     if paths.uses_stable_root:
         env["LJQC_DATA_ROOT"] = str(paths.root)

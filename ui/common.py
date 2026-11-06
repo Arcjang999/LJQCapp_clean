@@ -12,6 +12,8 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
+from services.runtime_edition import runtime_version_label, software_downloads_available
+
 from ui.module_styles import (
     module_styles,
     render_module_card,
@@ -1169,6 +1171,9 @@ def _open_user_guide_page(practical: bool = False) -> None:
 
 def _open_software_downloads_page() -> None:
     st.session_state["global_help_menu"] = False
+    if not software_downloads_available():
+        go_to_home_page(rerun=False)
+        return
     open_global_page("show_software_downloads_page", rerun=False)
 
 
@@ -1221,7 +1226,7 @@ def render_page_chrome() -> None:
             st.markdown(
                 '<div class="app-wordmark"><span class="app-wordmark-mark" aria-hidden="true">质控</span>'
                 f'<div><div class="app-wordmark-title">{html_escape(APP_TITLE)}</div>'
-                '<div class="app-wordmark-caption">项目 · 检测 · 处理 · 报告</div></div></div>',
+                f'<div class="app-wordmark-caption">{html_escape(runtime_version_label())}</div></div></div>',
                 unsafe_allow_html=True,
             )
         with action_column:
@@ -1271,8 +1276,9 @@ def render_page_chrome() -> None:
                                       on_click=_open_workbench_tutorial_page)
                             st.button("操作说明", key="open_operation_guide_page", width="stretch",
                                       on_click=_open_user_guide_page, args=(True,))
-                            st.button("软件下载", key="open_software_downloads_page", width="stretch",
-                                      on_click=_open_software_downloads_page)
+                            if software_downloads_available():
+                                st.button("软件下载", key="open_software_downloads_page", width="stretch",
+                                          on_click=_open_software_downloads_page)
                             st.link_button(
                                 "问题反馈",
                                 "https://docs.qq.com/sheet/DY3V4b0FqS3psbkdK?tab=BB08J2",

@@ -14,6 +14,7 @@ from pages.main_page import (
     render_main_entry_page,
 )
 from ui.common import APP_TITLE, inject_global_styles, render_page_chrome
+from services.runtime_edition import software_downloads_available
 
 
 def _consume_pending_navigation_intent() -> None:
@@ -61,6 +62,9 @@ except (ValueError, OSError):
 
 normalize_top_level_method_selection()
 _consume_pending_navigation_intent()
+if st.session_state.get("show_software_downloads_page") and not software_downloads_available():
+    from ui.common import go_to_home_page
+    go_to_home_page(rerun=False)
 from ui.onboarding import prepare_onboarding, render_onboarding
 prepare_onboarding()
 inject_global_styles()
