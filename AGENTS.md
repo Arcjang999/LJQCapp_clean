@@ -1,5 +1,7 @@
 # AGENTS.md
 
+2026-11-06 main合并授权及构建入口：用户明确当前开发分支可完整取代main，“规则”指GitHub自动生成安装包的构建规则。此授权覆盖下方此前“不合并main”的阶段限制，不包含Westgard算法修复。核对原main=b73c8d0、开发c116141，main无独有提交（0/51），可快进并保留历史。自动打包转到main的版本/配方/测试等原路径触发，保留手动选择分支，避免开发分支重复构建；候选构建号递增2026110604。实际合并和运行结果以本轮远端核验及交付记录为准；不操作在用资料或更新云端运行程序。
+
 2026-11-06 GitHub双平台构建已跑通：源码76c51b0、版本1.0.0/build2026110603的最终run42176122800，两端各10套82项来源检查、真实Setup/DMG生成及包/服务检查全部success。Windows含真正Setup，Mac仍待DeveloperID签名/公证；两端同源摘要7834a84b...。首轮Windows夹具、Inno真实版本探针、完整日志和冻结中文UTF8已修复，失败历史保留。详见[GitHub交付](docs/execution/deliveries/GITHUB_DESKTOP_BUILD_2026-11-06.md)和[操作](docs/github-build.md)。本机附件在output/github-actions-2026-11-06/final-downloads。未合并main/部署/公开Release/发布下载清单；Win10/11桌面及既有Westgard规则专项仍待验，不以headless服务替代GUI或业务验收。
 
 2026-11-06 GitHub直接构建授权：用户要求现在使用GitHub构建，已接Desktop installers工作流，当前分支推送版本/打包配方后由Windows x64与Mac arm64分别构建；构建号递增2026110603。此授权覆盖本轮必要安装源码、首次说明和workflow提交推送，不合并main、不更新云端或自动发布下载。源隔离检查10套81项本机通过；两平台helper做真实冻结服务健康/正常退出，Mac另做DMG独立安装与签名检查；GUI/Win10/11桌面/规则符合性仍保持单独待验。工作流最终运行和产物以本轮GitHub回执为准，操作见[GitHub构建](docs/github-build.md)。在用资料保持，QA库/旧快照/完整source/app不作为Actions产物上传。

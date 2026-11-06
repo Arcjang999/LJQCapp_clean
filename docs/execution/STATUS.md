@@ -1,5 +1,7 @@
 # 执行进度与交付证据
 
+2026-11-06 main完整更新授权：用户确认当前开发分支完整取代main，GitHub自动生成安装包的规则一并合入。原main=b73c8d0、开发c116141，无main独有提交，可快进保留历史；自动构建入口转main，手动选择分支保留，候选build2026110604。实际结果待本轮远端核验；此前未合并限制由本次授权覆盖，不包含Westgard判读修复、运行资料或云端部署。
+
 2026-11-06 GitHub构建已真实跑通：源码76c51b0/build2026110603，最终run42176122800两平台success，来源检查各82项及真正WindowsSetup、MacDMG/包与无窗口服务校验通过，见[交付](deliveries/GITHUB_DESKTOP_BUILD_2026-11-06.md)。未合并main、部署或发布客户下载；Win10/11桌面验收、Mac签名/公证和规则专项仍待做。
 
 2026-11-06首次方法说明已按Westgard改写，4套33项和实际隔离页面通过；最新构建2026110602，Mac待签名DMG实包通过、Windows源码构建ZIP已刷新，两端同源，详见[交付](deliveries/WESTGARD_FIRST_USE_2026-11-06.md)。发现的既有规则范围/等号差异已[单列待处理](notes/WESTGARD_RULE_SCOPE_AUDIT_2026-11-06.md)，本轮未改算法/资料，未推送部署或发布下载清单。

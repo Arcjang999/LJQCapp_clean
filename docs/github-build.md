@@ -8,7 +8,9 @@
 
 工作流：`.github/workflows/desktop-build.yml`，名称 **Desktop installers**。
 
-当前开发分支 `codex/project-workflow-alignment` 中，推送 `release.json`、打包配方、测试或该工作流变化时自动构建。工作流也声明了手动触发；GitHub网页的手动按钮受默认分支中是否已存在该工作流影响，首次接线不为此自动合并main。可通过现有运行入口重跑，或在版本更新后推送触发。
+自动构建入口转到默认分支 `main`：推送 `release.json`、`.gitattributes`、打包配方、测试或该工作流变化时自动构建。单独修改业务源码或依赖文件不会触发；准备新的安装包时需一并递增 `release.json` 的构建号。开发分支推送不再重复自动打包。
+
+工作流进入 `main` 后，也可在 **Actions → Desktop installers → Run workflow** 手动构建，并选择需要构建的分支。手动构建仍须满足相同的源码、版本和实包检查。
 
 构建号由 `release.json` 统一读取；每次正式候选更新递增构建号，业务版本有变化时同时更新版本号。两端构建必须来自同一Git提交、同一发行输入摘要，源码不允许在构建过程中变化。`.gitattributes`及checkout设置保证源文本的LF一致。
 

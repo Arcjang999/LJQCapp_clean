@@ -1,5 +1,7 @@
 # LJQC 开发交接
 
+2026-11-06 main合并授权：用户明确用当前开发分支完整更新main，并带上GitHub安装包构建规则；不涉及Westgard算法修复。原main=b73c8d0是开发c116141祖先，无独有提交，按快进方式保留历史。自动构建改由main触发，仍保留手动构建其他分支，版本更新须递增release.json；本轮候选build2026110604。实际合并/构建结果以本轮远端核验为准；下方未合并是此前阶段状态，云端运行程序和资料保持。
+
 2026-11-06 GitHub真实双平台构建完成：76c51b0/build2026110603，run42176122800两任务success；各82项来源检查、Setup/DMG及冻结服务检查通过，最终同源产物见[交付](execution/deliveries/GITHUB_DESKTOP_BUILD_2026-11-06.md)。Windows实机桌面验收、Mac签名公证与既有规则专项保持待做；未合并main、部署服务器或发布下载清单。后续同一开发分支更新版本/配方/测试推送自动构建，取回文件在output/github-actions-2026-11-06/final-downloads。
 
 2026-11-06 Westgard方法说明修订已交付：首次选择、双教程及用户帮助按各浓度均值SD/L-J连续记录/多水平综合判读重写，33项及隔离浏览器通过。最新包为2026110602，两端同源，Mac实包验收通过，Windows仍待Setup原生构建；旧01不再作为最新资料，见[交付](execution/deliveries/WESTGARD_FIRST_USE_2026-11-06.md)。另有[既有规则范围差异](execution/notes/WESTGARD_RULE_SCOPE_AUDIT_2026-11-06.md)待专项处理，本轮未改算法；不得据说明来源宣称完整Westgard符合性。未推送或部署。
