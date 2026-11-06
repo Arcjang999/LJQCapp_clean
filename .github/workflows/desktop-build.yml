@@ -10,6 +10,7 @@ on:
       - .gitattributes
       - .github/workflows/desktop-build.yml
       - packaging/**
+      - tests/**
 
 permissions:
   contents: read

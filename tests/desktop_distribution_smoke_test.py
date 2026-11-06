@@ -35,7 +35,8 @@ class DistributionTests(unittest.TestCase):
             service = base.parent / "Resources/app/LJQCAppService"
             service.parent.mkdir(parents=True)
             service.write_bytes(b"test service")
-            with patch.object(launcher, "_base_dir", return_value=base):
+            with (patch.object(launcher, "_base_dir", return_value=base),
+                  patch.object(launcher, "os", SimpleNamespace(name="posix"))):
                 self.assertEqual(launcher._service_exe_path(), service)
                 self.assertIn(base.parent / "Resources", launcher._resource_roots())
 
