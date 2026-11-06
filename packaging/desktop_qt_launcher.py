@@ -220,6 +220,7 @@ def _run_service_command(args: list[str]) -> int:
         process = subprocess.Popen(
             command,
             cwd=str(service_path.parent),
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -229,8 +230,11 @@ def _run_service_command(args: list[str]) -> int:
         )
         assert process.stdout is not None
         for line in process.stdout:
-            print(line, end="")
+            _write_log(line.rstrip())
+            if sys.stdout is not None:
+                print(line, end="")
         process.wait()
+        _write_log(f"Service command exited with code {process.returncode}.")
         return int(process.returncode or 0)
     except Exception:
         print("维护命令执行失败。请关闭 LJQCApp 后重试。")
@@ -528,7 +532,7 @@ def _start_service(port: int) -> subprocess.Popen[object]:
     env["LJQC_SHUTDOWN_FILE"] = str(shutdown_file)
     _write_log(f"Starting service: {' '.join(command)}")
     try:
-        process = subprocess.Popen(command, cwd=str(service_path.parent), stdout=log_file,
+        process = subprocess.Popen(command, cwd=str(service_path.parent), stdin=subprocess.DEVNULL, stdout=log_file,
             stderr=subprocess.STDOUT, text=True, creationflags=creationflags, env=env,
             start_new_session=(os.name != "nt"))
     finally:

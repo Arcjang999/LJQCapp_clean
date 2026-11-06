@@ -110,18 +110,37 @@ $CliDataRoot = Join-Path $WorkRoot "cli-verification-data"
 try {
     $env:LJQC_DATA_ROOT = $CliDataRoot
     $env:PYTHONUTF8 = "1"
-    foreach ($Executable in @((Join-Path $ReleaseStaging "LJQCApp.exe"), (Join-Path $ReleaseStaging "_internal\app\LJQCAppService.exe"))) {
+    foreach ($Executable in @((Join-Path $ReleaseStaging "_internal\app\LJQCAppService.exe"), (Join-Path $ReleaseStaging "LJQCApp.exe"))) {
         $OutputPath = Join-Path $ArtifactDir ((Split-Path -Leaf $Executable) + "-version.txt")
         $ErrorPath = Join-Path $ArtifactDir ((Split-Path -Leaf $Executable) + "-version-error.txt")
         # The outer launcher is a GUI executable; '&' does not reliably wait for
         # it under PowerShell. A held process handle gives its real exit status.
         $VersionProcess = Start-Process -FilePath $Executable -ArgumentList @("--version") -Wait -PassThru -RedirectStandardOutput $OutputPath -RedirectStandardError $ErrorPath
-        if ($VersionProcess.ExitCode -ne 0) { throw "Frozen version command failed: $Executable (exit $($VersionProcess.ExitCode)). See $ErrorPath" }
+        if ($VersionProcess.ExitCode -ne 0) {
+            Write-Host "Frozen version stdout ($Executable):"
+            Get-Content -LiteralPath $OutputPath -Encoding utf8 | Write-Host
+            Write-Host "Frozen version stderr ($Executable):"
+            Get-Content -LiteralPath $ErrorPath -Encoding utf8 | Write-Host
+            throw "Frozen version command failed: $Executable (exit $($VersionProcess.ExitCode)). See $ErrorPath"
+        }
     }
     if ((Test-Path -LiteralPath $CliDataRoot) -and (Get-ChildItem -LiteralPath $CliDataRoot -Recurse -File -Filter "*.db")) {
         throw "A frozen version command unexpectedly created a database."
     }
 } finally {
+    $DiagnosticDirectory = Join-Path $ArtifactDir "logs"
+    New-Item -ItemType Directory -Path $DiagnosticDirectory -Force | Out-Null
+    foreach ($VersionLog in (Get-ChildItem -LiteralPath $ArtifactDir -File -Filter "*-version*.txt")) {
+        Copy-Item -LiteralPath $VersionLog.FullName -Destination (Join-Path $DiagnosticDirectory ($VersionLog.BaseName + ".log"))
+    }
+    $IsolatedLogs = Join-Path $CliDataRoot "logs"
+    if (Test-Path -LiteralPath $IsolatedLogs -PathType Container) {
+        foreach ($ApplicationLog in (Get-ChildItem -LiteralPath $IsolatedLogs -File -Filter "*.log")) {
+            Copy-Item -LiteralPath $ApplicationLog.FullName -Destination (Join-Path $DiagnosticDirectory ("frozen-cli-" + $ApplicationLog.Name))
+            Write-Host "Isolated frozen CLI log ($($ApplicationLog.Name)):"
+            Get-Content -LiteralPath $ApplicationLog.FullName -Encoding utf8 | Write-Host
+        }
+    }
     if ($null -eq $OriginalDataRoot) { Remove-Item Env:\LJQC_DATA_ROOT -ErrorAction SilentlyContinue }
     else { $env:LJQC_DATA_ROOT = $OriginalDataRoot }
     if ($null -eq $OriginalPythonUtf8) { Remove-Item Env:\PYTHONUTF8 -ErrorAction SilentlyContinue }

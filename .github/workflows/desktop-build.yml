@@ -105,5 +105,7 @@ jobs:
             output/github-build/**/build_receipt.json
             output/github-build/**/release_payload_manifest.json
             output/github-build/**/logs/*.log
+            output/github-build/**/logs/*.txt
+            output/github-build/**/*-version*.txt
           if-no-files-found: warn
           retention-days: 3
