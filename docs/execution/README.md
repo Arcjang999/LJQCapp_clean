@@ -1,5 +1,7 @@
 # 后续任务执行总表
 
+2026-11-06最新[GitHub两平台构建交付](deliveries/GITHUB_DESKTOP_BUILD_2026-11-06.md)已完成，构建2026110603，run42176122800两任务success；WindowsSetup与Mac待签名DMG及回执均已生成。对应实际桌面验收/签名/规则专项保持独立状态，未部署或发布客户下载清单。
+
 2026-11-06最新首次说明与构建为[Westgard说明修订交付](deliveries/WESTGARD_FIRST_USE_2026-11-06.md)，构建号2026110602；33项及隔离页面通过，Mac实包通过，Windows待原生Setup。既有判读的[规则范围差异](notes/WESTGARD_RULE_SCOPE_AUDIT_2026-11-06.md)单列待处理，本轮未改算法和历史记录。
 
 2026-11-06安装包首轮见[交付](deliveries/DESKTOP_INSTALLERS_2026-11-06.md)：Mac待签名DMG已实包验收，Windows源码构建资料和Inno配方已就绪、待Windows原生构建/安装。稳定资料、最小兼容门槛、首次方法与教程、正常退出锁已实现；20套148项及隔离浏览器通过。自动在线更新和统一云端发布尚未实现，未推送或部署。Windows执行见[操作说明](../windows-build.md)。

@@ -1,5 +1,7 @@
 # AGENTS.md
 
+2026-11-06 GitHub双平台构建已跑通：源码76c51b0、版本1.0.0/build2026110603的最终run42176122800，两端各10套82项来源检查、真实Setup/DMG生成及包/服务检查全部success。Windows含真正Setup，Mac仍待DeveloperID签名/公证；两端同源摘要7834a84b...。首轮Windows夹具、Inno真实版本探针、完整日志和冻结中文UTF8已修复，失败历史保留。详见[GitHub交付](docs/execution/deliveries/GITHUB_DESKTOP_BUILD_2026-11-06.md)和[操作](docs/github-build.md)。本机附件在output/github-actions-2026-11-06/final-downloads。未合并main/部署/公开Release/发布下载清单；Win10/11桌面及既有Westgard规则专项仍待验，不以headless服务替代GUI或业务验收。
+
 2026-11-06 GitHub直接构建授权：用户要求现在使用GitHub构建，已接Desktop installers工作流，当前分支推送版本/打包配方后由Windows x64与Mac arm64分别构建；构建号递增2026110603。此授权覆盖本轮必要安装源码、首次说明和workflow提交推送，不合并main、不更新云端或自动发布下载。源隔离检查10套81项本机通过；两平台helper做真实冻结服务健康/正常退出，Mac另做DMG独立安装与签名检查；GUI/Win10/11桌面/规则符合性仍保持单独待验。工作流最终运行和产物以本轮GitHub回执为准，操作见[GitHub构建](docs/github-build.md)。在用资料保持，QA库/旧快照/完整source/app不作为Actions产物上传。
 
 2026-11-06首次方法说明纠正：按用户要求对照Westgard官网，首次说明/双教程/用户帮助改为浓度水平、各自均值SD、L-J连续结果及多水平综合判读，去掉原录入方式复述；4套33项及实际隔离浏览器通过。已重建2026110602的Mac待签名DMG与Windows源码资料，两端同源摘要，Mac独立实包验收通过；旧01及首个02中间包不作为最新交付，详见[修订交付](docs/execution/deliveries/WESTGARD_FIRST_USE_2026-11-06.md)。核对发现既有R4s跨次范围、2_2s覆盖和阈值等号差异，已[单独记录](docs/execution/notes/WESTGARD_RULE_SCOPE_AUDIT_2026-11-06.md)，本轮未改算法/历史重算。不能称完整Westgard符合性已验证；未推送部署或发布下载清单。

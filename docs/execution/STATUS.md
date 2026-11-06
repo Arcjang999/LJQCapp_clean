@@ -1,5 +1,7 @@
 # 执行进度与交付证据
 
+2026-11-06 GitHub构建已真实跑通：源码76c51b0/build2026110603，最终run42176122800两平台success，来源检查各82项及真正WindowsSetup、MacDMG/包与无窗口服务校验通过，见[交付](deliveries/GITHUB_DESKTOP_BUILD_2026-11-06.md)。未合并main、部署或发布客户下载；Win10/11桌面验收、Mac签名/公证和规则专项仍待做。
+
 2026-11-06首次方法说明已按Westgard改写，4套33项和实际隔离页面通过；最新构建2026110602，Mac待签名DMG实包通过、Windows源码构建ZIP已刷新，两端同源，详见[交付](deliveries/WESTGARD_FIRST_USE_2026-11-06.md)。发现的既有规则范围/等号差异已[单列待处理](notes/WESTGARD_RULE_SCOPE_AUDIT_2026-11-06.md)，本轮未改算法/资料，未推送部署或发布下载清单。
 
 2026-11-06桌面首轮部分交付：Mac arm64待签名DMG已完成及实际安装/空库引导/重装重开资料保持通过，最低macOS13；Windows Inno配方及源码构建ZIP完成，Setup待Windows原生执行。稳定资料根、最小兼容门槛、首选方法和教程、单实例及正常退出已实现，20套148项和隔离浏览器通过，见[交付](deliveries/DESKTOP_INSTALLERS_2026-11-06.md)。未签名公证、未Windows实机验收、未推送部署，下载清单未发布；完整在线更新和统一发布仍未实现。

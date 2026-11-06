@@ -1,12 +1,14 @@
 # GitHub Actions 构建桌面安装包
 
+2026-11-06真实双平台构建已完成：版本1.0.0/build2026110603，两端各82项来源检查和实包/服务校验通过，成品与边界见[本轮交付](execution/deliveries/GITHUB_DESKTOP_BUILD_2026-11-06.md)。
+
 同一份源码分别在 GitHub 的 `windows-2022` x64 和 `macos-15` arm64 环境打包。Windows 10/11共用一个x64安装包；Mac仅Apple芯片。业务资料不参与打包，构建产物仍需桌面安装验收。Mac仅本地ad-hoc签名，Developer ID签名和公证尚未配置。
 
 ## 当前入口
 
 工作流：`.github/workflows/desktop-build.yml`，名称 **Desktop installers**。
 
-当前开发分支 `codex/project-workflow-alignment` 中，推送 `release.json`、打包配方或该工作流变化时自动构建。工作流也声明了手动触发；GitHub网页的手动按钮受默认分支中是否已存在该工作流影响，首次接线不为此自动合并main。可通过现有运行入口重跑，或在版本更新后推送触发。
+当前开发分支 `codex/project-workflow-alignment` 中，推送 `release.json`、打包配方、测试或该工作流变化时自动构建。工作流也声明了手动触发；GitHub网页的手动按钮受默认分支中是否已存在该工作流影响，首次接线不为此自动合并main。可通过现有运行入口重跑，或在版本更新后推送触发。
 
 构建号由 `release.json` 统一读取；每次正式候选更新递增构建号，业务版本有变化时同时更新版本号。两端构建必须来自同一Git提交、同一发行输入摘要，源码不允许在构建过程中变化。`.gitattributes`及checkout设置保证源文本的LF一致。
 
