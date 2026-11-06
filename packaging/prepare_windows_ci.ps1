@@ -6,6 +6,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 if ($env:OS -ne "Windows_NT") { throw "Windows CI preparation must run on Windows." }
+. (Join-Path $PSScriptRoot "windows_compiler.ps1")
 
 # GitHub's windows-2022 image already includes Inno Setup 6. Prefer it to an
 # unbounded package-manager upgrade, and fail rather than silently skip Setup.
@@ -20,18 +21,17 @@ if (-not $InnoCompiler -or -not (Test-Path -LiteralPath $InnoCompiler -PathType 
     throw "Inno Setup 6.5+ was not found. Use the supported windows-2022 runner image or provide -InnoCompiler."
 }
 $InnoCompiler = (Resolve-Path -LiteralPath $InnoCompiler).Path
-$CompilerVersion = (Get-Item -LiteralPath $InnoCompiler).VersionInfo.FileVersion
-if ($CompilerVersion -notmatch '^6\.(\d+)' -or [int]$Matches[1] -lt 5) {
-    throw "This pipeline requires Inno Setup 6.5 or newer within version 6; found $CompilerVersion."
-}
 
 if (-not $PreparationRoot) {
-    $TemporaryRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
+    $TemporaryRoot = if ($env:GITHUB_ACTIONS -eq "true") {
+        Join-Path (Split-Path -Parent $PSScriptRoot) "output\ci-verification\windows-compiler"
+    } elseif ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
     $PreparationRoot = Join-Path $TemporaryRoot ("ljqc-windows-ci-" + [guid]::NewGuid().ToString("N"))
 }
 $PreparationRoot = [IO.Path]::GetFullPath($PreparationRoot)
 if (Test-Path -LiteralPath $PreparationRoot) { throw "CI preparation output must be a new directory: $PreparationRoot" }
 New-Item -ItemType Directory -Path $PreparationRoot | Out-Null
+$CompilerVersion = Get-LJQCInnoCompilerVersion -CompilerPath $InnoCompiler -EvidenceDirectory $PreparationRoot
 
 $CompilerDirectory = Split-Path -Parent $InnoCompiler
 $ChineseMessagesFile = Join-Path $CompilerDirectory "Languages\ChineseSimplified.isl"
@@ -53,6 +53,7 @@ $ReceiptPath = Join-Path $PreparationRoot "windows-ci-preparation.json"
     status = "ready"
     compiler_path = $InnoCompiler
     compiler_version = $CompilerVersion
+    compiler_version_source = "ISPP Ver probe"
     chinese_messages_file = $ChineseMessagesFile
     chinese_messages_sha256 = $LanguageHash
     chinese_messages_source = $LanguageSource

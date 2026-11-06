@@ -197,6 +197,8 @@ def main() -> None:
         prep = os.environ.get("LJQC_CI_PREPARATION_RECEIPT", "")
         if prep:
             shutil.copy2(prep, output / "windows-ci-preparation.json")
+            for path in Path(prep).parent.glob("inno-compiler-probe-*.log"):
+                shutil.copy2(path, output / path.name)
         shutil.copy2(setup, output / setup.name)
         result.update(status="passed", release=receipt["release"], frozen_service=service,
             installer={"file": setup.name, "size_bytes": setup.stat().st_size, "sha256": digest_file(setup)},

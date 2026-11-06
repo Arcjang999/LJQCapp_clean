@@ -10,6 +10,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 if ($env:OS -ne "Windows_NT") { throw "Build the Windows installer on a Windows x64 computer." }
+. (Join-Path $PSScriptRoot "windows_compiler.ps1")
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 if (-not $PythonExe) { $PythonExe = Join-Path $RepoRoot ".venv\Scripts\python.exe" }
 if (-not (Test-Path -LiteralPath $PythonExe -PathType Leaf)) { throw "Python not found: $PythonExe" }
@@ -56,10 +57,7 @@ if (-not $SkipInstaller -and (-not $InnoCompiler -or -not (Test-Path -LiteralPat
 }
 if (-not $SkipInstaller) {
     $InnoCompiler = (Resolve-Path -LiteralPath $InnoCompiler).Path
-    $CompilerVersion = (Get-Item -LiteralPath $InnoCompiler).VersionInfo.FileVersion
-    if ($CompilerVersion -notmatch '^6\.(\d+)' -or [int]$Matches[1] -lt 5) {
-        throw "Inno Setup 6.5 or newer within version 6 is required; found $CompilerVersion."
-    }
+    $CompilerVersion = Get-LJQCInnoCompilerVersion -CompilerPath $InnoCompiler -EvidenceDirectory (Join-Path $ArtifactDir "logs")
     if (-not $ChineseMessagesFile) { $ChineseMessagesFile = Join-Path (Split-Path -Parent $InnoCompiler) "Languages\ChineseSimplified.isl" }
     if (-not (Test-Path -LiteralPath $ChineseMessagesFile -PathType Leaf)) {
         throw "The Simplified Chinese language file is missing. In GitHub Actions run packaging/prepare_windows_ci.ps1 and pass its LJQC_CI_CHINESE_MESSAGES path with -ChineseMessagesFile."
