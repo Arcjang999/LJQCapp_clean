@@ -1,5 +1,7 @@
 # GitHub Actions 构建桌面安装包
 
+2026-11-06已按用户要求完整合入`main`，自动构建入口同步转移；`main`首次自动运行[42179158278](https://github.com/Arcjang999/LJQCapp_clean/actions/runs/42179158278)对应候选build2026110604，记录时仍在构建。下条03为已完成的历史验收，不代替04结果。
+
 2026-11-06真实双平台构建已完成：版本1.0.0/build2026110603，两端各82项来源检查和实包/服务校验通过，成品与边界见[本轮交付](execution/deliveries/GITHUB_DESKTOP_BUILD_2026-11-06.md)。
 
 同一份源码分别在 GitHub 的 `windows-2022` x64 和 `macos-15` arm64 环境打包。Windows 10/11共用一个x64安装包；Mac仅Apple芯片。业务资料不参与打包，构建产物仍需桌面安装验收。Mac仅本地ad-hoc签名，Developer ID签名和公证尚未配置。

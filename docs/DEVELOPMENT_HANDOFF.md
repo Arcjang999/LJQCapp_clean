@@ -1,6 +1,6 @@
 # LJQC 开发交接
 
-2026-11-06 main合并授权：用户明确用当前开发分支完整更新main，并带上GitHub安装包构建规则；不涉及Westgard算法修复。原main=b73c8d0是开发c116141祖先，无独有提交，按快进方式保留历史。自动构建改由main触发，仍保留手动构建其他分支，版本更新须递增release.json；本轮候选build2026110604。实际合并/构建结果以本轮远端核验为准；下方未合并是此前阶段状态，云端运行程序和资料保持。
+2026-11-06 main完整合并完成：按用户授权，原main=b73c8d0已快进至a13b926，与开发分支同提交、同内容，历史保留，本机切换main。GitHub安装包自动构建转到main，手动构建其他分支保留，准备新版安装包时递增release.json；本轮候选build2026110604。10套82项隔离检查通过，失败/跳过/越界均0；main已自动触发[run42179158278](https://github.com/Arcjang999/LJQCapp_clean/actions/runs/42179158278)，记录时两端仍在构建，不能提前称04成品已验收。下方未合并是此前阶段状态；本轮未改Westgard算法、在用资料或云端运行程序。入口与触发范围见[构建操作](github-build.md)。
 
 2026-11-06 GitHub真实双平台构建完成：76c51b0/build2026110603，run42176122800两任务success；各82项来源检查、Setup/DMG及冻结服务检查通过，最终同源产物见[交付](execution/deliveries/GITHUB_DESKTOP_BUILD_2026-11-06.md)。Windows实机桌面验收、Mac签名公证与既有规则专项保持待做；未合并main、部署服务器或发布下载清单。后续同一开发分支更新版本/配方/测试推送自动构建，取回文件在output/github-actions-2026-11-06/final-downloads。
 
