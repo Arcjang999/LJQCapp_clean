@@ -5,21 +5,21 @@
       "published": true,
       "target": "windows-x86_64",
       "version": "1.0.0",
-      "build_number": 2026110604,
+      "build_number": 2026110606,
       "published_at": "2026-11-06",
-      "url": "https://159.75.243.120/downloads/releases/1.0.0/2026110604/LJQCApp-1.0.0-2026110604-027216014fd5-windows-x64-Setup.exe",
-      "sha256": "4e0f058009f852e92bbf871f337dfc874b5560675d22263aba97f1278a23289b",
-      "size_bytes": 244415232
+      "url": "https://159.75.243.120/downloads/releases/1.0.0/2026110606/LJQCApp-1.0.0-2026110606-0a259ec3cae7-windows-x64-Setup.exe",
+      "sha256": "958ad7fb73d7f5dfbda2801e9d06f387a7dc1128d0b60a93ed44a0129f8f2bdb",
+      "size_bytes": 244432827
     },
     "macos-arm64": {
       "published": true,
       "target": "macos-arm64",
       "version": "1.0.0",
-      "build_number": 2026110604,
+      "build_number": 2026110606,
       "published_at": "2026-11-06",
-      "url": "https://159.75.243.120/downloads/releases/1.0.0/2026110604/LJQCApp-1.0.0-2026110604-macos-arm64-pending-signing.dmg",
-      "sha256": "0a9c90a3be0961b7e672acbb4b06581ab5f74a045e767d88ebfd01e43742f777",
-      "size_bytes": 363145855
+      "url": "https://159.75.243.120/downloads/releases/1.0.0/2026110606/LJQCApp-1.0.0-2026110606-macos-arm64-pending-signing.dmg",
+      "sha256": "03bf236b47c4e9154d2b453d28943abd658085b8fc6bf21a13f0b9d1c5e23970",
+      "size_bytes": 356752071
     }
   }
 }
