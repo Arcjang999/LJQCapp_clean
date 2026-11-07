@@ -1,5 +1,7 @@
 # AGENTS.md
 
+2026-11-07累计更新02已完成两端验收并合main：run42379066480、2adb7721060582308164a4b10a13d8d3c66dd14f，Windows/Mac真实构建、冻结UI、原06安装→接入→真实补丁→74表/报告BLOB/附件保持全通过。main由ddec9e5快进到2adb，source_digest9b8100574296...，程序1.0.1/build2026110702；原1.00源码tag与两包/下载catalog保持。四成品已本地下载并实算SHA，使用本地专用key签名，signed-build02-bundle.tar仅暂存未发布；下载核对/接线工具包/源码bundle见output/desktop-update-release-2026-11-07。main相同提交触发的重复run42380302031已取消，不影响完整通过的run。腾讯云当前再要求微信MFA，已在Chrome OrcaTerm留handoff并异步请用户扫码，仍待完成；尚未向服务器上传本轮文件或新增账号/权限，GitHub环境及Secrets未配置，绝不能称云端更新通道已上线。创建新的受限发布身份需按控制台的安全要求在实际启用前确认，扫码只解决登录。保留原在用资料，云端fresh备份/严格验收v2工具已本地就绪（15+23项及隔离探针通过，未执行服务器），见[交付](docs/execution/deliveries/DESKTOP_CUMULATIVE_UPDATES_2026-11-07.md)。本机不再重复native Qt。
+
 2026-11-07累计更新首轮CI已完成：ecf8a1f/run42373808170 Mac完整success，Win源码检查因fsync只读句柄及跨平台fixture失败，已精确修复不放宽数据/签名约束。当前候选1.0.1/build2026110702，新增真实原06→接入→补丁的GitHub-only无窗口验收、Dock直接入口转helper、受限服务器接线脚本、环境AUTO权限门槛。17套182项及最新打包16项单独通过，02新轮CI/云端接线待做，不能用首轮Mac通过替代Windows。原06基础文件及catalog不变，密钥只本地忽略目录，尚未授予GitHub/服务器新权限；详见[本轮交付](docs/execution/deliveries/DESKTOP_CUMULATIVE_UPDATES_2026-11-07.md)。本机不再启动native Qt；用户“Python意外退出”已修复经唯一受控四项复核通过，后续原生验收交GitHub。
 
 2026-11-07用户已授权完整实施固定1.00基础包的Windows/Mac接入补丁和后续自动更新，覆盖下条“仅文档”。以已核对main=ddec9e5为开发基线，在codex/desktop-patch-updates实施；固定发行tag desktop-base-1.0.0-2026110606指向原包源d07a577，原两包及下载清单保持。候选程序1.0.1/build2026110701；实现/验证进行中，不能提前称上线或实包完成。保留上一轮6份规则文档修改，不操作云端业务资料或恢复旧库。
