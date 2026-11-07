@@ -1,16 +1,13 @@
-name: Desktop installers
+name: Base installers (explicit only)
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - release.json
-      - .gitattributes
-      - .github/workflows/desktop-build.yml
-      - packaging/**
-      - tests/**
+    inputs:
+      rebuild_base_installers:
+        description: 'Only select after the project owner explicitly requests replacement base installers'
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -20,7 +17,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  updates:
+    if: inputs.rebuild_base_installers != true
+    uses: ./.github/workflows/desktop-updates.yml
+    with:
+      publish: false
+    secrets: inherit
+
   build:
+    if: inputs.rebuild_base_installers == true
     name: ${{ matrix.target }} candidate
     timeout-minutes: 45
     strategy:

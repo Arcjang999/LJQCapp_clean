@@ -1,0 +1,123 @@
+name: Desktop update signing and restricted transfer
+
+on:
+  workflow_call:
+    inputs:
+      refresh_only:
+        type: boolean
+        default: false
+      publish:
+        type: boolean
+        default: false
+    secrets:
+      LJQC_UPDATE_SIGNING_KEY:
+        required: false
+      LJQC_UPDATE_DEPLOY_KEY:
+        required: false
+      LJQC_UPDATE_KNOWN_HOSTS:
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-update-publication
+  cancel-in-progress: false
+
+jobs:
+  sign_and_transfer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: desktop-updates
+    env:
+      PYTHONUTF8: '1'
+      SIGNING_KEY: ${{ secrets.LJQC_UPDATE_SIGNING_KEY }}
+      DEPLOY_KEY: ${{ secrets.LJQC_UPDATE_DEPLOY_KEY }}
+      KNOWN_HOSTS: ${{ secrets.LJQC_UPDATE_KNOWN_HOSTS }}
+      DEPLOY_HOST: ${{ vars.LJQC_UPDATE_DEPLOY_HOST || '159.75.243.120' }}
+      DEPLOY_USER: ${{ vars.LJQC_UPDATE_DEPLOY_USER }}
+      DO_REFRESH: ${{ inputs.refresh_only }}
+      DO_PUBLISH: ${{ github.ref == 'refs/heads/main' && inputs.publish == true }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.13'
+      - name: Identify available publication capabilities
+        id: capabilities
+        run: |
+          python - <<'PY'
+          import os
+          signing = bool(os.environ.get('SIGNING_KEY'))
+          deploying = signing and all(os.environ.get(name) for name in ('DEPLOY_KEY', 'KNOWN_HOSTS', 'DEPLOY_USER'))
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('signing=' + str(signing).lower() + '\n')
+              output.write('deploying=' + str(deploying).lower() + '\n')
+          if not signing:
+              print('::notice::Release signing is not configured. Native artifacts are candidates; nothing is published.')
+          elif not deploying:
+              print('::notice::Restricted server transfer is not configured. Signed artifacts can be retained, but nothing is published.')
+          PY
+      - name: Install signing/verifying dependency
+        if: steps.capabilities.outputs.signing == 'true'
+        run: python -m pip install cryptography==50.0.2
+      - name: Get both native candidates from this successful run
+        if: steps.capabilities.outputs.signing == 'true' && env.DO_REFRESH != 'true'
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: LJQCUpdate-*
+          path: output/update-inputs
+          merge-multiple: true
+      - name: Sign exactly the verified platform pair
+        if: steps.capabilities.outputs.signing == 'true' && env.DO_REFRESH != 'true'
+        env:
+          LJQC_UPDATE_SIGNING_KEY: ${{ secrets.LJQC_UPDATE_SIGNING_KEY }}
+        run: python packaging/publish_desktop_update.py sign --inputs output/update-inputs --output output/signed-update
+      - name: Refresh only the current release metadata
+        if: steps.capabilities.outputs.signing == 'true' && env.DO_REFRESH == 'true'
+        env:
+          LJQC_UPDATE_SIGNING_KEY: ${{ secrets.LJQC_UPDATE_SIGNING_KEY }}
+        run: python packaging/publish_desktop_update.py refresh-metadata --output output/signed-update
+      - name: Retain signed publication files
+        if: steps.capabilities.outputs.signing == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: LJQCUpdate-signed-${{ github.run_number }}-${{ github.run_attempt }}
+          path: output/signed-update/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+      - name: Transfer only through the restricted receiving command
+        if: steps.capabilities.outputs.deploying == 'true' && env.DO_PUBLISH == 'true'
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          import subprocess
+          import sys
+          import tempfile
+          subprocess.run([sys.executable, 'packaging/publish_desktop_update.py', 'bundle', '--source', 'output/signed-update', '--output', str(Path(os.environ['RUNNER_TEMP']) / 'ljqc-update-bundle.tar')], check=True)
+          with tempfile.TemporaryDirectory(prefix='ljqc-publish-', dir=os.environ['RUNNER_TEMP']) as temporary:
+              root = Path(temporary)
+              root.chmod(0o700)
+              key = root / 'identity'
+              key.write_text(os.environ['DEPLOY_KEY'].rstrip() + '\n')
+              key.chmod(0o600)
+              hosts = root / 'known_hosts'
+              hosts.write_text(os.environ['KNOWN_HOSTS'].rstrip() + '\n')
+              hosts.chmod(0o600)
+              with (Path(os.environ['RUNNER_TEMP']) / 'ljqc-update-bundle.tar').open('rb') as bundle:
+                  result = subprocess.run(['ssh', '-i', str(key), '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'UserKnownHostsFile=' + str(hosts), os.environ['DEPLOY_USER'] + '@' + os.environ['DEPLOY_HOST'], 'ljqc-update-upload'], stdin=bundle, capture_output=True, text=True, timeout=900)
+              if result.returncode:
+                  raise RuntimeError('Restricted update receiver failed; the previous channel remains selected.')
+              receipt = json.loads(result.stdout)
+              if receipt.get('status') != 'published' or receipt.get('base_installer_changed') is not False:
+                  raise RuntimeError('The server did not return a successful immutable-base publication receipt.')
+              Path('output/update-publish-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+              print(json.dumps(receipt))
+          PY
+      - name: State when server publication was not requested
+        if: steps.capabilities.outputs.signing == 'true' && env.DO_PUBLISH != 'true'
+        run: echo 'Signed candidates retained. Server publication was not requested; the installed base and server channel are unchanged.'

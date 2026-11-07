@@ -151,6 +151,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--diagnose-output", default="")
     parser.add_argument("--browser-mode", action="store_true")
     parser.add_argument("--version", action="store_true")
+    parser.add_argument("--update-preflight", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--update-result", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--adopt-from", type=Path, help="接入已关闭的原软件data资料文件夹")
     parser.add_argument("--demo-profile", "--profile", dest="demo_profile", choices=("basic", "full"), default="full")
     return parser.parse_args(argv)
@@ -661,6 +663,44 @@ def _configure_standard_streams() -> None:
             stream.reconfigure(encoding="utf-8", errors="backslashreplace")
 
 
+def update_preflight(result_path: Path | None) -> int:
+    """Initialize only an updater-owned candidate, never the active database."""
+    from desktop_updates.data_guard import atomic_json
+    paths = get_storage_paths()
+    marker = paths.root / 'update-candidate.json'
+    if (os.environ.get('LJQC_UPDATE_PREFLIGHT') != '1' or not paths.uses_stable_root
+            or not marker.is_file() or marker.is_symlink()
+            or result_path is None or result_path.resolve().parent != paths.root.resolve()):
+        raise RuntimeError('更新检查位置无效，未操作原资料。')
+    declaration = json.loads(marker.read_text(encoding='utf-8'))
+    if declaration.get('format') != 'ljqc-update-candidate' or declaration.get('base_release') != '1.0.0-2026110606':
+        raise RuntimeError('更新检查记录无效，未操作原资料。')
+    allowed = paths.root.resolve()
+    def audit(event, arguments):
+        if event != 'sqlite3.connect' or str(arguments[0]) == ':memory:':
+            return
+        from urllib.parse import urlsplit, unquote
+        target = str(arguments[0])
+        if target.startswith('file:'):
+            target = unquote(urlsplit(target).path)
+            if os.name == 'nt' and target.startswith('/') and len(target) > 2 and target[2] == ':':
+                target = target[1:]
+        if not Path(target).resolve().is_relative_to(allowed):
+            raise RuntimeError('更新检查只能访问隔离副本，已停止更新。')
+    sys.addaudithook(audit)
+    import database
+    expected = paths.root / 'data/qc_lj_app.db'
+    if database.get_db_path().resolve() != expected.resolve():
+        raise RuntimeError('更新检查未使用隔离副本，已停止更新。')
+    database.init_db(refresh_reference_data=not expected.exists())
+    from services.schema_compatibility import inspect_database
+    inspect_database(expected, check_integrity=True)
+    info = get_release_info().as_dict()
+    atomic_json(result_path, {'status': 'passed', 'release': info,
+                             'database_path': str(expected.resolve())})
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     _configure_standard_streams()
     args = parse_args(argv)
@@ -668,6 +708,8 @@ def main(argv: list[str] | None = None) -> int:
         return print_version()
     if args.diagnose:
         return generate_diagnostics(args.diagnose_output)
+    if args.update_preflight:
+        return update_preflight(args.update_result)
     if args.browser_mode:
         return run_browser_mode()
     paths = get_storage_paths()

@@ -21,6 +21,7 @@ from release_payload import digest_file, write_payload_manifest
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, default=ROOT / 'output/installers')
+    parser.add_argument('--skip-dmg', action='store_true', help='Build only the native program for a cumulative update patch')
     args = parser.parse_args()
     if sys.platform != 'darwin' or platform.machine() != 'arm64':
         raise SystemExit('Mac 安装包须在 Apple 芯片 Mac 上构建。')
@@ -93,6 +94,13 @@ def main() -> None:
         '需要诊断时，在终端运行："/Applications/LJQCApp.app/Contents/MacOS/LJQCApp" --diagnose\n', encoding='utf-8')
     write_payload_manifest(image_root, info)
     shutil.copy2(image_root / 'release_payload_manifest.json', stage / 'release_payload_manifest.json')
+    if args.skip_dmg:
+        summary = {**info, 'artifact_kind': 'program-payload', 'application': str(app),
+                   'payload_root': str(image_root), 'source_snapshot': str(source),
+                   'base_installer_rebuilt': False}
+        (stage / 'artifact.json').write_text(json.dumps(summary, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+        print(json.dumps(summary, ensure_ascii=False), flush=True)
+        return
     (image_root / 'Applications').symlink_to('/Applications')
     dmg = stage / f"LJQCApp-{info['version']}-{info['build_number']}-macos-arm64-pending-signing.dmg"
     run(['hdiutil', 'create', '-volname', 'LJQCApp', '-srcfolder', str(image_root), '-format', 'UDZO', '-ov', str(dmg)], 'create-dmg')

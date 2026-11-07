@@ -19,6 +19,9 @@ SUITES = (
     'onboarding_service_smoke_test', 'onboarding_ui_smoke_test',
     'workbench_tutorial_smoke_test', 'software_downloads_smoke_test',
     'user_guide_smoke_test', 'app_entry_smoke_test',
+    'desktop_update_core_smoke_test', 'desktop_update_bootstrap_smoke_test',
+    'desktop_update_manager_smoke_test', 'desktop_update_packaging_smoke_test',
+    'desktop_update_catalog_smoke_test',
 )
 
 

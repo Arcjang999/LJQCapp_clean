@@ -228,7 +228,7 @@ def get_connection() -> sqlite3.Connection:
     return connection
 
 
-def init_db() -> None:
+def init_db(*, refresh_reference_data: bool = True) -> None:
     _read_storage_config_payload()
     inspect_database(DB_PATH)
     _migrate_legacy_db_file()
@@ -249,7 +249,7 @@ def init_db() -> None:
         from migrations.report_periods import ensure_report_periods_schema
         ensure_report_periods_schema(connection)
         _ensure_app_settings_table(connection)
-        ensure_v11_schema(connection)
+        ensure_v11_schema(connection, refresh_reference_data=refresh_reference_data)
         from migrations.product_attributes import ensure_product_attributes_schema
         ensure_product_attributes_schema(connection)
         ensure_template_reagent_schema(connection)

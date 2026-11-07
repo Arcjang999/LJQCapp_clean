@@ -1,0 +1,22 @@
+name: Refresh desktop update metadata
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish refreshed signatures without rebuilding the fixed base or program'
+        type: boolean
+        default: false
+  schedule:
+    - cron: '17 2 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    uses: ./.github/workflows/desktop-update-publish.yml
+    with:
+      refresh_only: true
+      publish: ${{ github.ref == 'refs/heads/main' && (inputs.publish == true || vars.LJQC_UPDATES_AUTO_PUBLISH == 'true') }}
+    secrets: inherit

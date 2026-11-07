@@ -1,0 +1,14 @@
+{
+  "format_version": 1,
+  "product": "LJQCApp",
+  "channel": "dev",
+  "base_release": "1.0.0-2026110606",
+  "origin": "https://159.75.243.120",
+  "keys": {
+    "release-2026-11": "ZpnvkhEEGmQsw8iVCspvkKiau28ISFfpG23Q7lPLidk="
+  },
+  "max_manifest_bytes": 262144,
+  "max_artifact_bytes": 4294967296,
+  "max_unpacked_bytes": 12884901888,
+  "max_files": 100000
+}

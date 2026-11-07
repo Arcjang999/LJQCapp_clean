@@ -13,7 +13,7 @@ def _new_uid() -> str:
     return str(uuid4())
 
 
-def ensure_v11_schema(connection: sqlite3.Connection) -> None:
+def ensure_v11_schema(connection: sqlite3.Connection, *, refresh_reference_data: bool = True) -> None:
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -28,10 +28,13 @@ def ensure_v11_schema(connection: sqlite3.Connection) -> None:
     _create_master_data_tables(connection)
     _create_project_configuration_tables(connection)
     _create_indexes(connection)
-    _seed_builtin_sources(connection)
-    _seed_builtin_units(connection)
-    _seed_builtin_methods(connection)
-    _seed_wst886_test_items(connection)
+    # Candidate upgrade checks preserve the current reference rows byte for
+    # byte. Normal application initialization keeps its existing refresh path.
+    if refresh_reference_data:
+        _seed_builtin_sources(connection)
+        _seed_builtin_units(connection)
+        _seed_builtin_methods(connection)
+        _seed_wst886_test_items(connection)
     connection.execute(
         """
         INSERT OR IGNORE INTO schema_migrations (migration_key, app_version)

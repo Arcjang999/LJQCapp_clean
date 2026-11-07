@@ -654,6 +654,21 @@ def _run_qt_desktop(argv: list[str]) -> int:
         window = DesktopWindow()
         window.setWindowTitle(APP_NAME)
         window.resize(1440, 960)
+        helper = os.environ.get('LJQC_UPDATE_HELPER', '').strip()
+        if helper:
+            def check_for_updates():
+                from PySide6.QtWidgets import QMessageBox
+                path = Path(helper)
+                if not path.is_absolute() or not path.is_file() or path.is_symlink():
+                    QMessageBox.information(window, APP_NAME, '更新组件未找到，请重新运行更新接入补丁。')
+                    return
+                env = _service_environment()
+                env['PYINSTALLER_RESET_ENVIRONMENT'] = '1'
+                try:
+                    subprocess.Popen([str(path), '--check'], env=env, cwd=str(path.parent))
+                except OSError:
+                    QMessageBox.information(window, APP_NAME, '暂时无法打开更新组件，请保存并退出后重新打开软件。')
+            window.menuBar().addMenu('帮助').addAction('检查更新', check_for_updates)
         view = QWebEngineView()
         window.setCentralWidget(view)
         active_downloads: list[object] = []

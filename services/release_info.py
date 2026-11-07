@@ -37,7 +37,7 @@ def _read_json(path: Path) -> dict:
 def release_input_files(root: Path) -> list[Path]:
     """Explicit allowlist: never traverse runtime databases, output or snapshots."""
     files = set(root.glob("*.py"))
-    for name in ("migrations", "pages", "services", "ui", "packaging"):
+    for name in ("migrations", "pages", "services", "ui", "packaging", "desktop_updates"):
         files.update(p for p in (root / name).rglob("*") if p.suffix in {".py", ".spec", ".ps1", ".iss", ".sh", ".plist"})
     for name in ("assets", "resources", "data/dictionaries", "data/catalogs"):
         files.update(p for p in (root / name).rglob("*") if p.is_file())
@@ -46,6 +46,7 @@ def release_input_files(root: Path) -> list[Path]:
                  "docs/OPERATION_GUIDE.md", "docs/current_user_guide.md"):
         files.add(root / name)
     files.update((root / "docs/images/first-use").glob("*"))
+    files.update((root / ".github/workflows").glob("*.yml"))
     return sorted((p for p in files if p.is_file() and "__pycache__" not in p.parts
                    and p.suffix.lower() not in {".db", ".sqlite", ".sqlite3", ".pyc", ".pyo"}),
                   key=lambda p: p.relative_to(root).as_posix())

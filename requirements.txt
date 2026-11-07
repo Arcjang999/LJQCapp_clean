@@ -4,3 +4,4 @@ matplotlib
 numpy
 PySide6==6.11.1
 pypdf
+cryptography==50.0.2
