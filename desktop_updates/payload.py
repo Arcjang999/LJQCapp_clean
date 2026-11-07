@@ -144,8 +144,14 @@ def _verify_extracted(root: Path, manifest: dict, entries: dict[str, dict], *, c
     entry_name = manifest.get("payload", {}).get("entrypoint")
     if entry_name not in actual or actual[entry_name]["kind"] != "file":
         raise UpdateError("更新包缺少可执行程序入口。")
-    if manifest.get("target") == "macos-arm64" and not actual[entry_name]["mode"] & stat.S_IXUSR:
-        raise UpdateError("Mac 更新包的启动权限无效。")
+    if manifest.get("target") == "macos-arm64":
+        # The authenticated manifest and tar entry retain POSIX mode even when
+        # inspected on Windows. Windows stat/chmod cannot represent executable
+        # bits; only a native POSIX recheck may require them on the installed file.
+        signed_mode = expected[entry_name].get("mode")
+        if (type(signed_mode) is not int or not signed_mode & stat.S_IXUSR
+                or (check_modes and not actual[entry_name]["mode"] & stat.S_IXUSR)):
+            raise UpdateError("Mac 更新包的启动权限无效。")
     return payload
 
 

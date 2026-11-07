@@ -21,6 +21,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 from desktop_updates.protocol import BASE_RELEASE, UpdateError, canonical_json, validate_trust, verify_envelope
 from desktop_updates.payload import extract_verified_payload, verify_installed_payload
+from desktop_updates import payload as payload_module
 from desktop_updates import transport
 
 NOW = datetime(2026, 11, 7, 9, 0, tzinfo=timezone.utc)
@@ -52,11 +53,12 @@ def verify(raw, **kwargs):
                            highest_sequence=kwargs.pop("highest_sequence", 0), now=NOW, **kwargs)
 
 
-def make_archive(directory, *, target="windows-x86_64", extra=None, file_bytes=b"test-program", mutate_record=None):
+def make_archive(directory, *, target="windows-x86_64", extra=None, file_bytes=b"test-program", mutate_record=None,
+                 entry_mode=0o755, include_frameworks=True):
     manifest = make_manifest(target)
     entry = manifest["payload"]["entrypoint"]
-    files = [(entry, file_bytes, 0o755, "file", None)]
-    if target == "macos-arm64":
+    files = [(entry, file_bytes, entry_mode, "file", None)]
+    if target == "macos-arm64" and include_frameworks:
         files += [("LJQCApp.app/Contents/Frameworks/Qt/Versions/A/Qt", b"framework", 0o755, "file", None),
                   ("LJQCApp.app/Contents/Frameworks/Qt/Versions/Current", b"", 0o777, "symlink", "A"),
                   ("LJQCApp.app/Contents/Frameworks/Qt/Qt", b"framework", 0o777, "symlink", "Versions/Current/Qt")]
@@ -173,6 +175,35 @@ class PayloadTests(unittest.TestCase):
                 result = extract_verified_payload(archive, Path(temporary) / "candidate", manifest)
                 self.assertFalse(result["mutable_data_included"])
                 self.assertEqual((Path(temporary) / "candidate" / manifest["payload"]["entrypoint"]).read_bytes(), b"test-program")
+
+    def test_mac_entry_mode_remains_required_when_host_cannot_express_posix_modes(self):
+        for entry_mode in (0o755, 0o644):
+            with self.subTest(entry_mode=oct(entry_mode)), tempfile.TemporaryDirectory() as temporary:
+                archive, manifest = make_archive(temporary, target="macos-arm64", entry_mode=entry_mode,
+                                                 include_frameworks=False)
+                # These are fixed ordinary fixture files, copied with the same
+                # non-executable stat mode returned by Windows. No symlinks or
+                # native Mac executable are needed to exercise cross-host QA.
+                candidate = Path(temporary) / "cross-host-candidate"
+                candidate.mkdir()
+                with tarfile.open(archive, "r:gz") as bundle:
+                    self.assertEqual(bundle.getmember(manifest["payload"]["entrypoint"]).mode, entry_mode)
+                    for member in bundle:
+                        target = candidate / member.name
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        with bundle.extractfile(member) as content:
+                            target.write_bytes(content.read())
+                entries = {path.relative_to(candidate).as_posix():
+                           {"kind": "directory" if path.is_dir() else "file", "mode": 0o644}
+                           for path in candidate.rglob("*")}
+                if entry_mode == 0o755:
+                    payload_module._verify_extracted(candidate, manifest, entries, check_modes=False)
+                    extract_verified_payload(archive, Path(temporary) / "verified", manifest)
+                else:
+                    with self.assertRaises(UpdateError):
+                        payload_module._verify_extracted(candidate, manifest, entries, check_modes=False)
+                    with self.assertRaises(UpdateError):
+                        extract_verified_payload(archive, Path(temporary) / "rejected", manifest)
 
     def test_installed_candidate_revalidated_and_tampering_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:

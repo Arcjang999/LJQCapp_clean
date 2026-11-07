@@ -226,6 +226,7 @@ class UpdateManager:
                 raise UpdateError('请先接入已安装的 1.00 程序。')
             entry = self._entry(state['current'])
             env = _environment(self.root)
+            env['LJQC_LAUNCHED_BY_UPDATER'] = '1'
             if state.get('updater_entrypoint'):
                 env['LJQC_UPDATE_HELPER'] = state['updater_entrypoint']
             process = _spawn([str(entry)], cwd=str(entry.parent), env=env,
@@ -380,7 +381,8 @@ class UpdateManager:
         previous = original.with_name('.' + original.name + '.before-update-' + identifier)
         shutil.copy2(candidate, prepared)
         shutil.copystat(original, prepared, follow_symlinks=False)
-        with prepared.open('rb') as handle:
+        # Windows FlushFileBuffers requires a handle opened for writing.
+        with prepared.open('r+b') as handle:
             os.fsync(handle.fileno())
         journal.update(phase='data-switching', prepared_db=str(prepared), previous_db=str(previous), data_migrated=True)
         atomic_json(self.journal_path, journal)

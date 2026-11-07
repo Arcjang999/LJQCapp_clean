@@ -6,7 +6,7 @@
 
 开发从核对一致的 `main=ddec9e5f1ca6057312d0f3346c34d59534cdd2be` 开始，分支为 `codex/desktop-patch-updates`。固定发行标记 `desktop-base-1.0.0-2026110606` 指向原包构建源 `d07a57771475a9367e0face03d14f7629b97fe04`，不指向后续开发提交，也不移动这个标记。
 
-`resources/desktop_base_release.json` 固定原基础发行身份和两平台原文件，`resources/software_downloads.json` 保持原下载记录。基础包对外称 1.00，内部 `1.0.0/build2026110606`；首个更新候选为 `1.0.1/build2026110701`。后续构建号必须递增，只有项目负责人明确要求替换基础包时才生成新的基础发行。
+`resources/desktop_base_release.json` 固定原基础发行身份和两平台原文件，`resources/software_downloads.json` 保持原下载记录。基础包对外称 1.00，内部 `1.0.0/build2026110606`；当前更新候选为 `1.0.1/build2026110702`。首轮01的Mac已通过，Windows检查失败后修复，记录保留。后续构建号必须递增，只有项目负责人明确要求替换基础包时才生成新的基础发行。
 
 ## 客户使用
 
@@ -35,6 +35,7 @@
 - 完整程序归档的字节、文件、权限、内链及元数据核对。
 - 真正冻结服务的隔离预检、健康和正常退出。
 - 真正冻结接入组件的配置自检及 Qt 检查、下载、应用、退出全链探针。
+- 仅在 GitHub 一次性环境真实安装原06，原冻结程序的本地会话创建旧资料结构；加入隔离测试项目、原报告和附件后，经真实接入及更新器应用本轮补丁，核对全部原资料保持。Windows 的临时安装登记和 Known Folder 路径最后恢复，此检查不冒充 Windows 10/11 客户桌面 GUI 验收。
 
 日常工作流不生成替换基础 Setup/DMG；Windows 的一次性接入 Setup 和 Mac 接入 DMG 使用独立名称。GitHub Artifacts 是中间成品，客户下载始终来自自有 HTTPS。
 

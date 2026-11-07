@@ -50,8 +50,14 @@ def self_test(target: str | None = None) -> dict:
     keys = trust.get("keys", {})
     if not isinstance(keys, dict) or not keys:
         raise BootstrapError("更新组件缺少发行校验资料。")
+    # Exercise the frozen native crypto backend, not merely JSON/base64 parsing.
+    # This ephemeral diagnostic key is never saved or used as release trust.
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    probe = Ed25519PrivateKey.generate()
+    message = b'LJQCApp isolated cryptography backend probe'
+    probe.public_key().verify(probe.sign(message), message)
     return {**version_info(), "status": "passed", "baseline_file_counts": receipts,
-            "trust_keys": len(keys), "business_storage_opened": False}
+            "trust_keys": len(keys), "cryptography_backend": "passed", "business_storage_opened": False}
 
 
 def main(argv: list[str] | None = None) -> int:

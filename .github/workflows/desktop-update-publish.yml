@@ -34,10 +34,8 @@ jobs:
       SIGNING_KEY: ${{ secrets.LJQC_UPDATE_SIGNING_KEY }}
       DEPLOY_KEY: ${{ secrets.LJQC_UPDATE_DEPLOY_KEY }}
       KNOWN_HOSTS: ${{ secrets.LJQC_UPDATE_KNOWN_HOSTS }}
-      DEPLOY_HOST: ${{ vars.LJQC_UPDATE_DEPLOY_HOST || '159.75.243.120' }}
-      DEPLOY_USER: ${{ vars.LJQC_UPDATE_DEPLOY_USER }}
       DO_REFRESH: ${{ inputs.refresh_only }}
-      DO_PUBLISH: ${{ github.ref == 'refs/heads/main' && inputs.publish == true }}
+      MANUAL_PUBLISH_REQUEST: ${{ inputs.publish }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -47,14 +45,29 @@ jobs:
           python-version: '3.13'
       - name: Identify available publication capabilities
         id: capabilities
+        env:
+          # Resolve this only after the desktop-updates environment is active.
+          AUTO_PUBLISH: ${{ vars.LJQC_UPDATES_AUTO_PUBLISH }}
+          DEPLOY_HOST: ${{ vars.LJQC_UPDATE_DEPLOY_HOST || '159.75.243.120' }}
+          DEPLOY_USER: ${{ vars.LJQC_UPDATE_DEPLOY_USER }}
         run: |
           python - <<'PY'
-          import os
+          import os, re, sys
+          sys.path.insert(0, 'packaging')
+          from update_publish_policy import should_publish
           signing = bool(os.environ.get('SIGNING_KEY'))
           deploying = signing and all(os.environ.get(name) for name in ('DEPLOY_KEY', 'KNOWN_HOSTS', 'DEPLOY_USER'))
+          if deploying and (re.fullmatch(r'[a-z_][a-z0-9_-]{0,31}', os.environ['DEPLOY_USER']) is None or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.-]{0,252}', os.environ['DEPLOY_HOST']) is None):
+              raise ValueError('The configured dedicated SSH receiver identity is invalid')
+          publishing = should_publish(ref=os.environ['GITHUB_REF'], event=os.environ['GITHUB_EVENT_NAME'], requested=os.environ.get('MANUAL_PUBLISH_REQUEST') == 'true', automatic_enabled=os.environ.get('AUTO_PUBLISH') == 'true')
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write('signing=' + str(signing).lower() + '\n')
               output.write('deploying=' + str(deploying).lower() + '\n')
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write('DO_PUBLISH=' + str(publishing).lower() + '\n')
+              if deploying:
+                  output.write('DEPLOY_HOST=' + os.environ['DEPLOY_HOST'] + '\n')
+                  output.write('DEPLOY_USER=' + os.environ['DEPLOY_USER'] + '\n')
           if not signing:
               print('::notice::Release signing is not configured. Native artifacts are candidates; nothing is published.')
           elif not deploying:

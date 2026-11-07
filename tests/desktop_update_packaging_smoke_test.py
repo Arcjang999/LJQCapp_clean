@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import copy
+from contextlib import nullcontext
 from io import BytesIO
 from datetime import datetime, timezone
 import json
@@ -22,6 +23,8 @@ from cryptography.hazmat.primitives import serialization
 from build_update_patch import export_patch
 import publish_desktop_update as publication
 from desktop_updates.payload import extract_verified_payload
+from update_publish_policy import should_publish
+from ci_verify_update_adoption import TemporaryKnownFolders, verify_adoption
 
 
 class PatchPackagingTests(unittest.TestCase):
@@ -55,7 +58,13 @@ class PatchPackagingTests(unittest.TestCase):
         entry.write_bytes(b"a program fixture, never an actual user binary")
         entry.chmod(0o755)
         output = self.root / "inputs" / target
-        value = export_patch(program, metadata or self.metadata(target), output)
+        # Windows chmod cannot express a POSIX executable bit. Only this tiny
+        # synthetic Mac fixture is projected as 0755; native Mac builds use the
+        # real filesystem mode and the production exporter remains unchanged.
+        fixture_mode = (patch("build_update_patch.stat.S_IMODE", return_value=0o755)
+                        if os.name == "nt" and target == "macos-arm64" else nullcontext())
+        with fixture_mode:
+            value = export_patch(program, metadata or self.metadata(target), output)
         helper = output / ("qa-bootstrap.exe" if target == "windows-x86_64" else "qa-bootstrap.dmg")
         helper.write_bytes(b"QA-only bootstrap fixture")
         (output / "bootstrap-build-receipt.json").write_text(json.dumps({"status": "passed", "target": target,
@@ -211,6 +220,61 @@ class PatchPackagingTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "extended header"):
                 publication.receive(self.root / "receiver-staging")
         self.assertFalse(list((self.root / "receiver-staging").iterdir()))
+
+    def test_environment_publication_gate_respects_branch_event_and_manual_choice(self):
+        cases = [
+            ("refs/heads/main", "push", False, True, True),
+            ("refs/heads/main", "push", False, False, False),
+            ("refs/heads/main", "schedule", False, True, True),
+            ("refs/heads/main", "schedule", False, False, False),
+            ("refs/heads/main", "workflow_dispatch", False, True, False),
+            ("refs/heads/main", "workflow_dispatch", True, False, True),
+            ("refs/heads/feature", "push", True, True, False),
+            ("refs/heads/feature", "workflow_dispatch", True, True, False),
+        ]
+        for ref, event, requested, automatic, expected in cases:
+            with self.subTest(ref=ref, event=event, requested=requested, automatic=automatic):
+                self.assertEqual(should_publish(ref=ref, event=event, requested=requested, automatic_enabled=automatic), expected)
+
+    def test_real_installer_acceptance_refuses_local_execution_before_writing(self):
+        destination = self.root / "must-not-be-created"
+        with patch.dict(os.environ, {"GITHUB_ACTIONS": "false"}):
+            with self.assertRaisesRegex(ValueError, "ephemeral GitHub-hosted"):
+                verify_adoption("windows-x86_64", self.root / "unused-inputs", destination)
+        self.assertFalse(destination.exists())
+
+    def test_temporary_known_folder_restore_retains_original_registry_values(self):
+        fixture = object.__new__(TemporaryKnownFolders)
+        fixture.qa = self.root
+        original = {name: self.root / "original" / name for name in fixture.FOLDERS}
+        paths = dict(original)
+        registry = {key: {name: (str(path), 2) for name, path in original.items()} for key in fixture.KEYS}
+        before = copy.deepcopy(registry)
+        fixture.original, fixture.registry_before = {}, {}
+        fixture.get = lambda name: paths[name]
+        def set_path(name, path):
+            paths[name] = path
+            for key in registry:
+                registry[key][name] = (str(path), 1)
+        fixture.set = set_path
+        fixture._values = lambda key: dict(registry[key])
+        class RegistryKey:
+            def __init__(self, path):
+                self.path = path
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+        fake_registry = SimpleNamespace(HKEY_CURRENT_USER=1, KEY_SET_VALUE=2,
+            OpenKey=lambda root, path, reserved, access: RegistryKey(path),
+            SetValueEx=lambda key, name, reserved, kind, value: registry[key.path].__setitem__(name, (value, kind)),
+            DeleteValue=lambda key, name: registry[key.path].__delitem__(name))
+        fixture.begin()
+        self.assertTrue(all(path.is_relative_to(self.root / "KnownFolders") for path in paths.values()))
+        with patch.dict(sys.modules, {"winreg": fake_registry}):
+            fixture.restore()
+        self.assertEqual(paths, original)
+        self.assertEqual(registry, before)
 
 
 if __name__ == "__main__":

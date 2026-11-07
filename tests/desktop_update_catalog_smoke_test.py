@@ -188,7 +188,9 @@ class DesktopUpdateCatalogTests(unittest.TestCase):
         target = channel / "releases/fixture"
         target.mkdir(parents=True)
         (target / "release-index.json").write_bytes(self.index_path.read_bytes())
-        (channel / "current").symlink_to("releases/fixture", target_is_directory=True)
+        (channel / "current").symlink_to(Path("releases") / "fixture", target_is_directory=True)
+        self.assertTrue((channel / "current/release-index.json").is_file(),
+                        "The directory symlink fixture must expose its release index")
         with patch.dict(os.environ, {"LJQC_PUBLIC_UPDATE_ROOT": str(public)}):
             self.assertTrue(get_desktop_update_catalog(trust_path=self.trust_path, now=self.now).readable)
         (channel / "current").unlink()

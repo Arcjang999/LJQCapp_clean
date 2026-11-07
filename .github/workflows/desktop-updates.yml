@@ -104,6 +104,12 @@ jobs:
       - name: Build Mac one-time update bootstrap
         if: runner.os == 'macOS'
         run: python packaging/build_update_bootstrap.py --output output/ci-updates/${{ matrix.target }}
+      - name: Verify real 1.00 adoption and cumulative program update
+        run: >-
+          python packaging/ci_verify_update_adoption.py
+          --target ${{ matrix.target }}
+          --candidates output/ci-updates/${{ matrix.target }}
+          --output output/ci-updates/${{ matrix.target }}
       - name: Retain verified candidates (not a server publication)
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -137,5 +143,5 @@ jobs:
     uses: ./.github/workflows/desktop-update-publish.yml
     with:
       refresh_only: false
-      publish: ${{ (github.ref == 'refs/heads/main') && (inputs.publish == true || vars.LJQC_UPDATES_AUTO_PUBLISH == 'true') }}
+      publish: ${{ inputs.publish == true }}
     secrets: inherit

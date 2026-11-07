@@ -18,5 +18,5 @@ jobs:
     uses: ./.github/workflows/desktop-update-publish.yml
     with:
       refresh_only: true
-      publish: ${{ github.ref == 'refs/heads/main' && (inputs.publish == true || vars.LJQC_UPDATES_AUTO_PUBLISH == 'true') }}
+      publish: ${{ inputs.publish == true }}
     secrets: inherit

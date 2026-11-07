@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import ctypes
 import errno
+import json
 import os
 from pathlib import Path
 import platform
@@ -20,7 +21,7 @@ from services.storage_paths import get_storage_paths
 
 APP_NAME = "LJQCApp"
 APP_VERSION = get_release_info().version
-MAINTENANCE_FLAGS = {"--reset-db", "--seed-demo", "--diagnose", "--version", "--adopt-from"}
+MAINTENANCE_FLAGS = {"--reset-db", "--seed-demo", "--diagnose", "--version", "--adopt-from", "--update-preflight"}
 WINDOWS_APP_MUTEX = r"Local\LJQCApp.Desktop"
 _SERVICE_SHUTDOWN_FILES: dict[int, Path] = {}
 OLD_BROWSER_MESSAGE = (
@@ -204,6 +205,101 @@ def _service_exe_path() -> Path:
 
 def _is_maintenance_command(args: list[str]) -> bool:
     return any(arg in MAINTENANCE_FLAGS for arg in args)
+
+
+def _spawn_stable_update_helper(command: list[str], env: dict[str, str]) -> None:
+    """A new frozen process must resolve its own Qt/Python runtime libraries."""
+    options = {"env": env, "cwd": str(Path(command[0]).parent)}
+    if os.name != "nt":
+        subprocess.Popen(command, **options)
+        return
+    options["creationflags"] = subprocess.CREATE_NO_WINDOW
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.GetDllDirectoryW.argtypes = [ctypes.c_uint32, ctypes.c_wchar_p]
+    kernel.GetDllDirectoryW.restype = ctypes.c_uint32
+    kernel.SetDllDirectoryW.argtypes = [ctypes.c_wchar_p]
+    kernel.SetDllDirectoryW.restype = ctypes.c_int
+    previous = ctypes.create_unicode_buffer(32768)
+    if kernel.GetDllDirectoryW(len(previous), previous) >= len(previous):
+        raise RuntimeError("程序运行环境尚未释放，请正常退出后重新打开。")
+    if not kernel.SetDllDirectoryW(None):
+        raise RuntimeError("程序运行环境尚未释放，请正常退出后重新打开。")
+    try:
+        subprocess.Popen(command, **options)
+    finally:
+        kernel.SetDllDirectoryW(previous.value or None)
+
+
+def _update_state_object(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("Duplicate update state key")
+        value[key] = item
+    return value
+
+
+def _redirect_to_stable_update_helper(args: list[str]) -> bool:
+    """Route a pinned version-directory/Dock entry back through startup checks.
+
+    The immutable 1.00 application is adopted by its separate bootstrap. This
+    guard is included in later program patches and needs no database imports.
+    """
+    if (not getattr(sys, "frozen", False) or _is_maintenance_command(args)
+            or os.environ.get("LJQC_LAUNCHED_BY_UPDATER") == "1"):
+        return False
+    paths = get_storage_paths()
+    if not paths.uses_stable_root:
+        return False
+    state_path = paths.root / "updates/state.json"
+    if not state_path.exists() and not state_path.is_symlink():
+        return False
+    try:
+        if state_path.is_symlink():
+            raise ValueError("Linked update state")
+        with state_path.open("rb") as handle:
+            raw = handle.read(1024 * 1024 + 1)
+        if len(raw) > 1024 * 1024:
+            raise ValueError("Oversized update state")
+        state = json.loads(raw.decode("utf-8"), object_pairs_hook=_update_state_object,
+            parse_constant=lambda _: (_ for _ in ()).throw(ValueError("Non-finite state value")))
+        target = {"win32": "windows-x86_64", "darwin": "macos-arm64"}.get(sys.platform)
+        if (not isinstance(state, dict) or type(state.get("format_version")) is not int
+                or state["format_version"] != 1 or state.get("base_release") != "1.0.0-2026110606"
+                or target is None or state.get("target") != target):
+            raise ValueError("Unknown update registration")
+        current = state.get("current")
+        if not isinstance(current, dict) or current.get("target") != target:
+            raise ValueError("Missing registered program")
+        base_name, entry_name = current.get("path"), current.get("entrypoint")
+        if (not isinstance(base_name, str) or not isinstance(entry_name, str)
+                or not entry_name or "\\" in entry_name or ":" in entry_name
+                or any(part in ("", ".", "..") for part in entry_name.split("/"))):
+            raise ValueError("Invalid registered program path")
+        current_root = Path(base_name)
+        entry = current_root / entry_name
+        if (not current_root.is_absolute() or current_root.is_symlink() or entry.is_symlink()
+                or not entry.is_file() or not entry.resolve().is_relative_to(current_root.resolve())):
+            raise ValueError("Registered program is unavailable")
+        helper_name = state.get("updater_entrypoint")
+        if not isinstance(helper_name, str) or not helper_name:
+            raise ValueError("Missing stable update entry")
+        helper = Path(helper_name)
+        expected_name = "LJQCAppUpdater.exe" if target == "windows-x86_64" else "LJQCAppUpdater"
+        if (not helper.is_absolute() or helper.is_symlink() or not helper.is_file()
+                or helper.name != expected_name):
+            raise ValueError("Invalid stable update entry")
+    except (OSError, UnicodeError, ValueError, TypeError, RecursionError, RuntimeError) as error:
+        raise RuntimeError("更新启动记录无法核对，已停止打开。请保留原资料，重新运行更新接入补丁或联系维护人员。") from error
+    env = os.environ.copy()
+    env.update(LJQC_DATA_ROOT=str(paths.root), LJQC_DEPLOYMENT_MODE="desktop",
+               PYINSTALLER_RESET_ENVIRONMENT="1")
+    env.pop("LJQC_LAUNCHED_BY_UPDATER", None)
+    for key in ("QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH", "QML2_IMPORT_PATH",
+                "QTWEBENGINEPROCESS_PATH", "QTWEBENGINE_RESOURCES_PATH", "QTWEBENGINE_LOCALES_PATH"):
+        env.pop(key, None)
+    _spawn_stable_update_helper([str(helper), "--data-root", str(paths.root)], env)
+    return True
 
 
 def _run_service_command(args: list[str]) -> int:
@@ -813,6 +909,12 @@ def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if any(flag in args for flag in ("--version", "--diagnose")):
         return _run_service_command(args)
+    try:
+        if _redirect_to_stable_update_helper(args):
+            return 0
+    except (OSError, RuntimeError):
+        _message_box("更新入口暂时无法使用，已停止打开。请保留原资料，重新运行更新接入补丁或联系维护人员。")
+        return 1
     lock = _DesktopInstanceLock()
     try:
         if not lock.acquire():
