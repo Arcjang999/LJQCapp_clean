@@ -23,6 +23,10 @@ sudo /usr/bin/python3 /var/tmp/ljqc-update-receiver-<build>/scripts/install_desk
 
 `check` 不写文件。`install` 要求 root，并再次检查全部前置条件；遇到已有用户、目录、工具或 SSH 策略不匹配时停止，不递归改权限、不改现有用户、不替换外来文件，也不调整业务目录权限。现有 SSH 须启用 Ubuntu PAM 公钥登录、关闭 `PermitUserEnvironment`，`AcceptEnv` 仅接收语言区域变量；否则脚本停止供人工审核，不替你修改 SSH 配置。部分执行中断可能留下本工具自己新建的只读文件；保留现场，核对后再继续。
 
+sudo 核对固定使用 `LC_ALL=C`、`LANG=C`、`LANGUAGE=C`。部分 sudo 版本在 root 成功查询另一账号策略时，即使结论是无授权也返回 0；因此只接受完整单行 `User ljqc-update is not allowed to run sudo on <本机主机名>.`，返回码须为 0 或 1，且标准错误为空。授权列表、错误、警告、其他账号/主机、空输出或混合输出都停止，不能把“返回非零”当作无权限的证明。
+
+若旧版检查因此停在“已创建专用只读环境和锁定账号、尚未安装公钥”，保留现场并核对这个阶段；不要放宽检查或重建客户端。修复只涉及服务器接线脚本、其回归和本文，不进入客户端发行摘要。需从新的已提交源码导出新名字的 receiver 工具包，保留旧 tar 和 manifest。已有 root 只读脚本或工具 manifest 与新包不一致时仍会停止；应先分别备份、核对并受控更新这些确切工具文件，再重新 `check` 和 `install`，不能覆盖整个运行环境或递归改权限。
+
 | 路径/身份 | 安排 |
 | --- | --- |
 | `ljqc-update` | 独立系统用户和同名组、密码锁定、无附加组和 sudo 授权。 |

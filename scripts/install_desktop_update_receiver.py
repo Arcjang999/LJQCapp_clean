@@ -13,6 +13,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import stat
 import struct
 import subprocess
@@ -185,8 +186,31 @@ def make_bundle(output: Path) -> dict:
             "source_commit": commit, "mutable_data_included": False, "private_keys_included": False}
 
 
-def command(arguments: list[str], *, check: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run(arguments, check=check, capture_output=True, text=True)
+def command(arguments: list[str], *, check: bool = True, env: dict | None = None,
+            timeout: int | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(arguments, check=check, capture_output=True, text=True, env=env, timeout=timeout)
+
+
+def assert_no_sudo_access() -> None:
+    """Require an exact local-user denial, independently of sudo's 0/1 status.
+
+    Some sudo versions return zero when an administrator successfully queries a
+    different user's denied policy. A nonzero status alone is equally unsafe:
+    it may mean a parser/plugin error. No warning or unknown output is accepted.
+    """
+    locale = {**os.environ, "LC_ALL": "C", "LANG": "C", "LANGUAGE": "C"}
+    try:
+        result = command(["/usr/bin/sudo", "-n", "-l", "-U", USER], check=False,
+                         env=locale, timeout=30)
+    except (OSError, subprocess.TimeoutExpired, UnicodeError) as error:
+        raise ValueError("Could not confirm that the dedicated account has no sudo access") from error
+    hostname = socket.gethostname()
+    if not hostname or any(character in hostname for character in ("\n", "\r", "\x00")):
+        raise ValueError("The local hostname could not be used to verify the sudo denial")
+    denial = f"User {USER} is not allowed to run sudo on {hostname}."
+    if (type(result.returncode) is not int or result.returncode not in (0, 1)
+            or result.stderr != "" or result.stdout not in (denial, denial + "\n")):
+        raise ValueError("The dedicated account's no-sudo policy was not explicitly confirmed")
 
 
 def account() -> pwd.struct_passwd | None:
@@ -207,8 +231,7 @@ def account() -> pwd.struct_passwd | None:
         status = command(["passwd", "-S", USER]).stdout.split()
         if len(status) < 2 or status[1] != "L":
             raise ValueError("The dedicated account password must already be locked")
-        if command(["sudo", "-n", "-l", "-U", USER], check=False).returncode == 0:
-            raise ValueError("The dedicated account unexpectedly has sudo access")
+        assert_no_sudo_access()
     return value
 
 
