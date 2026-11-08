@@ -1,5 +1,7 @@
 # LJQC 开发交接
 
+2026-11-08下载页说明已上线：网页source2f59fbe/digest07ed6c1d，版本仍0802；“启用自动更新（只需设置一次）”及Windows/Mac真实短步骤已现场核对，四原链接和开发版提示保留。服务器独立五阶段/23套274项及全新before双备份/74表19404行201113cells/28BLOB/4附件/24报告最终保持通过，无恢复、无依赖安装；安全回执6915B/SHAa29e916e...已本地roundtrip。桌面仍DC/digest90bc/0802、原06和feed不变。当前只有在线更新，“从文件更新”尚未实现，不能把小工具或tar.gz宣传为离线安装包；发布桌面新版必须递增构建号并推main。详见[本轮交付](execution/deliveries/DOWNLOAD_UPDATE_GUIDANCE_2026-11-08.md)。本轮无待上线步骤，不重新导出封存工具/bundle，本机不执行native。
+
 2026-11-08 0802交付完成：程序/网页dc4af0e/digest90bc8c...，native42433269255双端全链成功；原签名包完整核验后本机中转上云，公网4文件已全下载并与CI/原签3JSON匹配。完整GH文件传输尝试失败/取消如实保留；最后正常GH清单刷新42440755547/source7f实际success，新seq1794106752558155，4程序和原06不变。AUTO=true且main-only已API实证，后续默认raw18000秒/job360分钟。网页fresh双备份2adb→dc4、21套235和最终全部74表/报告/附件及两备份保持，无恢复；云回执7143B/SHA35ccfdc7...已本地roundtrip。receiver230权限不变。本次无待发布步骤，后续按README增新build；原06及固定dc4源码bundle保持，本机不执行native。详见本轮交付。
 
 2026-11-08继续0802：0801 Mac已全pass，Win最后发现Inno卸载维护文件混入helper导致完整清单拒绝，发布自动skipped。已最小分离到版本化payload子目录，不忽略未知文件、不改CA/repair/业务；0801失败证据保留。待0802完整源/原生检查及发布，原06/生产网页2adb/原资料保持，AUTO仍false；细节见[本轮交付](execution/deliveries/DESKTOP_CUMULATIVE_UPDATES_2026-11-07.md)。
