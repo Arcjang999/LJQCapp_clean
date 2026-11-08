@@ -191,7 +191,7 @@ class ResendControlTests(unittest.TestCase):
                 patch.object(resend.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(receipt).encode(), b"")) as ssh:
             result = resend.transfer(bundle, index, self.root, fixture.trust_file, expected=self.expected, artifact={"size_in_bytes": 1000})
         self.assertEqual(result["transport"], "raw-fallback"); self.assertEqual(ssh.call_count, 1)
-        self.assertEqual(ssh.call_args.kwargs["timeout"], 7200)
+        self.assertEqual(ssh.call_args.kwargs["timeout"], 18000)
         self.assertEqual(ssh.call_args.args[0][-1], "ljqc-update-upload")
         with tarfile.open(self.root / "publication.tar") as archive:
             self.assertNotIn("delivery-reference.json", archive.getnames())
@@ -308,11 +308,12 @@ class ResendControlTests(unittest.TestCase):
         self.assertIn("github.ref == 'refs/heads/main'", recipe)
         self.assertIn("inputs.publish == true", recipe)
         self.assertIn("group: desktop-update-publication", recipe)
-        self.assertIn("timeout-minutes: 150", recipe)
+        self.assertIn("timeout-minutes: 360", recipe)
         self.assertNotIn("SIGNING_KEY", recipe)
         self.assertNotIn("build_update_bootstrap", recipe)
         normal = (ROOT / ".github/workflows/desktop-update-publish.yml").read_text()
         self.assertIn("from resend_desktop_update import publish_current", normal)
+        self.assertIn("timeout-minutes: 360", normal)
         for workflow in ("desktop-build.yml", "desktop-updates.yml", "desktop-update-refresh.yml", "desktop-update-publish.yml"):
             self.assertIn("actions: read", (ROOT / ".github/workflows" / workflow).read_text())
 
