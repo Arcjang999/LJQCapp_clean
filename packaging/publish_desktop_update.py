@@ -16,11 +16,18 @@ from pathlib import Path, PurePosixPath
 import re
 import shlex
 import shutil
+import stat
+import struct
+import time
+import threading
+import zipfile
 import subprocess
 import sys
 import tarfile
 import tempfile
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, unquote, parse_qsl
+from urllib.error import HTTPError
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request, build_opener
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -411,6 +418,344 @@ def refresh_metadata(output: Path, trust_path: Path, *, key_path: Path | None = 
     return index
 
 
+DELIVERY_REFERENCE = "delivery-reference.json"
+DELIVERY_REPOSITORY = "Arcjang999/LJQCapp_clean"
+DELIVERY_MAX_ZIP = 4 * 1024**3
+DELIVERY_TIMEOUT = 7200
+# Confirmed by the authenticated GitHub artifact API for this publication.
+# New storage shards require an explicit control-layer allowlist review; raw
+# signed-bundle transfer remains available without widening network access.
+DELIVERY_HOSTS = frozenset({"productionresultssa6.blob.core.windows.net"})
+_DELIVERY_PATH = re.compile(r"/actions-results/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/workflow-job-run-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/artifacts/[0-9a-f]{64}\.zip")
+
+
+class DeliveryReferenceError(ValueError):
+    """Sanitized delivery-stage failure; never contains vendor credentials."""
+
+
+def validate_delivery_url(url: str) -> str:
+    if not isinstance(url, str) or len(url) > 8192 or any(ord(c) < 33 or ord(c) > 126 for c in url):
+        raise ValueError("Invalid delivery download address")
+    try:
+        parsed = urlsplit(url)
+        valid = (parsed.scheme == "https" and parsed.hostname in DELIVERY_HOSTS
+            and parsed.username is None and parsed.password is None and not parsed.fragment
+            and parsed.port in (None, 443) and parsed.netloc == parsed.hostname + (":443" if parsed.port else "")
+            and "\\" not in url and "%" not in parsed.path and unquote(parsed.path) == parsed.path
+            and _DELIVERY_PATH.fullmatch(parsed.path) is not None and bool(parsed.query))
+    except (ValueError, UnicodeError):
+        valid = False
+    if valid:
+        try:
+            pairs = parse_qsl(parsed.query, keep_blank_values=True, strict_parsing=True)
+            query = dict(pairs)
+            expiry = datetime.fromisoformat(query["se"].replace("Z", "+00:00"))
+            remaining = (expiry - datetime.now(timezone.utc)).total_seconds()
+            valid = (len(query) == len(pairs) and query.get("sp") == "r" and query.get("sr") == "b"
+                and bool(query.get("sig")) and 60 <= remaining <= 3600
+                and expiry.utcoffset() == timedelta(0)
+                and not any(ord(char) < 32 or ord(char) == 127 for pair in pairs for item in pair for char in item))
+        except (KeyError, ValueError, TypeError, OverflowError):
+            valid = False
+    if not valid:
+        raise ValueError("The delivery download vendor, path, or short-lived read permission is not approved")
+    return url
+
+
+class _DeliveryRedirects(HTTPRedirectHandler):
+    max_redirections = 3
+    max_repeats = 1
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        validate_delivery_url(newurl)
+        redirects = getattr(req, "_ljqc_delivery_redirects", 0) + 1
+        if redirects > 3:
+            raise ValueError("Delivery redirect limit exceeded")
+        result = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if result is not None:
+            result._ljqc_delivery_redirects = redirects
+        return result
+
+
+def _retrieve_delivery_archive(url: str, destination: Path, expected_size: int, expected_hash: str) -> Path:
+    from desktop_updates.transport import _https_context
+    validate_delivery_url(url)
+    received, hashed = 0, hashlib.sha256()
+    deadline = time.monotonic() + DELIVERY_TIMEOUT
+    last_progress = time.monotonic()
+    print(json.dumps({"delivery_stage":"download", "bytes_received":0, "expected_bytes":expected_size}), file=sys.stderr, flush=True)
+    try:
+        # Explicitly ignore ambient proxies. No GitHub token or Authorization
+        # header is ever read, constructed, or forwarded to the storage vendor.
+        opener = build_opener(ProxyHandler({}), _DeliveryRedirects(), HTTPSHandler(context=_https_context()))
+        request = Request(url, headers={"User-Agent": "LJQCApp-Delivery/1", "Accept-Encoding": "identity"})
+        with opener.open(request, timeout=20) as response, destination.open("xb") as target:
+            destination.chmod(0o600)
+            validate_delivery_url(response.geturl())
+            if response.status != 200 or response.headers.get("Content-Encoding", "identity").lower() not in ("", "identity"):
+                raise ValueError("The delivery response is not a complete archive")
+            length = response.headers.get("Content-Length")
+            if length is not None and (not length.isdecimal() or int(length) != expected_size):
+                raise ValueError("The delivery response has an unexpected length")
+            reader = getattr(response, "read1", response.read)
+            while True:
+                if time.monotonic() >= deadline:
+                    raise ValueError("Delivery download timed out")
+                block = reader(min(1024**2, expected_size - received + 1))
+                if not block:
+                    break
+                received += len(block)
+                if received > expected_size:
+                    raise ValueError("Delivery download exceeds its expected size")
+                hashed.update(block); target.write(block)
+                if time.monotonic() - last_progress >= 30:
+                    print(json.dumps({"delivery_stage":"download", "bytes_received":received, "expected_bytes":expected_size}), file=sys.stderr, flush=True)
+                    last_progress = time.monotonic()
+            target.flush(); os.fsync(target.fileno())
+        if received != expected_size or hashed.hexdigest() != expected_hash:
+            raise ValueError("Delivery archive verification failed")
+        return destination
+    except Exception as error:
+        destination.unlink(missing_ok=True)
+        # urllib exceptions carry the complete SAS URL. Do not retain or chain
+        # them into receiver output, a traceback, or a publication receipt.
+        message = ("Temporary artifact access expired or was denied; the previous channel remains selected"
+            if isinstance(error, HTTPError) and error.code in (401, 403)
+            else "Delivery archive HTTPS retrieval failed; the previous channel remains selected")
+        raise DeliveryReferenceError(message) from None
+
+
+def _download_delivery_archive(url: str, destination: Path, expected_size: int, expected_hash: str) -> Path:
+    # Socket timeouts alone do not bound slow headers. A daemon performs only
+    # private archive I/O; the caller cannot promote after timeout and the
+    # forced-command process exits, terminating the daemon and its descriptors.
+    completed = threading.Event(); outcome = {}
+    def retrieve():
+        try: outcome["value"] = _retrieve_delivery_archive(url, destination, expected_size, expected_hash)
+        except Exception as error: outcome["error"] = error
+        finally: completed.set()
+    threading.Thread(target=retrieve, name="LJQCDeliveryDownload", daemon=True).start()
+    if not completed.wait(DELIVERY_TIMEOUT):
+        raise DeliveryReferenceError("Delivery archive exceeded its total time budget; the previous channel remains selected") from None
+    if "error" in outcome:
+        error = outcome["error"]
+        if isinstance(error, DeliveryReferenceError):raise error from None
+        raise DeliveryReferenceError("Delivery archive HTTPS retrieval failed; the previous channel remains selected") from None
+    return outcome["value"]
+
+
+def _precheck_delivery_current(public: Path, index: dict, trust: dict) -> tuple[int, int]:
+    current = public / "updates/desktop/dev/current"
+    if not current.exists() and not current.is_symlink():
+        return 2026110606, 0
+    if not current.is_symlink():
+        raise ValueError("The current channel is not a managed symbolic link")
+    selected = current.readlink()
+    if not current.resolve().is_relative_to(public.resolve()):
+        raise ValueError("The current channel escapes the public release tree")
+    if (selected.is_absolute() or len(selected.parts) != 2 or selected.parts[0] != "releases"
+            or ".." in selected.parts or not current.exists()):
+        raise ValueError("The current channel cannot be verified")
+    from desktop_updates.protocol import strict_json
+    previous_path = current / "release-index.json"
+    if (previous_path.is_symlink() or not previous_path.is_file()
+            or not previous_path.resolve().is_relative_to(public.resolve())
+            or not 0 < previous_path.stat().st_size <= 262144):
+        raise ValueError("The selected release index is not a bounded public file")
+    with previous_path.open("rb") as handle:
+        previous = verify_index(strict_json(handle.read(262145), maximum=262144), trust)
+    if (type(index.get("sequence")) is not int or type(index.get("build_number")) is not int
+            or index["sequence"] < previous["sequence"] or index["build_number"] < previous["build_number"]
+            or (index["sequence"] == previous["sequence"] and canonical(index) != canonical(previous))):
+        raise ValueError("Delivery metadata cannot roll back or rewrite the selected release")
+    return previous["build_number"], previous["sequence"]
+
+
+def _delivery_metadata(bundle: Path, trust_path: Path, public: Path) -> tuple[dict, dict[str, dict]]:
+    from desktop_updates.protocol import strict_json, validate_trust, verify_envelope
+    trust = validate_trust(strict_json(trust_path.read_bytes()))
+    raw = (bundle / "release-index.json").read_bytes()
+    encoded = strict_json(raw, maximum=262144)
+    if set(encoded) != {"signed", "key_id", "signature"} or not isinstance(encoded["signed"], dict):
+        raise ValueError("Invalid delivery signed envelope")
+    index = verify_index(encoded, trust)
+    if (type(index.get("format_version")) is not int or index["format_version"] != 1
+            or type(index.get("build_number")) is not int or not 2026110606 <= index["build_number"] <= 2**63-1
+            or not isinstance(index.get("version"), str) or re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", index["version"]) is None
+            or index.get("metadata_only") is True or not isinstance(index.get("files"), list)
+            or len(index["files"]) != 6 or type(index.get("sequence")) is not int
+            or not 0 < index["sequence"] <= 2**63 - 1
+            or not isinstance(index.get("source_commit"), str) or re.fullmatch(r"[0-9a-f]{40}", index["source_commit"]) is None
+            or not isinstance(index.get("source_digest"), str) or re.fullmatch(r"[0-9a-f]{64}", index["source_digest"]) is None
+            or index.get("release_id") != str(index.get("version"))+"-"+str(index.get("build_number"))+"-"+index["source_digest"][:12]):
+        raise ValueError("Invalid complete delivery release metadata")
+    issued = index.get("issued_at")
+    if not isinstance(issued, str) or len(issued) > 40:
+        raise ValueError("Invalid delivery release timestamp")
+    issued = datetime.fromisoformat(issued.replace("Z", "+00:00"))
+    now = datetime.now(timezone.utc)
+    if issued.tzinfo is None or issued.utcoffset() != timedelta(0) or not now-timedelta(days=31) <= issued <= now+timedelta(minutes=5):
+        raise ValueError("Delivery release timestamp is stale or not yet valid")
+    build, sequence = _precheck_delivery_current(public, index, trust)
+    records = {}
+    destinations = set()
+    for record in index["files"]:
+        relative = safe_relative(record["path"])
+        if (record["path"] in records or record.get("target") != relative.parts[0]
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{1,200}", relative.name) is None
+                or type(record.get("size_bytes")) is not int or not 0 < record["size_bytes"] <= DELIVERY_MAX_ZIP
+                or not isinstance(record.get("sha256"), str) or re.fullmatch(r"[0-9a-f]{64}", record["sha256"]) is None):
+            raise ValueError("Invalid or duplicate delivery record")
+        if record.get("kind") in ("patch", "bootstrap"):
+            parsed = urlsplit(record["url"])
+            prefix = "/downloads/patches/" + BASE + "/" if record["kind"] == "patch" else "/downloads/update-bootstrap/1/"
+            if (parsed.scheme+"://"+parsed.netloc != trust["origin"] or parsed.query or parsed.fragment
+                    or not parsed.path.startswith(prefix) or "/../" in parsed.path or "%" in parsed.path or "\\" in parsed.path
+                    or PurePosixPath(parsed.path).name != relative.name or parsed.path in destinations):
+                raise ValueError("Invalid delivery public artifact binding")
+            if record["kind"] == "bootstrap" and record["url"] != (trust["origin"]+"/downloads/update-bootstrap/1/"+str(index["build_number"])+"/"+record["target"]+"/"+relative.name):
+                raise ValueError("Delivery bootstrap destination differs from its release")
+            destinations.add(parsed.path)
+        elif record.get("kind") != "manifest" or relative.name != "latest.json" or record["size_bytes"] > 262144:
+            raise ValueError("Invalid delivery manifest record")
+        records[record["path"]] = record
+    for target in TARGETS:
+        matching = [value for value in records.values() if value["target"] == target]
+        if sorted(value["kind"] for value in matching) != ["bootstrap", "manifest", "patch"]:
+            raise ValueError("A complete platform pair is required")
+        raw = (bundle / target / "latest.json").read_bytes()
+        manifest_record = records[target+"/latest.json"]
+        if (len(raw) != manifest_record["size_bytes"] or hashlib.sha256(raw).hexdigest() != manifest_record["sha256"]
+                or index["targets"][target] != {"manifest_sha256": manifest_record["sha256"], "manifest_size_bytes": len(raw)}):
+            raise ValueError("Delivery platform bytes do not match the signed index")
+        body = verify_envelope(raw, trust, target=target, installed_build=build, highest_sequence=sequence)
+        if (any(body[field] != index[field] for field in ("version", "build_number", "source_commit", "source_digest", "sequence"))
+                or datetime.fromisoformat(body["issued_at"].replace("Z", "+00:00")) != issued):
+            raise ValueError("Delivery platform identity differs from the signed index")
+        patch = next(value for value in matching if value["kind"] == "patch")
+        if any(patch[field] != body["artifact"][field] for field in ("url", "size_bytes", "sha256")):
+            raise ValueError("Delivery patch differs from its platform envelope")
+    return index, records
+
+
+def _bounded_zip_directory(archive: Path) -> None:
+    # Bound central-directory allocation before zipfile parses attacker headers.
+    with archive.open("rb") as handle:
+        handle.seek(0, 2); size = handle.tell(); handle.seek(max(0, size-65577))
+        tail = handle.read(65577)
+    position = tail.rfind(b"PK\x05\x06")
+    if position < 0 or len(tail)-position < 22:
+        raise ValueError("Delivery ZIP end record is missing")
+    _, disk, central_disk, disk_entries, entries, central_size, central_offset, comment = struct.unpack("<4s4H2LH", tail[position:position+22])
+    end_offset = size-len(tail)+position
+    # This bounded, <=4GiB artifact format needs no ZIP64. Python otherwise
+    # follows a locator even when small legacy fields hide an enormous ZIP64
+    # central directory, before our per-member limits can run.
+    zip64_locator = position >= 20 and tail[position-20:position-16] == b"PK\x06\x07"
+    if (disk or central_disk or disk_entries != entries or not 7 <= entries <= 9
+            or zip64_locator or entries == 0xffff or central_size == 0xffffffff or central_offset == 0xffffffff
+            or central_size > 1024**2 or central_offset+central_size != end_offset
+            or position+22+comment != len(tail)):
+        raise ValueError("Delivery ZIP directory exceeds its limit")
+
+
+def extract_delivery_zip(archive: Path, destination: Path, metadata: Path, index: dict) -> Path:
+    _bounded_zip_directory(archive)
+    expected = {value["path"]: value for value in index["files"]}
+    expected["release-index.json"] = {"size_bytes": (metadata/"release-index.json").stat().st_size,
+                                     "sha256": digest(metadata/"release-index.json")}
+    if sum(value["size_bytes"] for value in expected.values()) > 12*1024**3:
+        raise ValueError("Delivery expanded size exceeds its limit")
+    destination.mkdir(mode=0o700)
+    seen = set(); directories = set()
+    with zipfile.ZipFile(archive) as source:
+        for member in source.infolist():
+            original = getattr(member, "orig_filename", member.filename)
+            name = member.filename
+            mode = member.external_attr >> 16
+            kind = stat.S_IFMT(mode)
+            if (original != name or member.flag_bits & 1 or "\\" in name or any(ord(c) < 32 for c in name)
+                    or member.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
+                    or len(member.extra) > 65536 or len(member.comment) > 4096 or mode & 0o7000):
+                raise ValueError("Unsupported delivery ZIP entry")
+            if member.is_dir():
+                if name not in {target+"/" for target in TARGETS} or kind not in (0, stat.S_IFDIR) or member.file_size or name.casefold() in directories:
+                    raise ValueError("Invalid delivery ZIP directory")
+                directories.add(name.casefold()); continue
+            if (kind not in (0, stat.S_IFREG) or name not in expected or name.casefold() in seen
+                    or member.file_size != expected[name]["size_bytes"]
+                    or member.file_size > max(1, member.compress_size)*1000):
+                raise ValueError("Delivery ZIP contents differ from the signed full file set")
+            seen.add(name.casefold())
+            path = destination/name
+            path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            count, hashed = 0, hashlib.sha256()
+            with source.open(member) as received, path.open("xb") as target:
+                path.chmod(0o600)
+                while True:
+                    block=received.read(min(1024**2, member.file_size-count+1))
+                    if not block:break
+                    count += len(block)
+                    if count > member.file_size:raise ValueError("Delivery ZIP entry exceeds its signed length")
+                    hashed.update(block);target.write(block)
+                target.flush();os.fsync(target.fileno())
+            if count != member.file_size or hashed.hexdigest() != expected[name]["sha256"]:
+                raise ValueError("Delivery ZIP file verification failed")
+        if seen != {name.casefold() for name in expected}:
+            raise ValueError("Delivery ZIP is incomplete")
+    for name in ("release-index.json", *(target+"/latest.json" for target in TARGETS)):
+        if (destination/name).read_bytes() != (metadata/name).read_bytes():
+            raise ValueError("Delivery ZIP changed the original signed metadata bytes")
+    return destination
+
+
+def hydrate_delivery_reference(bundle: Path, public: Path, trust_path: Path, *, downloader=None) -> Path:
+    from desktop_updates.protocol import strict_json
+    try:
+        files={path.relative_to(bundle).as_posix() for path in bundle.rglob("*") if not path.is_dir()}
+        if files != {DELIVERY_REFERENCE, "release-index.json", *(target+"/latest.json" for target in TARGETS)}:
+            raise ValueError("Delivery reference must contain exactly four metadata files")
+        for name in files:
+            candidate = bundle/name
+            maximum = 65536 if name == DELIVERY_REFERENCE else 262144
+            if candidate.is_symlink() or not candidate.is_file() or not 0 < candidate.stat().st_size <= maximum:
+                raise ValueError("Delivery metadata must be bounded ordinary files")
+        index, records = _delivery_metadata(bundle, trust_path, public)
+        reference = strict_json((bundle/DELIVERY_REFERENCE).read_bytes(), maximum=65536)
+        if (set(reference) != {"format", "format_version", "artifact", "source", "index_sha256"}
+                or reference.get("format") != "ljqc-desktop-delivery-reference" or type(reference.get("format_version")) is not int or reference["format_version"] != 1
+                or reference.get("index_sha256") != digest(bundle/"release-index.json")):
+            raise ValueError("Invalid delivery reference identity")
+        artifact, origin = reference["artifact"], reference["source"]
+        if (not isinstance(artifact, dict) or set(artifact) != {"url", "size_bytes", "sha256", "kind"}
+                or artifact.get("kind") != "github-artifact-zip" or type(artifact.get("size_bytes")) is not int
+                or not 0 < artifact["size_bytes"] <= DELIVERY_MAX_ZIP
+                or not isinstance(artifact.get("sha256"), str) or re.fullmatch(r"[0-9a-f]{64}", artifact["sha256"]) is None
+                or not isinstance(origin, dict) or set(origin) != {"repository", "run_id", "run_attempt", "artifact_id"}
+                or origin.get("repository") != DELIVERY_REPOSITORY
+                or any(type(origin.get(field)) is not int or origin[field] <= 0 for field in ("run_id", "run_attempt", "artifact_id"))):
+            raise ValueError("Invalid delivery artifact provenance")
+        validate_delivery_url(artifact["url"])
+        expanded = sum(value["size_bytes"] for value in records.values()) + (bundle/"release-index.json").stat().st_size
+        if shutil.disk_usage(bundle).free < artifact["size_bytes"]+expanded+1024**3:
+            raise ValueError("Not enough private staging space for delivery")
+        archive = bundle/".delivery-artifact.zip"
+        (downloader or _download_delivery_archive)(artifact["url"], archive, artifact["size_bytes"], artifact["sha256"])
+        if (not archive.is_file() or archive.is_symlink() or archive.stat().st_size != artifact["size_bytes"]
+                or digest(archive) != artifact["sha256"]):
+            raise ValueError("Delivery ZIP bytes differ from the GitHub artifact digest")
+        destination = bundle/".delivery-payload"
+        extract_delivery_zip(archive, destination, bundle, index)
+        result = verify_bundle(destination, trust_path)
+        if canonical(result) != canonical(index):
+            raise ValueError("Hydrated delivery changed its signed release identity")
+        return destination
+    except DeliveryReferenceError as error:
+        raise error from None
+    except Exception:
+        raise DeliveryReferenceError("Delivery reference verification failed; the previous channel remains selected") from None
+
+
 class _BoundedPublicationTarInfo(tarfile.TarInfo):
     def _charge_header(self, archive):
         total = getattr(archive, "_ljqc_header_bytes", 0) + self.size
@@ -437,8 +782,10 @@ def receive(staging_root: Path) -> Path:
             for member in archive:
                 if len(seen) >= 32 or not member.isfile() or member.name in seen or member.sparse is not None:
                     raise ValueError("Only a small regular-file publication bundle is accepted")
-                if member.name != "release-index.json":
+                if member.name not in ("release-index.json", DELIVERY_REFERENCE):
                     safe_relative(member.name)
+                if (member.name == DELIVERY_REFERENCE and member.size > 65536) or (member.name.endswith(".json") and member.size > 262144):
+                    raise ValueError("Publication metadata exceeds its size limit")
                 total += member.size
                 if total > 12 * 1024**3 or member.size < 0:
                     raise ValueError("Publication bundle exceeds its size limit")
@@ -504,10 +851,21 @@ def main() -> None:
         if os.environ.get("SSH_ORIGINAL_COMMAND", "") not in ("", "ljqc-update-upload"):
             raise ValueError("This SSH identity only accepts ljqc-update-upload")
         bundle = receive(args.staging_root)
-        result = promote(bundle, args.public_root, args.trust)
-        # Only this invocation's validated private staging directory is removed;
-        # immutable public releases and every previous program remain untouched.
-        shutil.rmtree(bundle)
+        if (bundle/DELIVERY_REFERENCE).exists():
+            try:
+                payload = hydrate_delivery_reference(bundle, args.public_root, args.trust)
+                result = promote(payload, args.public_root, args.trust)
+            except DeliveryReferenceError as error:
+                raise error from None
+            except Exception:
+                raise DeliveryReferenceError("Reference delivery did not publish; the previous channel remains selected") from None
+            finally:
+                # Includes the short-lived reference URL, downloaded ZIP and
+                # private hydrated payload; no SAS persists after this command.
+                shutil.rmtree(bundle)
+        else:
+            result = promote(bundle, args.public_root, args.trust)
+            shutil.rmtree(bundle)
         print(json.dumps(result))
     else:
         with tarfile.open(args.output, "x") as archive:

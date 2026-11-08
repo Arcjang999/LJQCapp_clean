@@ -1,5 +1,15 @@
 # GitHub Actions 构建桌面安装包
 
+## 日常补丁和传输重试
+
+日常更新先递增 `release.json` 的程序版本/构建号，提交完整代码到 `main`，由 **Desktop cumulative updates** 分别完成 Windows x64 和 Mac arm64 验收。开启环境变量 `LJQC_UPDATES_AUTO_PUBLISH=true` 后，可信 main 的成功双端构建自动签名并送到自有服务器；开发分支只保留候选。手动构建仍须明确选中 `publish` 才发布，AUTO 不替代手动选择。基础包始终保持06，重新制作基础包还须项目负责人的明确授权。
+
+若只在传输环节失败，使用 **Resend an accepted signed desktop update**，选择 main、勾选 publish，并填写原 run/attempt/artifact ID、GitHub artifact SHA、程序 source commit/digest、version/build。它严格检查原生步骤、同源双平台、原签名附件和唯一传输失败，不重新构建或签名。该工作流只用部署密钥和已核对的主机公钥，不读取发行签名私钥；与普通发布共用互斥发布组。具体下载验证和受限参考交付见[桌面更新说明](desktop-updates.md#大文件交付与重发)。
+
+0802原生验收已经完成于[42433269255](https://github.com/Arcjang999/LJQCapp_clean/actions/runs/42433269255)，source dc4af0e、digest90bc8c...；原签名附件保留，唯一失败是900秒上传超时。后来的交付控制提交不改变这批程序来源，不需要为传输问题重新打包；实际公开状态以[本轮交付](execution/deliveries/DESKTOP_CUMULATIVE_UPDATES_2026-11-07.md)为准。
+
+下方按日期保留历史操作和验收边界，早期“待实施”“未发布”描述仅对应当时阶段，当前日常入口以上述流程为准。
+
 2026-11-08日常入口为 **Desktop cumulative updates**，从同一源码分别生成Windows/Mac累计程序补丁和更新接入组件；操作、版本递增和验收见[桌面更新说明](desktop-updates.md)。已有 `desktop-build.yml` 手动入口现名 **Base installers (explicit only)**，默认调用补丁流程，只有明确勾选 `rebuild_base_installers` 才制作基础Setup/DMG。原06基础发行文件和下载记录保持不变。02已完成两平台构建、云端发布及真实GitHub清单直传，当前0802包含证书、既有助手修复及Windows载荷目录修正，以[本轮交付](execution/deliveries/DESKTOP_CUMULATIVE_UPDATES_2026-11-07.md)的实际回执为准。下文为此前安装器工作流的历史操作，不用它触发日常重新打基础包。
 
 2026-11-07发布规则更新：现有 `1.0.0/build2026110606` 两份原包固定为1.00基础发行，后续按[README约定](../README.md#安装与更新约定固定-100-基础包2026-11-07)分发累计程序补丁，只有用户明确要求超大更新并替换基础包时才刷新。下文是当前候选Setup/DMG工作流的实际操作，不表示每次构建都能替换基础包。一次性更新接入组件、默认补丁导出和GitHub直传尚待实现；完整实施与验收见[方案](execution/DESKTOP_UPDATE_AND_RELEASE_PLAN_2026-11-06.md)。本次未修改工作流或触发重构建。06已发布及最终验收见[云端交付](execution/deliveries/CLOUD_DESKTOP_DOWNLOADS_2026-11-06.md)，下方04/05为此前阶段记录。

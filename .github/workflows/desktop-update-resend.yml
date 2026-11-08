@@ -1,0 +1,108 @@
+name: Resend an accepted signed desktop update
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Explicitly resend the selected signed release through the restricted receiver'
+        type: boolean
+        default: false
+      raw_transfer:
+        description: 'Explicitly use the original long raw transfer if the server cannot fetch the artifact'
+        type: boolean
+        default: false
+      source_run_id:
+        type: string
+        default: '42433269255'
+        required: true
+      source_attempt:
+        type: string
+        default: '1'
+        required: true
+      artifact_id:
+        type: string
+        default: '13599005609'
+        required: true
+      artifact_sha256:
+        type: string
+        default: 'd2f99866a418b6eafeb586bef3ade3e7bd030282ece5441626f646f7e6c378e0'
+        required: true
+      source_commit:
+        type: string
+        default: 'dc4af0e84aac02a120294e19469c2d5bef96976c'
+        required: true
+      source_digest:
+        type: string
+        default: '90bc8c66b1978e7bb71fb1321d759cf910eec3ab7bcebd708dab8e2ca8ecd4af'
+        required: true
+      build_number:
+        type: string
+        default: '2026110802'
+        required: true
+      version:
+        type: string
+        default: '1.0.1'
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: desktop-update-publication
+  cancel-in-progress: false
+
+jobs:
+  resend:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.publish == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    environment: desktop-updates
+    env:
+      PYTHONUTF8: '1'
+      GH_TOKEN: ${{ github.token }}
+      DEPLOY_KEY: ${{ secrets.LJQC_UPDATE_DEPLOY_KEY }}
+      KNOWN_HOSTS: ${{ secrets.LJQC_UPDATE_KNOWN_HOSTS }}
+      DEPLOY_USER: ${{ vars.LJQC_UPDATE_DEPLOY_USER }}
+      DEPLOY_HOST: ${{ vars.LJQC_UPDATE_DEPLOY_HOST }}
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+      SOURCE_ATTEMPT: ${{ inputs.source_attempt }}
+      ARTIFACT_ID: ${{ inputs.artifact_id }}
+      ARTIFACT_SHA256: ${{ inputs.artifact_sha256 }}
+      SOURCE_COMMIT: ${{ inputs.source_commit }}
+      SOURCE_DIGEST: ${{ inputs.source_digest }}
+      SOURCE_BUILD_NUMBER: ${{ inputs.build_number }}
+      SOURCE_VERSION: ${{ inputs.version }}
+      RAW_TRANSFER: ${{ inputs.raw_transfer }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.13'
+      - name: Install only publication verification dependencies
+        run: python -m pip install cryptography==50.0.2 certifi==2026.7.22
+      - name: Run publication boundary fixtures without native builds
+        run: >-
+          python -m unittest discover -s tests -p "desktop_update_resend_smoke_test.py"
+      - name: Run receiver reference boundary fixtures without native builds
+        run: >-
+          python -m unittest discover -s tests -p "desktop_update_delivery_reference_smoke_test.py"
+      - name: Verify original native acceptance and resend the exact signed bytes
+        run: >-
+          python scripts/resend_desktop_update.py
+          --run-id "$SOURCE_RUN_ID" --attempt "$SOURCE_ATTEMPT"
+          --artifact-id "$ARTIFACT_ID" --artifact-sha256 "$ARTIFACT_SHA256"
+          --source-commit "$SOURCE_COMMIT" --source-digest "$SOURCE_DIGEST"
+          --build-number "$SOURCE_BUILD_NUMBER" --version "$SOURCE_VERSION"
+          --raw-transfer "$RAW_TRANSFER"
+          --output-receipt output/desktop-update-resend/publication-receipt.json
+      - name: Retain only the bounded resend receipt
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: desktop-update-resend-receipt-${{ github.run_number }}-${{ github.run_attempt }}
+          path: output/desktop-update-resend/*.json
+          if-no-files-found: warn
+          retention-days: 7

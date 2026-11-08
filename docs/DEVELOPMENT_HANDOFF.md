@@ -1,5 +1,7 @@
 # LJQC 开发交接
 
+2026-11-08 0802实物验收已通过：run42433269255 两端 native/TLS/真实旧助手接入及修复/真实程序升级和资料保持全过；source dc4af0e/digest90bc8c...。只最后740MB传输超过900秒，原签名附件13599005609已保留，正在做独立发布控制修复和原包重发，不重构建/重签/改变程序来源。网页0802-v2全新检查21套235项通过，无依赖安装、失败/跳过/越界0；尚未release，生产仍2adb/AUTO=false。用户已完成本次腾讯云扫码，连接恢复。详见本轮交付，不能复用旧网页before或重导出固定dc4 bundle。
+
 2026-11-08继续0802：0801 Mac已全pass，Win最后发现Inno卸载维护文件混入helper导致完整清单拒绝，发布自动skipped。已最小分离到版本化payload子目录，不忽略未知文件、不改CA/repair/业务；0801失败证据保留。待0802完整源/原生检查及发布，原06/生产网页2adb/原资料保持，AUTO仍false；细节见[本轮交付](execution/deliveries/DESKTOP_CUMULATIVE_UPDATES_2026-11-07.md)。
 
 2026-11-08最新：用户MFA及新增受限发布权限均已明确确认；02网页2adb772和四成品已在云端，资料/两备份最终保持通过，GitHub真实元数据直传run42428985794成功；main有仅服务器sudo检查修复a41684c，发行digest不变。原06两包字节保持，AUTO仍false。公网验收发现Mac默认CA缺失，正在做build2026110801显式可信CA、冻结实物公网TLS及自签拒绝，并修复已接入02不能替换稳定helper的early-return问题；保持current/base/sequence和全部资料，不能以02已上传替代0801最终验收。02云端回执已取回并核对4060B/SHA2233309d64c5c5ff956115d82965bd26628a4124164944c34416bcd70b523e27，见[交付](execution/deliveries/DESKTOP_CUMULATIVE_UPDATES_2026-11-07.md)。服务器网页目前仍2adb，后续0801必须新证据目录和当时资料双备份，不能复用07快照。本机不运行Qt/安装器/冻结helper。

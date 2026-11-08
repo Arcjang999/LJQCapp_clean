@@ -47,6 +47,8 @@ sudo 核对固定使用 `LC_ALL=C`、`LANG=C`、`LANGUAGE=C`。部分 sudo 版�
 
 接收端只收有大小、文件数及路径限制的普通 tar 文件，不接受压缩输入、链接、稀疏文件或任意 shell。它验证两平台签名及来源、静态文件长度/哈希和实际 HTTPS 下载字节，最后才切换同一 `current` 指针。失败保留上一频道；成功删除本次私有大文件暂存副本。静态旧发行保留，两阶段均保留至少 1 GiB 空闲空间。
 
+完整发布也可在同一普通 tar 中仅发送引用文件、原签名索引和两个平台清单。服务器先验签和检查反回放，再通过显式 CA 的 HTTPS 拉取原 GitHub 签名附件；当前只允许已核对的 `productionresultssa6.blob.core.windows.net` 及严格的 Actions artifact 路径，每个重定向重新检查。ZIP 的长度、摘要、目录大小、文件类型、数量、原清单字节和完整签名文件集都必须通过，才能复用上述发布步骤。此方式不增加监听端口、SSH 命令、账号目录权限或 GitHub 凭据；短期只读地址在私有暂存中使用后清理，错误消息不得包含它。官方分片不匹配时不自动放宽主机限制，可采用原普通文件传输路径。
+
 ## 3 审核更新清单的 Nginx 静态入口
 
 安装器只生成提案：`/opt/ljqc-update-publisher/nginx-updates-location.proposal.conf`。先读取现有配置，确认 HTTPS server、ACME、`/downloads/` 和应用反向代理，再将该片段加入现有 HTTPS server。它只服务 `/var/www/ljqc-public/updates/` 下的 JSON，禁止目录列表，设置 `no-store` 与 `nosniff`；不会自动改配置或重载服务。

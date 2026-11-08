@@ -27,6 +27,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: desktop-updates-${{ github.ref }}

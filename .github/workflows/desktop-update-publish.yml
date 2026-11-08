@@ -19,6 +19,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: desktop-update-publication
@@ -27,7 +28,7 @@ concurrency:
 jobs:
   sign_and_transfer:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 150
     environment: desktop-updates
     env:
       PYTHONUTF8: '1'
@@ -94,6 +95,7 @@ jobs:
           LJQC_UPDATE_SIGNING_KEY: ${{ secrets.LJQC_UPDATE_SIGNING_KEY }}
         run: python packaging/publish_desktop_update.py refresh-metadata --output output/signed-update
       - name: Retain signed publication files
+        id: signed_publication
         if: steps.capabilities.outputs.signing == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
@@ -104,32 +106,21 @@ jobs:
           retention-days: 7
       - name: Transfer only through the restricted receiving command
         if: steps.capabilities.outputs.deploying == 'true' && env.DO_PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGNED_ARTIFACT_ID: ${{ steps.signed_publication.outputs.artifact-id }}
+          SIGNED_ARTIFACT_SHA256: ${{ steps.signed_publication.outputs.artifact-digest }}
         run: |
           python - <<'PY'
-          import json, os
+          import json, os, sys
           from pathlib import Path
-          import subprocess
-          import sys
-          import tempfile
-          subprocess.run([sys.executable, 'packaging/publish_desktop_update.py', 'bundle', '--source', 'output/signed-update', '--output', str(Path(os.environ['RUNNER_TEMP']) / 'ljqc-update-bundle.tar')], check=True)
-          with tempfile.TemporaryDirectory(prefix='ljqc-publish-', dir=os.environ['RUNNER_TEMP']) as temporary:
-              root = Path(temporary)
-              root.chmod(0o700)
-              key = root / 'identity'
-              key.write_text(os.environ['DEPLOY_KEY'].rstrip() + '\n')
-              key.chmod(0o600)
-              hosts = root / 'known_hosts'
-              hosts.write_text(os.environ['KNOWN_HOSTS'].rstrip() + '\n')
-              hosts.chmod(0o600)
-              with (Path(os.environ['RUNNER_TEMP']) / 'ljqc-update-bundle.tar').open('rb') as bundle:
-                  result = subprocess.run(['ssh', '-i', str(key), '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'UserKnownHostsFile=' + str(hosts), os.environ['DEPLOY_USER'] + '@' + os.environ['DEPLOY_HOST'], 'ljqc-update-upload'], stdin=bundle, capture_output=True, text=True, timeout=900)
-              if result.returncode:
-                  raise RuntimeError('Restricted update receiver failed; the previous channel remains selected.')
-              receipt = json.loads(result.stdout)
-              if receipt.get('status') != 'published' or receipt.get('base_installer_changed') is not False:
-                  raise RuntimeError('The server did not return a successful immutable-base publication receipt.')
-              Path('output/update-publish-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
-              print(json.dumps(receipt))
+          sys.path.insert(0, 'scripts')
+          from resend_desktop_update import publish_current
+          receipt = publish_current(Path('output/signed-update'), Path('resources/desktop_update_trust.json'),
+              artifact_id=int(os.environ['SIGNED_ARTIFACT_ID']),
+              artifact_sha256=os.environ['SIGNED_ARTIFACT_SHA256'])
+          Path('output/update-publish-receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          print(json.dumps(receipt))
           PY
       - name: State when server publication was not requested
         if: steps.capabilities.outputs.signing == 'true' && env.DO_PUBLISH != 'true'
