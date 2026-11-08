@@ -1,6 +1,6 @@
 # 固定 1.00 基础包的累计更新实施
 
-## 0802原生验收完成、传输控制修复中
+## 0802原生与网页已验收，原包重发中
 
 [run42433269255](https://github.com/Arcjang999/LJQCapp_clean/actions/runs/42433269255)的 Windows 和 Mac 两个原生任务均成功，来源固定 `dc4af0e84aac02a120294e19469c2d5bef96976c`，摘要 `90bc8c66b1978e7bb71fb1321d759cf910eec3ab7bcebd708dab8e2ca8ecd4af`，程序 `1.0.1/build2026110802`。真实冻结HTTPS、有效但未知自签拒绝、原06安装后的真实旧02 CLI接入、新助手修复及稳定助手联网、实际程序补丁应用、74表原typedcells/PDF BLOB/附件保持均通过。Windows版本化payload完整文件验证成功，卸载维护文件未进入载荷；未在用户Mac运行native。
 
@@ -8,7 +8,7 @@
 
 网页独立工具 `cloud-tools-build0802-v2/ljqc-auto-updates-tools-20261108-0802-v2.tar.gz` 为35922字节/SHA `eb99c4fd52808f4b9b1849d926dc2ffd71abf9ce8511bda1e538c5129a09b057`，服务器使用全新 `/var/tmp/ljqc-auto-updates-20261108-0802-v2`。prepare、无安装依赖核对及21套235项check均成功，失败/跳过/越界0，业务环境117CA根、证书及主机名校验保留。v1唯一失败为测试夹具意外读取生产更新feed，v2仅隔离测试子进程的公开清单根，未改产品或放宽断言；所有失败现场保留。固定dc4源码bundle仍为68123字节/SHA `14427a8573b4aec5e9313130c79e2b93edd8ea2121c4e80e887a8d23d400dde7`，不得随控制提交重导出。
 
-当前生产网页仍2adb、桌面频道仍0702、AUTO=false；0802网页release/新鲜双备份/最终accept、原06最终SHA、GitHub重发及公开四文件校验均待完成。用户已完成本次腾讯云扫码，连接恢复；已重新读取正式check回执，21套235项和当前HEAD2adb均匹配。后续必须沿本轮现场继续，不复用旧before、不恢复旧库。
+网页已按本轮fresh双备份从2adb发布到dc4，02:13:03服务健康；02:14:42最终accept通过，保留74表19404行201113原有类型单元格、28BLOB、4附件及24报告（22质控+2处理），两备份/配置/权限不变，data_restored=false。唯一许可的内置参考时间及3N/296N序列刷新为4轮，没有导航例外或客户记录差异。新网页实际Home和帮助下载页显示build0802；桌面频道尚0702/AUTO=false。reference重发42437417536因服务器实际约50KB/s、预计超过7200秒而取消；已确认无active receiver、频道未切换，失败证据及私有部分暂存保留。现以[42437890977](https://github.com/Arcjang999/LJQCapp_clean/actions/runs/42437890977)明确raw_transfer=true重发同一原签名附件，不能用取消run充成功证据。日常及重发默认改用raw7200秒/150分钟，小引用保留为显式opt-in；3文件最小修正及新增2回归共19项局部guard通过，原source267通过保持。实际published、原06最终SHA、公开四文件和AUTO开启仍待完成。
 
 交付控制独立最终源码检查已通过22套267项，失败/错误/跳过/越界0，见 `control-reference-source-checks/summary.json` 及逐套guard回执；其中新引用接收20项、新重发17项，旧打包兼容19项全部实际执行。三方独立复核覆盖先验签/反回放、短期只读SAS、逐跳窄域名、ZIP64/中央目录分配上界、原JSON字节/全文件哈希、精确原生API来源及SSH回执白名单。原API-only预检匹配真实0802的两端和签名保留步骤，唯一原失败为Transfer。两套新检查已注册今后源码CI，手动重发也先执行这两套纯fixture；没有本机native、重新签名或重构建。此处仍为控制源码通过，服务器受控替换和实际重发结果待另记。
 

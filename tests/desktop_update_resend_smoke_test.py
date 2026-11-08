@@ -270,6 +270,39 @@ class ResendControlTests(unittest.TestCase):
         self.assertIsNone(transfer.call_args.kwargs["expected"])
         self.assertIsNone(transfer.call_args.kwargs["artifact"])
 
+    def test_normal_publication_selects_raw_after_the_same_artifact_source_verification(self):
+        fixture, bundle, _ = self.signed_fixture()
+        run, _, artifacts = self.api_fixture()
+        artifact = artifacts["artifacts"][0]
+        with patch.dict(os.environ, GITHUB_ACTIONS="true", GITHUB_REF="refs/heads/main", GITHUB_REPOSITORY=resend.REPOSITORY,
+                        GITHUB_REPOSITORY_ID=str(resend.REPOSITORY_ID), RUNNER_TEMP=str(self.root),
+                        GITHUB_SHA=self.expected.source_commit, GITHUB_RUN_ID=str(self.expected.run_id), GITHUB_RUN_ATTEMPT="1"), \
+                patch.object(resend, "api_json", side_effect=[run, artifact]) as api, \
+                patch.object(resend, "transfer", return_value={"status": "published"}) as transfer:
+            resend.publish_current(bundle, fixture.trust_file, artifact_id=self.expected.artifact_id,
+                                   artifact_sha256=self.expected.artifact_sha256)
+        self.assertEqual(api.call_count, 2)
+        self.assertTrue(transfer.call_args.kwargs["force_raw"])
+        self.assertEqual(transfer.call_args.kwargs["expected"], self.expected)
+        self.assertEqual(transfer.call_args.kwargs["artifact"], artifact)
+
+    def test_explicit_false_still_sends_one_reference_without_changing_signed_bytes(self):
+        fixture, bundle, _ = self.signed_fixture(); index = resend.verify_bundle(bundle, fixture.trust_file)
+        original = (bundle / "release-index.json").read_bytes()
+        receipt = {"status": "published", "release_id": index["release_id"], "sequence": index["sequence"],
+                   "base_installer_changed": False, "business_data_access": False}
+        with patch.dict(os.environ, DEPLOY_HOST="159.75.243.120", DEPLOY_USER="ljqc-update", DEPLOY_KEY="inert", KNOWN_HOSTS="inert"), \
+                patch.object(resend, "artifact_location", return_value=self.blob_url()) as location, \
+                patch.object(resend.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, json.dumps(receipt).encode(), b"")) as ssh:
+            result = resend.transfer(bundle, index, self.root, fixture.trust_file, expected=self.expected,
+                                     artifact={"size_in_bytes": 1000}, force_raw=False)
+        self.assertEqual(result["transport"], "github-artifact-reference")
+        location.assert_called_once(); self.assertEqual(ssh.call_count, 1)
+        self.assertEqual(original, (bundle / "release-index.json").read_bytes())
+        with tarfile.open(self.root / "publication.tar") as archive:
+            self.assertEqual(set(archive.getnames()), {"delivery-reference.json", "release-index.json",
+                                                       "windows-x86_64/latest.json", "macos-arm64/latest.json"})
+
     def test_workflow_is_manual_main_only_and_uses_two_existing_ssh_secrets(self):
         recipe = (ROOT / ".github/workflows/desktop-update-resend.yml").read_text()
         self.assertIn("github.ref == 'refs/heads/main'", recipe)

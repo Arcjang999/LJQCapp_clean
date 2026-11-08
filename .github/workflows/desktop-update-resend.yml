@@ -8,9 +8,9 @@ on:
         type: boolean
         default: false
       raw_transfer:
-        description: 'Explicitly use the original long raw transfer if the server cannot fetch the artifact'
+        description: 'Use the proven long raw transfer; set false to explicitly try server HTTPS retrieval'
         type: boolean
-        default: false
+        default: true
       source_run_id:
         type: string
         default: '42433269255'

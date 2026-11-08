@@ -1,6 +1,6 @@
 # 执行进度与交付证据
 
-2026-11-08 0802双端全链已过：run42433269255/source dc4af0e/digest90bc8c...，原生构建、冻结TLS、真实旧组件接入/新组件修复和程序/资料保持均成功；仅最后大文件传输900秒超时。原已签名附件保留，发布控制修复及受限重发进行中，不重建原包。网页0802-v2已fresh prepare/dependencies/check通过21套235项、0失败/跳过/越界，生产HEAD仍2adb，尚未release/accept，AUTO仍false。用户已完成本次腾讯云扫码，连接恢复；本机不执行native。
+2026-11-08 0802原生＋网页验收已完成：source dc4af0e/digest90bc8c...，native42433269255双端全过；网页fresh双备份2adb→dc4，21套235项和最终74表19404行201113cells/28BLOB/4附件/24报告及两备份保持通过，无恢复。receiver控制2306883受控更新和preflight通过，权限/依赖未变。reference42437417536因50KB/s慢网取消、频道仍0702；原签名artifact现由42437890977明确rawtrue长时限重发，不重建/重签。控制原22套267及默认raw新增局部19项通过。待桌面实际published/公网四文件/最终AUTO开启；原06不动，本机不执行native。
 
 2026-11-08当前0802：0801 Mac全成功，Windows最后完整校验因Inno维护文件进入助手根失败，发布自动跳过；正以版本化payload目录最小修复，完整校验不放宽，原06不动。0801现场准备未release，生产仍2adb，AUTO仍false。待0802完整回执收口。
 

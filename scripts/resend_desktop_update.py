@@ -435,7 +435,7 @@ def publish_current(bundle: Path, trust_path: Path, *, artifact_id: int, artifac
     with tempfile.TemporaryDirectory(prefix="ljqc-publish-", dir=temporary) as directory:
         work = Path(directory)
         work.chmod(0o700)
-        return transfer(bundle, index, work, trust_path, expected=expected, artifact=artifact)
+        return transfer(bundle, index, work, trust_path, expected=expected, artifact=artifact, force_raw=True)
 
 
 def main() -> None:
@@ -445,7 +445,7 @@ def main() -> None:
     for name in ("artifact-sha256", "source-commit", "source-digest", "version"):
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--output-receipt", type=Path, required=True)
-    parser.add_argument("--raw-transfer", choices=("true", "false"), default="false")
+    parser.add_argument("--raw-transfer", choices=("true", "false"), default="true")
     args = parser.parse_args()
     temporary = require_main_dispatch()
     expected = Expected(args.run_id, args.attempt, args.artifact_id, args.artifact_sha256,

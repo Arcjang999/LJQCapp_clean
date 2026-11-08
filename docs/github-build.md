@@ -4,7 +4,7 @@
 
 日常更新先递增 `release.json` 的程序版本/构建号，提交完整代码到 `main`，由 **Desktop cumulative updates** 分别完成 Windows x64 和 Mac arm64 验收。开启环境变量 `LJQC_UPDATES_AUTO_PUBLISH=true` 后，可信 main 的成功双端构建自动签名并送到自有服务器；开发分支只保留候选。手动构建仍须明确选中 `publish` 才发布，AUTO 不替代手动选择。基础包始终保持06，重新制作基础包还须项目负责人的明确授权。
 
-若只在传输环节失败，使用 **Resend an accepted signed desktop update**，选择 main、勾选 publish，并填写原 run/attempt/artifact ID、GitHub artifact SHA、程序 source commit/digest、version/build。它严格检查原生步骤、同源双平台、原签名附件和唯一传输失败，不重新构建或签名。该工作流只用部署密钥和已核对的主机公钥，不读取发行签名私钥；与普通发布共用互斥发布组。具体下载验证和受限参考交付见[桌面更新说明](desktop-updates.md#大文件交付与重发)。
+若只在传输环节失败，使用 **Resend an accepted signed desktop update**，选择 main、勾选 publish，并填写原 run/attempt/artifact ID、GitHub artifact SHA、程序 source commit/digest、version/build。默认 `raw_transfer=true`，沿固定受限命令直接重发、上限7200秒；显式false才采用服务器拉取附件。它严格检查原生步骤、同源双平台、原签名附件和唯一传输失败，不重新构建或签名。该工作流只用部署密钥和已核对的主机公钥，不读取发行签名私钥；与普通发布共用互斥发布组。具体下载验证和受限参考交付见[桌面更新说明](desktop-updates.md#大文件交付与重发)。
 
 0802原生验收已经完成于[42433269255](https://github.com/Arcjang999/LJQCapp_clean/actions/runs/42433269255)，source dc4af0e、digest90bc8c...；原签名附件保留，唯一失败是900秒上传超时。后来的交付控制提交不改变这批程序来源，不需要为传输问题重新打包；实际公开状态以[本轮交付](execution/deliveries/DESKTOP_CUMULATIVE_UPDATES_2026-11-07.md)为准。
 
