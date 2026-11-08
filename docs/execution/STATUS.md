@@ -1,6 +1,6 @@
 # 执行进度与交付证据
 
-2026-11-08 0802原生＋网页验收已完成：source dc4af0e/digest90bc8c...，native42433269255双端全过；网页fresh双备份2adb→dc4，21套235项和最终74表19404行201113cells/28BLOB/4附件/24报告及两备份保持通过，无恢复。receiver控制2306883受控更新和preflight通过，权限/依赖未变。reference42437417536因50KB/s慢网取消、频道仍0702；原签名artifact现由42437890977明确rawtrue长时限重发，不重建/重签。控制原22套267及默认raw新增局部19项通过。待桌面实际published/公网四文件/最终AUTO开启；原06不动，本机不执行native。
+2026-11-08 0802已完成：Windows/Mac实物native42433269255全链、网页21套235和最终全部原资料/双备份保持、公开4文件全下载/原CI SHA、原06两包server完整SHA均通过。程序/网页source dc4/digest90bc，原签包本机中转发布，无重签或重建；不能把失败/取消的GH全文件尝试冒称success。实际GH清单刷新42440755547/source7f成功，新seq1794106752558155；AUTO=true和仅main限制已API验证，18000秒/360分钟适配慢网。云回执7143B/SHA35ccfdc7...已下载并roundtrip，receiver230权限保持。两端接入包及程序补丁在downloads-build0802，本次无剩余上线步骤。原06不动、本机不执行native；网页后续独立部署。
 
 2026-11-08当前0802：0801 Mac全成功，Windows最后完整校验因Inno维护文件进入助手根失败，发布自动跳过；正以版本化payload目录最小修复，完整校验不放宽，原06不动。0801现场准备未release，生产仍2adb，AUTO仍false。待0802完整回执收口。
 

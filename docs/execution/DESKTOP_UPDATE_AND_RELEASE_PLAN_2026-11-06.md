@@ -1,6 +1,6 @@
 # Windows、Mac 安装更新与网页发布方案
 
-2026-11-07后续已获完整实施授权，已增加接入组件、累计补丁、签名清单、候选资料预检及恢复、日常GitHub构建和受限发布的候选源码，当前进行实包与服务器接线验收。下文“尚未实现”保留方案制定时的依赖说明；实际完成度只以[更新操作](../desktop-updates.md)和[本轮交付](deliveries/DESKTOP_CUMULATIVE_UPDATES_2026-11-07.md)为准，不能把候选代码或本机检查当作已经上线。
+2026-11-08实施已完成：0802两平台接入/修复/累计升级、网页资料保持、公开下载、实际GitHub清单发布及main-only自动发布均已验收；原1.00两包保持。完整文件本次经本机中转，GitHub实际成功验证的是清单刷新，证据边界见[本轮交付](deliveries/DESKTOP_CUMULATIVE_UPDATES_2026-11-07.md)。下文日期、旧版本和“尚未实现”为方案制定时的历史说明；现行操作以[更新操作](../desktop-updates.md)及README固定基础包规则为准。
 
 日期：2026-11-06；更新：2026-11-07。当前已发布 `1.0.0 / build2026110606` 的 Windows Setup 和 Mac Apple 芯片 DMG，构建源为 `d07a57771475a9367e0face03d14f7629b97fe04`；网页运行源为 `b26fe36413e34a6f4913d129f45c694f9d90339a`。桌面隐藏“软件下载”、端别版本标识、自有 IP HTTPS 下载及云端最终资料验收已完成，见[云端交付](deliveries/CLOUD_DESKTOP_DOWNLOADS_2026-11-06.md)。完整升级协调、签名更新清单、启动检查、补丁生成和自动下载/安装尚未实现。[首轮安装包交付](deliveries/DESKTOP_INSTALLERS_2026-11-06.md)与[GitHub构建入口](../github-build.md)保留各阶段证据。
 

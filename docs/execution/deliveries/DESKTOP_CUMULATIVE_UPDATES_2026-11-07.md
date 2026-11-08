@@ -1,6 +1,35 @@
 # 固定 1.00 基础包的累计更新实施
 
-## 0802原生与网页已验收，原包重发中
+## 最终交付：0802已上线，main自动发布已开启
+
+2026-11-08完成。Windows x64和Mac arm64的更新接入组件、累计程序补丁及网页版均为 `1.0.1/build2026110802`，程序来源 `dc4af0e84aac02a120294e19469c2d5bef96976c`、摘要 `90bc8c66b1978e7bb71fb1321d759cf910eec3ab7bcebd708dab8e2ca8ecd4af`。原1.00两包、URL、SHA、下载catalog和基线tag始终保持；后续日常只发补丁，只有负责人明确要求超大更新并替换基础包时才重做基础安装器。
+
+[原生运行42433269255](https://github.com/Arcjang999/LJQCapp_clean/actions/runs/42433269255)的两个平台任务均完整成功，包含真实原06安装、旧02冻结CLI接入、新助手修复、明确CA的生产HTTPS与未知自签拒绝、实际程序升级及原资料保持。其最后上传超过900秒；后续引用拉取42437417536和慢网raw42437890977均如实记录取消，不能写成GitHub完整文件发布成功。
+
+完整签名附件13599005609（737617156B/SHA `d2f99866a418b6eafeb586bef3ade3e7bd030282ece5441626f646f7e6c378e0`）在本机完整取回并核对原签名、7原文件、3个JSON原字节和CI四文件SHA后，通过同一受限身份中转发布。没有重新签名或构建程序，初发序号 `1794101168403968`。实际成功回执见 `deployment/local-publish-build0802-receipt.json`，取包回执见 `deployment/local-signed-build0802-original-receipt.json`。
+
+四文件随后全部从自有HTTPS服务器独立完整下载、校验并原子保存至 `downloads-build0802/`，无残余.part、未运行或挂载任何包：
+
+| 平台 | 文件 | 字节 | SHA-256 |
+| --- | --- | --- | --- |
+| Windows x64 | 累计程序补丁 | 356796211 | `f07c9cff5e5bce7cd8d527e5528319b742576e74994ccae35aaac776240fa9f2` |
+| Windows x64 | 更新接入Setup | 39311807 | `37469decc686394e048ce85a9266c2d4664786383c8e0d55b90c90ac4a58e5c9` |
+| Mac arm64 | 累计程序补丁 | 290963195 | `13b15499ded15840dc988f2ecee2de052009367c028e6e12e5835141ecb2a943` |
+| Mac arm64 | 更新接入DMG | 50539611 | `5382742807e4ea84deb766aeba1c38ac98c35e9119406f175e9871e40e2e9942` |
+
+`public-verification-build0802-independent-network.json`、`downloads-build0802/download-receipt.json`（SHA `c3f7679e2548cd1e350eaa3de769f412f695a9c605eeeca505d00b1155934ce8`）和原签元数据绑定均通过。网页版“帮助 → 软件下载”已实际显示两端0802接入链接、原06基础链接、SmartScreen/Apple开发版说明和真实SHA；不关闭系统保护。桌面隐藏软件下载，接入后每次启动检查、客户确认后下载并退出更新。当前仍无Windows正式代码签名及Apple Developer ID/公证；Windows Server原生CI不冒充Win10/11客户机全部GUI验收。
+
+网页从2adb发布到同一dc4前新建本轮原始封存及完整备份，21套235项检查和最终accept通过。原74表19404行201113有类型单元格、28BLOB、4附件、24报告（22质控+2处理）及两备份保持，配置/权限/业务依赖未变，未恢复旧库。仅允许的内置参考时间及3N/296N序列刷新4轮，无客户记录或导航例外。原06两公开文件另在服务器完整实算SHA与固定值一致。独立云汇总已下载并双向SHA核验：`deployment/cloud-build0802-receipt.json`，7143B/SHA `35ccfdc790208f4c5c89813cef407f5468c778d3fbc8c16947e263554e520db3`；它明确不代验GitHub或本机传输状态，不含客户记录正文、私钥或备份正文。
+
+接收端控制源为2306883，仅原只读pubpy及manifest备份后受控替换，原账号/公钥/SSH命令/三个静态目录/业务隔离边界保持。GitHub发送控制源为 `7f8a0b7e1002c8a898355c5decd138e8858c90cc`，与程序源分开记录，不重导出原68123B dc4部署bundle。控制22套267项及后续19项局部guard、最终collector22项均通过；本机不再启动Qt或任何冻结程序。
+
+最后[正常GitHub清单发布42440755547](https://github.com/Arcjang999/LJQCapp_clean/actions/runs/42440755547)实际success，新的受限发送函数和接收命令均真实执行。它只更新清单时效/签名/序号，4程序与基础包不变。当前序号 `1794106752558155`，签发2026-11-08T02:59:12.558155Z，有效至2026-11-22T02:59:12.558155Z；current及不可变双平台清单独立验签通过，4条记录与原CI和刚下载文件一致。新index SHA `71c0c544a77b63f82965ca167cb609ee003cfb539d5a6c65ec925c8c93929645`，见 `final-public-metadata-refresh-build0802.json` 及 `deployment/github-final-refresh-42440755547-*`。
+
+03:03:17 UTC已实际将 `LJQC_UPDATES_AUTO_PUBLISH=true` 并复核环境唯一允许main分支，未增加任何新权限；回执 `deployment/github-auto-publish-enabled-final.json`。后续main同源双端成功后自动签名/传输/核验并原子晋级，日常默认raw传输18000秒、任务360分钟，适配本轮实测跨区慢网；明确手动不选publish仍不发布，每周只刷新14天清单。网页后续仍独立部署。此次完整发行经本机中转，GitHub实际成功验证的是正常清单发布；以上界限和所有失败、取消、误读进度的更正记录均保留，不将它们合并成虚构的全文件成功证据。本次上线工作已收口。
+
+最终本地合并回执 `output/desktop-update-release-2026-11-07/final-release-acceptance-build0802.json`，SHA `e46ba357ec58940d6005981c0fd0855b5a5723a3abd67bb4e9be6c4fb468c178`，将云端、原签名包、实际中转、公网四文件、最终GitHub清单和AUTO/main-only七份独立证据逐一绑定。回执没有将GitHub全文件尝试记为成功，也不含客户记录或凭据。
+
+## 0802阶段记录（保留当时状态）
 
 [run42433269255](https://github.com/Arcjang999/LJQCapp_clean/actions/runs/42433269255)的 Windows 和 Mac 两个原生任务均成功，来源固定 `dc4af0e84aac02a120294e19469c2d5bef96976c`，摘要 `90bc8c66b1978e7bb71fb1321d759cf910eec3ab7bcebd708dab8e2ca8ecd4af`，程序 `1.0.1/build2026110802`。真实冻结HTTPS、有效但未知自签拒绝、原06安装后的真实旧02 CLI接入、新助手修复及稳定助手联网、实际程序补丁应用、74表原typedcells/PDF BLOB/附件保持均通过。Windows版本化payload完整文件验证成功，卸载维护文件未进入载荷；未在用户Mac运行native。
 

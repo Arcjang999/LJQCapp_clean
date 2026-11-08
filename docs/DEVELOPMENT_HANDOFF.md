@@ -1,6 +1,6 @@
 # LJQC 开发交接
 
-2026-11-08 0802两端原生及网页验收完成：programme dc4af0e/digest90bc8c...，native run42433269255全过；网页fresh双备份后2adb→dc4，21套235项及最终74表/全部报告附件/两备份保持accept通过，无恢复。控制2306883已受控更新receiver，新preflight通过。reference run42437417536因服务器50KB/s慢网取消、频道仍0702；现run42437890977以明确raw_transfer=true重发同一原签名artifact13599005609，不重签/不重建。日常改默认raw18000s/360min，仅显式false试引用；19项局部guard通过，原22套267项全过。尚待实际桌面发布、公网核对及AUTO开启；原06/dc4固定bundle保持。详见本轮交付，本机不执行native。
+2026-11-08 0802交付完成：程序/网页dc4af0e/digest90bc8c...，native42433269255双端全链成功；原签名包完整核验后本机中转上云，公网4文件已全下载并与CI/原签3JSON匹配。完整GH文件传输尝试失败/取消如实保留；最后正常GH清单刷新42440755547/source7f实际success，新seq1794106752558155，4程序和原06不变。AUTO=true且main-only已API实证，后续默认raw18000秒/job360分钟。网页fresh双备份2adb→dc4、21套235和最终全部74表/报告/附件及两备份保持，无恢复；云回执7143B/SHA35ccfdc7...已本地roundtrip。receiver230权限不变。本次无待发布步骤，后续按README增新build；原06及固定dc4源码bundle保持，本机不执行native。详见本轮交付。
 
 2026-11-08继续0802：0801 Mac已全pass，Win最后发现Inno卸载维护文件混入helper导致完整清单拒绝，发布自动skipped。已最小分离到版本化payload子目录，不忽略未知文件、不改CA/repair/业务；0801失败证据保留。待0802完整源/原生检查及发布，原06/生产网页2adb/原资料保持，AUTO仍false；细节见[本轮交付](execution/deliveries/DESKTOP_CUMULATIVE_UPDATES_2026-11-07.md)。
 

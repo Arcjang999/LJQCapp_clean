@@ -6,7 +6,7 @@
 
 若只在传输环节失败，使用 **Resend an accepted signed desktop update**，选择 main、勾选 publish，并填写原 run/attempt/artifact ID、GitHub artifact SHA、程序 source commit/digest、version/build。默认 `raw_transfer=true`，沿固定受限命令直接重发、上限18000秒；显式false才采用服务器拉取附件。它严格检查原生步骤、同源双平台、原签名附件和唯一传输失败，不重新构建或签名。该工作流只用部署密钥和已核对的主机公钥，不读取发行签名私钥；与普通发布共用互斥发布组。具体下载验证和受限参考交付见[桌面更新说明](desktop-updates.md#大文件交付与重发)。
 
-0802原生验收已经完成于[42433269255](https://github.com/Arcjang999/LJQCapp_clean/actions/runs/42433269255)，source dc4af0e、digest90bc8c...；原签名附件保留，唯一失败是900秒上传超时。后来的交付控制提交不改变这批程序来源，不需要为传输问题重新打包；实际公开状态以[本轮交付](execution/deliveries/DESKTOP_CUMULATIVE_UPDATES_2026-11-07.md)为准。
+0802原生验收已经完成于[42433269255](https://github.com/Arcjang999/LJQCapp_clean/actions/runs/42433269255)，source dc4af0e、digest90bc8c...；原签名附件保留，原run唯一失败是900秒上传超时。该原包已完整核对并经本机中转发布、公网4文件验收通过；最后正常GitHub清单刷新42440755547成功，AUTO已开启且仅main。后来的交付控制提交不改变这批程序来源，不需要为传输问题重新打包；实际证据以[本轮交付](execution/deliveries/DESKTOP_CUMULATIVE_UPDATES_2026-11-07.md)为准。
 
 下方按日期保留历史操作和验收边界，早期“待实施”“未发布”描述仅对应当时阶段，当前日常入口以上述流程为准。
 
