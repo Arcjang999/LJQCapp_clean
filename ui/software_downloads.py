@@ -25,8 +25,9 @@ def _installation_help(target: str, sha256: str, *, bootstrap: bool = False) -> 
         else:
             application_name = "LJQCAppUpdater" if bootstrap else "LJQCApp"
             instructions = (
-                "打开更新接入 DMG，运行其中的 LJQCAppUpdater 更新接入应用，选择已安装的 LJQCApp。"
-                "它会保留原程序与资料并接续启动入口，无需手动拖动它替换原应用。"
+                "打开下载的 DMG，双击其中的 LJQCAppUpdater 自动更新工具。"
+                "确认原来的 LJQCApp 位置，点击窗口中的“接入更新”。"
+                "完成后仍从原来的 LJQCApp 图标打开软件，无需手动拖动它替换原应用。"
                 if bootstrap else "打开 DMG 后，将 LJQCApp 拖入“应用程序”，再打开应用。"
             )
             st.markdown(
@@ -59,9 +60,10 @@ def render_software_downloads_page() -> None:
               kwargs={"rerun": False})
     st.markdown("**当前提供开发版，仍在持续更新。** 请从本页下载安装包；"
                 "首次安装如遇系统验证提示，可查看下方“安装提示与文件校验”。")
-    st.markdown("**1.00 基础安装包固定保留。** 新用户先安装基础包，再运行一次“更新接入补丁”；"
-                "已经安装 1.00 的用户直接接入即可。接入后，每次启动检查更新，经确认下载并退出后更新，"
-                "继续保留原有数据、报告、附件和保存位置。")
+    st.markdown("**第一次使用：** 先安装下方的 1.00 软件，再完成“启用自动更新”。\n\n"
+                "**已经安装 1.00：** 直接完成“启用自动更新”，不用重新安装软件。\n\n"
+                "设置完成后，仍从原图标打开软件；有新版时会提示，确认后下载更新。"
+                "原有数据、报告、附件和保存位置继续保留。")
     catalog = get_software_download_catalog()
     updates = get_desktop_update_catalog()
     bootstraps = {entry.target: entry for entry in updates.bootstraps}
@@ -73,7 +75,7 @@ def render_software_downloads_page() -> None:
             st.caption("系统要求：Windows 10/11，64 位（x64）。" if option.target == "windows-x86_64"
                        else "系统要求：macOS 13 或以上，Apple 芯片（M 系列）。")
             release = option.release
-            st.markdown("**1.00 基础安装包**")
+            st.markdown("**第一步：安装软件（1.00）**")
             if release is None:
                 st.button("安装包准备中", key="software_download_pending_" + option.target,
                           disabled=True, width="stretch")
@@ -83,18 +85,25 @@ def render_software_downloads_page() -> None:
                            f"{_package_size(release.size_bytes)}")
                 st.link_button(option.download_label, release.url, width="stretch")
                 _installation_help(option.target, release.sha256)
-            st.markdown("**一次性更新接入补丁**")
+            st.markdown("**第二步：启用自动更新（只需设置一次）**")
+            st.caption("此工具用于开启更新检查。完成后需要联网下载新版软件；"
+                       "已经能正常检查更新的电脑，无需重复安装。")
             bootstrap = bootstraps.get(option.target)
             if bootstrap is None:
-                st.button("更新接入组件准备中", key="software_update_pending_" + option.target,
+                st.button("自动更新工具准备中", key="software_update_pending_" + option.target,
                           disabled=True, width="stretch")
             else:
-                st.caption(f"更新接入补丁 · 构建 {bootstrap.build_number} · "
+                st.caption(f"自动更新工具 · 构建 {bootstrap.build_number} · "
                            f"{bootstrap.published_at.date().isoformat()} · {_package_size(bootstrap.size_bytes)}")
-                label = "下载 Windows 更新接入补丁" if option.target == "windows-x86_64" else "下载 Mac 更新接入补丁"
+                label = "下载 Windows 自动更新工具" if option.target == "windows-x86_64" else "下载 Mac 自动更新工具"
                 st.link_button(label, bootstrap.url, width="stretch")
                 if option.target == "windows-x86_64":
-                    st.caption("运行更新接入补丁，按提示选择已经安装的 LJQCApp；完成后继续通过原入口打开。")
+                    st.markdown("1. 保存工作并关闭 LJQCApp。\n"
+                                "2. 双击下载的工具，确认原软件位置，点击“接入更新”。\n"
+                                "3. 以后仍从原图标打开软件，有新版时点击“下载并更新”。")
                 else:
-                    st.caption("打开更新接入 DMG，运行其中的更新接入应用；由它接续原程序入口，保留原有资料。")
+                    st.markdown("1. 保存工作并关闭 LJQCApp。\n"
+                                "2. 打开下载的 DMG，双击里面的 LJQCAppUpdater。\n"
+                                "3. 确认已安装的 LJQCApp 位置，点击“接入更新”。\n"
+                                "4. 以后仍从原图标打开软件，有新版时点击“下载并更新”。")
                 _installation_help(option.target, bootstrap.sha256, bootstrap=True)

@@ -212,7 +212,7 @@ class DesktopUpdateCatalogTests(unittest.TestCase):
         expected.update(entry.url for entry in helpers.bootstraps)
         self.assertEqual({entry.proto.url for entry in links}, expected)
         text = "\n".join(entry.value for entry in app.markdown)
-        self.assertIn("1.00 基础安装包固定保留", text)
+        self.assertIn("安装软件（1.00）", text)
         self.assertIn("无需手动拖动它替换原应用", text)
         self.assertIn("无需关闭系统安全保护", "\n".join(entry.value for entry in app.caption))
 
@@ -224,7 +224,7 @@ class DesktopUpdateCatalogTests(unittest.TestCase):
             app = AppTest.from_string(PAGE, default_timeout=15).run()
         self.assertFalse(list(app.exception))
         self.assertEqual(len(app.get("link_button")), 2)
-        self.assertEqual(len([item for item in app.button if item.label == "更新接入组件准备中" and item.disabled]), 2)
+        self.assertEqual(len([item for item in app.button if item.label == "自动更新工具准备中" and item.disabled]), 2)
 
     def test_desktop_does_not_read_bootstrap_or_base_download_catalog(self):
         from streamlit.testing.v1 import AppTest
