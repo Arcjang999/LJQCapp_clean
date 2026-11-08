@@ -141,6 +141,7 @@ def build_bootstrap(output: Path, *, inno: Path | None = None, chinese_messages:
             "helper_integrity_manifest": {"sha256": digest_file(helper_manifest_path),
                                           "file_count": len(helper_manifest["files"]),
                                           "inside_signed_mac_app": False},
+            "installer_payload_subdirectory": "payload-" + str(metadata["build_number"]) if target == "windows-x86_64" else None,
             "native_gui_installation_validation": "not-performed-by-this-script",
             "code_signing": "ad-hoc-pending-developer-id" if target == "macos-arm64" else "unsigned-development",
             "base_installer_rebuilt": False}

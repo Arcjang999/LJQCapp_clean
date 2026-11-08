@@ -43,10 +43,12 @@ Name: "chinesesimp"; MessagesFile: "{#ChineseMessagesFile}"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
-Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Only this build-specific directory is copied/verified as an updater payload.
+; Inno's unins* maintenance files remain in {app}, outside its exact inventory.
+Source: "{#SourceDir}\*"; DestDir: "{app}\payload-{#BuildNumber}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Run]
-Filename: "{app}\LJQCAppUpdater.exe"; Parameters: "--install"; Description: "接入更新并保留现有资料"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\payload-{#BuildNumber}\LJQCAppUpdater.exe"; Parameters: "--install"; Description: "接入或修复更新组件并保留现有资料"; Flags: postinstall nowait skipifsilent
 
 ; The bootstrap itself asks for the exact original application and creates the
 ; stable entry. Its copied program and all business data are not Inno-owned.

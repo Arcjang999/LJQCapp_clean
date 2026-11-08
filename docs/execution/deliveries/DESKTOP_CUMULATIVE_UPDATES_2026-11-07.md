@@ -1,5 +1,13 @@
 # 固定 1.00 基础包的累计更新实施
 
+## 0801实物结果与0802候选
+
+0802最终源检查20套230项通过，失败/跳过/越界均0，包含严格payload与额外文件拒绝的新回归；证据`build0802-source-checks/acceptance-summary.json`。无本机Qt、冻结程序或安装器运行，实际两端成品仍须本轮GitHub验收。
+
+[0801 run42431705710](https://github.com/Arcjang999/LJQCapp_clean/actions/runs/42431705710)，源3bc718a/digest75ddb9...。Mac全job成功，真实原06→原02冻结CLI接入→新冻结CLI修复→稳定助手TLS→真实程序补丁/资料保持通过；Windows冻结TLS/未知证书拒绝/Qt及真实原02接入通过，最后新组件完整inventory因Inno生成的unins维护文件额外进入助手根而失败。签名发布自动skipped，0801未上feed；保留`deployment/github-0801-42431705710-*`完整脱敏日志与53KB Windows诊断，未重试冒充通过。
+
+0802仅改Windows源安装布局：纯助手放版本化`payload-{BuildNumber}`，维护卸载文件在父层，现代CI仅从明确定义的payload根取源；原02定位不变。未知额外文件仍拒绝，不增加忽略清单，也不全目录删除。CA/助手修复/业务代码保持0801已验证实现；两平台仍必须来自新的同一确定源码完整重建验收。0801云端fresh工具已prepare及no-install依赖确认（现有CA117根）但未check/release，保留该现场；0802使用独立工具/OUT及当时资料基线，生产网页仍2adb。receiver已受控更新至3bc并补独立certifi，实际发布账号在无系统CA环境下通过121根HTTPS+发行签名，原SSH公钥/业务环境未变。AUTO仍false。
+
 ## 2026-11-08 云端接线与0801收尾
 
 0801源码最终隔离检查20套228项通过，失败/跳过/越界0，证据`build0801-source-checks-final/acceptance-summary.json`；此前224项记录保留。较新helper工厂支持合法未来版本/构建（包含1.0.2/build2026110901回归），所有现代来源首次接入须完整清单，人工较新组件修复保持state/bootstrap字节；原02仅精确来源可作为缺清单例外。打包后的官方HTTPS、自签拒绝和真实旧02→新组件修复仍须本次GitHub两平台实证，未在本机运行Qt或冻结程序。

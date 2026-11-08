@@ -1,5 +1,7 @@
 # LJQC 开发交接
 
+2026-11-08继续0802：0801 Mac已全pass，Win最后发现Inno卸载维护文件混入helper导致完整清单拒绝，发布自动skipped。已最小分离到版本化payload子目录，不忽略未知文件、不改CA/repair/业务；0801失败证据保留。待0802完整源/原生检查及发布，原06/生产网页2adb/原资料保持，AUTO仍false；细节见[本轮交付](execution/deliveries/DESKTOP_CUMULATIVE_UPDATES_2026-11-07.md)。
+
 2026-11-08最新：用户MFA及新增受限发布权限均已明确确认；02网页2adb772和四成品已在云端，资料/两备份最终保持通过，GitHub真实元数据直传run42428985794成功；main有仅服务器sudo检查修复a41684c，发行digest不变。原06两包字节保持，AUTO仍false。公网验收发现Mac默认CA缺失，正在做build2026110801显式可信CA、冻结实物公网TLS及自签拒绝，并修复已接入02不能替换稳定helper的early-return问题；保持current/base/sequence和全部资料，不能以02已上传替代0801最终验收。02云端回执已取回并核对4060B/SHA2233309d64c5c5ff956115d82965bd26628a4124164944c34416bcd70b523e27，见[交付](execution/deliveries/DESKTOP_CUMULATIVE_UPDATES_2026-11-07.md)。服务器网页目前仍2adb，后续0801必须新证据目录和当时资料双备份，不能复用07快照。本机不运行Qt/安装器/冻结helper。
 
 2026-11-07两端02验收及main合入完成：完整通过的[run42379066480](https://github.com/Arcjang999/LJQCapp_clean/actions/runs/42379066480)，源2adb772、摘要9b8100574296...、1.0.1/build2026110702；包含真实原06接入/升级/资料保持和冻结更新窗口。main已从ddec9e5快进，四份成品本地下载/校验并签名，尚未发布服务器；原06不变。腾讯云会话超时后重连触发微信MFA，OrcaTerm保留handoff，用户异步扫码问题仍待答复；服务器本轮无写入，GitHub发布环境/Secrets/专用上传账号均未启用，不能把扫码当新增权限授权。后续按[交付](execution/deliveries/DESKTOP_CUMULATIVE_UPDATES_2026-11-07.md)继续云端接线和fresh资料验收，源bundle和工具包均已本地就绪。Python窗口崩溃已修复，本机不再跑native Qt。

@@ -1,12 +1,12 @@
 # 固定 1.00 基础包的桌面更新
 
-2026-11-08。规则见 [README](../README.md#安装与更新约定固定-100-基础包2026-11-07)，完整设计见[更新方案](execution/DESKTOP_UPDATE_AND_RELEASE_PLAN_2026-11-06.md)。02网页、补丁和受限GitHub直传已上线验收；当前0801补充冻结助手可信CA及已接入组件修复，两平台成品结果以[本轮交付](execution/deliveries/DESKTOP_CUMULATIVE_UPDATES_2026-11-07.md)为准，不将源码检查写成安装验收。
+2026-11-08。规则见 [README](../README.md#安装与更新约定固定-100-基础包2026-11-07)，完整设计见[更新方案](execution/DESKTOP_UPDATE_AND_RELEASE_PLAN_2026-11-06.md)。02网页、补丁和受限GitHub直传已上线验收；当前0802包含冻结助手可信CA、已接入组件修复及Windows载荷目录修正，两平台成品结果以[本轮交付](execution/deliveries/DESKTOP_CUMULATIVE_UPDATES_2026-11-07.md)为准，不将源码检查写成安装验收。
 
 ## 基线和版本
 
 开发从核对一致的 `main=ddec9e5f1ca6057312d0f3346c34d59534cdd2be` 开始，分支为 `codex/desktop-patch-updates`。固定发行标记 `desktop-base-1.0.0-2026110606` 指向原包构建源 `d07a57771475a9367e0face03d14f7629b97fe04`，不指向后续开发提交，也不移动这个标记。
 
-`resources/desktop_base_release.json` 固定原基础发行身份和两平台原文件，`resources/software_downloads.json` 保持原下载记录。基础包对外称 1.00，内部 `1.0.0/build2026110606`；当前更新候选为 `1.0.1/build2026110801`。02已发布，早期失败及后续证书问题的记录保留。后续构建号必须递增，只有项目负责人明确要求替换基础包时才生成新的基础发行。
+`resources/desktop_base_release.json` 固定原基础发行身份和两平台原文件，`resources/software_downloads.json` 保持原下载记录。基础包对外称 1.00，内部 `1.0.0/build2026110606`；当前更新候选为 `1.0.1/build2026110802`。02已发布，早期失败及后续证书问题的记录保留。后续构建号必须递增，只有项目负责人明确要求替换基础包时才生成新的基础发行。
 
 ## 客户使用
 

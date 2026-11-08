@@ -429,7 +429,18 @@ def verify_adoption(target: str, candidates: Path, output: Path) -> dict:
                 known_folders.begin()
             installed = install_inno(downloaded, qa / "Installed/LJQCApp", "install-base")
             base = installed / "versions" / ("1.0.0-2026110606-" + BASE_DIGEST[:12])
-            helper = install_inno(helper_artifact, qa / "BootstrapSource", "install-bootstrap")
+            helper_installation = install_inno(helper_artifact, qa / "BootstrapSource", "install-bootstrap")
+            payload_subdirectory = "payload-" + str(current["build_number"])
+            if bootstrap.get("installer_payload_subdirectory") != payload_subdirectory:
+                raise ValueError("The modern bootstrap receipt does not identify its exact versioned program payload")
+            helper = helper_installation / payload_subdirectory
+            if helper.is_symlink() or not helper.is_dir():
+                raise ValueError("The modern bootstrap did not install its exact versioned program payload")
+            from desktop_updates.helper_repair import verify_helper_manifest
+            installed_manifest = verify_helper_manifest(helper, target)
+            result["installed_helper_exact_payload"] = {"subdirectory": payload_subdirectory,
+                "manifest_file_count": len(installed_manifest["files"]),
+                "inno_maintenance_outside_payload": True}
             legacy_helper = install_inno(legacy_artifact, qa / "LegacyBootstrapSource", "install-legacy-bootstrap")
             helper_executable = helper / "LJQCAppUpdater.exe"
             helper_metadata = helper / "_internal/build_info.json"

@@ -1,6 +1,6 @@
 # GitHub Actions 构建桌面安装包
 
-2026-11-08日常入口为 **Desktop cumulative updates**，从同一源码分别生成Windows/Mac累计程序补丁和更新接入组件；操作、版本递增和验收见[桌面更新说明](desktop-updates.md)。已有 `desktop-build.yml` 手动入口现名 **Base installers (explicit only)**，默认调用补丁流程，只有明确勾选 `rebuild_base_installers` 才制作基础Setup/DMG。原06基础发行文件和下载记录保持不变。02已完成两平台构建、云端发布及真实GitHub清单直传，当前0801补强证书和既有助手修复，以[本轮交付](execution/deliveries/DESKTOP_CUMULATIVE_UPDATES_2026-11-07.md)的实际回执为准。下文为此前安装器工作流的历史操作，不用它触发日常重新打基础包。
+2026-11-08日常入口为 **Desktop cumulative updates**，从同一源码分别生成Windows/Mac累计程序补丁和更新接入组件；操作、版本递增和验收见[桌面更新说明](desktop-updates.md)。已有 `desktop-build.yml` 手动入口现名 **Base installers (explicit only)**，默认调用补丁流程，只有明确勾选 `rebuild_base_installers` 才制作基础Setup/DMG。原06基础发行文件和下载记录保持不变。02已完成两平台构建、云端发布及真实GitHub清单直传，当前0802包含证书、既有助手修复及Windows载荷目录修正，以[本轮交付](execution/deliveries/DESKTOP_CUMULATIVE_UPDATES_2026-11-07.md)的实际回执为准。下文为此前安装器工作流的历史操作，不用它触发日常重新打基础包。
 
 2026-11-07发布规则更新：现有 `1.0.0/build2026110606` 两份原包固定为1.00基础发行，后续按[README约定](../README.md#安装与更新约定固定-100-基础包2026-11-07)分发累计程序补丁，只有用户明确要求超大更新并替换基础包时才刷新。下文是当前候选Setup/DMG工作流的实际操作，不表示每次构建都能替换基础包。一次性更新接入组件、默认补丁导出和GitHub直传尚待实现；完整实施与验收见[方案](execution/DESKTOP_UPDATE_AND_RELEASE_PLAN_2026-11-06.md)。本次未修改工作流或触发重构建。06已发布及最终验收见[云端交付](execution/deliveries/CLOUD_DESKTOP_DOWNLOADS_2026-11-06.md)，下方04/05为此前阶段记录。
 

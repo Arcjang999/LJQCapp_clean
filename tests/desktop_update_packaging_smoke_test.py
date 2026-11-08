@@ -242,6 +242,37 @@ class PatchPackagingTests(unittest.TestCase):
         self.assertIn(dependency, recipe)
         self.assertLess(recipe.index(dependency), recipe.index("publish_desktop_update.py refresh-metadata"))
 
+    def test_windows_bootstrap_installs_and_runs_only_versioned_payload(self):
+        recipe = (ROOT / "packaging/update_bootstrap_windows.iss").read_text(encoding="utf-8")
+        self.assertIn('DestDir: "{app}\\payload-{#BuildNumber}"', recipe)
+        self.assertIn('Filename: "{app}\\payload-{#BuildNumber}\\LJQCAppUpdater.exe"', recipe)
+        self.assertNotIn("[InstallDelete]", recipe)
+        self.assertNotIn("Uninstallable=no", recipe.replace(" ", ""))
+        self.assertNotIn("UninstallFilesDir=", recipe)
+
+    def test_inno_maintenance_files_stay_outside_exact_helper_inventory(self):
+        from desktop_updates.helper_repair import verify_helper_manifest, write_helper_manifest
+        from desktop_updates.bootstrap import BootstrapError
+        installation = self.root / "InstalledBootstrap"
+        payload = installation / "payload-2026110802"
+        resources = payload / "_internal/resources"
+        resources.mkdir(parents=True)
+        (payload / "LJQCAppUpdater.exe").write_bytes(b"inert QA helper executable; never run")
+        (resources / "desktop_update_trust.json").write_bytes((ROOT / "resources/desktop_update_trust.json").read_bytes())
+        metadata = {"version": "1.0.1", "build_number": 2026110802, "target": "windows-x86_64",
+                    "git_commit": "e" * 40, "source_digest": "f" * 64, "source_dirty": False,
+                    "data_format_version": 1}
+        (payload / "_internal/build_info.json").write_text(json.dumps(metadata), encoding="utf-8")
+        manifest = write_helper_manifest(payload, "windows-x86_64")
+        for name in ("unins000.exe", "unins000.dat"):
+            (installation / name).write_bytes(b"inert Inno maintenance fixture")
+        self.assertEqual(verify_helper_manifest(payload, "windows-x86_64"), manifest)
+        self.assertFalse(any("unins" in entry["path"] for entry in manifest["files"]))
+        (payload / "unexpected-file.txt").write_bytes(b"unknown payload content must still fail closed")
+        with self.assertRaises(BootstrapError):
+            verify_helper_manifest(payload, "windows-x86_64")
+        self.assertTrue((installation / "unins000.exe").is_file())
+
     def test_real_installer_acceptance_refuses_local_execution_before_writing(self):
         destination = self.root / "must-not-be-created"
         with patch.dict(os.environ, {"GITHUB_ACTIONS": "false"}):
