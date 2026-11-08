@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QLabel,
 
 from desktop_updates.bootstrap import (BootstrapError, default_base_path, helper_source,
                                        install_bootstrap)
+from desktop_updates.helper_repair import helper_manifest_path, repair_registered_helper
 
 
 class Worker(QThread):
@@ -226,25 +227,48 @@ class UpdateWindow(QWidget):
 
 
 class BootstrapWindow(QWidget):
-    def __init__(self, manager, *, base=None, helper=None):
+    def __init__(self, manager, *, base=None, helper=None, repair_mode=False):
         super().__init__()
         self.manager, self.helper, self.worker = manager, helper, None
         self._closing = False
+        self.repair_mode = repair_mode
         self.next_window = None
-        self.setWindowTitle("LJQCApp 更新接入")
+        self.setWindowTitle("LJQCApp 修复更新组件" if repair_mode else "LJQCApp 更新接入")
         self.resize(520, 220)
         layout = QVBoxLayout(self)
-        self.status = QLabel("选择已安装的 LJQCApp 1.00。接入后通过原入口检查更新，现有资料继续保留。")
+        self.status = QLabel("修复更新组件后，通过原入口继续检查更新。当前程序、版本记录和资料会保留。"
+            if repair_mode else "选择已安装的 LJQCApp 1.00。接入后通过原入口检查更新，现有资料继续保留。")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         row = QHBoxLayout()
-        self.base = QLineEdit(str(base or default_base_path(manager.target)))
+        self.base = QLineEdit("" if repair_mode else str(base or default_base_path(manager.target)))
         self.browse = QPushButton("选择程序")
         self.browse.clicked.connect(self.choose_base)
         row.addWidget(self.base)
         row.addWidget(self.browse)
         layout.addLayout(row)
-        self.install = QPushButton("接入更新")
+        self.base.setVisible(not repair_mode)
+        self.browse.setVisible(not repair_mode)
+        # A Mac may run a quarantined copy separately from its DMG sidecar.
+        # Ask for the exact source application; never search the filesystem or
+        # modify quarantine. The repair/adoption worker still verifies every
+        # source byte and the complete macOS signature before changing entry.
+        self.helper_source_missing = False
+        self.helper_choice = QLabel()
+        self.helper_choice.setWordWrap(True)
+        self.choose_helper_button = QPushButton("选择更新接入应用")
+        self.choose_helper_button.clicked.connect(self.choose_helper)
+        if manager.target == "macos-arm64":
+            source = self.helper or helper_source()
+            sidecar = helper_manifest_path(Path(source), manager.target)
+            self.helper_source_missing = not sidecar.exists() and not sidecar.is_symlink()
+        self.helper_choice.setText("请从下载的更新接入补丁中选择 LJQCAppUpdater 应用。")
+        self.helper_choice.setVisible(self.helper_source_missing)
+        self.choose_helper_button.setVisible(self.helper_source_missing)
+        layout.addWidget(self.helper_choice)
+        layout.addWidget(self.choose_helper_button)
+        self.install = QPushButton("修复更新组件" if repair_mode else "接入更新")
+        self.install.setEnabled(not self.helper_source_missing)
         self.install.clicked.connect(self.adopt)
         layout.addWidget(self.install)
         QApplication.instance().aboutToQuit.connect(self.wait_for_worker)
@@ -255,21 +279,43 @@ class BootstrapWindow(QWidget):
         if location:
             self.base.setText(location)
 
+    def choose_helper(self):
+        location, _ = QFileDialog.getOpenFileName(self, "选择更新接入应用", "",
+                                                  "更新接入应用 (LJQCAppUpdater.app)")
+        if not location:
+            return
+        source = Path(location)
+        sidecar = helper_manifest_path(source, "macos-arm64")
+        if (source.name != "LJQCAppUpdater.app" or source.is_symlink() or not source.is_dir()
+                or sidecar.is_symlink() or not sidecar.is_file()):
+            self.helper_choice.setText("请直接选择下载补丁里的 LJQCAppUpdater 应用，并保持补丁内容完整。")
+            return
+        self.helper = source
+        self.helper_source_missing = False
+        self.helper_choice.setText("已选择 LJQCAppUpdater 应用。")
+        self.install.setEnabled(True)
+
     def adopt(self):
-        if QMessageBox.question(self, "接入更新", "请先保存工作并正常关闭 LJQCApp。\n现在接入更新吗？",
+        label = "修复更新组件" if self.repair_mode else "接入更新"
+        instruction = ("请先保存工作，关闭原软件及此前打开的更新窗口，保留当前修复窗口。"
+                       if self.repair_mode else "请先保存工作并正常关闭 LJQCApp。")
+        if QMessageBox.question(self, label, instruction + "\n现在" + label + "吗？",
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
             return
         self.install.setEnabled(False)
+        self.choose_helper_button.setEnabled(False)
         self.browse.setEnabled(False)
         self.base.setEnabled(False)
-        self.status.setText("正在核对原程序并接入更新，请稍候……")
+        self.status.setText("正在修复更新组件，请稍候……" if self.repair_mode else "正在核对原程序并接入更新，请稍候……")
         base = Path(self.base.text()).expanduser()
         try:
             helper = self.helper or helper_source()
         except Exception:
             self.failed("请使用对应系统的更新接入补丁进行安装。")
             return
-        self.worker = Worker(lambda progress: install_bootstrap(self.manager, base, helper), self)
+        operation = ((lambda progress: repair_registered_helper(self.manager, helper)) if self.repair_mode
+                     else (lambda progress: install_bootstrap(self.manager, base, helper)))
+        self.worker = Worker(operation, self)
         self.worker.finished.connect(self._worker_finished)
         self.worker.start()
 
@@ -303,12 +349,14 @@ class BootstrapWindow(QWidget):
 
     def failed(self, message):
         self.status.setText(message)
-        self.install.setEnabled(True)
+        self.install.setEnabled(not self.helper_source_missing)
+        self.choose_helper_button.setEnabled(True)
         self.browse.setEnabled(True)
         self.base.setEnabled(True)
 
     def completed(self, receipt):
-        self.status.setText("更新已接入。以后通过原程序入口打开即可检查更新。")
+        self.status.setText("更新组件已修复。以后通过原程序入口打开即可检查更新。" if self.repair_mode
+                           else "更新已接入。以后通过原程序入口打开即可检查更新。")
         self.next_window = UpdateWindow(self.manager)
         self.next_window.show()
         QTimer.singleShot(0, self.close)
@@ -321,11 +369,11 @@ class BootstrapWindow(QWidget):
             event.accept()
 
 
-def run_update_ui(manager, *, install=False, base=None, helper=None, manual_check=False) -> int:
+def run_update_ui(manager, *, install=False, base=None, helper=None, manual_check=False, repair_mode=False) -> int:
     application = QApplication.instance() or QApplication(sys.argv[:1])
     application.setApplicationName("LJQCApp")
-    if install or not manager.get_state().get("current"):
-        window = BootstrapWindow(manager, base=base, helper=helper)
+    if repair_mode or install or not manager.get_state().get("current"):
+        window = BootstrapWindow(manager, base=base, helper=helper, repair_mode=repair_mode)
     else:
         window = UpdateWindow(manager, manual_check=manual_check)
     window.show()
@@ -340,6 +388,7 @@ def run_ui_self_test(*, timeout_ms: int = 8000) -> dict:
     bundled, and the real update manager/data root are never instantiated.
     """
     class ProbeManager:
+        target = "windows-x86_64"
         def __init__(self):
             self.stages = []
             self.version = "1.0.0"
@@ -372,9 +421,14 @@ def run_ui_self_test(*, timeout_ms: int = 8000) -> dict:
     previous_quit = application.quitOnLastWindowClosed()
     application.setQuitOnLastWindowClosed(False)
     manager = ProbeManager()
+    repair_window = BootstrapWindow(manager, repair_mode=True)
+    repair_fields = (repair_window.base.isHidden() and repair_window.browse.isHidden()
+                     and repair_window.install.text() == "修复更新组件")
+    repair_window.close()
     window = UpdateWindow(manager, confirm_update=lambda: True)
     result = {"format_version": 1, "product": "LJQCAppUpdater", "status": "failed",
-              "native_gui_initialized": True, "business_storage_opened": False}
+              "native_gui_initialized": True, "business_storage_opened": False,
+              "repair_mode_ui_fields_hidden": repair_fields}
     started = False
     finished = False
     watcher = QTimer()
@@ -392,7 +446,7 @@ def run_ui_self_test(*, timeout_ms: int = 8000) -> dict:
         worker_joined = window.worker is None
         window.wait_for_worker()
         window.close()
-        result.update(status="passed" if success else "failed", stages=list(manager.stages),
+        result.update(status="passed" if success and repair_fields else "failed", stages=list(manager.stages),
                       ui_closed=not window.isVisible(), worker_joined=worker_joined,
                       program_version=manager.version)
         if reason:

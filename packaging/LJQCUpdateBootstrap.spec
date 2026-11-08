@@ -3,19 +3,23 @@ import json
 import os
 import sys
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_data_files
 
 ROOT = Path(SPECPATH).resolve().parent
 release = json.loads((ROOT / 'release.json').read_text(encoding='utf-8'))
 datas = [(str(ROOT / 'release.json'), '.'),
          (str(ROOT / 'resources/desktop_update_trust.json'), 'resources'),
          (str(ROOT / 'resources/desktop_baselines'), 'resources/desktop_baselines')]
+# The updater must carry its own Mozilla roots on both platforms. In particular,
+# python.org macOS runtimes need not have a usable system OpenSSL CA location.
+datas += collect_data_files('certifi', includes=['cacert.pem'])
 metadata = os.environ.get('LJQC_UPDATE_BUILD_INFO')
 if metadata:
     datas.append((metadata, '.'))
 a = Analysis([str(ROOT / 'desktop_updates/launcher.py')], pathex=[str(ROOT)],
     datas=datas, binaries=[],
     hiddenimports=['PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets',
-                   'cryptography.hazmat.primitives.asymmetric.ed25519'],
+                   'cryptography.hazmat.primitives.asymmetric.ed25519', 'certifi'],
     hookspath=[], hooksconfig={}, runtime_hooks=[],
     excludes=['PyQt5', 'PyQt6', 'PySide6.QtWebEngineCore', 'PySide6.QtWebEngineWidgets',
               'streamlit', 'pandas', 'matplotlib', 'numpy'], noarchive=False, optimize=0)

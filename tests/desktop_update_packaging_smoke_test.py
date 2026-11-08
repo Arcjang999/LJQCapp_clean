@@ -236,6 +236,12 @@ class PatchPackagingTests(unittest.TestCase):
             with self.subTest(ref=ref, event=event, requested=requested, automatic=automatic):
                 self.assertEqual(should_publish(ref=ref, event=event, requested=requested, automatic_enabled=automatic), expected)
 
+    def test_minimal_metadata_refresh_environment_explicitly_installs_ca_dependency(self):
+        recipe = (ROOT / ".github/workflows/desktop-update-publish.yml").read_text(encoding="utf-8")
+        dependency = "python -m pip install cryptography==50.0.2 certifi==2026.7.22"
+        self.assertIn(dependency, recipe)
+        self.assertLess(recipe.index(dependency), recipe.index("publish_desktop_update.py refresh-metadata"))
+
     def test_real_installer_acceptance_refuses_local_execution_before_writing(self):
         destination = self.root / "must-not-be-created"
         with patch.dict(os.environ, {"GITHUB_ACTIONS": "false"}):

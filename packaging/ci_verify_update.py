@@ -31,6 +31,37 @@ def read_json(path: Path) -> dict:
     return value
 
 
+def verify_frozen_tls(executable: Path, *, env: dict, result_file: Path, log_file: Path) -> dict:
+    """Only CI may execute this actual frozen-helper network acceptance."""
+    if (os.environ.get("GITHUB_ACTIONS", "").lower() != "true"
+            or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted"):
+        raise ValueError("Frozen helper TLS acceptance is restricted to ephemeral GitHub runners")
+    import certifi
+    probe_env = {**env, "SSL_CERT_FILE": str(result_file.parent / "absent-ambient-ca.pem"),
+                 "SSL_CERT_DIR": str(result_file.parent / "absent-ambient-ca-directory")}
+    with log_file.open("wb") as log:
+        subprocess.run([str(executable), "--tls-self-test", "--probe-result", str(result_file)],
+            cwd=executable.parent, env=probe_env, stdout=log, stderr=subprocess.STDOUT,
+            check=True, timeout=90)
+    result = read_json(result_file)
+    if (result.get("status") != "passed" or result.get("frozen") is not True
+            or result.get("bundled_ca") is not True or result.get("trusted_ca_count", 0) < 1
+            or result.get("certifi_version") != certifi.__version__
+            or result.get("ca_sha256") != digest_file(Path(certifi.where()))
+            or result.get("hostname_verification") is not True
+            or result.get("certificate_verification") != "CERT_REQUIRED"
+            or result.get("minimum_tls_version") not in ("TLSv1_2", "TLSv1_3")
+            or result.get("unknown_self_signed_rejected") is not True
+            or result.get("release_index_signature_verified") is not True
+            or result.get("production_origin") != "https://159.75.243.120"
+            or result.get("business_storage_opened") is not False
+            or set(result.get("platform_manifests", {})) != {"windows-x86_64", "macos-arm64"}
+            or any(item.get("signature_verified") is not True
+                   for item in result.get("platform_manifests", {}).values())):
+        raise ValueError("The actual frozen helper did not pass production HTTPS/signature and untrusted-CA acceptance")
+    return result
+
+
 def find_program(build_root: Path, target: str) -> tuple[Path, dict]:
     if target == "windows-x86_64":
         paths = list(build_root.rglob("build_receipt.json"))
@@ -63,6 +94,11 @@ def verify_native_payload(program: Path, target: str, output: Path) -> dict:
     """Probe the actual extracted archive, not a separate pre-export directory."""
     desktop = program / ("LJQCApp.exe" if target == "windows-x86_64" else "LJQCApp.app/Contents/MacOS/LJQCApp")
     service = program / ("_internal/app/LJQCAppService.exe" if target == "windows-x86_64" else "LJQCApp.app/Contents/Resources/app/LJQCAppService")
+    import certifi
+    ca_sha = digest_file(Path(certifi.where()))
+    packaged_roots = [path for path in program.rglob("cacert.pem") if path.parent.name == "certifi" and path.is_file()]
+    if not packaged_roots or any(digest_file(path) != ca_sha for path in packaged_roots):
+        raise ValueError("The native program did not retain the pinned certifi root bundle")
     qa = Path(tempfile.mkdtemp(prefix="ljqc-native-update-qa-"))
     data = qa / "data"
     runtime = data / "runtime"
@@ -159,7 +195,9 @@ def verify_native_payload(program: Path, target: str, output: Path) -> dict:
         return {"status": "passed", "native_architecture": "passed", "cli_versions": "passed",
                 "service_health": "passed", "graceful_exit": "passed", "locks_released": True,
                 "business_database_created": False, "gui_installation_tested": False,
-                "isolated_empty_database_preflight": "passed", "data_migration_tested": False}
+                "isolated_empty_database_preflight": "passed", "data_migration_tested": False,
+                "bundled_ca_files": [path.relative_to(program).as_posix() for path in packaged_roots],
+                "bundled_ca_sha256": ca_sha, "certifi_version": certifi.__version__}
     finally:
         if process is not None and process.poll() is None:
             request.write_text("stop\n", encoding="ascii")

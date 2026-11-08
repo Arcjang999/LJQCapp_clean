@@ -93,7 +93,7 @@ jobs:
           --target ${{ matrix.target }}
           --build-root output/github-update/${{ runner.os == 'Windows' && 'windows' || 'macos' }}
           --output output/ci-updates/${{ matrix.target }}
-      - name: Build Windows one-time update bootstrap
+      - name: Build Windows bootstrap and verify frozen production HTTPS
         if: runner.os == 'Windows'
         shell: pwsh
         run: >-
@@ -101,10 +101,10 @@ jobs:
           --output output/ci-updates/${{ matrix.target }}
           --inno-compiler "$env:LJQC_CI_INNO_COMPILER"
           --chinese-messages "$env:LJQC_CI_CHINESE_MESSAGES"
-      - name: Build Mac one-time update bootstrap
+      - name: Build Mac bootstrap and verify frozen production HTTPS
         if: runner.os == 'macOS'
         run: python packaging/build_update_bootstrap.py --output output/ci-updates/${{ matrix.target }}
-      - name: Verify real 1.00 adoption and cumulative program update
+      - name: Verify installed helper HTTPS and real 1.00 cumulative update adoption
         run: >-
           python packaging/ci_verify_update_adoption.py
           --target ${{ matrix.target }}

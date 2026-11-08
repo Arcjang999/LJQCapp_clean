@@ -31,6 +31,22 @@ from urllib.request import urlopen
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "packaging")]
 
+# Immutable, already published update components from the first accepted pair.
+# These identify actual frozen 02 helpers, not source-generated stand-ins. They
+# are independent of the unchanged 1.00 base download catalog.
+LEGACY_HELPERS = {
+    "windows-x86_64": {
+        "url": "https://159.75.243.120/downloads/update-bootstrap/1/2026110702/windows-x86_64/LJQCApp-UpdateBootstrap-1-2026110702-windows-x64-Setup.exe",
+        "size_bytes": 39021001,
+        "sha256": "813c75b7df56ef5e91bcc89a1db554f40af36972746181ac45ad126bc91983ea"},
+    "macos-arm64": {
+        "url": "https://159.75.243.120/downloads/update-bootstrap/1/2026110702/macos-arm64/LJQCApp-UpdateBootstrap-1-2026110702-macos-arm64-pending-signing.dmg",
+        "size_bytes": 49730713,
+        "sha256": "e4db85d3f172a8e6095cf0c01b02bab9c9086480347a5c955441f8bc61a00f93"},
+}
+LEGACY_COMMIT = "2adb7721060582308164a4b10a13d8d3c66dd14f"
+LEGACY_SOURCE_DIGEST = "9b8100574296fa4d1083d9b91013d34276d57f65c8a7f59bba1e3596dcbabc72"
+
 
 def read_json(path: Path) -> dict:
     result = json.loads(path.read_text(encoding="utf-8-sig"))
@@ -308,7 +324,7 @@ def verify_adoption(target: str, candidates: Path, output: Path) -> dict:
     runner_temp = require_ephemeral_runner(target)
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
     from cryptography.hazmat.primitives import serialization
-    from desktop_updates.bootstrap import BASE_DIGEST, install_bootstrap, validate_baseline
+    from desktop_updates.bootstrap import BASE_DIGEST, validate_baseline
     from desktop_updates.data_guard import (assert_attachments, assert_current, assert_retained,
                                             digest_file, logical_digest, snapshot)
     from desktop_updates.manager import UpdateManager
@@ -368,6 +384,11 @@ def verify_adoption(target: str, candidates: Path, output: Path) -> dict:
             raise ValueError("The native image does not contain its expected application")
         destination.parent.mkdir(parents=True, exist_ok=True)
         run(["ditto", str(mount / application), str(destination)], name + "-copy", timeout=180)
+        if name == "bootstrap":
+            helper_manifest = mount / "update_helper_manifest.json"
+            if helper_manifest.is_symlink() or not helper_manifest.is_file():
+                raise ValueError("The new helper image is missing its complete external byte manifest")
+            shutil.copyfile(helper_manifest, destination.parent / helper_manifest.name)
         run(["codesign", "--verify", "--deep", "--strict", str(destination)], name + "-signature", timeout=120)
         run(["hdiutil", "detach", str(mount)], name + "-detach", timeout=120)
         mounts.remove(mount)
@@ -396,6 +417,11 @@ def verify_adoption(target: str, candidates: Path, output: Path) -> dict:
         downloaded = download_artifact({"_trusted_origin": "https://159.75.243.120", "artifact": baseline},
                                       download_dir / baseline["url"].rsplit("/", 1)[-1])
         result["immutable_base_download"] = {"size_bytes": downloaded.stat().st_size, "sha256": digest_file(downloaded)}
+        legacy_identity = LEGACY_HELPERS[target]
+        legacy_artifact = download_artifact({"_trusted_origin": "https://159.75.243.120", "artifact": legacy_identity},
+            download_dir / legacy_identity["url"].rsplit("/", 1)[-1])
+        result["published_02_helper_download"] = {"size_bytes": legacy_artifact.stat().st_size,
+                                                  "sha256": digest_file(legacy_artifact)}
         if target == "windows-x86_64":
             refuse_existing_windows_installation()
             known_folders = TemporaryKnownFolders(qa)
@@ -404,13 +430,23 @@ def verify_adoption(target: str, candidates: Path, output: Path) -> dict:
             installed = install_inno(downloaded, qa / "Installed/LJQCApp", "install-base")
             base = installed / "versions" / ("1.0.0-2026110606-" + BASE_DIGEST[:12])
             helper = install_inno(helper_artifact, qa / "BootstrapSource", "install-bootstrap")
+            legacy_helper = install_inno(legacy_artifact, qa / "LegacyBootstrapSource", "install-legacy-bootstrap")
             helper_executable = helper / "LJQCAppUpdater.exe"
             helper_metadata = helper / "_internal/build_info.json"
+            legacy_metadata = legacy_helper / "_internal/build_info.json"
         else:
             base = mount_application(downloaded, "LJQCApp.app", qa / "Installed/LJQCApp.app", "base")
             helper = mount_application(helper_artifact, "LJQCAppUpdater.app", qa / "BootstrapSource/LJQCAppUpdater.app", "bootstrap")
+            legacy_helper = mount_application(legacy_artifact, "LJQCAppUpdater.app",
+                qa / "LegacyBootstrapSource/LJQCAppUpdater.app", "legacy-bootstrap")
             helper_executable = helper / "Contents/MacOS/LJQCAppUpdater"
             helper_metadata = helper / "Contents/Resources/build_info.json"
+            legacy_metadata = legacy_helper / "Contents/Resources/build_info.json"
+        legacy_embedded = read_json(legacy_metadata)
+        if (legacy_embedded.get("build_number") != 2026110702 or legacy_embedded.get("git_commit") != LEGACY_COMMIT
+                or legacy_embedded.get("source_digest") != LEGACY_SOURCE_DIGEST
+                or legacy_embedded.get("source_dirty") is not False or legacy_embedded.get("target") != target):
+            raise ValueError("The downloaded public 02 helper carries an unexpected source identity")
         embedded = read_json(helper_metadata)
         if any(embedded.get(field) != current[field] for field in
                ("version", "build_number", "git_commit", "source_digest", "source_dirty")) or embedded.get("target") != target:
@@ -422,6 +458,11 @@ def verify_adoption(target: str, candidates: Path, output: Path) -> dict:
             raise ValueError("The installed frozen helper has different production trust")
         run([str(helper_executable), "--version"], "installed-helper-version", timeout=60)
         run([str(helper_executable), "--self-test"], "installed-helper-public-config", timeout=60)
+        # Exercise the helper extracted from the distributable Setup/DMG, not
+        # just the pre-installer build directory or this source interpreter.
+        from ci_verify_update import verify_frozen_tls
+        result["installed_frozen_helper_production_tls"] = verify_frozen_tls(helper_executable, env=env,
+            result_file=logs / "installed-helper-tls.json", log_file=logs / "installed-helper-tls.log")
         if data_root.exists():
             raise ValueError("A side-effect-free installed-helper probe touched business storage")
 
@@ -447,25 +488,31 @@ def verify_adoption(target: str, candidates: Path, output: Path) -> dict:
         trust_path = qa / "qa-only-trust.json"
         trust_path.write_bytes(canonical_json(qa_trust))
         trust_path.chmod(0o600)
-        manager = UpdateManager(root=data_root, target=target, trust_path=trust_path)
-        shortcut_files = []
-        def qa_shortcuts(entry: Path, old: Path, root: Path) -> dict:
-            destination = qa / "StartMenu/LJQCApp.lnk"
-            destination.parent.mkdir(parents=True)
-            payload = {"file": str(destination), "entry": str(entry), "working": str(entry.parent),
-                       "arguments": subprocess.list2cmdline(["--data-root", str(root)])}
-            script = ("$p=[Console]::In.ReadToEnd()|ConvertFrom-Json; $s=New-Object -ComObject WScript.Shell; "
-                      "$l=$s.CreateShortcut($p.file); $l.TargetPath=$p.entry; $l.Arguments=$p.arguments; "
-                      "$l.WorkingDirectory=$p.working; $l.Save(); "
-                      "if($s.CreateShortcut($p.file).TargetPath -ine $p.entry){throw 'QA shortcut did not target the installed helper'}")
-            subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
-                input=json.dumps(payload), text=True, encoding="utf-8", capture_output=True, env=env, check=True, timeout=45)
-            if not destination.is_file() or not destination.resolve().is_relative_to(qa):
-                raise ValueError("The redirected native shortcut was not created inside QA")
-            shortcut_files.append(str(destination))
-            return {"shortcuts": shortcut_files}
-        receipt = install_bootstrap(manager, base, helper,
-            windows_destination=qa / "Programs/LJQCAppUpdater", shortcut_writer=qa_shortcuts)
+        # Initial adoption/repair uses unchanged production trust. The temporary
+        # QA key is selected only after repair for the isolated program apply.
+        manager = UpdateManager(root=data_root, target=target)
+        if target == "windows-x86_64":
+            # Before allowing the old frozen component's real COM shortcut code,
+            # verify WScript resolves both writable locations to the QA mapping.
+            script = ("$s=New-Object -ComObject WScript.Shell; "
+                      "@{Programs=$s.SpecialFolders.Item('Programs');Desktop=$s.SpecialFolders.Item('Desktop')}|ConvertTo-Json -Compress")
+            locations = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+                text=True, encoding="utf-8", capture_output=True, env=env, check=True, timeout=45)
+            resolved = json.loads(locations.stdout.lstrip("\ufeff"))
+            if any(Path(resolved[name]).resolve() != (qa / "KnownFolders" / name).resolve()
+                   for name in ("Programs", "Desktop")):
+                raise ValueError("The legacy component's real COM shortcut locations are not isolated to QA")
+        legacy_executable = legacy_helper / ("LJQCAppUpdater.exe" if target == "windows-x86_64"
+                                              else "Contents/MacOS/LJQCAppUpdater")
+        run([str(legacy_executable), "--install", "--no-gui", "--base", str(base),
+             "--helper", str(legacy_helper), "--data-root", str(data_root), "--target", target],
+            "legacy-frozen-helper-adoption", timeout=180)
+        receipt = read_json(manager.directory / "bootstrap.json")
+        if target == "windows-x86_64" and (not receipt.get("shortcuts") or any(
+                not Path(path).resolve().is_relative_to(qa) or not Path(path).is_file()
+                for path in receipt["shortcuts"])):
+            raise ValueError("The real legacy frozen component's shortcuts escaped its temporary QA mapping")
+        result["real_02_frozen_cli_adoption"] = True
         old_state = manager.get_state()
         original = Path(receipt["original_program"])
         original_root = original.parent if target == "windows-x86_64" else original.parents[2]
@@ -473,9 +520,45 @@ def verify_adoption(target: str, candidates: Path, output: Path) -> dict:
         assert_current(data_root, before)
         if old_state["current"]["build_number"] != 2026110606 or not Path(receipt["updater_entrypoint"]).is_file():
             raise ValueError("Real baseline/helper adoption did not register a valid stable entry")
+        manager.check()  # Real signed public feed; retain a nonzero replay gate.
+        if manager.get_state().get("highest_sequence", 0) <= 0:
+            raise ValueError("The production metadata check did not establish a replay-protection sequence")
+        # Repair a genuinely installed legacy component without registering the
+        # base again or resetting current/sequence/customer data. Only the new
+        # component source is eligible; its production trust is unchanged.
+        state_before_repair = manager.state_path.read_bytes()
+        bootstrap_path = manager.directory / "bootstrap.json"
+        registration_before_repair = bootstrap_path.read_bytes()
+        stable_executable = Path(receipt["updater_entrypoint"])
+        stable_root = (stable_executable.parent if target == "windows-x86_64"
+                       else stable_executable.parents[2])
+        stable_metadata = stable_root / ("_internal/build_info.json" if target == "windows-x86_64"
+                                         else "Contents/Resources/build_info.json")
+        if read_json(stable_metadata).get("build_number") != 2026110702:
+            raise ValueError("The real legacy component was not installed before repair")
+        # Execute repair through the actual newly distributed frozen CLI. Its
+        # data-root is this QA installation and its built-in production trust
+        # remains unchanged; no --trust override exists on the customer CLI.
+        run([str(helper_executable), "--install", "--no-gui", "--target", target,
+             "--data-root", str(data_root)], "installed-frozen-helper-repair", timeout=180)
+        repaired = read_json(bootstrap_path)
+        if (manager.state_path.read_bytes() != state_before_repair
+                or bootstrap_path.read_bytes() != registration_before_repair
+                or repaired.get("updater_entrypoint") != receipt["updater_entrypoint"]):
+            raise ValueError("Helper repair changed registered application state or its stable entry")
+        from release_payload import validate_payload
+        if validate_payload(stable_root) != validate_payload(helper):
+            raise ValueError("The repaired stable component differs from the accepted frozen source")
+        result["repaired_stable_helper_production_tls"] = verify_frozen_tls(stable_executable, env=env,
+            result_file=logs / "repaired-stable-helper-tls.json", log_file=logs / "repaired-stable-helper-tls.log")
+        validate_baseline(original_root, target)
+        assert_current(data_root, before)
+        result["real_02_helper_repaired_without_state_reset"] = True
+        result["repair_retained_published_sequence"] = manager.get_state()["highest_sequence"]
+        manager = UpdateManager(root=data_root, target=target, trust_path=trust_path)
         issued = datetime.now(timezone.utc)
         body = {**candidate, "issued_at": issued.isoformat(), "expires_at": (issued + timedelta(days=14)).isoformat(),
-                "sequence": int(issued.timestamp() * 1_000_000)}
+                "sequence": max(int(issued.timestamp() * 1_000_000), manager.get_state()["highest_sequence"] + 1)}
         raw = canonical_json({"signed": body, "key_id": "qa-adoption-only",
                               "signature": base64.b64encode(key.sign(canonical_json(body))).decode("ascii")})
         with patch("desktop_updates.manager.fetch_manifest", return_value=raw):

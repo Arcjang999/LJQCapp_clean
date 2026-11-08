@@ -265,15 +265,22 @@ def install_bootstrap(manager, base: Path, helper: Path, *, windows_destination:
     receipt_path = updates / "bootstrap.json"
     with manager.maintenance():
         if receipt_path.exists():
-            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-            state = manager.get_state()
-            if state.get("current") and Path(receipt.get("updater_entrypoint", "")).is_file():
-                return receipt
-            raise BootstrapError("已有更新接入记录尚待核对，未改动原程序。")
+            from .helper_repair import repair_registered_helper
+            return repair_registered_helper(manager, helper, already_locked=True,
+                                            signature_checker=signature_checker)
         if journal_path.exists():
             recover_bootstrap(manager, already_locked=True)
             if receipt_path.exists():
-                return json.loads(receipt_path.read_text(encoding="utf-8"))
+                from .helper_repair import repair_registered_helper
+                return repair_registered_helper(manager, helper, already_locked=True,
+                                                signature_checker=signature_checker)
+        # Legacy build02 did not carry a helper manifest; its original public
+        # artifact is separately pinned by native adoption acceptance. New
+        # components must have their post-signing complete inventory.
+        from .helper_repair import read_helper_identity, verify_helper_manifest, MIN_INVENTORIED_BUILD
+        helper_identity = read_helper_identity(helper, target)
+        if helper_identity["build_number"] >= MIN_INVENTORIED_BUILD:
+            verify_helper_manifest(helper, target)
         identity = validate(base, target)
         base = Path(identity["path"])
         if helper == base or helper.is_relative_to(base) or base.is_relative_to(helper):

@@ -6,6 +6,9 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import io
 import json
+import ipaddress
+import os
+import ssl
 from pathlib import Path
 import sys
 import tarfile
@@ -18,7 +21,11 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, PrivateFormat, NoEncryption
+from cryptography.x509.oid import NameOID, ExtendedKeyUsageOID
 from desktop_updates.protocol import BASE_RELEASE, UpdateError, canonical_json, validate_trust, verify_envelope
 from desktop_updates.payload import extract_verified_payload, verify_installed_payload
 from desktop_updates import payload as payload_module
@@ -288,6 +295,122 @@ class Response(io.BytesIO):
         self.url = url
     def geturl(self):
         return self.url
+
+
+class TLSContextTests(unittest.TestCase):
+    def local_certificate_chain(self, directory):
+        """Ephemeral QA-only root and localhost leaf, never production material."""
+        now = datetime.now(timezone.utc)
+        root_key = ec.generate_private_key(ec.SECP256R1())
+        root_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "LJQC temporary unit-test CA")])
+        root = (x509.CertificateBuilder().subject_name(root_name).issuer_name(root_name)
+            .public_key(root_key.public_key()).serial_number(x509.random_serial_number())
+            .not_valid_before(now - timedelta(days=1)).not_valid_after(now + timedelta(days=2))
+            .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+            .add_extension(x509.KeyUsage(digital_signature=True, content_commitment=False,
+                key_encipherment=False, data_encipherment=False, key_agreement=False,
+                key_cert_sign=True, crl_sign=True, encipher_only=None, decipher_only=None), critical=True)
+            .add_extension(x509.SubjectKeyIdentifier.from_public_key(root_key.public_key()), critical=False)
+            .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(root_key.public_key()), critical=False)
+            .sign(root_key, hashes.SHA256()))
+        server_key = ec.generate_private_key(ec.SECP256R1())
+        leaf = (x509.CertificateBuilder()
+            .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "localhost")]))
+            .issuer_name(root_name).public_key(server_key.public_key()).serial_number(x509.random_serial_number())
+            .not_valid_before(now - timedelta(days=1)).not_valid_after(now + timedelta(days=2))
+            .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+            .add_extension(x509.KeyUsage(digital_signature=True, content_commitment=False,
+                key_encipherment=False, data_encipherment=False, key_agreement=False,
+                key_cert_sign=False, crl_sign=False, encipher_only=None, decipher_only=None), critical=True)
+            .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
+            .add_extension(x509.SubjectAlternativeName([x509.DNSName("localhost"),
+                x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]), critical=False)
+            .add_extension(x509.SubjectKeyIdentifier.from_public_key(server_key.public_key()), critical=False)
+            .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(root_key.public_key()), critical=False)
+            .sign(root_key, hashes.SHA256()))
+        directory = Path(directory)
+        ca = directory / "qa-only-root.pem"
+        ca.write_bytes(root.public_bytes(Encoding.PEM))
+        chain = directory / "qa-only-server.pem"
+        chain.write_bytes(leaf.public_bytes(Encoding.PEM) + root.public_bytes(Encoding.PEM))
+        key = directory / "qa-only-server-key.pem"
+        key.write_bytes(server_key.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()))
+        key.chmod(0o600)
+        server = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        server.load_cert_chain(chain, key)
+        return ca, root, server
+
+    def handshake(self, client_context, server_context, hostname="localhost"):
+        """Real OpenSSL TLS handshake over MemoryBIO, without opening a socket."""
+        client_in, client_out, server_in, server_out = (ssl.MemoryBIO() for _ in range(4))
+        client = client_context.wrap_bio(client_in, client_out, server_hostname=hostname)
+        server = server_context.wrap_bio(server_in, server_out, server_side=True)
+        finished = set()
+        for _ in range(100):
+            for name, peer in (("client", client), ("server", server)):
+                if name in finished:
+                    continue
+                try:
+                    peer.do_handshake()
+                    finished.add(name)
+                except ssl.SSLWantReadError:
+                    pass
+            for outgoing, incoming in ((client_out, server_in), (server_out, client_in)):
+                data = outgoing.read()
+                if data:
+                    incoming.write(data)
+            if len(finished) == 2:
+                return
+        self.fail("TLS fixture handshake did not finish")
+
+    def test_bundled_roots_load_without_system_ca_paths(self):
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.dict(os.environ, {"SSL_CERT_FILE": str(Path(temporary) / "absent.pem"),
+                                     "SSL_CERT_DIR": str(Path(temporary) / "absent-dir"),
+                                     "SSLKEYLOGFILE": str(Path(temporary) / "must-not-create.keylog")}), \
+             patch.object(ssl.SSLContext, "load_default_certs", side_effect=AssertionError("system CA fallback forbidden")), \
+             patch.object(ssl, "get_default_verify_paths", side_effect=AssertionError("system CA paths forbidden")):
+            self.assertEqual(ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT).cert_store_stats()["x509_ca"], 0)
+            context = transport._https_context()
+            self.assertGreater(context.cert_store_stats()["x509_ca"], 0)
+            self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+            self.assertTrue(context.check_hostname)
+            self.assertGreaterEqual(context.minimum_version, ssl.TLSVersion.TLSv1_2)
+            self.assertIsNone(context.keylog_filename)
+            self.assertFalse((Path(temporary) / "must-not-create.keylog").exists())
+
+    def test_environment_ca_cannot_trust_an_unknown_self_signed_issuer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            ca, root, server = self.local_certificate_chain(temporary)
+            with patch.dict(os.environ, {"SSL_CERT_FILE": str(ca), "SSL_CERT_DIR": temporary,
+                                          "PYTHONHTTPSVERIFY": "0", "REQUESTS_CA_BUNDLE": str(ca)}):
+                context = transport._https_context()
+                self.assertNotIn(root.public_bytes(Encoding.DER), context.get_ca_certs(binary_form=True))
+                self.assertEqual(context.verify_mode, ssl.CERT_REQUIRED)
+                self.assertTrue(context.check_hostname)
+                with self.assertRaises(ssl.SSLCertVerificationError):
+                    self.handshake(context, server)
+
+    def test_tls_peer_hostname_verification_is_retained(self):
+        import certifi
+        with tempfile.TemporaryDirectory() as temporary:
+            ca, root, server = self.local_certificate_chain(temporary)
+            # Only the test substitutes a freshly generated root resource. The
+            # production factory has no CA path argument or environment override.
+            with patch.object(certifi, "where", return_value=str(ca)):
+                self.handshake(transport._https_context(), server, "localhost")
+                with self.assertRaises(ssl.SSLCertVerificationError):
+                    self.handshake(transport._https_context(), server, "wrong.example")
+
+    def test_missing_or_empty_bundled_root_resource_fails_closed(self):
+        import certifi
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "missing-cacert.pem"
+            with patch.object(certifi, "where", return_value=str(path)), self.assertRaises(UpdateError):
+                transport._https_context()
+            path.write_bytes(b"")
+            with patch.object(certifi, "where", return_value=str(path)), self.assertRaises(UpdateError):
+                transport._https_context()
 
 
 class TransportTests(unittest.TestCase):

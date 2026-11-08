@@ -118,6 +118,60 @@ class ReceiverSetupTests(unittest.TestCase):
         self.assertNotIn("ssl_certificate ", setup.NGINX_PROPOSAL)
         self.assertNotIn("systemctl", setup.NGINX_PROPOSAL)
 
+    def runtime_fixture(self):
+        tools = self.root / "dedicated-tools"
+        executable = tools / "venv/bin/python"
+        executable.parent.mkdir(parents=True)
+        executable.write_bytes(b"inert fixture, never executed")
+        return tools
+
+    def test_existing_receiver_adds_only_missing_certifi_without_dependencies(self):
+        tools = self.runtime_fixture()
+        missing = {"runtime": "existing", "cryptography": "50.0.2", "certifi": "install-pinned-if-missing"}
+        ready = {**missing, "certifi": "2026.7.22"}
+        with patch.object(setup, "TOOLS", tools), patch.object(setup, "runtime_dependency_status", side_effect=[missing, ready]), \
+                patch.object(setup, "check_existing_venv") as permissions, patch.object(setup, "command") as command:
+            self.assertEqual(setup.ensure_runtime_dependencies("/usr/bin/python3"), ready)
+        installs = [call.args[0] for call in command.call_args_list if "pip" in call.args[0]]
+        self.assertEqual(len(installs), 1)
+        self.assertEqual(installs[0][-1], "certifi==2026.7.22")
+        self.assertIn("--no-deps", installs[0])
+        self.assertNotIn("cryptography==50.0.2", installs[0])
+        self.assertTrue(all(str(tools / "venv/bin/python") == call.args[0][0] for call in command.call_args_list))
+        permissions.assert_called_once_with()
+
+    def test_complete_existing_receiver_never_runs_pip_or_recreates_venv(self):
+        tools = self.runtime_fixture()
+        ready = {"runtime": "existing", "cryptography": "50.0.2", "certifi": "2026.7.22"}
+        with patch.object(setup, "TOOLS", tools), patch.object(setup, "runtime_dependency_status", return_value=ready), \
+                patch.object(setup, "check_existing_venv"), patch.object(setup, "command") as command:
+            setup.ensure_runtime_dependencies("/usr/bin/python3")
+        self.assertEqual(command.call_count, 1)
+        self.assertNotIn("pip", command.call_args.args[0])
+        self.assertIn("cert_store_stats", command.call_args.args[0][-1])
+        self.assertIn("version('certifi')", command.call_args.args[0][-1])
+        self.assertNotIn("certifi.__version__ ==", command.call_args.args[0][-1])
+
+    def test_receiver_runtime_conflicts_fail_before_any_package_change(self):
+        tools = self.runtime_fixture()
+        for versions in ({"cryptography": "50.0.2", "certifi": "2026.10.18"},
+                         {"cryptography": "49.0.0", "certifi": None},
+                         {"cryptography": None, "certifi": "2026.7.22"}):
+            with self.subTest(versions=versions), patch.object(setup, "TOOLS", tools), \
+                    patch.object(setup, "command", return_value=SimpleNamespace(stdout=json.dumps(versions))) as command:
+                with self.assertRaisesRegex(ValueError, "no packages were changed"):
+                    setup.ensure_runtime_dependencies("/usr/bin/python3")
+                self.assertEqual(command.call_count, 1)
+                self.assertNotIn("pip", command.call_args.args[0])
+
+    def test_missing_receiver_ca_after_pip_is_not_reported_as_installed(self):
+        tools = self.runtime_fixture()
+        missing = {"runtime": "existing", "cryptography": "50.0.2", "certifi": "install-pinned-if-missing"}
+        with patch.object(setup, "TOOLS", tools), patch.object(setup, "runtime_dependency_status", return_value=missing), \
+                patch.object(setup, "command"):
+            with self.assertRaisesRegex(ValueError, "not installed correctly"):
+                setup.ensure_runtime_dependencies("/usr/bin/python3")
+
     def test_ssh_policy_rejects_loader_environment_and_incompatible_locked_login(self):
         safe = ("pubkeyauthentication yes\nchrootdirectory none\nforcecommand none\n"
                 "authenticationmethods any\npermituserenvironment no\nusepam yes\n"

@@ -36,6 +36,8 @@ TRUST = TOOLS / "resources/desktop_update_trust.json"
 FORCED = (f"{TOOLS}/venv/bin/python -I {TOOLS}/packaging/publish_desktop_update.py receive-and-promote "
           f"--staging-root {STAGING} --public-root {PUBLIC} --trust {TRUST}")
 MANIFEST = "receiver-tools-manifest.json"
+CRYPTOGRAPHY_VERSION = "50.0.2"
+CERTIFI_VERSION = "2026.7.22"
 FILES = (
     "scripts/install_desktop_update_receiver.py", "packaging/publish_desktop_update.py",
     "desktop_updates/__init__.py", "desktop_updates/protocol.py", "desktop_updates/transport.py",
@@ -250,6 +252,47 @@ def check_existing_venv() -> None:
         raise ValueError("The dedicated runtime must use an ordinary copied Python executable")
 
 
+def runtime_dependency_status() -> dict:
+    """Read only the dedicated runtime; never inspect/change the business venv."""
+    executable = TOOLS / "venv/bin/python"
+    if not executable.is_file():
+        return {"runtime": "not-created", "certifi": "install-pinned-if-missing"}
+    probe = ("import importlib.metadata as m,json\nversions={}\n"
+             "for name in ('cryptography','certifi'):\n"
+             " try: versions[name]=m.version(name)\n"
+             " except m.PackageNotFoundError: versions[name]=None\n"
+             "print(json.dumps(versions))")
+    value = json.loads(command([str(executable), "-I", "-B", "-c", probe]).stdout)
+    if not isinstance(value, dict) or value.get("cryptography") != CRYPTOGRAPHY_VERSION:
+        raise ValueError("The dedicated receiver cryptography version differs; no packages were changed")
+    if value.get("certifi") not in (None, CERTIFI_VERSION):
+        raise ValueError("The dedicated receiver certifi version differs; no packages were changed")
+    return {"runtime": "existing", "cryptography": CRYPTOGRAPHY_VERSION,
+            "certifi": value.get("certifi") or "install-pinned-if-missing"}
+
+
+def ensure_runtime_dependencies(python: str) -> dict:
+    """Add only a missing pinned CA bundle to an already deployed receiver."""
+    runtime = TOOLS / "venv"
+    executable = runtime / "bin/python"
+    if not runtime.exists():
+        command([python, "-m", "venv", "--copies", str(runtime)])
+        command([str(executable), "-I", "-m", "pip", "install", "--disable-pip-version-check",
+                 "cryptography==" + CRYPTOGRAPHY_VERSION])
+    value = runtime_dependency_status()
+    if value.get("certifi") == "install-pinned-if-missing":
+        command([str(executable), "-I", "-m", "pip", "install", "--disable-pip-version-check",
+                 "--no-deps", "--only-binary=:all:", "certifi==" + CERTIFI_VERSION])
+    value = runtime_dependency_status()
+    if value.get("certifi") != CERTIFI_VERSION:
+        raise ValueError("The dedicated receiver CA dependency was not installed correctly")
+    command([str(executable), "-I", "-B", "-c",
+             "import certifi,ssl; from importlib.metadata import version; assert version('certifi') == '" + CERTIFI_VERSION + "'; "
+             "assert ssl.create_default_context(cafile=certifi.where()).cert_store_stats()['x509_ca'] > 0"])
+    check_existing_venv()
+    return value
+
+
 def check_sshd() -> None:
     sshd = shutil.which("sshd") or "/usr/sbin/sshd"
     result = command([sshd, "-T", "-C", f"user={USER},host=localhost,addr=127.0.0.1"])
@@ -299,6 +342,7 @@ def preflight(key_file: Path) -> tuple[dict, str, dict]:
     directory(TOOLS / "venv", 0, 0o755)
     directory(TOOLS / "venv/bin", 0, 0o755)
     check_existing_venv()
+    dependencies = runtime_dependency_status()
     for path in (PUBLIC / "downloads/patches", PUBLIC / "downloads/update-bootstrap", PUBLIC / "updates/desktop/dev"):
         directory(path, uid, 0o755)
     directory(STAGING, uid, 0o700)
@@ -323,7 +367,7 @@ def preflight(key_file: Path) -> tuple[dict, str, dict]:
     return {"status": "preflight_passed", "user": USER, "create_account": value is None,
             "ssh_public_key_fingerprint": fingerprint, "source_commit": manifest["source_commit"],
             "forced_command": FORCED, "nginx_configuration_changed": False,
-            "business_configuration_changed": False}, authorized, manifest
+            "business_configuration_changed": False, "runtime_dependencies": dependencies}, authorized, manifest
 
 
 def create_directory(path: Path, uid: int, gid: int, mode: int) -> None:
@@ -353,10 +397,7 @@ def install(key_file: Path, python: str) -> dict:
         create_file(TOOLS / name, (SOURCE / name).read_bytes(), 0o444)
     create_file(TOOLS / MANIFEST, (SOURCE / MANIFEST).read_bytes(), 0o444)
     create_file(SHELL, WRAPPER.encode(), 0o555)
-    if not (TOOLS / "venv").exists():
-        command([python, "-m", "venv", "--copies", str(TOOLS / "venv")])
-        command([str(TOOLS / "venv/bin/python"), "-I", "-m", "pip", "install", "--disable-pip-version-check", "cryptography==50.0.2"])
-    command([str(TOOLS / "venv/bin/python"), "-I", "-c", "import cryptography; assert cryptography.__version__ == '50.0.2'"])
+    result["runtime_dependencies"] = ensure_runtime_dependencies(python)
     if account() is None:
         command(["useradd", "--system", "--user-group", "--no-create-home", "--home-dir", str(HOME), "--shell", str(SHELL), USER])
         command(["passwd", "-l", USER])

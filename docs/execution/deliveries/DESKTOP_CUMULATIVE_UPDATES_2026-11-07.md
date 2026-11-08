@@ -1,6 +1,18 @@
 # 固定 1.00 基础包的累计更新实施
 
-状态：更新源码及02两平台原生全链验收完成，已经快进合入main；四成品已本地下载/校验及签名，服务器接线和公开发行尚待完成。用户已明确授权“把 Windows 和 Mac 的更新接入补丁、后续自动更新功能都实现，现有 1.00 基础包保持不变”；用户后来反馈 Python 反复意外退出，此为当前任务中的修复要求，未取消原实施任务。
+## 2026-11-08 云端接线与0801收尾
+
+0801源码最终隔离检查20套228项通过，失败/跳过/越界0，证据`build0801-source-checks-final/acceptance-summary.json`；此前224项记录保留。较新helper工厂支持合法未来版本/构建（包含1.0.2/build2026110901回归），所有现代来源首次接入须完整清单，人工较新组件修复保持state/bootstrap字节；原02仅精确来源可作为缺清单例外。打包后的官方HTTPS、自签拒绝和真实旧02→新组件修复仍须本次GitHub两平台实证，未在本机运行Qt或冻结程序。
+
+用户已完成腾讯云验证，并明确同意创建受限自动发布通道、专用GitHub签名/上传密钥及main-only环境。02网页已从b26fe36更新到2adb772，18套188项隔离检查通过；以实际停机时的新鲜资料创建双备份，最终保留74表19404行201113原单元格、28BLOB、4附件及24报告（22质控+2处理），差异0、两备份不变，未恢复旧库。原数据库格式号0按既有unversioned/format1兼容规则通过，未为对齐编号写库。
+
+受限接收账号已启用并实际验证任意SSH命令拒绝126、业务目录不可读；权限只给三更新静态子树及私有暂存。新账号独有的SSH Match限定AcceptEnv，候选/在线语法检查和ubuntu/root有效配置保持通过，SSH仅reload。Nginx在现有HTTPS server新增JSON更新入口，候选/在线nginx-t均通过、TLS/ACME/原downloads/代理保持。sudo查询返回0但实际无授权的误判已用严格C locale/本机账号完整拒绝消息修正，18项专项与独立复核通过；提交a41684c，客户端输入摘要未变，未重复构建客户端。新receiver工具20763B/SHA`da4f8b1e841cc513e0c9e77de7fd980c815065cbaba13f5b2a46ad54bb4a67dd`，原只读installer及工具manifest分别备份/核对后受控替换，旧归档保留。
+
+02四成品已真实发布到自有HTTPS；独立公网全文件长度/SHA匹配，原06两包在服务器public目录完整实算SHA匹配，外部HEAD来源/长度通过。[GitHub真实清单刷新直传42428985794](https://github.com/Arcjang999/LJQCapp_clean/actions/runs/42428985794)成功，source a41684c、程序仍2adb772，sequence1794096988210362；只更新14天签名清单，原安装包和程序字节未变。GitHub环境仅main、三项专用Secrets和host/user已设，**AUTO仍false**。完整脱敏Actions证据在`deployment/github-refresh-42428985794-*`；独立公网证据在`public-verification-build02-independent-ca.json`。
+
+02云端回执已通过文件管理器取回：`deployment/cloud-build02-receipt.json`，4060B/SHA`2233309d64c5c5ff956115d82965bd26628a4124164944c34416bcd70b523e27`。公网检查首次因本机Python默认CA为空而失败的证据保留；使用已安装受信Mozilla CA并保留主机名/证书校验后通过。追查确认02 helper没有明确CA来源，因此**02已发布不等于Mac自动联网已最终验收**。正在制作`1.0.1/build2026110801`：显式certifi CA、冻结实物真实官方HTTPS正向/未知自签负向探针，以及已接入02时受控替换稳定helper的修复流程，保留current/base/highest_sequence、原06隐藏备份及客户资料。原06基础包不重做、不覆盖；本机不运行Qt/安装器/冻结helper。0801完整CI、发布、receiver更新及网页新鲜资料验收完成后才能开启AUTO。
+
+历史状态（02初次验收完成、尚未接线时；当前进度以上节为准）：更新源码及02两平台原生全链验收完成，已经快进合入main；四成品已本地下载/校验及签名，服务器接线和公开发行当时尚待完成。用户已明确授权“把 Windows 和 Mac 的更新接入补丁、后续自动更新功能都实现，现有 1.00 基础包保持不变”；用户后来反馈 Python 反复意外退出，此为当前任务中的修复要求，未取消原实施任务。
 
 ## 02完成记录
 

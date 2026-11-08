@@ -34,8 +34,10 @@ def build_bootstrap(output: Path, *, inno: Path | None = None, chinese_messages:
         metadata_file.write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         env = {**os.environ, "LJQC_UPDATE_BUILD_INFO": str(metadata_file),
                "PYINSTALLER_CONFIG_DIR": str(work / "pyinstaller-cache")}
-        logs = work / "logs"
-        logs.mkdir()
+        # Keep diagnostic text/JSON even when a frozen/native probe fails.
+        # No temporary app, private key or business data is copied here.
+        logs = output / "bootstrap-verification-logs"
+        logs.mkdir(exist_ok=False)
         def run(arguments: list[str], name: str, *, extra_env: dict | None = None, timeout: int = 1200):
             with (logs / (name + ".log")).open("wb") as log:
                 subprocess.run(arguments, cwd=ROOT, env=extra_env or env, stdout=log,
@@ -56,6 +58,11 @@ def build_bootstrap(output: Path, *, inno: Path | None = None, chinese_messages:
                     raise ValueError("Cannot remove incompatible bundle presentation metadata")
             run(["codesign", "--force", "--deep", "--sign", "-", str(package)], "sign-bootstrap")
             run(["codesign", "--verify", "--deep", "--strict", str(package)], "verify-bootstrap-signature")
+        from desktop_updates.helper_repair import verify_helper_manifest, write_helper_manifest
+        if target == "windows-x86_64":
+            write_helper_manifest(package, target)
+            helper_manifest_path = package / "update_helper_manifest.json"
+            helper_manifest = verify_helper_manifest(package, target)
         qa = work / "probe-data"
         probe_env = {**env, "LJQC_DATA_ROOT": str(qa)}
         for command in ("--version", "--self-test"):
@@ -63,7 +70,13 @@ def build_bootstrap(output: Path, *, inno: Path | None = None, chinese_messages:
             if qa.exists():
                 raise ValueError("A read-only bootstrap probe unexpectedly created a data directory")
         ui_probe = {"status": "not-run-outside-github"}
+        tls_probe = {"status": "not-run-outside-github"}
         if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
+            from ci_verify_update import verify_frozen_tls
+            tls_probe = verify_frozen_tls(executable, env=probe_env,
+                result_file=logs / "native-tls-probe.json", log_file=logs / "probe-native-tls.log")
+            if qa.exists():
+                raise ValueError("The frozen helper TLS probe unexpectedly created business storage")
             ui_result = work / "ui-probe-result.json"
             run([str(executable), "--ui-self-test", "--probe-result", str(ui_result)],
                 "probe-native-ui", extra_env={**probe_env, "QT_QPA_PLATFORM": "offscreen"}, timeout=30)
@@ -71,6 +84,7 @@ def build_bootstrap(output: Path, *, inno: Path | None = None, chinese_messages:
             if (ui_probe.get("status") != "passed" or ui_probe.get("ui_closed") is not True
                     or ui_probe.get("worker_joined") is not True
                     or ui_probe.get("native_gui_initialized") is not True
+                    or ui_probe.get("repair_mode_ui_fields_hidden") is not True
                     or ui_probe.get("business_storage_opened") is not False
                     or not {"check", "download", "apply", "launch"}.issubset(set(ui_probe.get("stages", [])))):
                 raise ValueError("Native helper UI/thread lifecycle did not pass its explicit probe")
@@ -92,9 +106,15 @@ def build_bootstrap(output: Path, *, inno: Path | None = None, chinese_messages:
             image = work / "image"
             image.mkdir()
             shutil.copytree(package, image / package.name, symlinks=True)
+            # A complete byte manifest must sit beside the signed .app. Adding
+            # it inside after codesign would invalidate the application's seal.
+            write_helper_manifest(image / package.name, target)
+            helper_manifest_path = image / "update_helper_manifest.json"
+            helper_manifest = verify_helper_manifest(image / package.name, target)
             (image / "更新接入说明.txt").write_text(
                 "LJQCApp 1.00 更新接入补丁\n\n"
-                "先正常退出原软件，再打开 LJQCAppUpdater，选择已安装的 LJQCApp。\n"
+                "先正常退出原软件，再打开 LJQCAppUpdater。首次接入选择已安装的 LJQCApp；"
+                "已接入的电脑会修复更新组件，保留当前程序、入口及资料。\n"
                 "接入会保留原资料并建立更新入口；以后每次启动可检查和下载累计补丁。\n"
                 "请先保存完整备份。此组件尚待 Apple Developer ID 签名和公证，"
                 "首次打开仍可能显示未验证开发者提示；遵循软件网页下载说明，不关闭系统保护。\n",
@@ -108,10 +128,6 @@ def build_bootstrap(output: Path, *, inno: Path | None = None, chinese_messages:
             run(["hdiutil", "verify", str(artifact)], "verify-bootstrap-dmg", timeout=120)
         if not artifact.is_file():
             raise ValueError("Bootstrap installer artifact was not produced")
-        logs_output = output / "bootstrap-verification-logs"
-        logs_output.mkdir(exist_ok=False)
-        for path in logs.iterdir():
-            shutil.copyfile(path, logs_output / path.name)
         current = get_release_info(ROOT, include_source_state=True).as_dict()
         if any(current[field] != metadata[field] for field in ("git_commit", "source_digest", "source_dirty")):
             raise ValueError("Source changed while building the bootstrap")
@@ -121,6 +137,10 @@ def build_bootstrap(output: Path, *, inno: Path | None = None, chinese_messages:
                          "sha256": digest_file(artifact)},
             "read_only_cli_probes": "passed", "business_database_access": False,
             "native_ui_lifecycle_probe": ui_probe,
+            "native_production_tls_probe": tls_probe,
+            "helper_integrity_manifest": {"sha256": digest_file(helper_manifest_path),
+                                          "file_count": len(helper_manifest["files"]),
+                                          "inside_signed_mac_app": False},
             "native_gui_installation_validation": "not-performed-by-this-script",
             "code_signing": "ad-hoc-pending-developer-id" if target == "macos-arm64" else "unsigned-development",
             "base_installer_rebuilt": False}

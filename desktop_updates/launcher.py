@@ -21,6 +21,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--version", action="store_true")
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--ui-self-test", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--tls-self-test", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--probe-result", type=Path, help=argparse.SUPPRESS)
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--install", action="store_true")
@@ -30,8 +31,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--target", choices=("windows-x86_64", "macos-arm64"))
     parser.add_argument("--no-gui", action="store_true")
     args = parser.parse_args(argv)
-    if args.probe_result is not None and not args.ui_self_test:
-        parser.error("--probe-result 仅用于 --ui-self-test。")
+    if args.ui_self_test and args.tls_self_test:
+        parser.error("一次只能运行一个验收检查。")
+    if args.probe_result is not None and not (args.ui_self_test or args.tls_self_test):
+        parser.error("--probe-result 仅用于独立验收检查。")
     return args
 
 
@@ -68,6 +71,28 @@ def main(argv: list[str] | None = None) -> int:
     if args.self_test:
         print(json.dumps(self_test(args.target), ensure_ascii=False))
         return 0
+    if args.tls_self_test:
+        # No Qt, UpdateManager or storage-path resolution on this branch, even
+        # when the server is unavailable or TLS verification fails.
+        from desktop_updates.tls_probe import run_tls_self_test
+        try:
+            trust = json.loads(resource_path("resources/desktop_update_trust.json").read_text(encoding="utf-8"))
+            result = run_tls_self_test(trust)
+        except Exception as error:
+            chain = []
+            cause = error
+            while cause is not None and len(chain) < 5:
+                chain.append(type(cause).__name__)
+                cause = cause.__cause__
+            result = {"format_version": 1, "product": "LJQCAppUpdater", "status": "failed",
+                      "reason": "tls-probe-" + type(error).__name__,
+                      "error_types": chain,
+                      "business_storage_opened": False}
+        if args.probe_result is not None:
+            _write_probe_result(args.probe_result, result)
+        if sys.stdout is not None:
+            print(json.dumps(result, ensure_ascii=False))
+        return 0 if result.get("status") == "passed" else 1
     if args.ui_self_test:
         # This branch deliberately precedes native storage-path resolution and
         # UpdateManager import. Its manager is entirely in memory.
@@ -79,15 +104,7 @@ def main(argv: list[str] | None = None) -> int:
                       "reason": "ui-probe-" + type(error).__name__,
                       "business_storage_opened": False}
         if args.probe_result is not None:
-            output = args.probe_result.expanduser()
-            if not output.is_absolute():
-                raise BootstrapError("窗口验收结果必须使用完整路径。")
-            if output.exists() or output.is_symlink():
-                raise BootstrapError("窗口验收结果文件已经存在。")
-            output.parent.mkdir(parents=True, exist_ok=True)
-            with output.open("x", encoding="utf-8") as handle:
-                json.dump(result, handle, ensure_ascii=False, indent=2)
-                handle.write("\n")
+            _write_probe_result(args.probe_result, result)
         if sys.stdout is not None:
             print(json.dumps(result, ensure_ascii=False))
         return 0 if result.get("status") == "passed" else 1
@@ -98,11 +115,21 @@ def main(argv: list[str] | None = None) -> int:
     from desktop_updates.manager import UpdateManager
     manager = UpdateManager(root=root, target=target)
     recover_bootstrap(manager)
+    from desktop_updates.helper_repair import (needs_helper_repair, recover_helper_repair,
+                                               repair_registered_helper)
+    recover_helper_repair(manager)
+    source_helper = args.helper or (helper_source() if getattr(sys, "frozen", False) else None)
+    registered = bool(manager.get_state().get("current"))
+    repair_mode = bool(source_helper is not None and registered
+                       and (args.install or needs_helper_repair(manager, source_helper)))
     if args.no_gui:
         if args.install:
-            if not args.base:
+            if registered:
+                result = repair_registered_helper(manager, source_helper or helper_source())
+            elif not args.base:
                 raise BootstrapError("请指定已安装的 1.00 程序位置。")
-            result = install_bootstrap(manager, args.base, args.helper or helper_source())
+            else:
+                result = install_bootstrap(manager, args.base, source_helper or helper_source())
             print(json.dumps(result, ensure_ascii=False))
             return 0
         if args.check:
@@ -112,7 +139,19 @@ def main(argv: list[str] | None = None) -> int:
         raise BootstrapError("无窗口模式仅支持版本检查或明确指定的更新接入。")
     from desktop_updates.qt_ui import run_update_ui
     return run_update_ui(manager, install=args.install, base=args.base,
-                         helper=args.helper, manual_check=args.check)
+                         helper=source_helper, manual_check=args.check, repair_mode=repair_mode)
+
+
+def _write_probe_result(path: Path, result: dict) -> None:
+    output = path.expanduser()
+    if not output.is_absolute():
+        raise BootstrapError("验收结果必须使用完整路径。")
+    if output.exists() or output.is_symlink():
+        raise BootstrapError("验收结果文件已经存在。")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("x", encoding="utf-8") as handle:
+        json.dump(result, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
 
 
 if __name__ == "__main__":
@@ -121,6 +160,12 @@ if __name__ == "__main__":
     except Exception:
         # Do not expose a Python traceback in a windowed customer entry point.
         logging.getLogger("ljqc.updater").exception("Updater entry failed")
+        if any(flag in sys.argv[1:] for flag in ("--no-gui", "--tls-self-test", "--ui-self-test", "--self-test", "--version")):
+            # Native CI/maintenance failures must exit rather than leave an
+            # invisible modal dialog. Diagnostics already emit bounded receipts.
+            if sys.stderr is not None:
+                print("更新组件验收未通过，现有程序及资料已保留。", file=sys.stderr)
+            raise SystemExit(1)
         try:
             from PySide6.QtWidgets import QApplication, QMessageBox
             app = QApplication.instance() or QApplication(sys.argv[:1])

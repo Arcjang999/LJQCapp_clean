@@ -27,10 +27,12 @@ sudo 核对固定使用 `LC_ALL=C`、`LANG=C`、`LANGUAGE=C`。部分 sudo 版�
 
 若旧版检查因此停在“已创建专用只读环境和锁定账号、尚未安装公钥”，保留现场并核对这个阶段；不要放宽检查或重建客户端。修复只涉及服务器接线脚本、其回归和本文，不进入客户端发行摘要。需从新的已提交源码导出新名字的 receiver 工具包，保留旧 tar 和 manifest。已有 root 只读脚本或工具 manifest 与新包不一致时仍会停止；应先分别备份、核对并受控更新这些确切工具文件，再重新 `check` 和 `install`，不能覆盖整个运行环境或递归改权限。
 
+2026-11-08 的 HTTPS 修复要求专用接收环境也有明确的 CA 根。`check` 只读报告 `runtime_dependencies`；已有 `cryptography==50.0.2` 且缺少 certifi 时，`install` 只在 `/opt/ljqc-update-publisher/venv` 执行 `pip install --no-deps --only-binary=:all: certifi==2026.7.22`，随后实际加载根并再次检查 root 所有权和只读权限。已有完整环境不再安装任何包；crypto 缺失、版本冲突或 CA 加载失败都停止，不能借此重解 crypto/cffi 或覆盖业务虚拟环境。业务环境已有的其他 certifi 版本保持原样。旧版 receiver 仍需先核对并受控替换新工具包明确列出的源码文件和 manifest，不覆盖旧归档，也不改变基础安装包。
+
 | 路径/身份 | 安排 |
 | --- | --- |
 | `ljqc-update` | 独立系统用户和同名组、密码锁定、无附加组和 sudo 授权。 |
-| `/opt/ljqc-update-publisher/` | root 所有的只读工具树及独立虚拟环境，固定 `cryptography==50.0.2`。原有应用环境不变。 |
+| `/opt/ljqc-update-publisher/` | root 所有的只读工具树及独立虚拟环境，固定 `cryptography==50.0.2`、`certifi==2026.7.22`。原有应用环境不变。 |
 | `/opt/ljqc-update-publisher/home/.ssh/authorized_keys` | root 所有；仅专用公钥、`restrict` 和固定 forced command，用户不能改公钥。 |
 | `/opt/ljqc-update-publisher/receiver-shell` | root 所有的受限入口；拒绝交互 shell、任意命令和 SFTP/SCP。 |
 | `/var/lib/ljqc-update-publisher/` | 仅专用用户可访问的接收暂存目录，`0700`。 |

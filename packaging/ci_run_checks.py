@@ -23,6 +23,8 @@ SUITES = (
     'desktop_update_manager_smoke_test', 'desktop_update_packaging_smoke_test',
     'desktop_update_catalog_smoke_test',
     'desktop_update_redirect_smoke_test', 'desktop_update_receiver_setup_smoke_test',
+    'desktop_update_receiver_smoke_test', 'desktop_update_tls_probe_smoke_test',
+    'desktop_update_helper_repair_smoke_test',
 )
 
 

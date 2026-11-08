@@ -8,7 +8,8 @@ ROOT = Path(SPECPATH).resolve().parent
 sys.path[:0] = [str(ROOT), str(ROOT / 'packaging')]
 from mac_resources import application_datas
 
-datas = application_datas(ROOT) + collect_data_files('streamlit') + copy_metadata('streamlit') + collect_data_files('matplotlib')
+datas = (application_datas(ROOT) + collect_data_files('streamlit') + copy_metadata('streamlit')
+         + collect_data_files('matplotlib') + collect_data_files('certifi', includes=['cacert.pem']))
 datas.append((os.environ['LJQC_BUILD_INFO'], '.'))
 hidden = list(dict.fromkeys(sum((collect_submodules(name) for name in ('streamlit', 'pyarrow', 'altair', 'pages', 'migrations', 'services', 'ui')), []) + [
     'database', 'import_review', 'plotting', 'qc_logic', 'zscore_logic', 'zscore_plotting',

@@ -34,7 +34,7 @@ a = Analysis(
     [str(PROJECT_ROOT / "packaging" / "desktop_qt_launcher.py")],
     pathex=[str(PROJECT_ROOT)],
     binaries=[],
-    datas=qt_datas + release_datas,
+    datas=qt_datas + release_datas + collect_data_files('certifi', includes=['cacert.pem']),
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

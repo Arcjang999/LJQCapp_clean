@@ -40,8 +40,11 @@ class FakeManager:
         if self.fail_registration:
             raise bootstrap.BootstrapError("模拟接入失败")
         assert (root / entrypoint).is_file()
-        self.state = {"current": {"path": str(root), "entrypoint": entrypoint},
+        current = {"path": str(root), "entrypoint": entrypoint, "target": self.target}
+        self.state = {"format_version": 1, "base_release": bootstrap.BASE_RELEASE,
+                      "target": self.target, "current": current, "base": dict(current),
                       "updater_entrypoint": kwargs.get("updater_entrypoint")}
+        bootstrap._atomic_json(self.root / "updates/state.json", self.state)
         return self.state
 
 
@@ -49,6 +52,18 @@ def base_identity(target):
     return {"version": "1.0.0", "build_number": 2026110606,
             "source_digest": bootstrap.BASE_DIGEST, "git_commit": bootstrap.BASE_COMMIT,
             "target": target, "source_dirty": False}
+
+
+def helper_metadata(helper, target):
+    from desktop_updates.helper_repair import OLD_HELPER_BUILD, OLD_HELPER_COMMIT, OLD_HELPER_DIGEST
+    resources = helper / ("_internal" if target == "windows-x86_64" else "Contents/Resources")
+    resources.mkdir(parents=True, exist_ok=True)
+    (resources / "build_info.json").write_text(json.dumps({"version": "1.0.1",
+        "build_number": OLD_HELPER_BUILD, "data_format_version": 1, "source_dirty": False,
+        "git_commit": OLD_HELPER_COMMIT, "source_digest": OLD_HELPER_DIGEST, "target": target}))
+    trust = resources / "resources/desktop_update_trust.json"
+    trust.parent.mkdir(parents=True, exist_ok=True)
+    trust.write_bytes((ROOT / "resources/desktop_update_trust.json").read_bytes())
 
 
 def manifest_for(path, target):
@@ -98,6 +113,7 @@ class BootstrapTests(unittest.TestCase):
         entry = helper / "Contents/MacOS/LJQCAppUpdater"
         entry.parent.mkdir(parents=True)
         entry.write_bytes(b"standalone updater")
+        helper_metadata(helper, "macos-arm64")
         return base, helper
 
     def windows_apps(self):
@@ -107,6 +123,7 @@ class BootstrapTests(unittest.TestCase):
         helper = self.root / "download/updater"
         helper.mkdir(parents=True)
         (helper / "LJQCAppUpdater.exe").write_bytes(b"new updater")
+        helper_metadata(helper, "windows-x86_64")
         return base, helper
 
     def validator(self, path, target):

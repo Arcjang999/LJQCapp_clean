@@ -2,10 +2,12 @@
 import json
 import os
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_data_files
 ROOT = Path(SPECPATH).resolve().parent
 release = json.loads((ROOT / 'release.json').read_text(encoding='utf-8'))
 a = Analysis([str(ROOT / 'packaging/desktop_qt_launcher.py')], pathex=[str(ROOT)], binaries=[],
-    datas=[(str(ROOT / 'release.json'), '.'), (os.environ['LJQC_BUILD_INFO'], '.')],
+    datas=[(str(ROOT / 'release.json'), '.'), (os.environ['LJQC_BUILD_INFO'], '.')]
+        + collect_data_files('certifi', includes=['cacert.pem']),
     hiddenimports=['PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtNetwork', 'PySide6.QtPrintSupport',
         'PySide6.QtWebChannel', 'PySide6.QtWebEngineCore', 'PySide6.QtWebEngineWidgets', 'PySide6.QtWidgets'],
     hookspath=[], hooksconfig={}, runtime_hooks=[], excludes=['PyQt5', 'PyQt6'], noarchive=False, optimize=0)

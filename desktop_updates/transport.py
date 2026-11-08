@@ -30,9 +30,38 @@ class _OriginRedirects(HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+def _https_context() -> ssl.SSLContext:
+    """Use the shipped Mozilla roots, including frozen Macs without system CAs.
+
+    Construct directly rather than loading OpenSSL's default paths: environment
+    SSL_CERT_FILE/SSL_CERT_DIR must not replace the bundled trust or disable
+    verification. The same strict verification flags used by Python's default
+    client context are retained, without environment-driven key logging.
+    """
+    try:
+        import certifi
+        cafile = certifi.where()
+        if not Path(cafile).is_file():
+            raise UpdateError("更新组件缺少可信证书文件，请重新安装更新接入补丁。")
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.verify_mode = ssl.CERT_REQUIRED
+        context.check_hostname = True
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        for flag in ("VERIFY_X509_STRICT", "VERIFY_X509_PARTIAL_CHAIN"):
+            context.verify_flags |= getattr(ssl, flag, 0)
+        context.load_verify_locations(cafile=cafile)
+        if context.cert_store_stats().get("x509_ca", 0) <= 0:
+            raise UpdateError("更新组件的可信证书文件为空，请重新安装更新接入补丁。")
+        return context
+    except UpdateError:
+        raise
+    except (ImportError, OSError, ValueError) as error:
+        raise UpdateError("更新组件无法加载可信证书，请重新安装更新接入补丁。") from error
+
+
 def _open_https(url: str, origin: str, *, timeout: float = TIMEOUT_SECONDS):
     validate_https_url(url, origin)
-    opener = build_opener(_OriginRedirects(origin), HTTPSHandler(context=ssl.create_default_context()))
+    opener = build_opener(_OriginRedirects(origin), HTTPSHandler(context=_https_context()))
     request = Request(url, headers={"User-Agent": "LJQCApp-Updater/1", "Accept-Encoding": "identity"})
     response = opener.open(request, timeout=timeout)
     try:

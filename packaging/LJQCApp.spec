@@ -76,6 +76,7 @@ if metadata:
     project_source_datas.append((metadata, "."))
 streamlit_datas = collect_data_files("streamlit")
 matplotlib_datas = collect_data_files("matplotlib")
+certifi_datas = collect_data_files("certifi", includes=["cacert.pem"])
 streamlit_metadata = copy_metadata("streamlit")
 hiddenimports = list(
     dict.fromkeys(
@@ -108,7 +109,7 @@ a = Analysis(
         str(PROJECT_ROOT / "ui"),
     ],
     binaries=[],
-    datas=streamlit_datas + streamlit_metadata + matplotlib_datas + project_source_datas,
+    datas=streamlit_datas + streamlit_metadata + matplotlib_datas + certifi_datas + project_source_datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
