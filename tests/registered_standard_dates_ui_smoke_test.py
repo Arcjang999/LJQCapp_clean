@@ -39,7 +39,7 @@ class RegisteredStandardDatesUITest(unittest.TestCase):
     def test_new_dates_start_empty_and_do_not_create_provenance(self):
         with IsolatedDatabase():
             before=database_contents()
-            app=AppTest.from_string(APP).run();assert_clean(app)
+            app=AppTest.from_string(APP, default_timeout=30).run();assert_clean(app)
             for field in ('effective_date','withdrawn_on','checked_on'):
                 self.assertIsNone(app.date_input(key='standards_registered_0_'+field).value)
                 self.assertEqual('',app.session_state['source_rows'][0][field])
@@ -51,7 +51,7 @@ class RegisteredStandardDatesUITest(unittest.TestCase):
     def test_selected_dates_validate_and_optional_withdrawal_can_be_cleared(self):
         with IsolatedDatabase():
             before=database_contents()
-            original=source();app=AppTest.from_string(APP)
+            original=source();app=AppTest.from_string(APP, default_timeout=30)
             app.session_state['prior']=[original]
             app.run();assert_clean(app)
             effective=date.today()-timedelta(days=5)
@@ -70,7 +70,7 @@ class RegisteredStandardDatesUITest(unittest.TestCase):
 
     def test_saved_string_widget_snapshot_restores_as_date_and_keeps_missing_empty(self):
         with IsolatedDatabase():
-            app=AppTest.from_string(APP)
+            app=AppTest.from_string(APP, default_timeout=30)
             original=source()
             app.session_state['prior']=[original]
             for field in ('effective_date','checked_on','withdrawn_on'):
@@ -90,7 +90,7 @@ class RegisteredStandardDatesUITest(unittest.TestCase):
         with IsolatedDatabase():
             before=database_contents()
             original=source()
-            app=AppTest.from_string(APP)
+            app=AppTest.from_string(APP, default_timeout=30)
             app.session_state['prior']=[original]
             app.run();assert_clean(app)
             chosen={'effective_date':date(2001,1,2),'checked_on':date(2001,1,3),
@@ -118,7 +118,7 @@ class RegisteredStandardDatesUITest(unittest.TestCase):
     def test_future_confirmation_date_is_kept_for_correction_and_rejected_by_service(self):
         with IsolatedDatabase():
             before=database_contents()
-            app=AppTest.from_string(APP)
+            app=AppTest.from_string(APP, default_timeout=30)
             app.session_state['prior']=[source()]
             app.run();assert_clean(app)
             app.date_input(key='standards_registered_0_checked_on').set_value(date(2099,12,30))

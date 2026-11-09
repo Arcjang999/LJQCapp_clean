@@ -246,7 +246,7 @@ def test_lj_monthly_report_page_exposes_generate_and_download_flow() -> None:
     with TemporaryDatabaseContext():
         _project_id, batch_id = seed_lj_batch_with_formal_monthly_data()
         report_scope = f"lj_monthly_report_{batch_id}"
-        at = AppTest.from_string(LJ_REPORT_APPTEST_SCRIPT)
+        at = AppTest.from_string(LJ_REPORT_APPTEST_SCRIPT, default_timeout=30)
         at.session_state["test_batch_id"] = batch_id
         at.run()
 

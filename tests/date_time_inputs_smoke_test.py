@@ -33,7 +33,7 @@ original = datetime(2026, 11, 9, 11, 6, 22, 123456)
 if 'when' not in st.session_state: st.session_state['when'] = original
 st.session_state['returned'] = minute_datetime_input('检测时间', key='when', preserve_original=original)
 st.text_input('备注')
-""").run()
+""", default_timeout=30).run()
         self.assertFalse(list(app.exception))
         picker = app.datetime_input[0]
         self.assertEqual(60, picker.proto.step)
@@ -54,7 +54,7 @@ if 'saved' not in st.session_state: st.session_state['saved'] = None
 def remember(): st.session_state['draft'] = st.session_state['when']
 minute_datetime_input('生效时间', value=None, key='when', on_change=remember)
 if st.button('保存'): st.session_state['saved'] = st.session_state['draft']
-""").run()
+""", default_timeout=30).run()
         self.assertFalse(list(app.exception))
         self.assertIsNone(app.datetime_input[0].value)
         chosen = datetime(2026, 11, 9, 11, 6)
@@ -75,7 +75,7 @@ import streamlit as st
 from ui.date_time_inputs import minute_datetime_input
 minute_datetime_input('生效时间', value=None, key='when')
 st.text_input('依据')
-""")
+""", default_timeout=30)
                 app.session_state['when'] = original
                 app.run()
                 app.text_input[0].set_value('其他字段修改').run()

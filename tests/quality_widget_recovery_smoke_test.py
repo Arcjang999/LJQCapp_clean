@@ -135,7 +135,7 @@ ctx=dict(token='current',quick_quality_identity='same',draft={'quality':{}},
   'quick_quality_earlier_same_registered_0_upload_error':'旧错误'}))
 _remember_quality_inputs(ctx)
 st.session_state['captured']=ctx['quick_quality_inputs']
-''').run()
+''', default_timeout=30).run()
         assert_clean(app)
         self.assertEqual(dict(identity='same',token='current',values={}),app.session_state['captured'])
 

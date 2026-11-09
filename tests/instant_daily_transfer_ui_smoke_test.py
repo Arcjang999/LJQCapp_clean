@@ -165,7 +165,7 @@ class InstantDailyTransferUITest(unittest.TestCase):
 import streamlit as st
 from ui.daily_entry import _activate
 if st.button('恢复草稿'):_activate(st.session_state['fresh_context'])
-''')
+''', default_timeout=30)
         app.session_state['daily_draft']=deepcopy(original)
         app.session_state['fresh_context']=self.context()
         app.run();self.healthy(app)

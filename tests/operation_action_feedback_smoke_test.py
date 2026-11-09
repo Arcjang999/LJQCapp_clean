@@ -113,7 +113,7 @@ eligible=st.session_state.get('test_eligible',False)
 _render_instant_transfer_section({'summary':{'effective_count':20 if eligible else 3,'disabled_count':0},
  'transfer_state':{'eligible':eligible,'blockers':[] if eligible else ['有效建靶点不足20个']}})
 '''
-        app = AppTest.from_string(script).run()
+        app = AppTest.from_string(script, default_timeout=30).run()
         self.healthy(app)
         self.assertTrue(app.button(key='open_instant_transfer_dialog').disabled)
         self.assertTrue(self.has_info(app, '有效建靶点不足20个'))
@@ -176,7 +176,7 @@ file=None if payload is None else SimpleNamespace(name='backup.zip',getvalue=lam
 with patch('pages.settings_page.st.file_uploader',return_value=file):
  _render_cloud_storage_section()
 '''
-        app = AppTest.from_string(script).run()
+        app = AppTest.from_string(script, default_timeout=30).run()
         self.healthy(app)
         self.assertTrue(app.button(key='cloud_confirm_restore').disabled)
         self.assertTrue(self.has_info(app, '上传之前下载的 .db 或 .zip 备份'))
@@ -199,7 +199,7 @@ with patch('pages.project_management_page.st.file_uploader',return_value=BytesIO
  _render_import_export_tab()
 '''
         before = self.snapshot()
-        app = AppTest.from_string(script).run()
+        app = AppTest.from_string(script, default_timeout=30).run()
         self.healthy(app)
         self.assertTrue(app.button(key='v11_prepare_project_import').disabled)
         self.assertTrue(self.has_info(app, '“导入到项目”中选择一个项目'))

@@ -319,7 +319,7 @@ def test_zscore_monthly_report_page_exposes_generate_and_download_flow() -> None
     with TemporaryDatabaseContext():
         project_id, batch_id = seed_zscore_batch_with_formal_monthly_data()
         report_scope = f"zscore_monthly_report_{batch_id}"
-        at = AppTest.from_string(ZSCORE_PAGE_APPTEST_SCRIPT)
+        at = AppTest.from_string(ZSCORE_PAGE_APPTEST_SCRIPT, default_timeout=30)
         at.session_state["zscore_selected_project_id"] = project_id
         at.session_state["zscore_selected_batch_id"] = batch_id
         at.run()

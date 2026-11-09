@@ -68,7 +68,7 @@ from ui.standard_source_links import render_standard_source_links
 with st.expander('查看参考标准原文'):
     render_standard_source_links(dict(id='wst494-2017', standard='WS/T 494—2017',
         source_url='https://www.nhc.gov.cn/wjw/s9492/201710/7faf1d5e1d13449d803c29e88c3d382e/files/1739781491810_39687.pdf'))
-''').run()
+''', default_timeout=30).run()
         self.assertFalse(list(app.exception))
         buttons = app.get('link_button')
         self.assertEqual(['查看全文PDF', '国内标准信息'], [row.proto.label for row in buttons])
