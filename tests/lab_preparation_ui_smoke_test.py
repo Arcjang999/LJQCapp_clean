@@ -1,5 +1,6 @@
 """Preparation files survive cancel and failed saves without partial registration."""
 from pathlib import Path
+import os
 import sys
 import unittest
 
@@ -19,18 +20,41 @@ APP = 'from pages.settings_page import render_settings_page\nrender_settings_pag
 
 
 class LabPreparationUI(unittest.TestCase):
+    def assert_preparation_closed(self, app):
+        self.assertFalse([item for item in app.get('file_uploader')
+                          if (item.key or '').startswith('lab_prep_upload_')])
+        self.assertFalse([item for item in app.get('download_button')
+                          if item.key in ('lab_prep_template', 'lab_prep_reference')])
+        self.assert_backup_entry(app)
+
+    def assert_backup_entry(self, app):
+        uploads = [item for item in app.get('file_uploader') if item.key == 'cloud_restore_upload']
+        if os.environ.get('LJQC_DEPLOYMENT_MODE', '').strip().lower() == 'cloud':
+            self.assertEqual(1, len(uploads))
+            self.assertEqual('选择备份文件', uploads[0].label)
+            self.assertEqual('生成完整备份', app.button(key='cloud_create_backup').label)
+            self.assertTrue(app.button(key='cloud_confirm_restore').disabled)
+        else:
+            self.assertFalse(uploads)
+
     def open(self):
         app = AppTest.from_string(APP, default_timeout=15).run()
         self.assertFalse(list(app.exception), list(app.exception))
-        self.assertFalse(app.get('file_uploader'))
+        self.assert_preparation_closed(app)
         self.assertTrue(any('单位资料准备' in item.proto.body for item in app.get('html')))
         self.assertFalse(any('Excel' in item.label for item in app.expander))
         self.assertEqual('下载填写表或导入Excel', app.button(key='lab_prep_open').label)
         app.button(key='lab_prep_open').click().run()
         self.assertFalse(list(app.exception), list(app.exception))
-        self.assertEqual('单位资料准备', app.get('dialog')[0].proto.dialog.title)
-        self.assertEqual(2, len(app.get('download_button')))
-        self.assertEqual(1, len(app.get('file_uploader')))
+        dialog = app.get('dialog')[0]
+        self.assertEqual('单位资料准备', dialog.proto.dialog.title)
+        self.assertEqual({'lab_prep_template', 'lab_prep_reference'},
+                         {item.key for item in dialog.get('download_button')})
+        uploads = dialog.get('file_uploader')
+        self.assertEqual(1, len(uploads))
+        self.assertEqual('lab_prep_upload_' + app.session_state['lab_preparation_dialog']['token'], uploads[0].key)
+        self.assertEqual('上传填写后的单位资料清单', uploads[0].label)
+        self.assert_backup_entry(app)
         data = dataframes_to_xlsx_bytes(tables())
         app.session_state['lab_preparation_dialog'].update(data=data, filename='单位资料.xlsx')
         app.run()
@@ -45,7 +69,7 @@ class LabPreparationUI(unittest.TestCase):
         with TemporaryDatabaseContext():
             app = AppTest.from_string(APP, default_timeout=15).run()
             self.assertFalse(list(app.exception), list(app.exception))
-            self.assertFalse(app.get('file_uploader'))
+            self.assert_preparation_closed(app)
             self.assertNotIn('lab_preparation_dialog', app.session_state.filtered_state)
             self.assertTrue(any('单位资料准备' in item.proto.body for item in app.get('html')))
             self.assertFalse(any('Excel' in item.label for item in app.expander))
