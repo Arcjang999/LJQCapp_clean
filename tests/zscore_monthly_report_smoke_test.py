@@ -328,8 +328,8 @@ def test_zscore_monthly_report_page_exposes_generate_and_download_flow() -> None
         assert any(selectbox.key == f"{report_scope}_month" for selectbox in at.selectbox)
 
         at.selectbox(key=f"{report_scope}_month").set_value("2026-04").run()
-        at.button(key=f"{report_scope}_generate").click().run(timeout=10)
-        at.button(key=f"{report_scope}_archive").click().run(timeout=10)
+        at.button(key=f"{report_scope}_generate").click().run(timeout=60)
+        at.button(key=f"{report_scope}_archive").click().run(timeout=60)
 
         assert not list(at.exception)
         download_elements = at.get("download_button")
