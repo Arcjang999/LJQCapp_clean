@@ -1,5 +1,6 @@
 """Actual-SKU project entry, complete three-method saves and overview filters."""
 from pathlib import Path
+from datetime import datetime
 import sys
 import unittest
 
@@ -115,7 +116,7 @@ class MultiProductDailyUiTests(unittest.TestCase):
             self.assertEqual([2, 1, 1], [len(item['levels']) for item in draft['context']['items']])
             token = draft['draft_id']
             app.text_input(key='daily_operator_' + token).set_value('三方法录入人').run()
-            app.text_input(key='daily_test_time_' + token).set_value('2026-10-01 08:00:00').run()
+            next(widget for widget in app.get('date_time_input') if widget.key=='daily_test_time_' + token).set_value(datetime(2026,10,1,8)).run()
             app.text_area(key='entry_paste_' + token).set_value('100\n200\n200\n200').run()
             click(app, '预览粘贴内容'); click(app, '确认带入本组')
             before = database_contents()

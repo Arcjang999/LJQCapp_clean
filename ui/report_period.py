@@ -84,8 +84,8 @@ def render_single_report(method, batch_id, *, months, preview_renderer):
     render = getattr(service, f'build_{method}_period_report_pdf')
     save = getattr(service, f'save_{method}_period_report_snapshot')
     preview_key = prefix + '_preview'
-    if st.button('核对报告', key=prefix + '_generate', width='stretch',
-                 help='整理所选期间的质控图、统计和异常记录，供生成报告前查看。'):
+    if st.button('查看报告预览', key=prefix + '_generate', width='stretch',
+                 help='查看所选期间的质控图、统计和异常记录；检查后点击“生成并保存报告”。'):
         try:
             package = build(batch_id, period.start_date, period.end_date, report_month=period.report_month or None)
             options = _versions(package, method)
@@ -102,7 +102,7 @@ def render_single_report(method, batch_id, *, months, preview_renderer):
         st.caption(f"已存入“报告历史”，编号：{state['snapshot_id']}。")
         with st.expander('已保存报告预览', expanded=False):
             preview_renderer(state['package'])
-        if st.button('核对并生成另一份报告', key=prefix + '_new'):
+        if st.button('查看另一份报告预览', key=prefix + '_new'):
             st.session_state.pop(preview_key, None)
             st.rerun()
         return
@@ -121,6 +121,7 @@ def render_single_report(method, batch_id, *, months, preview_renderer):
             else:
                 state.update(package=package, options=options, request_key=uuid4().hex)
                 st.rerun()
+    st.caption('检查下方报告内容，再点击“生成并保存报告”；保存后可在“报告历史”中查看和下载。')
     with st.expander('报告预览', expanded=False):
         preview_renderer(state['package'])
     left, right = st.columns(2)

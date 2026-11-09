@@ -170,7 +170,9 @@ def _render_project_list():
     projects = filter_projects(projects, 'home_project_filter')
     if st.session_state.get('home_selected_project_id') not in projects.id.tolist():
         st.session_state['home_selected_project_id'] = None
-    if tools[0].button('新建项目', type='primary', key='home_create_project', width='stretch'):
+    from ui.project_setup_draft import new_project_button_label
+    if tools[0].button(new_project_button_label(),
+                        type='primary', key='home_create_project', width='stretch'):
         open_project_dialog('project')
     selected = st.session_state.get('home_selected_project_id')
     row = next((r for r in all_projects.to_dict('records') if r['id']==selected), None)

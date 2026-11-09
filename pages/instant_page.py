@@ -4,6 +4,7 @@ from __future__ import annotations
 import pandas as pd
 from services.time_service import local_now, detection_input_max
 import streamlit as st
+from ui.date_time_inputs import minute_datetime_input
 
 from pages.instant_config_section import (
     prepare_instant_v12_project_batch_context,
@@ -218,7 +219,7 @@ def _render_instant_entry_and_summary_section(
             st.session_state["instant_reset_entry_form"] = False
 
         st.caption("保存本次检测值，更新SI判定和累计统计。")
-        test_time = st.datetime_input(
+        test_time = minute_datetime_input(
             "检测时间",
             key="instant_entry_test_time",
             max_value=detection_input_max(st.session_state.get("instant_entry_test_time")),

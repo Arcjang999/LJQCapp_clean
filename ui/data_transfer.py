@@ -287,6 +287,8 @@ def _render_import_dialog(state):
         if discard.button("放弃导入", key="qc_transfer_discard"):
             _close_transfer()
         return
+    from ui.workflow_steps import render_workflow_step
+    step_area = st.container()
     method, batch_id = state["method"], state["batch_id"]
     current = _fresh_import_context(method, batch_id)
     nonce = state["nonce"]
@@ -334,6 +336,11 @@ def _render_import_dialog(state):
             state.update(review=None, source_signature=None)
             st.error(str(exc))
     review = state.get("review")
+    with step_area:
+        render_workflow_step(2 if review else 1, 2,
+            '检查并导入检测记录' if review else '上传并检查检测文件',
+            '核对下方记录，点击“确认导入”保存到当前批次。' if review else
+            '按所选阶段的模板填写并上传文件，再点击“检查文件并预览”。')
     if review:
         render_import_review_summary(review["summary"])
         if review["summary"]["has_blocking_errors"]:

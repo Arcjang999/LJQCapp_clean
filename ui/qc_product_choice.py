@@ -187,6 +187,7 @@ def render_product_reviews(ctx, qc_material_ids, *, reagent_id, lab_instrument_i
     candidates = {int(row['qc_material_id']): row for row in suggestions['candidates']}
     catalog = {int(row['id']): row for row in product_display_rows(
         list_qc_materials(include_disabled=True).to_dict('records'))}
+    st.markdown('**质控品适用性确认**')
     prepared, complete, all_valid, dirty_inputs = {}, True, True, False
     cache = draft.setdefault('product_manual_drafts', {})
     for product in products:
@@ -212,10 +213,16 @@ def render_product_reviews(ctx, qc_material_ids, *, reagent_id, lab_instrument_i
                     _render_relation_editor(ctx, scope, product, pfx)
             continue
         all_valid = False
-        if old and error:
-            st.warning(error)
         candidate = candidates.get(product)
         manual = candidate is None or old.get('basis') == 'manual' or editing
+        instruction = ('请填写下方的“质控品确认人”和“适用依据”，再点击“' + confirm_label + '”。'
+            if manual else '请核对下方已登记的依据，再点击“' + confirm_label + '”。')
+        # Keep the reason a previous review expired, and point to the controls
+        # that are rendered immediately below it.
+        if old and error:
+            st.warning(error + ' ' + instruction)
+        else:
+            st.info(instruction)
         fields, fields_ready = None, True
         if manual:
             identity = sha256(json.dumps(dict(scope, qc_material_id=product), sort_keys=True).encode()).hexdigest()[:16]

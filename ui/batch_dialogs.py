@@ -49,6 +49,7 @@ def open_batch_item_dialog(item_id, kind='levels'):
     context = get_batch_item_context(int(item_id))
     levels = [_assignment(row) for row in context['levels']]
     initial = dict(selected=[row['qc_level_id'] for row in levels],
+                   products=[int(row['qc_material_id']) for row in context['levels']],
                    levels={row['qc_level_id']: dict(row) for row in levels},
                    cv_limit=_number(context['item'].get('cv_limit')),
                    cv_source=str(context['item'].get('quality_target_source_text') or ''))
@@ -56,7 +57,8 @@ def open_batch_item_dialog(item_id, kind='levels'):
         _clear_prefix(_quality_prefix(item_id))
     st.session_state[MODAL_KEY] = dict(item_id=int(item_id), kind=kind, token=uuid4().hex,
         revision=int(context['revision']), context=context, initial=initial,
-        draft=dict(selected=list(initial['selected']), levels={key: dict(value) for key, value in initial['levels'].items()},
+        draft=dict(selected=list(initial['selected']), products=list(initial['products']),
+                   levels={key: dict(value) for key, value in initial['levels'].items()},
                    cv_limit=initial['cv_limit'], cv_source=initial['cv_source']), discard=False)
     st.rerun(scope='app')
 
@@ -93,7 +95,8 @@ def _shown_assignments(draft):
 
 def _dirty(state):
     draft, initial = state['draft'], state['initial']
-    if draft['selected'] != initial['selected'] or draft['cv_limit'] != initial['cv_limit'] or draft['cv_source'] != initial['cv_source']:
+    if (draft['selected'] != initial['selected'] or draft.get('products', []) != initial.get('products', [])
+            or draft['cv_limit'] != initial['cv_limit'] or draft['cv_source'] != initial['cv_source']):
         return True
     return any(draft['levels'][level_id] != initial['levels'].get(level_id) for level_id in draft['selected'] if level_id is not None)
 
@@ -123,6 +126,9 @@ def _render_levels(state, current):
         selected = state['draft']['selected']
         selected += [None] * max(0, position + 1 - len(selected))
         selected[position] = result['level_id']
+        products = state['draft'].setdefault('products', [])
+        products += [None] * max(0, position + 1 - len(products))
+        products[position] = result['product_id']
         prefix = 'batch_control_' + state['token'] + '_' + str(position)
         st.session_state[prefix + '_product'] = result['product_id']
         st.session_state[prefix + '_level'] = result['level_id']
@@ -164,16 +170,20 @@ def _render_levels(state, current):
     from ui.control_selection import control_products, render_control_slot
     products = control_products()
     prior = list(draft['selected'])
-    selected = []
+    prior_products = list(draft.get('products', []))
+    selected, selected_products = [], []
     for position in range(int(item['level_count'])):
-        _, level_id = render_control_slot(
+        product_id, level_id = render_control_slot(
             prefix='batch_control_' + state['token'] + '_' + str(position), order=position+1,
             selected_level=prior[position] if position < len(prior) else None,
+            selected_product=prior_products[position] if position < len(prior_products) else None,
             registration_key=registration_key, slot=position, products=products,
             materials=list(available.values()),
             preserve_prefixes=('batch_level_' + state['token'] + '_', 'batch_control_' + state['token'] + '_'))
         selected.append(level_id)
+        selected_products.append(product_id)
     draft['selected'] = selected
+    draft['products'] = selected_products
     complete = all(level_id is not None for level_id in selected) and len(set(selected)) == len(selected)
     if len(set(level_id for level_id in selected if level_id is not None)) != sum(level_id is not None for level_id in selected):
         st.warning('各水平不能选择同一条质控品记录。')
@@ -291,7 +301,7 @@ def _render_product_recheck(state, current):
     render_product_reviews(ctx, product_ids, reagent_id=item.get('reagent_id'),
         lab_instrument_id=config['lab_instrument_id'], test_item_id=item['test_item_id'],
         method_id=item.get('method_id'), prefix=prefix,
-        confirm_label='确认并保存', on_confirm=save, allow_relation_edit=False)
+        confirm_label='保存质控品适用依据', on_confirm=save, allow_relation_edit=False)
     if st.button('取消', key='batch_product_cancel', width='stretch'):
         if ctx.get(prefix + '_dirty'):
             state['discard'] = True

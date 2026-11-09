@@ -9,6 +9,7 @@ from typing import Any
 import pandas as pd
 from services.time_service import detection_input_max
 import streamlit as st
+from ui.date_time_inputs import minute_datetime_input
 
 from database import delete_result, update_result
 from services.lot_lifecycle_service import get_result_edit_availability
@@ -107,10 +108,11 @@ def render_record_maintenance_dialog(
                 )
                 if edit_locked:
                     st.info(availability['reason'])
-                with st.form("edit_result_form"):
-                    edit_test_time = st.datetime_input(
+                with st.form("edit_result_form", enter_to_submit=False):
+                    edit_test_time = minute_datetime_input(
                         "检测时间",
                         value=pd.Timestamp(selected_result["test_time"]).to_pydatetime(),
+                        preserve_original=pd.Timestamp(selected_result["test_time"]).to_pydatetime(),
                         max_value=detection_input_max(selected_result["test_time"]),
                         disabled=edit_locked,
                     )
@@ -164,7 +166,7 @@ def render_record_maintenance_dialog(
                             try:
                                 update_result(
                                     result_id=int(selected_result_id),
-                                    test_time=edit_test_time.strftime("%Y-%m-%d %H:%M:%S"),
+                                    test_time=edit_test_time.isoformat(sep=" "),
                                     operator=cleaned_operator,
                                     value=float(edit_value),
                                     log_value=compute_legacy_log_value(float(edit_value), normalized_input_value_type),
@@ -274,9 +276,10 @@ def render_zscore_record_maintenance_dialog(
                 if is_locked_for_maintenance:
                     st.info(availability['reason'] or "批次已进入正式期，这条建靶记录保留供查看。")
                     readonly_prefix = f"readonly_zscore_run_{dialog_nonce}_{int(selected_run_id)}"
-                    st.datetime_input(
+                    minute_datetime_input(
                         "检测时间",
                         value=pd.Timestamp(selected_run["test_time"]).to_pydatetime(),
+                        preserve_original=pd.Timestamp(selected_run["test_time"]).to_pydatetime(),
                         disabled=True,
                         key=f"{readonly_prefix}_test_time",
                     )
@@ -312,10 +315,11 @@ def render_zscore_record_maintenance_dialog(
                         if level_caption:
                             st.caption(level_caption)
                 else:
-                    with st.form(f"edit_zscore_run_form_{dialog_nonce}_{int(selected_run_id)}"):
-                        edit_test_time = st.datetime_input(
+                    with st.form(f"edit_zscore_run_form_{dialog_nonce}_{int(selected_run_id)}", enter_to_submit=False):
+                        edit_test_time = minute_datetime_input(
                             "检测时间",
                             value=pd.Timestamp(selected_run["test_time"]).to_pydatetime(),
+                            preserve_original=pd.Timestamp(selected_run["test_time"]).to_pydatetime(),
                             max_value=detection_input_max(selected_run["test_time"]),
                         )
                         edit_operator = st.text_input(

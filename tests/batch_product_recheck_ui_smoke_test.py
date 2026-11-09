@@ -93,7 +93,7 @@ class BatchProductRecheckUITests(unittest.TestCase):
             unchanged = database_state()
             self.assertEqual(unchanged, database_state())
             self.assertFalse(any(row.label == '确认所选质控品' for row in app.button))
-            self.assertEqual('确认并保存', app.button(key=prefix + '_confirm').label)
+            self.assertEqual('保存质控品适用依据', app.button(key=prefix + '_confirm').label)
             app.button(key=prefix + '_confirm').click().run()
             assert_clean(app)
             self.assertNotIn('batch_item_dialog', app.session_state)
@@ -137,7 +137,7 @@ class BatchProductRecheckUITests(unittest.TestCase):
             app.button(key=f'open_product_{item}').click().run()
             assert_clean(app)
             self.assertFalse(get_batch_item_context(item)['editable'])
-            self.assertFalse(any(button.label == '确认并保存' for button in app.button))
+            self.assertFalse(any(button.label == '保存质控品适用依据' for button in app.button))
             self.assertEqual(frozen_before, database_state())
             self.assertEqual(review, json.loads(get_batch_item_context(item)['item']['product_choice_review_json']))
 
@@ -171,7 +171,7 @@ class BatchProductRecheckUITests(unittest.TestCase):
                     'SELECT snapshot_json FROM qc_config_snapshots WHERE lot_config_id=? ORDER BY id',
                     (fixture['config_id'],)).fetchall()))
             app.run()
-            self.assertFalse(any(button.label == '确认并保存' for button in app.button))
+            self.assertFalse(any(button.label == '保存质控品适用依据' for button in app.button))
             app.button(key='batch_product_close').click().run()
             self.assertNotIn('batch_item_dialog', app.session_state)
 
@@ -183,7 +183,7 @@ class BatchProductRecheckUITests(unittest.TestCase):
             app = AppTest.from_function(product_page, args=([item],), default_timeout=30).run()
             app.button(key=f'open_quality_{item}').click().run()
             assert_clean(app)
-            self.assertFalse(any(row.label in ('确认并保存', '确认所选质控品', '保存本批次质控品确认')
+            self.assertFalse(any(row.label in ('保存质控品适用依据', '确认所选质控品', '保存本批次质控品确认')
                                  for row in app.button))
             self.assertFalse(any(row.label == '质控品确认人' for row in app.text_input))
 

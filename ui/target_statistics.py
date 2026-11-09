@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 from ui.required_fields import required_field
+from ui.date_time_inputs import minute_datetime_input
 
 
 STATISTICS_MODE_LABELS = {'monthly': '月度统计', 'cumulative': '累计统计'}
@@ -60,6 +61,15 @@ def render_target_statistics_switch(state, current, *, on_cancel, on_saved):
     from services.target_statistics_service import get_target_statistics_candidate, save_target_statistics_candidate
     context, draft = state['context'], state['draft']
     st.subheader('切换均值和SD')
+    if state.get('discard'):
+        st.warning('本次均值和SD切换尚未保存。')
+        keep, discard = st.columns(2)
+        if keep.button('继续编辑', key='target_statistics_continue', type='primary'):
+            state['discard'] = False
+            st.rerun(scope='app')
+        if discard.button('放弃修改', key='target_statistics_discard'):
+            on_cancel()
+        return
     st.caption(context['template']['template_name'] + ' · ' + context['snapshot'].get('test_item_name', ''))
     if not current['editable']:
         st.info(current['read_only_reason'])
@@ -112,7 +122,7 @@ def render_target_statistics_switch(state, current, *, on_cancel, on_saved):
             st.error(str(message))
         if current['fingerprint'] != state['fingerprint']:
             st.warning('参数、设置或检测结果已修改，请重新计算本次候选。')
-    draft['effective_at'] = st.datetime_input('生效时间', key=_field(state, 'effective_at', draft['effective_at']))
+    draft['effective_at'] = minute_datetime_input('生效时间', key=_field(state, 'effective_at', draft['effective_at']))
     evidence_key = _field(state, 'evidence', draft['evidence'])
     with required_field(evidence_key, missing=not str(st.session_state[evidence_key] or '').strip(),
                         message='请填写本次切换依据。'):
@@ -120,14 +130,19 @@ def render_target_statistics_switch(state, current, *, on_cancel, on_saved):
     person_key = _field(state, 'confirmed_by', draft['confirmed_by'])
     with required_field(person_key, missing=not str(st.session_state[person_key] or '').strip(), message='请填写确认人。'):
         draft['confirmed_by'] = st.text_input('确认人', key=person_key)
-    draft['confirmed'] = st.checkbox('已核对全部水平的新统计值和生效时间',
-        key=_field(state, 'confirmed', draft['confirmed']))
+    confirm_key = _field(state, 'confirmed', draft['confirmed'])
+    with required_field(confirm_key, missing=not st.session_state[confirm_key],
+                        message='请勾选“已核对全部水平的新统计值和生效时间”。'):
+        draft['confirmed'] = st.checkbox('已核对全部水平的新统计值和生效时间', key=confirm_key)
     cancel, save = st.columns(2)
     if cancel.button('取消', key='target_statistics_cancel', width='stretch'):
+        if draft != state.get('initial', draft):
+            state['discard'] = True
+            st.rerun(scope='app')
         on_cancel()
     ready = bool(candidate and candidate.get('ready') and strategy and draft['confirmed']
                  and draft['confirmed_by'].strip() and draft['evidence'].strip())
-    if save.button('确认切换', key='target_statistics_save', type='primary', width='stretch', disabled=not ready):
+    if save.button('保存并启用新均值和SD', key='target_statistics_save', type='primary', width='stretch', disabled=not ready):
         try:
             profile = save_target_statistics_candidate(state['binding_id'], candidate,
                 expected_fingerprint=candidate['fingerprint'], expected_policy_revision=candidate['policy_revision'],

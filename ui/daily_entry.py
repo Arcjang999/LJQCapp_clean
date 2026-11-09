@@ -1,9 +1,10 @@
 from __future__ import annotations
 from copy import deepcopy
-from services.time_service import local_now, validate_detection_time, FUTURE_DETECTION_MESSAGE
+from services.time_service import local_now, detection_input_max, validate_detection_time, FUTURE_DETECTION_MESSAGE
 import logging
 import pandas as pd
 import streamlit as st
+from ui.date_time_inputs import minute_datetime_input, minute_value
 
 from services.daily_draft_service import new_draft,draft_rows,parse_rectangular_paste,apply_paste,build_request
 from services.daily_overview_service import METHOD_LABELS,CLASS_LABELS
@@ -79,7 +80,7 @@ def _entry_time(value):
     except (ValueError,TypeError,OverflowError) as exc:
         if str(exc) == FUTURE_DETECTION_MESSAGE:
             raise
-        raise ValueError('检测时间无效，请按年-月-日 时:分:秒填写，并核对日期。') from exc
+        raise ValueError('请选择有效的检测日期和时间。') from exc
 
 
 def _refresh_context(draft):
@@ -103,7 +104,9 @@ def _refresh_button(draft):
 def _field(field,key):
     draft=_draft()
     if draft:
-        draft[field]=st.session_state[key];draft['frozen']=None
+        value=st.session_state[key]
+        draft[field]=(value.isoformat(sep=' ', timespec='minutes') if value else '') if field=='test_time' else value
+        draft['frozen']=None
         draft.pop('paste_preview',None);draft.pop('file_preview',None)
 
 
@@ -145,7 +148,8 @@ def _activate(context):
         drafts.pop(selection_key,None)
         drafts[selection_key]=deepcopy(old)
     existing=drafts.get(str(context['selection']))
-    draft=deepcopy(existing) if existing else new_draft(context,operator=(old or {}).get('operator',''))
+    draft=deepcopy(existing) if existing else new_draft(context,operator=(old or {}).get('operator',''),
+        test_time=minute_value(context['test_time']).isoformat(sep=' ',timespec='minutes'))
     _follow_instant_transfer(draft,context)
     st.session_state['daily_draft']=draft
     st.session_state.pop('daily_pending_context',None)
@@ -189,7 +193,7 @@ def _render_selector():
         if st.session_state.get('entry_lot') not in lots:st.session_state['entry_lot']=None
         lot=c[2].selectbox('本次主批号',[None,*lots],key='entry_lot',format_func=lambda i:'请选择本次使用批号' if i is None else lots[i]['lot_no'])
         if None in (instrument,product,lot):return
-        when=local_now().strftime('%Y-%m-%d %H:%M:%S')
+        when=local_now().strftime('%Y-%m-%d %H:%M')
         context=get_daily_context(instrument,product,lot,when,template_id=template_id)
         if context.get('requires_combination'):
             combinations={i['lot_config_id']:i for i in context['combinations']}
@@ -259,7 +263,7 @@ def _receipt(draft):
     st.download_button('导出本次已保存结果',export_daily_workbook(draft),'常规质控已保存结果.xlsx',mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     if st.button('再次检测，开始新一组',type='primary'):
         from services.daily_context_service import get_daily_context
-        sel=draft['context']['selection'];when=local_now().strftime('%Y-%m-%d %H:%M:%S')
+        sel=draft['context']['selection'];when=local_now().strftime('%Y-%m-%d %H:%M')
         context=get_daily_context(test_time=when,**sel)
         st.session_state['daily_draft']=new_draft(context,operator=draft['operator'],test_time=when);st.rerun()
     return True
@@ -318,10 +322,14 @@ def render_daily_entry():
     if draft.get('transfer_recheck_required'):
         st.info('此检验项目已转入 L-J 法，尚未保存的输入已保留。请重新检查本组结果，再确认保存。')
     cols=st.columns(2)
-    for col,label,field in [(cols[0],'检测时间（年-月-日 时:分:秒）','test_time'),(cols[1],'检测人','operator')]:
-        key=f'daily_{field}_{token}'
-        if key not in st.session_state:st.session_state[key]=draft[field]
-        col.text_input(label,key=key,on_change=_field,args=(field,key))
+    time_key=f'daily_test_time_{token}'
+    with cols[0]:
+        time_value=minute_value(draft['test_time'])
+        minute_datetime_input('检测时间',value=time_value,key=time_key,on_change=_field,args=('test_time',time_key),
+            max_value=detection_input_max(time_value))
+    operator_key=f'daily_operator_{token}'
+    if operator_key not in st.session_state:st.session_state[operator_key]=draft['operator']
+    cols[1].text_input('检测人',key=operator_key,on_change=_field,args=('operator',operator_key))
     _refresh_button(draft)
     selection_key='entry_selected_'+token
     if selection_key not in st.session_state:st.session_state[selection_key]=draft['selected']

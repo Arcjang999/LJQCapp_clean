@@ -1,6 +1,6 @@
 # Linux 试用部署
 
-当前云端入口沿用 `app.py` 和 `codex/project-workflow-alignment` 分支，使用独立的运行账号与数据目录。适合少量使用者共同试用同一套资料；尚未实现各实验室账号和数据隔离。
+当前云端入口为 `app.py`，发布分支为 `main`，使用独立的运行账号与数据目录。网页通过现有 HTTPS 入口访问。适合少量使用者共同试用同一套资料；尚未实现各实验室账号和数据隔离。
 
 ## 首次部署
 
@@ -8,7 +8,7 @@
 
 ```bash
 sudo install -d -o "$USER" -g "$(id -gn)" /opt/ljqcapp
-git clone --depth 1 --single-branch --branch codex/project-workflow-alignment https://github.com/Arcjang999/LJQCapp_clean.git /opt/ljqcapp
+git clone --depth 1 --single-branch --branch main https://github.com/Arcjang999/LJQCapp_clean.git /opt/ljqcapp
 cd /opt/ljqcapp
 sudo bash scripts/deploy_cloud.sh YOUR_PUBLIC_IP
 ```
@@ -31,15 +31,8 @@ curl --fail http://127.0.0.1:8501/_stcore/health
 
 ## 后续更新
 
-先在网页设置中下载完整备份，再在无人录入时更新：
+现有服务器使用每轮独立的发布工具和来源合同，按 `prepare → dependencies → check → release → accept` 执行。先锁定服务器当前提交及本轮main目标，隔离检查通过后再停应用服务；停机后立即以当时资料建立完整对照、原始文件备份和完整业务备份，再正常快进源码并重启。最后逐表核对原单元格、报告BLOB、附件原字节、配置和权限，分别保存本轮部署及验收回执。
 
-```bash
-sudo systemctl stop ljqcapp
-cd /opt/ljqcapp
-git pull --ff-only origin codex/project-workflow-alignment
-sudo bash scripts/deploy_cloud.sh YOUR_PUBLIC_IP
-```
+每轮使用新的证据目录及双备份，不能沿用旧对照、恢复试用快照或用旧库覆盖新记录。依赖阶段核对现有环境；本轮没有依赖变化时不重新安装。原有HTTPS、Nginx、systemd和桌面补丁接收端保持。上面的首次部署脚本用于新服务器准备，现有服务器更新沿上述流程执行。
 
-脚本不会恢复试用快照或重建运行库。只有首次明确选用试用资料时才从 `test_data/trial-2026-10-13/trial-data.zip` 恢复；后续发布继续使用服务器已有记录。
-
-查看服务日志使用 `sudo journalctl -u ljqcapp -n 80 --no-pager`。公网目前按 IP 提供 HTTP；域名和 HTTPS 须在有域名后另行配置。
+桌面程序通过main的独立双平台构建和签名发布，网页版更新与桌面补丁各自完成验收。后续发布继续使用服务器已有记录。查看服务日志使用 `sudo journalctl -u ljqcapp -n 80 --no-pager`。

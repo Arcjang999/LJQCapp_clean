@@ -1,7 +1,8 @@
 """Explicit reagent dialogs preserve drafts, chosen assays and time-based history."""
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 import sys
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -104,6 +105,10 @@ def test_verification_requires_explicit_conclusion_and_keeps_selected_lot():
     with TemporaryDatabaseContext():
         _, systems, lot = fixture()
         app=make_app(lot);app.button(key='reagent_verify').click().run();p=prefix(app)
+        picker = app.datetime_input(key=p+'when')
+        assert picker.proto.step == 60 and picker.value.second == picker.value.microsecond == 0
+        selected_time = datetime(2026, 9, 3, 11, 25)
+        picker.set_value(selected_time).run()
         assert app.selectbox(key=p+'conclusion').value is None
         app.selectbox(key=p+'system').set_value(systems[0]['id'])
         app.text_area(key=p+'evidence').set_value('逐检测项验证依据')
@@ -115,12 +120,32 @@ def test_verification_requires_explicit_conclusion_and_keeps_selected_lot():
         app.button(key='reagent_continue').click().run();clean(app)
         assert app.selectbox(key=p+'system').value==systems[0]['id']
         assert app.selectbox(key=p+'conclusion').value=='fail'
+        assert app.datetime_input(key=p+'when').value == selected_time
         app.button(key='reagent_save').click().run();clean(app)
         assert not app.error and app.session_state['reagent_selected_lot']==lot
         with get_connection() as c:
             rows=c.execute('SELECT * FROM qc_lot_verifications').fetchall()
             assert len(rows)==1 and rows[0]['conclusion']=='fail' and rows[0]['system_id']==systems[0]['id']
+            assert rows[0]['confirmed_at'] == '2026-09-03 11:25:00'
             assert not c.execute('SELECT * FROM qc_reagent_lot_usage').fetchall()
+
+
+def test_switch_default_uses_next_minute_after_an_existing_second_precision_verification():
+    with TemporaryDatabaseContext():
+        _, systems, lot = fixture()
+        verify(systems[0], lot, when='2026-09-03 11:25:42')
+        app = make_app(lot)
+        before = dump()
+        with patch('ui.reagent_lifecycle_workspace.local_now', return_value=datetime(2026, 9, 3, 11, 25, 50)):
+            app.button(key='reagent_switch').click().run()
+        p = prefix(app)
+        picker = app.datetime_input(key=p+'when')
+        assert picker.proto.step == 60 and picker.value == datetime(2026, 9, 3, 11, 26)
+        app.multiselect(key=p+'systems').set_value([systems[0]['id']]).run()
+        clean(app)
+        preview = next(frame.value for frame in app.dataframe if '验证结论' in frame.value.columns)
+        assert preview.iloc[0]['验证结论'] == '通过'
+        assert dump() == before
 
 
 def verify(system, lot, conclusion='pass', when='2026-09-01'):

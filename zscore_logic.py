@@ -1500,7 +1500,7 @@ def _update_saved_zscore_run_impl(
 
     db_update_zscore_run(
         run_id,
-        test_time=_format_test_time(test_time),
+        test_time=test_time,
         operator=cleaned_operator,
         manual_note=manual_note,
     )

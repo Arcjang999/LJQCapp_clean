@@ -200,6 +200,11 @@ def _prepare(connection, values):
         summary.append(('质量要求', '本批次SD控制' + (f"；实验室CV≤{payload['cv_limit']:g}%" if payload['cv_limit'] is not None else '；未设置CV上限')))
     elif spec:
         summary.append(('质量要求', spec['standard'] + ' / ' + spec['version'] + '；' + spec['imprecision_text']))
+    if quality.get('source_name') or quality.get('source_version'):
+        summary.append(('质量要求依据', ' / '.join(str(quality.get(key) or '')
+            for key in ('source_name', 'source_version')).strip(' /')))
+    if quality.get('requirement_text'):
+        summary.append(('实验室质量要求', quality['requirement_text']))
     if args.get('ct_alert'):
         from services.ct_alert_service import ct_requirement_text
         summary.append(('实验室自定 Ct 线', ct_requirement_text(args['ct_alert'])))
@@ -227,7 +232,7 @@ def save_quick_project_setup(values, *, expected_preview_hash, request_key):
             return json.loads(old['receipt_json'])
         preview = _prepare(connection, values)
         if preview['preview_hash'] != expected_preview_hash:
-            raise ValueError('项目资料或可用质控品已修改，请返回检测设置核对后重新查看保存预览。')
+            raise ValueError('项目资料或可用质控品已修改，请返回检测设置重新核对，再进入“检查并保存项目”。')
         item_values = {key: values.get(key) for key in _FIELDS}
         item_values.update(product_choice_review=_product_review(values), notes=str(values.get('item_notes') or ''))
         project_values = dict(template_name=values['template_name'], lab_instrument_id=values['lab_instrument_id'],

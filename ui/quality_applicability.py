@@ -11,6 +11,7 @@ from services.quality_applicability_service import (
     missing_context_fields, source_status,
 )
 from ui.required_fields import required_field
+from ui.standard_source_links import render_standard_source_links
 
 
 def _applicability_label(row):
@@ -120,7 +121,7 @@ def render_conditions(item, review, prefix, *, quick=False, settings_location=No
             default=process_ids, format_func=names.get, key=prefix+'_mandatory_sources')
         for row in process:
             st.caption('；'.join(row['spec']['requirements']))
-            st.link_button('查看 '+row['source']['standard']+' 原文', row['source']['source_url'])
+            render_standard_source_links(row['source'])
         st.info('按以上条款核对对照设置、检测结果及异常处理要求。')
     else:
         adopted = []
@@ -196,7 +197,7 @@ def render_process_requirements(rows, review, prefix):
                     st.caption(names[row['id']] + '｜' + row['clause'])
                     for text in row['spec']['requirements']:
                         st.write(text)
-                    st.link_button('查看 '+row['source']['standard']+' 原文', row['source']['source_url'])
+                    render_standard_source_links(row['source'])
     return dict(source_ids=selected, requirement_text=requirement)
 
 
@@ -208,12 +209,27 @@ def render_registered_sources(prior, prefix):
         row={}
         with st.expander(f'补充标准 {i+1} 的名称、条款和全文',expanded=True):
             labels={'standard':'标准编号','name':'标准名称','version':'版本',
-                    'effective_date':'实施日期（YYYY-MM-DD）','withdrawn_on':'废止日期（如有）',
+                    'effective_date':'实施日期','withdrawn_on':'废止日期（如有）',
                     'source_url':'官方全文链接',
                     'source_clause':'本次使用的条款','source_page':'PDF 页码','verified_by':'阅读并确认此标准的人员',
-                    'checked_on':'确认日期（YYYY-MM-DD）'}
+                    'checked_on':'确认日期'}
             for key,label in labels.items():
-                row[key]=st.text_input(label,value=old.get(key,''),key=f'{prefix}_registered_{i}_{key}',max_chars=2000)
+                widget_key=f'{prefix}_registered_{i}_{key}'
+                if key in ('effective_date','withdrawn_on','checked_on'):
+                    value=st.session_state.get(widget_key,old.get(key))
+                    if isinstance(value,str):
+                        try:
+                            value=date.fromisoformat(value) if value else None
+                        except ValueError:
+                            value=None
+                    if widget_key not in st.session_state or isinstance(st.session_state[widget_key],str):
+                        st.session_state[widget_key]=value
+                    years=[1900,2100,local_today().year,*([value.year] if value else [])]
+                    selected=st.date_input(label,value=None,format='YYYY-MM-DD',key=widget_key,
+                        min_value=date(min(years),1,1),max_value=date(max(years),12,31))
+                    row[key]=selected.isoformat() if selected else ''
+                else:
+                    row[key]=st.text_input(label,value=old.get(key,''),key=widget_key,max_chars=2000)
             uploaded = st.file_uploader('标准全文文件（PDF）', type=['pdf'], key=f'{prefix}_registered_{i}_file')
             upload_error_key = f'{prefix}_registered_{i}_upload_error'
             row['sha256'] = old.get('sha256', '')

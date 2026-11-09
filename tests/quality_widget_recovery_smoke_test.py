@@ -31,11 +31,12 @@ class QualityWidgetRecoveryTest(unittest.TestCase):
         prefix=fill_quality(app,values)
         app.selectbox(key=prefix+'_search_conclusion').set_value('registered').run()
         fields=dict(standard='LAB-UPLOAD-2026',name='隔离上传核对文件',version='1',
-            effective_date=date.today().isoformat(),source_url='https://www.nhc.gov.cn/wjw/s9492/wsbz.shtml',
-            source_clause='隔离标准条款',source_page='1',verified_by='文件核对人',
-            checked_on=date.today().isoformat())
+            source_url='https://www.nhc.gov.cn/wjw/s9492/wsbz.shtml',
+            source_clause='隔离标准条款',source_page='1',verified_by='文件核对人')
         for field,value in fields.items():
             app.text_input(key=f'{prefix}_registered_0_{field}').set_value(value)
+        for field in ('effective_date','checked_on'):
+            app.date_input(key=f'{prefix}_registered_0_{field}').set_value(date.today())
         app.text_area(key=prefix+'_registered_0_requirement').set_value('按本实验室的对照安排核对检测。')
         app.text_area(key=prefix+'_registered_0_evidence').set_value('本条款的方法、标本和尺度与当前项目一致。')
         app.run();assert_clean(app)
@@ -74,6 +75,10 @@ class QualityWidgetRecoveryTest(unittest.TestCase):
             ctx=app.session_state['project_workspace_dialog'];row=ctx['draft']['quality']['registered_standards'][0]
             self.assertEqual(hashlib.sha256(contents).hexdigest(),row['sha256'])
             self.assertEqual('隔离上传核对文件',row['name'])
+            self.assertEqual(date.today().isoformat(),row['effective_date'])
+            self.assertEqual(date.today().isoformat(),row['checked_on'])
+            self.assertEqual('',row['withdrawn_on'])
+            self.assertEqual(date.today(),app.date_input(key=prefix+'_registered_0_effective_date').value)
             self.assertTrue(any('已保留上次上传的标准全文' in row.value for row in app.caption))
             self.assertFalse(any(key.endswith('_file') for key in ctx['quick_quality_inputs']['values']))
             self.assertIsNone(app.session_state[prefix+'_registered_0_file'])

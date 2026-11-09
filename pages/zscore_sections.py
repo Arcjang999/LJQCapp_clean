@@ -9,6 +9,7 @@ from typing import Any
 import pandas as pd
 from services.time_service import local_now, detection_input_max
 import streamlit as st
+from ui.date_time_inputs import minute_datetime_input
 
 from services.value_type_service import (
     build_level_measurement_label,
@@ -1239,8 +1240,8 @@ def render_zscore_entry_section(
         except (TypeError, ValueError):
             current_standard_sd_limit = 4.0
         # Keep entry widgets inside a form so Tab focus changes do not trigger reruns.
-        with st.form("zscore_entry_form"):
-            test_time = st.datetime_input("检测时间", key="zscore_entry_test_time",
+        with st.form("zscore_entry_form", enter_to_submit=False):
+            test_time = minute_datetime_input("检测时间", key="zscore_entry_test_time",
                 max_value=detection_input_max(st.session_state.get("zscore_entry_test_time")))
             operator = st.selectbox(
                 "检测人",

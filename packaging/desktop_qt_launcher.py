@@ -13,7 +13,7 @@ import sys
 import time
 import traceback
 import uuid
-from urllib.parse import quote
+from urllib.parse import quote, urljoin, urlsplit
 
 from services.release_info import get_release_info
 from services.storage_paths import get_storage_paths
@@ -710,6 +710,69 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_known_args(argv)[0]
 
 
+def _web_origin(value: str) -> tuple[str, str, int] | None:
+    try:
+        parts = urlsplit(value)
+        scheme = parts.scheme.casefold()
+        if (scheme not in ('http', 'https') or not parts.hostname
+                or parts.username is not None or parts.password is not None):
+            return None
+        return scheme, parts.hostname.casefold(), parts.port or (443 if scheme == 'https' else 80)
+    except ValueError:
+        return None
+
+
+def _desktop_navigation_action(value: str, local_origin: str) -> str:
+    """Route top-level links without handing arbitrary URI schemes to the OS."""
+    if not value or any(ord(char) < 32 or ord(char) == 127 for char in value):
+        return 'blocked'
+    if value in ('about:blank', 'about:srcdoc'):
+        return 'internal'
+    origin = _web_origin(local_origin)
+    if origin is None:
+        return 'blocked'
+    if value.startswith('blob:'):
+        return 'internal' if _web_origin(value[5:]) == origin else 'blocked'
+    destination = _web_origin(urljoin(local_origin + '/', value))
+    if destination is None:
+        return 'blocked'
+    return 'internal' if destination == origin else 'external'
+
+
+def _create_desktop_page(page_type, view, local_origin: str, open_external):
+    """Keep link policy testable without importing or starting a Qt runtime."""
+    class DesktopPage(page_type):
+        def __init__(self):
+            super().__init__(view.page().profile(), view)
+            self.newWindowRequested.connect(self._open_new_window)
+
+        def acceptNavigationRequest(self, url, navigation_type, is_main_frame):
+            if not is_main_frame:
+                # Streamlit uses inline and same-origin frames for components.
+                # Their navigation stays with the existing browser engine.
+                return super().acceptNavigationRequest(url, navigation_type, is_main_frame)
+            action = _desktop_navigation_action(url.toString(), local_origin)
+            if action == 'external':
+                open_external(url)
+            return action == 'internal'
+
+        def _open_new_window(self, request):
+            url = request.requestedUrl()
+            text = url.toString()
+            action = _desktop_navigation_action(text, local_origin)
+            if action == 'external':
+                # Streamlit link buttons request a new tab. Do not navigate
+                # the application page or replace its unsaved input.
+                open_external(url)
+            elif action == 'internal' and text not in ('about:blank', 'about:srcdoc'):
+                # Desktop local popups are downloads, including inline PDFs.
+                # openIn(self) would replace the application's form. download()
+                # emits this page profile's downloadRequested without navigation.
+                self.download(url)
+
+    return DesktopPage()
+
+
 def _run_qt_desktop(argv: list[str]) -> int:
     options = _parse_args(argv)
     _write_log("=" * 80)
@@ -725,7 +788,9 @@ def _run_qt_desktop(argv: list[str]) -> int:
     try:
         _configure_qt_environment()
         from PySide6.QtCore import QTimer, QUrl
-        from PySide6.QtWidgets import QApplication, QFileDialog, QMainWindow
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtWidgets import QApplication, QFileDialog, QMainWindow, QMessageBox
+        from PySide6.QtWebEngineCore import QWebEnginePage
         from PySide6.QtWebEngineWidgets import QWebEngineView
     except Exception:
         _write_log("PySide6 QtWebEngine import failed:")
@@ -767,6 +832,19 @@ def _run_qt_desktop(argv: list[str]) -> int:
             window.menuBar().addMenu('帮助').addAction('检查更新', check_for_updates)
         view = QWebEngineView()
         window.setCentralWidget(view)
+        local_origin = f"http://127.0.0.1:{port}"
+
+        def open_external_link(url) -> None:
+            try:
+                if QDesktopServices.openUrl(url):
+                    return
+            except Exception:
+                _write_log('Could not open an external web link:')
+                _write_log(traceback.format_exc())
+            QMessageBox.information(window, APP_NAME,
+                '请复制以下链接到浏览器打开：\n' + url.toString())
+
+        view.setPage(_create_desktop_page(QWebEnginePage, view, local_origin, open_external_link))
         active_downloads: list[object] = []
 
         def handle_download(download: object) -> None:

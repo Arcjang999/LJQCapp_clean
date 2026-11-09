@@ -218,9 +218,7 @@ def _status_pdf(report, events, unregistered):
         with PdfPages(buffer) as pdf:
             figures = layout._build_text_pages(report_title=report.title, page_title='失控处理归档清单',
                 subtitle_lines=[report.report_period_label], sections=[_section('本次采用的处理版本与资料', lines)])
-            for figure in figures:
-                pdf.savefig(figure)
-                plt.close(figure)
+            layout._write_pages(pdf, [(figure, '归档清单') for figure in figures], report)
     return buffer.getvalue()
 
 

@@ -4,6 +4,7 @@ AppTest exercises Python callbacks and reruns. Browser keyboard navigation is
 covered separately; these tests deliberately do not claim real Enter/Tab input.
 """
 from copy import deepcopy
+from datetime import datetime
 import json
 from pathlib import Path
 import shutil
@@ -133,7 +134,10 @@ class DailyUITest(unittest.TestCase):
         self.assertNotIn('unknown:999',app.session_state['daily_draft']['values'])
         app.text_input(key=f'entry_note_{token}_{item}').set_value('尚未保存备注').run()
         app.text_input(key=f'daily_operator_{token}').set_value('返回后仍为同人').run()
-        app.text_input(key=f'daily_test_time_{token}').set_value('不是时间，保留输入').run()
+        picker=next(widget for widget in app.get('date_time_input') if widget.key==f'daily_test_time_{token}')
+        self.assertEqual(60,picker.proto.step)
+        self.assertFalse(any(widget.key==f'daily_test_time_{token}' for widget in app.text_input))
+        picker.set_value(None).run()
         self.assertEqual(before,self.dump())
         expected=deepcopy(app.session_state['daily_draft'])
         self.click(app,'工程入口：系统设置');self.click(app,'返回日常录入')
@@ -145,9 +149,9 @@ class DailyUITest(unittest.TestCase):
         self.assertEqual(expected['notes'],app.session_state['daily_draft']['notes'])
         self.click(app,'检查本组结果')
         self.assertTrue(list(app.error));self.assertEqual(before,self.dump())
-        self.assertTrue(any('检测时间无效' in e.value for e in app.error))
+        self.assertTrue(any('请选择有效的检测日期和时间' in e.value for e in app.error))
         self.assertFalse(any('datetime' in e.value or 'Timestamp' in e.value for e in app.error))
-        self.assertEqual(app.session_state['daily_draft']['test_time'],'不是时间，保留输入')
+        self.assertEqual(app.session_state['daily_draft']['test_time'],'')
 
     def test_clear_restore_keeps_visible_notes_and_values(self):
         app=self.app(filled=True);before=self.dump();draft=app.session_state['daily_draft']
@@ -165,7 +169,7 @@ class DailyUITest(unittest.TestCase):
         app=self.app();submission_ids=set();source_ids=[]
         for group in range(3):
             draft=app.session_state['daily_draft'];submission_ids.add(draft['submission_id']);token=draft['draft_id']
-            app.text_input(key=f'daily_test_time_{token}').set_value(f'2026-09-28 {8+group:02d}:00:00').run()
+            next(widget for widget in app.get('date_time_input') if widget.key==f'daily_test_time_{token}').set_value(datetime(2026,9,28,8+group)).run()
             self.paste_values(app);before=self.dump();self.click(app,'检查本组结果')
             self.assertEqual(before,self.dump());self.assertIn('frozen',app.session_state['daily_draft'])
             self.click(app,'确认保存整组');receipt=app.session_state['daily_draft']['receipt']
@@ -277,7 +281,7 @@ class DailyUITest(unittest.TestCase):
         for field in ('values','notes','reagents','operator','test_time'):self.assertEqual(source[field],updated[field])
         self.assertEqual(app.text_input(key=f'entry_note_{token}_{item}').value,source['notes'][item])
         self.assertEqual(app.text_input(key=f'daily_operator_{token}').value,source['operator'])
-        self.assertEqual(app.text_input(key=f'daily_test_time_{token}').value,source['test_time'])
+        self.assertEqual(next(widget for widget in app.get('date_time_input') if widget.key==f'daily_test_time_{token}').value,datetime(2026,9,28,10,22))
         self.assertEqual(before,self.dump())
 
     def test_file_one_run_cannot_mix_two_individually_valid_reagents(self):

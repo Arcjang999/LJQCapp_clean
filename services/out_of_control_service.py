@@ -453,9 +453,16 @@ def save_handling(event_id, expected_revision_no, request_id, action, content, a
             if not content['confirmation_checked']:
                 raise ValueError('请明确确认处理效果后再完成。')
             confirmed = _time(content['confirmed_at'])
-            if confirmed < _time(event['saved_at']) or confirmed > _time(now):
+            minute_precision = content['confirmed_at'] == confirmed.strftime('%Y-%m-%d %H:%M')
+            submitted, current = _time(event['saved_at']), _time(now)
+            if minute_precision:
+                # A minute input represents the selected minute, not an
+                # invented second before or after the submission timestamp.
+                submitted = submitted.replace(second=0)
+                current = current.replace(second=0)
+            if confirmed < submitted or confirmed > current:
                 raise ValueError('确认时间须在提交待确认之后，且不能晚于当前时间。')
-            content['confirmed_at'] = confirmed.strftime('%Y-%m-%d %H:%M:%S')
+            content['confirmed_at'] = confirmed.strftime('%Y-%m-%d %H:%M' if minute_precision else '%Y-%m-%d %H:%M:%S')
             content['handled_at'] = event['content'].get('handled_at', event['saved_at'])
         else:
             content.update(confirmer_text='', confirmed_at='', confirmation_checked=False,

@@ -5,6 +5,7 @@ from datetime import datetime
 from functools import lru_cache
 from io import BytesIO
 import math
+import re
 import textwrap
 from typing import Any
 
@@ -45,6 +46,7 @@ HEADER_DIVIDER_Y = 0.822
 CONTENT_TOP = 0.790
 CONTENT_BOTTOM = 0.115
 SECTION_TITLE_HEIGHT = 0.043
+SECTION_DIVIDER_OFFSET = 0.024
 SECTION_GAP = 0.018
 PARAGRAPH_LINE_HEIGHT = 0.022
 TABLE_UNIT_HEIGHT = 0.034
@@ -261,6 +263,8 @@ def _wrap_measured_text(text: str, max_width_points: float, font_size: float) ->
     """Wrap mixed Chinese/Latin text to its actual PDF column width."""
     renderer = RendererAgg(1, 1, 72)
     font = FontProperties(size=font_size)
+    closing_punctuation = "，。；：！？、）】》〉」』〕,.!?:;%)]}"
+    opening_punctuation = "（【《〈「『〔([{"
     lines: list[str] = []
     for paragraph in str(text or "-").splitlines():
         line = ""
@@ -268,6 +272,30 @@ def _wrap_measured_text(text: str, max_width_points: float, font_size: float) ->
             candidate = line + character
             width = renderer.get_text_width_height_descent(candidate, font, False)[0]
             if line and width > max_width_points:
+                # Move an English word or code intact when it fits the next
+                # line; long identifiers can still wrap within the column.
+                word = re.search(r"[A-Za-z0-9][A-Za-z0-9_./-]*$", line)
+                if word and word.start() > 0 and (
+                    (character.isascii() and character.isalnum())
+                    or character in closing_punctuation
+                ):
+                    start = word.start()
+                    while start > 0 and line[start - 1] in opening_punctuation:
+                        start -= 1
+                    carried = line[start:] + character
+                    if renderer.get_text_width_height_descent(carried, font, False)[0] <= max_width_points:
+                        line, character = line[:start], carried
+                # Keep closing punctuation with its preceding character and
+                # opening brackets with the text that follows them.
+                while len(line) > 1 and (
+                    character[0] in closing_punctuation
+                    or line[-1] in opening_punctuation
+                ):
+                    carried = line[-1] + character
+                    if renderer.get_text_width_height_descent(carried, font, False)[0] > max_width_points:
+                        break
+                    character = carried
+                    line = line[:-1]
                 lines.append(line.rstrip())
                 line = character.lstrip()
             else:
@@ -351,10 +379,10 @@ def _build_lj_summary_pages(report: Any) -> list[Any]:
     basic_rows = [
         ["方法", report.basic_info.method_label, "输入值类型", report.basic_info.input_value_type_label],
         ["检测方法", report.basic_info.detection_method, "单位", report.basic_info.unit_symbol],
-        ["质控品批号", _wrap_text(report.basic_info.lot_no, 24), "仪器", report.basic_info.instrument],
+        ["质控品批号", report.basic_info.lot_no, "仪器", report.basic_info.instrument],
         ["试剂", report.basic_info.reagent, "质控品", report.basic_info.qc_material],
-        ["浓度", _wrap_text(report.basic_info.concentration, 16), "均值和标准差\n来源", report.basic_info.target_source_label],
-        ["来源说明", _wrap_text(report.basic_info.target_source_detail, 18), "", ""],
+        ["浓度", report.basic_info.concentration, "均值和标准差\n来源", report.basic_info.target_source_label],
+        ["来源说明", report.basic_info.target_source_detail, "", ""],
     ]
 
     summary_rows = [
@@ -443,12 +471,12 @@ def _build_lj_abnormal_pages(report: Any) -> list[Any]:
 def _build_zscore_summary_pages(report: Any) -> list[Any]:
     basic_rows = [
         ["方法", report.basic_info.method_label, "输入值类型", report.basic_info.input_value_type_label],
-        ["水平数", report.basic_info.level_count_label, "各水平说明", _wrap_text(report.basic_info.level_summary, 20)],
+        ["水平数", report.basic_info.level_count_label, "各水平说明", report.basic_info.level_summary],
         ["单位", report.basic_info.unit_symbol, "检测方法", report.basic_info.detection_method],
-        ["当前规则组合", report.basic_info.template_label, "质控品批号", _wrap_text(report.basic_info.lot_no, 24)],
+        ["当前规则组合", report.basic_info.template_label, "质控品批号", report.basic_info.lot_no],
         ["仪器", report.basic_info.instrument, "试剂", report.basic_info.reagent],
-        ["质控品", report.basic_info.qc_material, "浓度", _wrap_text(report.basic_info.concentration, 16)],
-        ["均值和标准差\n来源", report.basic_info.target_source_label, "来源说明", _wrap_text(report.basic_info.target_source_detail, 20)],
+        ["质控品", report.basic_info.qc_material, "浓度", report.basic_info.concentration],
+        ["均值和标准差\n来源", report.basic_info.target_source_label, "来源说明", report.basic_info.target_source_detail],
     ]
 
     run_summary_rows = [
@@ -702,7 +730,9 @@ def _draw_section_title(canvas: _PageCanvas, title: str) -> None:
         fontweight="bold",
         color=HEADER_COLOR,
     )
-    canvas.axis.hlines(canvas.cursor_y - 0.012, xmin=PAGE_LEFT, xmax=PAGE_RIGHT, colors=BORDER_COLOR, linewidth=0.9)
+    # A4's former 0.012 offset was only 10 pt, inside the 12.3 pt
+    # heading. Reserve space for the glyphs and a visible gap below them.
+    canvas.axis.hlines(canvas.cursor_y - SECTION_DIVIDER_OFFSET, xmin=PAGE_LEFT, xmax=PAGE_RIGHT, colors=BORDER_COLOR, linewidth=0.9)
     canvas.cursor_y -= SECTION_TITLE_HEIGHT
 
 

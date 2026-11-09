@@ -110,11 +110,13 @@ def _context(connection, binding_id):
             retained_version=retained_row['version_no'] if reference and not chosen else None))
     table = 'results' if method == 'lj' else 'zscore_runs'
     latest = dict(connection.execute(f'SELECT COUNT(*) AS count,MAX(id) AS latest_id,MAX(test_time) AS latest_time FROM {table} WHERE batch_id=?', (batch_id,)).fetchone())
-    initial_time = local_now().replace(microsecond=0)
+    initial_time = local_now().replace(second=0, microsecond=0)
     if profiles:
         initial_time = max(initial_time, datetime.fromisoformat(profiles[-1]['effective_at']) + timedelta(seconds=1))
     if latest['latest_time']:
         initial_time = max(initial_time, datetime.fromisoformat(timestamp(latest['latest_time'])))
+    minute = initial_time.replace(second=0, microsecond=0)
+    initial_time = minute if initial_time == minute else minute + timedelta(minutes=1)
     # Workbench synchronization refreshes this timestamp on every page rerun.
     # The binding's identities, status and source revision remain part of the check.
     stable_binding = {key: value for key, value in binding.items() if key != 'updated_at'}

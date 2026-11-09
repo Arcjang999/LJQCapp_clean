@@ -51,6 +51,13 @@ def _use_quality_context(ctx, context):
             if context['item'].get('input_value_type') == 'ct' and ct_alert else {})
         ctx.pop('quick_quality_inputs', None)
         ctx.pop('quick_preview', None)
+        prefix = 'quick_quality_' + ctx['token'] + '_'
+        ctx['setup_draft_widgets'] = {key: value
+            for key, value in ctx.get('setup_draft_widgets', {}).items()
+            if not key.startswith(prefix)}
+        for key in list(st.session_state):
+            if key.startswith(prefix):
+                st.session_state.pop(key, None)
         ctx['quick_quality_identity'] = identity
 
 
@@ -75,8 +82,13 @@ def render_quick_project_setup(ctx):
         return
     step = ctx.get('quick_step', 'details')
     st.subheader('新建项目')
-    st.caption({'details': '1 检测设置：确定检验项目、检测系统及各水平实际质控品', 'quality': '2 质量要求：核对检测条件、适用限值及实验室要求',
-                'preview': '3 保存核对：同时建立项目和首个批次，完成后进入录入'}[step])
+    from ui.workflow_steps import render_workflow_step
+    number, title, instruction = {
+        'details': (1, '填写检测设置', '选择检验项目、仪器、试剂和各水平质控品，并确认适用依据。'),
+        'quality': (2, '填写质量要求', '填写检测条件和质量要求，核对本页设置后勾选确认。'),
+        'preview': (3, '检查并保存项目', '检查下表，点击“保存项目并开始录入”后，建立项目和首个批次，并打开结果录入页。'),
+    }[step]
+    render_workflow_step(number, 3, title, instruction)
     if step == 'details':
         _render_details(ctx)
     elif step == 'quality':
@@ -235,12 +247,18 @@ def _render_details(ctx):
         _text(ctx, 'notes', '项目备注', multiline=True)
     dependency_open = render_project_dependencies(ctx, kind='quick', disabled=registration_open)
     relation_pending = render_pending_product_relation_notice(ctx)
+    from ui.project_setup_draft import render_save_setup_draft
+    render_save_setup_draft(ctx, disabled=registration_open or dependency_open or relation_pending)
     if duplicate_levels:
         st.error('各水平不能选择同一条质控品记录，请调整上方的原厂批号与浓度。')
+    if (not reviewed and any(product is not None for product in product_ids)
+            and draft['lab_instrument_id'] is not None and draft['reagent_id'] is not None
+            and not (registration_open or dependency_open or relation_pending)):
+        st.info('请先在上方“质控品适用性确认”中完成核对，再点击“确认所选质控品”。')
     cancel, forward = st.columns(2)
     if cancel.button('取消', key='project_dialog_cancel', disabled=registration_open or dependency_open):
         _cancel(ctx)
-    if forward.button('下一步：设置质量要求', type='primary', key='quick_details_next',
+    if forward.button('下一步：填写质量要求', type='primary', key='quick_details_next',
                       disabled=not reviewed or not materials_ready or not draft['target_statistics_mode']
                       or registration_open or dependency_open or relation_pending):
         try:
@@ -311,6 +329,8 @@ def _render_quality(ctx):
             st.rerun()
         if st.button('取消', key='project_dialog_cancel'):
             _cancel(ctx)
+        from ui.project_setup_draft import render_save_setup_draft
+        render_save_setup_draft(ctx)
         return
     _use_quality_context(ctx, context)
     saved = ctx.get('quick_quality_inputs') or {}
@@ -320,13 +340,15 @@ def _render_quality(ctx):
                 st.session_state[key] = deepcopy(value)
     ctx['draft']['quality'] = _quality_form(context, ctx)
     _remember_quality_inputs(ctx)
+    from ui.project_setup_draft import render_save_setup_draft
+    render_save_setup_draft(ctx)
     back, cancel, forward = st.columns(3)
     if back.button('返回检测设置', key='quick_quality_back'):
         ctx['quick_step'] = 'details'
         st.rerun()
     if cancel.button('取消', key='project_dialog_cancel'):
         _cancel(ctx)
-    if forward.button('下一步：查看设置', key='quick_quality_next', type='primary',
+    if forward.button('下一步：检查并保存项目', key='quick_quality_next', type='primary',
                       disabled=not ctx['draft']['quality'].get('checked') or ctx['draft']['quality'].get('blocked', False)):
         try:
             ctx['quick_preview'] = prepare_quick_project_setup(ctx['draft'])
@@ -335,7 +357,7 @@ def _render_quality(ctx):
             st.info('上述检测设置需要调整，请返回检测设置核对；本次填写内容已保留。')
         except (ValueError, TypeError) as error:
             st.error(str(error))
-            st.info('请按上述提示补齐质量要求，再核对保存预览。')
+            st.info('请按上方提示补齐质量要求，再点击“下一步：检查并保存项目”。')
         else:
             ctx['quick_step'] = 'preview'
             st.rerun()
@@ -354,11 +376,13 @@ def _quality_form(context, ctx):
 def _render_preview(ctx):
     from ui.project_dialogs import MODAL_KEY, _cancel
     preview = ctx['quick_preview']
-    st.table(pd.DataFrame(preview['summary'], columns=['设置内容', '本次填写']))
+    st.table(pd.DataFrame(preview['summary'], columns=['保存内容', '设置值']))
     for order, label in enumerate(preview['material_labels'], 1):
         st.caption(f'水平 {order}：{label}')
     quality = ctx['draft']['quality']
     st.caption('质量要求确认人：' + quality['confirmed_by'])
+    from ui.project_setup_draft import render_save_setup_draft, clear_saved_setup
+    render_save_setup_draft(ctx)
     details, back, cancel, save = st.columns([1, 1, 0.7, 1.6])
     if details.button('返回检测设置', key='quick_preview_details'):
         ctx['quick_step'] = 'details'
@@ -368,10 +392,13 @@ def _render_preview(ctx):
         st.rerun()
     if cancel.button('取消', key='project_dialog_cancel'):
         _cancel(ctx)
-    if save.button('确认保存并进入录入', key='quick_save', type='primary'):
+    if save.button('保存项目并开始录入', key='quick_save', type='primary'):
         try:
-            receipt = save_quick_project_setup(deepcopy(ctx['draft']),
-                expected_preview_hash=preview['preview_hash'], request_key=ctx['token'])
+            from database import atomic_write
+            with atomic_write():
+                receipt = save_quick_project_setup(deepcopy(ctx['draft']),
+                    expected_preview_hash=preview['preview_hash'], request_key=ctx['token'])
+                clear_saved_setup(ctx)
         except QuickSetupDetailsError as error:
             st.error(str(error))
             st.info('上述检测设置需要调整，请返回检测设置核对；本次填写内容已保留。')

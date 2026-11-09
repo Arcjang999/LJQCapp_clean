@@ -76,7 +76,7 @@ def _selector(rows,scope):
 
 @st.dialog('新增实验室自定要求',width='large',dismissible=False)
 def _custom_requirement_dialog():
-    with st.form('quality_custom_form'):
+    with st.form('quality_custom_form', enter_to_submit=False):
         values={}
         for label in ['检验项目','来源名称','版本','单位']:
             values[label]=st.text_input('说明书或实验室文件名称' if label == '来源名称' else label,max_chars=100)

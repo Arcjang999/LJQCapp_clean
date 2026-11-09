@@ -126,6 +126,34 @@ def to_preview(app, values):
 
 
 class QuickProjectSetupUiTests(unittest.TestCase):
+    def test_steps_explain_the_save_action_and_show_the_actual_laboratory_requirement(self):
+        with IsolatedDatabase():
+            values = metadata_values()
+            app = open_details(values)
+            before = database_contents()
+            self.assertTrue(any(row.value == '1/3 填写检测设置' for row in app.subheader))
+            self.assertEqual('下一步：填写质量要求', app.button(key='quick_details_next').label)
+            app.button(key='quick_details_next').click().run()
+            assert_clean(app)
+            self.assertTrue(any(row.value == '2/3 填写质量要求' for row in app.subheader))
+            self.assertEqual('下一步：检查并保存项目', app.button(key='quick_quality_next').label)
+            fill_quality(app, values)
+            app.button(key='quick_quality_next').click().run()
+            assert_clean(app)
+            self.assertTrue(any(row.value == '3/3 检查并保存项目' for row in app.subheader))
+            self.assertEqual('保存项目并开始录入', app.button(key='quick_save').label)
+            self.assertTrue(any('建立项目和首个批次，并打开结果录入页' in row.value for row in app.markdown))
+            shown = app.table[0].value.set_index('保存内容')['设置值'].to_dict()
+            self.assertEqual(values['quality']['requirement_text'], shown['实验室质量要求'])
+            self.assertIn(values['quality']['source_name'], shown['质量要求依据'])
+            self.assertEqual(before, database_contents())
+            app.button(key='quick_save').click().run()
+            assert_clean(app)
+            with get_connection() as connection:
+                self.assertEqual(1, connection.execute('SELECT COUNT(*) FROM qc_project_templates').fetchone()[0])
+                self.assertEqual(1, connection.execute('SELECT COUNT(*) FROM qc_lot_configs').fetchone()[0])
+                self.assertEqual(1, connection.execute('SELECT COUNT(*) FROM qc_quick_setup_receipts').fetchone()[0])
+
     def test_register_missing_lots_in_place_keeps_draft_and_requires_distinct_levels(self):
         from datetime import date
         from services.material_catalog_service import get_material_product
@@ -418,7 +446,7 @@ class QuickProjectSetupUiTests(unittest.TestCase):
                 self.assertEqual('preview', app.session_state['project_workspace_dialog']['quick_step'])
                 self.assertEqual(draft, app.session_state['project_workspace_dialog']['draft'])
                 self.assertEqual(before, database_contents())
-                expected = ('项目资料或可用质控品已修改', '重新查看保存预览') if change == 'lot' else (
+                expected = ('项目资料或可用质控品已修改', '检查并保存项目') if change == 'lot' else (
                     '质控品资料已修改', '重新核对并确认质控品')
                 self.assertTrue(any(all(text in str(item.value) for text in expected) for item in app.error))
 

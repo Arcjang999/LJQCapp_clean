@@ -19,6 +19,7 @@ from services.reagent_lifecycle_edit_service import (
     get_reagent_workspace_context, get_reagent_correction_context, save_reagent_correction,
 )
 from ui.traceability import event_history_table
+from ui.date_time_inputs import minute_datetime_input
 
 MODAL_KEY = 'reagent_history_dialog'
 _CLEANUP_KEY = 'reagent_history_dialog_cleanup'
@@ -260,7 +261,9 @@ def _render_editor(state, current):
     draft['reagent_lot_id'] = st.selectbox('更正后的试剂批号', [None] + list(lots), key=lot_key,
         placeholder='请选择试剂批号',
         format_func=lambda value: '请选择试剂批号' if value is None else f"{lots[value]['lot_no']}｜效期 {lots[value]['expiry_date']}")
-    draft['effective_at'] = st.datetime_input('生效时间', value=None, key=_key(state, 'effective_at', draft['effective_at']))
+    draft['effective_at'] = minute_datetime_input('生效时间', value=None,
+        key=_key(state, 'effective_at', draft['effective_at']),
+        preserve_original=state['initial']['effective_at'])
     if _effective_time(draft['effective_at']) is None:
         st.info('请填写有效的生效时间。')
     verifications = _applicable_verifications(context, draft['reagent_lot_id'], draft['effective_at'])

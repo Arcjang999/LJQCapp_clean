@@ -250,6 +250,7 @@ else:
                 app.run()
                 self.assertFalse(app.exception, [error.message for error in app.exception])
                 time_key, operator_key = prefix+'entry_test_time', prefix+'entry_operator'
+                self.assertEqual(60, app.get('date_time_input')[0].proto.step)
                 app.selectbox(key=operator_key).set_value('检验员')
                 value_keys = ['zscore_level1_value', 'zscore_level2_value'] if method == 'zscore' else [prefix+'entry_value']
                 for index, key in enumerate(value_keys, 1):
@@ -316,6 +317,48 @@ else:
                     rows = connection.execute(f'SELECT test_time FROM {table} WHERE batch_id=? ORDER BY id', (batch,)).fetchall()
                 self.assertEqual(2, len(rows))
                 self.assertEqual('2026-10-27 08:59:00', rows[-1][0])
+
+    def test_record_minute_control_preserves_untouched_precision_and_saves_changed_minute(self):
+        script = """
+import streamlit as st
+from ui.record_actions import open_record_dialog, render_pending_record_dialog
+method, batch, record = st.session_state['method'], st.session_state['batch'], st.session_state['record']
+if st.button('打开编辑'):
+    open_record_dialog(method, batch, record, 'edit')
+render_pending_record_dialog(method, batch)
+"""
+        original = datetime(2026, 9, 29, 8, 3, 37, 123456)
+        changed = datetime(2026, 9, 29, 8, 4)
+        for method in ('lj', 'zscore'):
+            with self.subTest(method=method), IsolatedDatabase(), patch.object(clock, 'local_now', return_value=NOW):
+                batch, identifiers = seed_batch(method)
+                table = 'results' if method == 'lj' else 'zscore_runs'
+                with db.get_connection() as connection:
+                    connection.execute(f'UPDATE {table} SET test_time=? WHERE id=?', (original.isoformat(sep=' '), identifiers[-1]))
+                app = AppTest.from_string(script, default_timeout=25)
+                app.session_state['method'], app.session_state['batch'], app.session_state['record'] = method, batch, identifiers[-1]
+                app.run()
+                next(button for button in app.button if button.label=='打开编辑').click().run()
+                self.assertFalse(app.exception, [error.message for error in app.exception])
+                picker = app.get('date_time_input')[0]
+                self.assertEqual(60, picker.proto.step)
+                self.assertEqual(original.replace(second=0,microsecond=0), picker.value)
+                self.assertEqual(original, app.session_state['qc_record_dialog']['draft']['test_time'])
+                next(area for area in app.text_area if area.label=='备注（可选）').set_value('只补备注').run()
+                next(area for area in app.text_area if area.label=='维护原因').set_value('补齐原记录备注').run()
+                app.button(key='record_save').click().run()
+                self.assertFalse(app.exception, [error.message for error in app.exception])
+                with db.read_snapshot() as connection:
+                    row=connection.execute(f'SELECT test_time,manual_note FROM {table} WHERE id=?',(identifiers[-1],)).fetchone()
+                self.assertEqual((original.isoformat(sep=' '),'只补备注'),tuple(row))
+                next(button for button in app.button if button.label=='打开编辑').click().run()
+                app.get('date_time_input')[0].set_value(changed).run()
+                next(area for area in app.text_area if area.label=='维护原因').set_value('更正检测时间').run()
+                app.button(key='record_save').click().run()
+                self.assertFalse(app.exception, [error.message for error in app.exception])
+                with db.read_snapshot() as connection:
+                    stored=connection.execute(f'SELECT test_time FROM {table} WHERE id=?',(identifiers[-1],)).fetchone()[0]
+                self.assertEqual(changed.isoformat(sep=' '),stored)
 
     def test_existing_future_record_editor_opens_and_retains_failed_changes(self):
         script = '''

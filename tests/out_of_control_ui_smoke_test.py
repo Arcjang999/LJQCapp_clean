@@ -4,12 +4,14 @@ Native browser upload is covered separately. Here genuine staged attachments
 are injected into the page draft to verify its unsaved/saved presentation.
 """
 from copy import deepcopy
+from datetime import datetime, timedelta
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 import sys
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -95,6 +97,47 @@ class HandlingPageTest(unittest.TestCase):
     def current(self, event=None):
         return service.get_event((event or self.event)['event_id'])
 
+    def test_patient_impact_uses_optional_minute_controls_and_keeps_invalid_range(self):
+        app = self.open_page(self.event)
+        self.fill_required(app)
+        for label in ('影响开始时间', '影响结束时间'):
+            picker = self.widget(app, 'datetime_input', label)
+            self.assertIsNone(picker.value)
+            self.assertEqual(60, picker.proto.step)
+            self.assertFalse(any(item.label.startswith(label) for item in app.text_input))
+        start = datetime(2026, 11, 9, 11, 7)
+        end = start - timedelta(minutes=1)
+        self.fill(app, 'datetime_input', '影响开始时间', start)
+        self.fill(app, 'datetime_input', '影响结束时间', end)
+        with database.get_connection() as connection:
+            before = '\n'.join(connection.iterdump())
+        self.click(app, '保存处理草稿')
+        self.assertTrue(any('结束时间不能早于开始时间' in item.value for item in app.error))
+        self.assertEqual(start, self.widget(app, 'datetime_input', '影响开始时间').value)
+        self.assertEqual(end, self.widget(app, 'datetime_input', '影响结束时间').value)
+        with database.get_connection() as connection:
+            self.assertEqual(before, '\n'.join(connection.iterdump()))
+        self.fill(app, 'datetime_input', '影响结束时间', start + timedelta(minutes=1))
+        self.click(app, '保存处理草稿')
+        self.assertEqual(2, self.current()['revision_no'])
+        self.assertEqual('2026-11-09 11:07:00', self.current()['content']['patient_impact_start'])
+        self.assertEqual('2026-11-09 11:08:00', self.current()['content']['patient_impact_end'])
+
+    def test_unchanged_patient_impact_times_keep_original_seconds(self):
+        content = {**self.event['content'], 'handler_text': '处理员',
+                   'patient_impact_start': '2026-11-09 11:06:22',
+                   'patient_impact_end': '2026-11-09 11:07:35'}
+        saved = service.save_handling(self.event['event_id'], 1, 'ui-patient-original',
+                                     'save_draft', content, '处理员')
+        app = self.open_page(saved)
+        self.assertEqual(datetime(2026, 11, 9, 11, 6),
+                         self.widget(app, 'datetime_input', '影响开始时间').value)
+        self.fill(app, 'text_area', '补充说明', '只补充文字说明')
+        self.click(app, '保存处理草稿')
+        self.assertEqual(3, self.current()['revision_no'])
+        for field in ('patient_impact_start', 'patient_impact_end'):
+            self.assertEqual(content[field], self.current()['content'][field])
+
     def test_unchanged_initial_open_returns_without_discard_prompt(self):
         app = self.open_page(self.event)
         self.click(app, '返回处理列表')
@@ -151,24 +194,24 @@ class HandlingPageTest(unittest.TestCase):
         self.assertEqual(len(levels), 1)
         self.assertEqual(levels[0]['检测值'].tolist(), ['3.0', '3.30103', '3.47712'])
 
-    def test_invalid_time_retains_inputs_and_explicit_save_survives_reopen(self):
+    def test_patient_time_clear_retains_inputs_and_explicit_save_survives_reopen(self):
         app = self.open_page(self.event)
         self.fill(app, 'text_input', '处理人', '处理员')
         self.fill(app, 'text_area', '原因分析', '尚未保存的分析')
-        label = '影响开始时间（可选，年-月-日 时:分:秒）'
-        self.fill(app, 'text_input', label, '不是时间')
-        self.click(app, '保存处理草稿')
-        self.assertTrue(list(app.error))
+        label = '影响开始时间'
+        selected = datetime(2026, 9, 1, 9)
+        self.fill(app, 'datetime_input', label, selected)
+        self.fill(app, 'datetime_input', label, None)
         self.assertEqual(self.current()['revision_no'], 1)
-        self.assertEqual(self.widget(app, 'text_input', label).value, '不是时间')
+        self.assertIsNone(self.widget(app, 'datetime_input', label).value)
         self.assertEqual(self.widget(app, 'text_area', '原因分析').value, '尚未保存的分析')
-        self.fill(app, 'text_input', label, '2026-09-01 09:00:00')
+        self.fill(app, 'datetime_input', label, selected)
         self.click(app, '保存处理草稿')
         self.assertEqual(self.current()['revision_no'], 2)
         self.assertEqual(self.current()['status'], 'in_progress')
         reopened = self.open_page(self.current())
         self.assertEqual(self.widget(reopened, 'text_area', '原因分析').value, '尚未保存的分析')
-        self.assertEqual(self.widget(reopened, 'text_input', label).value, '2026-09-01 09:00:00')
+        self.assertEqual(self.widget(reopened, 'datetime_input', label).value, selected)
         self.assertEqual(len(self.current()['history']), 2)
 
     def test_navigation_drafts_isolate_events_and_discard_does_not_write(self):
@@ -204,7 +247,7 @@ class HandlingPageTest(unittest.TestCase):
         self.assertTrue(list(app.error))
         self.assertEqual(self.current()['revision_no'], 3)
         self.fill(app, 'text_input', '确认人', '确认员')
-        self.fill(app, 'text_input', '确认时间（年-月-日 时:分:秒）', service._now())
+        self.fill(app, 'datetime_input', '确认时间', datetime.fromisoformat(service._now()).replace(second=0))
         self.click(app, '确认完成')
         self.assertTrue(any('明确确认' in item.value for item in app.error))
         self.assertEqual(self.current()['revision_no'], 3)
@@ -222,7 +265,7 @@ class HandlingPageTest(unittest.TestCase):
         self.fill(app, 'text_area', '效果依据', '补充后的独立记录')
         self.click(app, '提交效果确认')
         self.fill(app, 'text_input', '确认人', '确认员')
-        self.fill(app, 'text_input', '确认时间（年-月-日 时:分:秒）', service._now())
+        self.fill(app, 'datetime_input', '确认时间', datetime.fromisoformat(service._now()).replace(second=0))
         self.fill(app, 'checkbox', '已核对处理效果及相关依据', True)
         self.click(app, '确认完成')
         self.assertEqual(self.current()['status'], 'completed')
@@ -241,6 +284,63 @@ class HandlingPageTest(unittest.TestCase):
         self.assertEqual(next(row for row in self.current()['history'] if row['revision_no'] == 7)['saved_by'], '后续修订员')
         self.assertEqual(service.get_event(self.event['event_id'], 6)['status'], 'completed')
         self.assertEqual([row['revision_no'] for row in self.current()['history']], list(range(1, 8)))
+
+    def test_minute_picker_only_updates_draft_and_survives_leaving_and_continuing(self):
+        with patch.object(service, '_now', return_value='2026-11-09 11:06:22'):
+            app = self.open_page(self.event)
+            self.fill_required(app)
+            self.click(app, '保存处理草稿')
+            self.click(app, '提交效果确认')
+            self.assertFalse(any(row.label.startswith('确认时间') for row in app.text_input))
+            picker = self.widget(app, 'datetime_input', '确认时间')
+            self.assertIsNone(picker.value)
+            self.assertEqual(60, picker.proto.step)
+            with database.get_connection() as connection:
+                before = '\n'.join(connection.iterdump())
+            selected = datetime(2026, 11, 9, 11, 6)
+            self.fill(app, 'datetime_input', '确认时间', selected)
+            self.fill(app, 'text_input', '确认人', '分钟控件核对人')
+            self.fill(app, 'checkbox', '已核对处理效果及相关依据', True)
+            self.click(app, '返回处理列表')
+            self.click(app, '继续填写')
+            self.assertEqual(selected, self.widget(app, 'datetime_input', '确认时间').value)
+            self.assertTrue(self.widget(app, 'checkbox', '已核对处理效果及相关依据').value)
+            self.click(app, '返回处理列表')
+            self.click(app, '保留本次草稿并返回')
+            self.select(app, self.current())
+            self.assertEqual(selected, self.widget(app, 'datetime_input', '确认时间').value)
+            self.assertEqual('分钟控件核对人', self.widget(app, 'text_input', '确认人').value)
+            self.assertTrue(self.widget(app, 'checkbox', '已核对处理效果及相关依据').value)
+            with database.get_connection() as connection:
+                self.assertEqual(before, '\n'.join(connection.iterdump()))
+            self.click(app, '确认完成')
+            self.assertEqual('completed', self.current()['status'])
+            self.assertEqual(4, self.current()['revision_no'])
+            self.assertEqual('2026-11-09 11:06', self.current()['content']['confirmed_at'])
+
+    def test_minute_picker_keeps_invalid_range_visible_until_corrected(self):
+        with patch.object(service, '_now', return_value='2026-11-09 11:06:55'):
+            app = self.open_page(self.event)
+            self.fill_required(app)
+            self.click(app, '保存处理草稿')
+            self.click(app, '提交效果确认')
+            self.fill(app, 'text_input', '确认人', '时间边界核对人')
+            self.fill(app, 'checkbox', '已核对处理效果及相关依据', True)
+            minute = datetime(2026, 11, 9, 11, 6)
+            with database.get_connection() as connection:
+                before = '\n'.join(connection.iterdump())
+            for selected in (minute - timedelta(minutes=1), minute + timedelta(minutes=1)):
+                self.fill(app, 'datetime_input', '确认时间', selected)
+                self.click(app, '确认完成')
+                self.assertTrue(any('确认时间' in row.value for row in app.error))
+                self.assertEqual(selected, self.widget(app, 'datetime_input', '确认时间').value)
+                self.assertTrue(self.widget(app, 'checkbox', '已核对处理效果及相关依据').value)
+                with database.get_connection() as connection:
+                    self.assertEqual(before, '\n'.join(connection.iterdump()))
+            self.fill(app, 'datetime_input', '确认时间', minute)
+            self.click(app, '确认完成')
+            self.assertEqual('completed', self.current()['status'])
+            self.assertEqual('2026-11-09 11:06', self.current()['content']['confirmed_at'])
 
     def test_attachment_staged_and_saved_lists_and_history(self):
         item = attachments.stage_attachment(self.event['event_id'], '复测数据.csv', b'value\n1\n',

@@ -5,6 +5,7 @@ import streamlit as st
 from services.quality_catalog_service import browse_quality_catalog, catalog_display_rows, CATEGORIES
 from services.search_service import SEARCH_HELP
 from ui.quality_targets import render_spec
+from ui.standard_source_links import render_standard_source_links
 
 
 def render_quality_catalog():
@@ -50,7 +51,7 @@ def render_quality_catalog():
             st.caption('可在“质量目标设置”中修改参考文字。'
                        if row['kind'] == 'process' else '请按以上要求检查对照结果，并记录结果和异常处理情况。')
             st.caption('条款：'+row['spec']['source_clause']+'｜原文第 '+str(row['spec']['source_page'])+' 页（含封面）')
-            st.link_button('查看标准原文', row['source']['source_url'])
+            render_standard_source_links(row['source'])
             for related in row.get('related_sources', []):
                 st.markdown('**'+related['name']+'**')
                 st.caption(related['source_type'])
@@ -60,4 +61,4 @@ def render_quality_catalog():
                     for requirement in rule['requirements']:
                         st.write(requirement)
                     st.caption('条款：'+rule['source_clause']+'｜原文第 '+rule['source_page']+' 页（含封面）')
-                st.link_button('查看 '+related['standard']+' 原文', related['source_url'])
+                render_standard_source_links(related)

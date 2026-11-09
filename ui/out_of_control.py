@@ -11,6 +11,7 @@ import streamlit as st
 
 from services import out_of_control_service as service
 from services.value_type_service import get_input_value_type_label
+from ui.date_time_inputs import minute_datetime_input, minute_value
 
 STATUS_LABELS = {'pending': '待处理', 'in_progress': '处理中',
                  'pending_confirmation': '待确认', 'completed': '已完成'}
@@ -146,6 +147,32 @@ def _text(ctx, field, *, multiline=False, disabled=False, label=None):
     value = (st.text_area if multiline else st.text_input)(label or CONTENT_LABELS[field], key=key,
         disabled=disabled, on_change=remember)
     ctx['content'][field] = value
+
+
+def _date_time(ctx, field, *, disabled=False, preserve_original=False):
+    key = 'ooc_draft_' + ctx['token'] + '_' + field + '_picker'
+    raw = ctx['content'].get(field)
+    try:
+        original = service._time(raw) if raw else None
+    except ValueError:
+        original = None
+    if key not in st.session_state:
+        st.session_state[key] = minute_value(original)
+
+    def remember():
+        value = st.session_state[key]
+        if preserve_original and original is not None and value == minute_value(original):
+            ctx['content'][field] = raw
+        else:
+            ctx['content'][field] = value.isoformat(sep=' ', timespec='minutes') if value else ''
+
+    minute_datetime_input(CONTENT_LABELS[field], value=None, key=key,
+                          disabled=disabled, on_change=remember)
+    remember()
+
+
+def _confirmation_time(ctx, *, disabled=False):
+    _date_time(ctx, 'confirmed_at', disabled=disabled)
 
 
 def _save(event, ctx, action):
@@ -374,7 +401,7 @@ def render_event_detail(selection):
             assessments, key=key, disabled=disabled, format_func=lambda v: v or '未记录')
         st.caption('需要评估时，请填写受影响的检测结果、核对情况和实验室决定的处理办法。')
         for field in ('patient_impact_start', 'patient_impact_end'):
-            _text(ctx, field, disabled=disabled, label=CONTENT_LABELS[field] + '（可选，年-月-日 时:分:秒）')
+            _date_time(ctx, field, disabled=disabled, preserve_original=True)
         for field in ('patient_impact_scope', 'patient_impact_actions', 'patient_impact_basis'):
             _text(ctx, field, multiline=True, disabled=disabled)
     _render_retests(event, ctx, disabled=disabled)
@@ -394,8 +421,14 @@ def render_event_detail(selection):
     elif event['status'] == 'pending_confirmation':
         st.markdown('**人工确认**')
         _text(ctx, 'confirmer_text', disabled=stale)
-        _text(ctx, 'confirmed_at', disabled=stale, label='确认时间（年-月-日 时:分:秒）')
-        ctx['content']['confirmation_checked'] = st.checkbox('已核对处理效果及相关依据', key=f"ooc_confirm_{ctx['token']}", disabled=stale)
+        _confirmation_time(ctx, disabled=stale)
+        confirm_key = f"ooc_confirm_{ctx['token']}"
+        if confirm_key not in st.session_state:
+            st.session_state[confirm_key] = bool(ctx['content'].get('confirmation_checked'))
+        def remember_confirmation():
+            ctx['content']['confirmation_checked'] = st.session_state[confirm_key]
+        ctx['content']['confirmation_checked'] = st.checkbox('已核对处理效果及相关依据',
+            key=confirm_key, disabled=stale, on_change=remember_confirmation)
         if st.button('确认完成', type='primary', disabled=stale): _save(event, ctx, 'confirm')
         ctx['change_reason'] = st.text_input('退回原因', key=f"ooc_return_reason_{ctx['token']}")
         ctx['action_actor'] = st.text_input('本次退回人', key=f"ooc_return_actor_{ctx['token']}")

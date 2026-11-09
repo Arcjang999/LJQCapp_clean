@@ -8,6 +8,8 @@ from uuid import uuid4
 import pandas as pd
 import streamlit as st
 from services.search_service import fuzzy_match, SEARCH_HELP
+from services.time_service import local_now
+from ui.date_time_inputs import ceil_minute, minute_datetime_input, minute_value
 
 from services.reagent_lifecycle_edit_service import (
     build_reagent_switch_preview, get_reagent_workspace_context,
@@ -43,7 +45,13 @@ def _key(state, field, initial):
 
 def _field(state, field, label, widget='text_input', **kwargs):
     key = _key(state, field, state['draft'][field])
-    state['draft'][field] = getattr(st, widget)(label, key=key, **kwargs)
+    if widget == 'datetime_input':
+        value = minute_datetime_input(label, key=key, **kwargs)
+    else:
+        if widget == 'date_input':
+            kwargs.setdefault('format', 'YYYY-MM-DD')
+        value = getattr(st, widget)(label, key=key, **kwargs)
+    state['draft'][field] = value
     return state['draft'][field]
 
 
@@ -74,9 +82,14 @@ def open_reagent_lifecycle_dialog(kind, lot_id=None, *, product_id=None):
     elif kind == 'verify':
         focus=st.session_state.get('reagent_focus_system_id')
         legal={row['id'] for row in _systems(context,lot_id) if row['available']}
-        draft = dict(system=focus if focus in legal else None, conclusion=None, evidence='', person='', when=datetime.now().replace(microsecond=0))
+        draft = dict(system=focus if focus in legal else None, conclusion=None, evidence='', person='', when=minute_value(local_now()))
     else:
-        draft = dict(systems=[], when=datetime.now().replace(microsecond=0), person='', reason='', confirmed=False)
+        now = local_now()
+        system_ids = {row['id'] for row in _systems(context, lot_id) if row['available']}
+        verified = [ceil_minute(row['confirmed_at']) for row in context['verifications']
+                    if row['reagent_lot_id'] == lot_id and row['system_id'] in system_ids
+                    and row['confirmed_at'] <= now.isoformat(sep=' ')]
+        draft = dict(systems=[], when=max([minute_value(now), *verified]), person='', reason='', confirmed=False)
     st.session_state[MODAL_KEY] = dict(kind=kind, lot_id=lot_id, context=context, bound_product_id=bound_product_id,
         fingerprint=context['fingerprint'], token=uuid4().hex, draft=deepcopy(draft), initial=draft, discard=False)
     st.rerun(scope='app')

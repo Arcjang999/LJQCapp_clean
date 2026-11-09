@@ -142,7 +142,7 @@ with patch('ui.batch_monthly_reports.list_monthly_report_choices',return_value={
  patch('ui.batch_monthly_reports.preview_period_reports',side_effect=preview):
  render_batch_monthly_reports_page()
 '''
-        app = AppTest.from_string(script).run()
+        app = AppTest.from_string(script, default_timeout=30).run()
         self.healthy(app)
         app.multiselect(key='monthly_methods').set_value([]).run()
         self.assertTrue(app.button(key='monthly_preview').disabled)

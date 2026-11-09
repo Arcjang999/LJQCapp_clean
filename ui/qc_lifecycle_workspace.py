@@ -1,7 +1,6 @@
 """QC lot lists, current details and explicit operation dialogs."""
 from __future__ import annotations
 
-from datetime import datetime
 from functools import partial
 from hashlib import sha1
 import json
@@ -10,6 +9,8 @@ from uuid import uuid4
 import pandas as pd
 import streamlit as st
 from services.search_service import fuzzy_match, SEARCH_HELP
+from services.time_service import local_now
+from ui.date_time_inputs import ceil_minute, minute_datetime_input, minute_value
 
 from services.material_workflow_service import concentration_label, material_label, config_material_summary
 from services.project_config_service import QC_METHOD_LABELS
@@ -34,7 +35,8 @@ def _field(state, name, label, widget='text_input', **kwargs):
         st.session_state[key] = state['draft'][name]
     if widget == 'selectbox' and None in kwargs.get('options', []):
         kwargs.setdefault('placeholder', kwargs['format_func'](None))
-    state['draft'][name] = getattr(st, widget)(label, key=key, **kwargs)
+    state['draft'][name] = (minute_datetime_input if widget == 'datetime_input'
+                            else getattr(st, widget))(label, key=key, **kwargs)
     return state['draft'][name]
 
 
@@ -46,7 +48,13 @@ def open_qc_lifecycle_dialog(kind, context_id):
         from ui.qc_replacement_workspace import open_qc_replacement_dialog
         open_qc_replacement_dialog(context_id)
         return
-    now = datetime.now().replace(microsecond=0)
+    current_time = local_now()
+    now = minute_value(current_time)
+    if kind in ('state', 'combination'):
+        verified = [ceil_minute(row['confirmed_at']) for row in context['verifications']
+                    if (kind == 'combination' or row['qc_lot_id'] in context['actual_lots'])
+                    and row['confirmed_at'] <= current_time.isoformat(sep=' ')]
+        now = max([now, *verified])
     draft = {'when': now, 'person': '', 'reason': ''}
     if kind == 'prepare':
         draft.update(target=None, items=[])
@@ -291,7 +299,7 @@ def _render_dialog():
     left, right = st.columns(2)
     if left.button('取消', key='qcl_cancel', width='stretch'):
         _cancel(state)
-    label = {'prepare': '准备新批次并核对', 'verify': '保存验证记录', 'state': '确认使用状态', 'combination': '建立新组合并核对'}[state['kind']]
+    label = {'prepare': '建立新批次并打开设置', 'verify': '保存验证记录', 'state': '保存使用状态', 'combination': '建立新组合并打开设置'}[state['kind']]
     if right.button(label, key='qcl_save', type='primary', width='stretch'):
         try:
             if state['kind'] == 'prepare' and values['target_qc_lot_id'] is None:

@@ -9,6 +9,7 @@ import json
 
 import pandas as pd
 import streamlit as st
+from ui.date_time_inputs import minute_datetime_input
 from services.search_service import fuzzy_match, SEARCH_HELP
 
 from services.cv_service import calculate_cv_percent
@@ -68,7 +69,8 @@ def open_target_statistics_dialog(binding_id, *, return_to=None):
     draft = dict(strategy=policy['mode'] or None, effective_at=context['initial_time'],
                  evidence='', confirmed_by='', confirmed=False)
     st.session_state[MODAL_KEY] = dict(kind='statistics', binding_id=int(binding_id), token=uuid4().hex,
-        context=context, fingerprint=context['fingerprint'], draft=draft, return_to=return_to)
+        context=context, fingerprint=context['fingerprint'], initial=dict(draft), draft=draft,
+        discard=False, return_to=return_to)
     st.rerun(scope='app')
 
 
@@ -258,7 +260,7 @@ def _render_editor(state, current):
         row['sd'] = middle.number_input('标准差', key=_key(state, f'{index+1}_sd', row['sd']), min_value=0.0, format='%.6f')
         with right:
             render_target_cv(row['mean'], row['sd'], snapshot.get('cv_limit'), input_value_type=snapshot.get('input_value_type', 'raw'))
-    draft['effective_at'] = st.datetime_input('生效时间', key=_key(state, 'effective_at', draft['effective_at']))
+    draft['effective_at'] = minute_datetime_input('生效时间', key=_key(state, 'effective_at', draft['effective_at']))
     draft['evidence'] = st.text_area('均值和标准差依据及调整原因', key=_key(state, 'evidence', draft['evidence']))
     draft['confirmed_by'] = st.text_input('确认人', key=_key(state, 'confirmed_by', draft['confirmed_by']))
     st.caption('新参数从生效时间开始使用，连续规则重新累计；此前检测保留原参数和判读。')

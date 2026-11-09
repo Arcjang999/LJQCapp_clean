@@ -112,10 +112,13 @@ class QualityFormV2Tests(unittest.TestCase):
     def test_pending_catalog_reopens_and_cancel_restores_manual_draft(self):
         with IsolatedDatabase():
             app, item, prefix, identifier = ready_form()
+            self.assertEqual('保存质量要求草稿', app.button(key=prefix+'_save_pending').label)
+            self.assertEqual('保存并确认项目质量要求', app.button(key=prefix+'_adopt').label)
             self.fill_manual(app, prefix)
             app.selectbox(key=prefix+'_requirement').set_value(identifier).run()
             app.button(key=prefix+'_save_pending').click().run()
             self.healthy(app)
+            self.assertTrue(any('质量要求草稿已保存' in row.value for row in app.success))
             saved = decode(item_context('project', item)['quality_review_json'])
             self.assertEqual('pending', saved['status'])
             self.assertEqual('source', saved['draft_recorded']['mode'])
@@ -131,6 +134,8 @@ class QualityFormV2Tests(unittest.TestCase):
             confirm(app, prefix)
             self.assertFalse(list(app.error))
             self.assertEqual(4.25, item_context('project', item)['cv_limit'])
+            self.assertTrue(any('项目质量要求已保存并确认，请返回项目确认设置。' in row.value
+                                for row in app.success))
 
     def test_old_recorded_text_can_add_cv_without_selecting_a_mode(self):
         with IsolatedDatabase():

@@ -127,19 +127,27 @@ def test_current_and_future_versions_prefill_current_and_preserve_saved_results(
         context = get_target_profile_context(binding['id'])
         future = create_target_profile(method='lj', batch_id=binding['runtime_batch_id'],
             levels=[dict(level_id='Level 1', mean=200, sd=4)], source='revision',
-            evidence='未来参数计划', confirmed_by='未来确认人', effective_at='2099-01-01')
+            evidence='未来参数计划', confirmed_by='未来确认人', effective_at='2099-01-01 12:34:56')
         assert result_state() == before
         context = get_target_profile_context(binding['id'])
         assert context['current']['id'] == current_id
         assert context['levels'][0]['mean'] == 100 and context['levels'][0]['sd'] == 2
         assert [profile['id'] for profile in context['profiles']] == [current_id, future]
         assert context['initial_time'] > datetime(2099, 1, 1)
+        assert context['initial_time'] == datetime(2099, 1, 1, 12, 35)
         app = make_app(binding['id'])
         assert not app.exception
         assert any('尚未生效' in str(frame.value) for frame in app.dataframe)
         open_dialog(app)
+        picker = app.datetime_input(key=key(app, 'effective_at'))
+        assert picker.proto.step == 60 and picker.value == context['initial_time']
         assert app.number_input(key=key(app, '1_mean')).value == 100
         assert app.number_input(key=key(app, '1_sd')).value == 2
+        assert result_state() == before
+        fill(app)
+        app.button(key='target_profile_save').click().run()
+        assert not app.exception and not app.error, [element.value for element in (*app.exception, *app.error)]
+        assert get_target_profile_context(binding['id'])['profiles'][-1]['effective_at'] == '2099-01-01 12:35:00'
         assert result_state() == before
 
 

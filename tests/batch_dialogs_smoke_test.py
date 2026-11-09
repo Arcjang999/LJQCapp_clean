@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT))
 
 from database import get_connection
 from services.batch_edit_service import get_batch_item_context
-from services.master_data_service import create_test_item
+from services.master_data_service import create_qc_material, create_test_item
 from services.material_workflow_service import create_material_config
 from services.project_config_service import (
     activate_lot_config, activate_project_template, create_project_template,
@@ -108,6 +108,42 @@ def test_cancel_and_failed_save_preserve_values_and_original_records():
         assert row.notes == '尚未保存的说明'
         assert get_batch_item_context(item)['item']['cv_limit'] == 2.25
         assert 'batch_item_dialog' not in app.session_state
+
+
+def test_cancel_continue_preserves_product_without_a_selected_lot():
+    with TemporaryDatabaseContext():
+        fixture = seed_draft()
+        item = fixture['items']['lj']
+        context = get_batch_item_context(item)
+        with get_connection() as connection:
+            maker = connection.execute('SELECT manufacturer_id FROM md_qc_materials WHERE id=?',
+                (context['config']['qc_material_id'],)).fetchone()[0]
+        product = create_qc_material(manufacturer_id=maker, generic_name='尚未登记批号的待选产品')
+        before = list_lot_item_levels(item).to_json(orient='records')
+        revision = get_lot_config(fixture['config_id'])['revision_no']
+        app = run_app(fixture)
+        app.button(key=f'open_levels_{item}').click().run()
+        token = app.session_state['batch_item_dialog']['token']
+        slot = f'batch_control_{token}_0'
+        app.selectbox(key=slot + '_product').set_value(product).run()
+        assert_clean(app)
+        assert app.selectbox(key=slot + '_level').value is None
+        assert app.button(key='batch_levels_save').disabled
+        app.button(key='batch_levels_cancel').click().run()
+        assert_clean(app)
+        assert app.session_state['batch_item_dialog']['discard']
+        app.button(key='batch_levels_continue').click().run()
+        assert_clean(app)
+        assert app.selectbox(key=slot + '_product').value == product
+        assert app.selectbox(key=slot + '_level').value is None
+        assert app.button(key='batch_levels_save').disabled
+        assert list_lot_item_levels(item).to_json(orient='records') == before
+        assert get_lot_config(fixture['config_id'])['revision_no'] == revision
+        app.button(key='batch_levels_cancel').click().run()
+        app.button(key='batch_levels_discard').click().run()
+        assert_clean(app)
+        assert 'batch_item_dialog' not in app.session_state.filtered_state
+        assert list_lot_item_levels(item).to_json(orient='records') == before
 
 
 def test_level_selection_order_and_per_material_values_survive_reorder():

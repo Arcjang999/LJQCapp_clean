@@ -1,5 +1,6 @@
 """Temporary-database checks for history selection and append-only correction dialogs."""
 import json
+from datetime import datetime
 from pathlib import Path
 import sys
 from unittest.mock import patch
@@ -13,12 +14,12 @@ from tests.instant_v12_integration_smoke_test import IsolatedDatabase
 from tests.lot_lifecycle_smoke_test import lj, verified, switch
 
 
-def seed():
+def seed(event_time='2026-09-04'):
     batch = lj()
     source, first, first_verification = verified('lj', batch, '历史试剂-A')
     _, second, second_verification = verified('lj', batch, '历史试剂-B')
     first_event = switch(source, first, first_verification, '2026-09-02')
-    second_event = switch(source, second, second_verification, '2026-09-04')
+    second_event = switch(source, second, second_verification, event_time)
     create_target_profile(method='lj', batch_id=batch, levels=[dict(level_id='Level 1', mean=100, sd=2)],
         source='manual', evidence='历史只读参数依据', confirmed_by='测试确认人', effective_at='2026-09-02')
     add_result(batch, '2026-09-03', 101, operator='原操作者', lot_selection={'reagent_lot_id': first})
@@ -131,6 +132,34 @@ def test_typing_cancel_continue_failure_and_save_preserve_original_events_and_re
         assert result_history() == old_results
         with get_connection() as connection:
             assert connection.execute('PRAGMA foreign_key_check').fetchall() == []
+
+
+def test_minute_picker_preserves_original_seconds_until_the_time_is_changed():
+    with IsolatedDatabase():
+        original = datetime(2026, 9, 4, 12, 34, 56)
+        fixture = seed(original.isoformat(sep=' '))
+        before = database_state()
+        app = open_dialog(make_app(fixture['event']))
+        time_key = key(app, 'effective_at')
+        picker = app.datetime_input(key=time_key)
+        assert picker.proto.step == 60 and picker.value == original.replace(second=0)
+        assert app.session_state['reagent_history_dialog']['draft']['effective_at'] == original
+        changed = original.replace(minute=35, second=0)
+        picker.set_value(changed).run()
+        assert app.session_state['reagent_history_dialog']['draft']['effective_at'] == changed
+        app.datetime_input(key=time_key).set_value(original.replace(second=0)).run()
+        assert app.session_state['reagent_history_dialog']['draft']['effective_at'] == original
+        fill(app, fixture).run()
+        app.button(key='reagent_history_cancel').click().run()
+        app.button(key='reagent_history_continue').click().run()
+        assert app.datetime_input(key=time_key).value == original.replace(second=0)
+        assert app.session_state['reagent_history_dialog']['draft']['effective_at'] == original
+        assert database_state() == before
+        app.button(key='reagent_history_save').click().run()
+        assert not app.exception and not app.error
+        current = events()
+        assert current[max(current)]['effective_at'] == original.isoformat(sep=' ')
+        assert current[fixture['event']]['effective_at'] == original.isoformat(sep=' ')
 
 
 def test_cancel_discard_and_reopen_use_independent_drafts_and_require_explicit_confirmation():

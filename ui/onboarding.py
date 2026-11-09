@@ -41,6 +41,9 @@ def prepare_onboarding() -> None:
             or st.session_state.get('top_level_method_selector', '主页') != '主页'):
         return
     try:
+        from services.project_setup_draft_service import load_project_setup_draft
+        if load_project_setup_draft() is not None:
+            return
         if should_auto_show_onboarding():
             st.session_state['onboarding_open'] = True
     except (sqlite3.Error, OSError, ValueError):
@@ -130,7 +133,8 @@ def _render_project(ready: dict) -> None:
     st.markdown('建立项目的**检验项目、仪器、试剂、质控品批号和各水平**，设置**质量要求**。保存后可进入结果录入。')
     if ready['project']:
         st.caption('已有项目，可继续使用。')
-    if st.button('新建项目', key='onboarding_project', type='primary', width='stretch'):
+    from ui.project_setup_draft import new_project_button_label
+    if st.button(new_project_button_label(), key='onboarding_project', type='primary', width='stretch'):
         if _leave('project'):
             _project_home()
             from ui.project_dialogs import open_project_dialog
@@ -186,13 +190,13 @@ def _render_dialog() -> None:
         return
     step = state['step']
     index = STEP_IDS.index(step)
-    st.caption(f'第 {index + 1} 步，共 {len(STEP_IDS)} 步')
     for column, target, title in zip(st.columns(len(STEP_IDS)), STEP_IDS, STEP_TITLES):
         if column.button(title, key='onboarding_step_' + target, width='stretch',
                          type='primary' if target == step else 'secondary'):
             if _save(target):
                 st.rerun(scope='app')
-    st.subheader(STEP_TITLES[index])
+    from ui.workflow_steps import render_workflow_step
+    render_workflow_step(index + 1, len(STEP_IDS), STEP_TITLES[index])
     {'unit': _render_unit, 'materials': _render_materials,
      'project': _render_project}[step](ready)
     st.divider()

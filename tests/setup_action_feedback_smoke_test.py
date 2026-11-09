@@ -8,13 +8,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from streamlit.testing.v1 import AppTest
+from services.master_data_service import create_method
 from services.project_config_service import list_lot_config_items, set_project_template_disabled
 from services.project_workspace_service import save_project_details
 from tests.master_data_dialogs_smoke_test import snapshot
 from tests.project_management_v11_smoke_test import (
     TemporaryDatabaseContext, _seed_v11_configuration_dependencies, _build_active_source_config,
 )
-from tests.project_workspace_smoke_test import assert_clean, workspace_page, values as project_values
+from tests.project_workspace_smoke_test import assert_clean, draft_key, workspace_page, values as project_values
 from tests.project_dependencies_ui_smoke_test import dependency_prefix
 from tests.quick_project_setup_smoke_test import metadata_values
 from tests.quick_project_setup_ui_smoke_test import open_details, product_prefix
@@ -30,6 +31,73 @@ def feedback(app):
 
 
 class SetupActionFeedbackTests(unittest.TestCase):
+    def test_first_product_confirmation_explains_how_to_enable_quality_step(self):
+        with TemporaryDatabaseContext():
+            values = metadata_values()
+            before = snapshot()
+            app = AppTest.from_function(workspace_page, default_timeout=30).run()
+            app.button(key='home_create_project').click().run()
+            for field in ('test_item_id', 'lab_instrument_id', 'reagent_id', 'method_id', 'unit_id',
+                          'target_statistics_mode'):
+                app.selectbox(key=draft_key(app, field)).set_value(values[field]).run()
+                assert_clean(app)
+            token = app.session_state['project_workspace_dialog']['token']
+            slot = 'quick_control_' + token + '_0'
+            app.selectbox(key=slot+'_product').set_value(values['qc_material_id']).run()
+            app.selectbox(key=slot+'_level').set_value(values['level_ids'][0]).run()
+            prefix = product_prefix(app)
+            assert_clean(app)
+            self.assertTrue(any('质控品适用性确认' in row.value for row in app.markdown))
+            self.assertIn('请填写下方的“质控品确认人”和“适用依据”，再点击“确认所选质控品”。', feedback(app))
+            self.assertIn('请先在上方“质控品适用性确认”中完成核对，再点击“确认所选质控品”。', feedback(app))
+            self.assertTrue(app.button(key=prefix+'_confirm').disabled)
+            self.assertTrue(app.button(key='quick_details_next').disabled)
+            app.text_input(key=prefix+'_person').set_value('首次设置核对人').run()
+            self.assertTrue(app.button(key=prefix+'_confirm').disabled)
+            app.text_area(key=prefix+'_evidence').set_value('已核对本仪器、试剂及检验项目的说明书。').run()
+            assert_clean(app)
+            self.assertFalse(app.button(key=prefix+'_confirm').disabled)
+            self.assertTrue(app.button(key='quick_details_next').disabled)
+            self.assertEqual(before, snapshot())
+            app.button(key=prefix+'_confirm').click().run()
+            assert_clean(app)
+            self.assertFalse(app.button(key='quick_details_next').disabled)
+            self.assertNotIn('请先在上方“质控品适用性确认”中完成核对，再点击“确认所选质控品”。', feedback(app))
+            app.button(key='quick_details_next').click().run()
+            assert_clean(app)
+            self.assertEqual('quality', app.session_state['project_workspace_dialog']['quick_step'])
+            self.assertEqual(before, snapshot())
+
+    def test_changed_detection_method_points_to_confirmation_and_keeps_selected_lot(self):
+        with TemporaryDatabaseContext():
+            values = metadata_values()
+            other_method = create_method(method_name='适用性重新核对方法')
+            app = open_details(values)
+            prefix = product_prefix(app)
+            original = deepcopy(app.session_state['project_workspace_dialog']['draft'])
+            before = snapshot()
+            app.selectbox(key=draft_key(app, 'method_id')).set_value(other_method).run()
+            assert_clean(app)
+            self.assertTrue(app.button(key='quick_details_next').disabled)
+            self.assertIn('请填写下方的“质控品确认人”和“适用依据”，再点击“确认所选质控品”。', feedback(app))
+            self.assertIn('请先在上方“质控品适用性确认”中完成核对，再点击“确认所选质控品”。', feedback(app))
+            current = app.session_state['project_workspace_dialog']['draft']
+            self.assertEqual(original['level_ids'], current['level_ids'])
+            self.assertEqual(original['level_product_ids'], current['level_product_ids'])
+            self.assertEqual(original['product_choice_review'], current['product_choice_review'])
+            app.text_input(key=prefix+'_person').set_value('重新核对人')
+            app.text_area(key=prefix+'_evidence').set_value('已核对变更后的方法、仪器和试剂。')
+            app.run()
+            self.assertTrue(app.button(key='quick_details_next').disabled)
+            app.button(key=prefix+'_confirm').click().run()
+            assert_clean(app)
+            self.assertFalse(app.button(key='quick_details_next').disabled)
+            self.assertNotIn('请先在上方“质控品适用性确认”中完成核对，再点击“确认所选质控品”。', feedback(app))
+            review = app.session_state['project_workspace_dialog']['draft']['product_choice_review']
+            self.assertEqual(other_method, review['context']['method_id'])
+            self.assertEqual('重新核对人', review['confirmed_by'])
+            self.assertEqual(before, snapshot())
+
     def test_new_group_save_explains_unconfirmed_product_and_clears_after_confirmation(self):
         with TemporaryDatabaseContext():
             app = open_details(metadata_values())
@@ -37,7 +105,7 @@ class SetupActionFeedbackTests(unittest.TestCase):
             app.button(key='setup_mode_change').click().run()
             assert_clean(app)
             self.assertTrue(app.button(key='project_dialog_save').disabled)
-            self.assertIn('“保存项目”暂不可用', feedback(app))
+            self.assertIn('请先核对所选质控品是否适用，完成“确认所选质控品”后即可保存项目。', feedback(app))
             self.assertIn('确认所选质控品', feedback(app))
             before = snapshot()
             prefix = product_prefix(app)
@@ -46,7 +114,7 @@ class SetupActionFeedbackTests(unittest.TestCase):
             app.button(key=prefix+'_confirm').click().run()
             assert_clean(app)
             self.assertFalse(app.button(key='project_dialog_save').disabled)
-            self.assertNotIn('“保存项目”暂不可用', feedback(app))
+            self.assertNotIn('请先核对所选质控品是否适用，完成“确认所选质控品”后即可保存项目。', feedback(app))
             self.assertEqual(before, snapshot())
 
     def test_product_manual_missing_fields_name_the_exact_inputs(self):
@@ -79,13 +147,13 @@ class SetupActionFeedbackTests(unittest.TestCase):
             app.radio(key='panel_source_'+token).set_value('选择检验项目').run()
             assert_clean(app)
             self.assertTrue(app.button(key='panel_source_preview').disabled)
-            self.assertIn('“预览整组带入”暂不可用。请在“本次检验项目”中至少选择一项', feedback(app))
+            self.assertIn('请在“本次检验项目”中至少选择一项', feedback(app))
             before = snapshot()
             key = 'panel_source_tests_选择检验项目'+token
             app.multiselect(key=key).set_value([data['lj_item_id']]).run()
             assert_clean(app)
             self.assertFalse(app.button(key='panel_source_preview').disabled)
-            self.assertNotIn('“预览整组带入”暂不可用', feedback(app))
+            self.assertNotIn('请在“本次检验项目”中至少选择一项。', feedback(app))
             self.assertEqual(before, snapshot())
 
     def test_changed_manual_product_evidence_requires_current_confirmation(self):
@@ -137,16 +205,16 @@ class SetupActionFeedbackTests(unittest.TestCase):
             app.selectbox(key='batch_project_filter').set_value(tid).run()
             assert_clean(app)
             self.assertTrue(app.button(key='batch_create').disabled)
-            self.assertIn('所选项目的设置尚未确认', feedback(app))
+            self.assertIn('项目设置尚未确认。请返回主页，打开该项目，补齐资料后点击“确认项目设置”。', feedback(app))
             self.assertIn('返回主页', feedback(app))
             self.assertIn('确认项目设置', feedback(app))
             set_project_template_disabled(tid, is_disabled=True, reason='核对停用项目提示')
             app.run()
             assert_clean(app)
             self.assertTrue(app.button(key='batch_create').disabled)
-            self.assertIn('所选项目已停用', feedback(app))
+            self.assertIn('项目已停用。请返回主页，在“编辑项目”中恢复并确认项目设置，再新增批次。', feedback(app))
             self.assertIn('在“编辑项目”中恢复', feedback(app))
-            self.assertNotIn('所选项目的设置尚未确认', feedback(app))
+            self.assertNotIn('项目设置尚未确认。请返回主页，打开该项目，补齐资料后点击“确认项目设置”。', feedback(app))
 
     def test_readonly_missing_levels_does_not_point_to_disabled_edit_button(self):
         with TemporaryDatabaseContext():
@@ -161,7 +229,7 @@ with patch('services.batch_edit_service.get_batch_item_context',return_value=con
 ''', default_timeout=30).run()
             assert_clean(app)
             self.assertTrue(app.button(key='batch_edit_levels_1').disabled)
-            self.assertIn('当前批次仅供查看，不能在这里补填', feedback(app))
+            self.assertIn('该批次尚未设置质控品水平。请在批次管理中核对状态，并为可编辑批次补齐各水平。', feedback(app))
             self.assertNotIn('尚未选择质控品水平，请点击“编辑水平设置”', feedback(app))
 
     def test_panel_product_confirmation_explains_unchecked_confirmation(self):
@@ -181,11 +249,11 @@ render_panel_product_review(ctx,get_project_template(tid))
             app.run()
             assert_clean(app)
             self.assertTrue(app.button(key='panel_product_feedback_confirm').disabled)
-            self.assertIn('勾选“已确认此质控品可用于以上各项的试剂和检测方法”', feedback(app))
+            self.assertIn('勾选上方确认项后，即可确认各项目的质控品适用依据。', feedback(app))
             app.checkbox(key='panel_product_feedback_checked').check().run()
             assert_clean(app)
             self.assertFalse(app.button(key='panel_product_feedback_confirm').disabled)
-            self.assertNotIn('请核对以上项目，并勾选', feedback(app))
+            self.assertNotIn('勾选上方确认项后，即可确认各项目的质控品适用依据。', feedback(app))
             self.assertEqual(before, snapshot())
 
     def test_replacement_save_explains_empty_item_selection(self):

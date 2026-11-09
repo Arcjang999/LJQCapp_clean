@@ -140,7 +140,7 @@ def _edit_record(method, record_id, changes):
         if error:
             raise ValueError(error)
         from database import update_result
-        update_result(int(record_id), time.strftime('%Y-%m-%d %H:%M:%S'), value, operator=operator,
+        update_result(int(record_id), time.isoformat(sep=' '), value, operator=operator,
             log_value=compute_legacy_log_value(value, value_type),
             reagent_lot_changed=int(changes.get('reagent_lot_changed', 0)), manual_note=str(changes.get('manual_note') or ''))
     else:

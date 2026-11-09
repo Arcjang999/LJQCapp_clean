@@ -37,7 +37,8 @@ def _render_dialog():
         if discard.button('放弃本次准备', key='lab_prep_discard', width='stretch'):
             _close()
         return
-    st.caption('用Excel批量登记单位信息、仪器、试剂和质控品；上传后先核对，再统一保存。')
+    from ui.workflow_steps import render_workflow_step
+    step_area = st.container()
     template, reference = st.columns(2)
     template.download_button('下载空白单位资料清单', build_lab_preparation_template(),
         file_name='单位资料准备清单.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -59,7 +60,7 @@ def _render_dialog():
         st.caption('当前文件：' + state['filename'])
     else:
         st.caption('上传填写后的清单，即可检查缺项、重复记录和资料冲突。')
-    if st.button('审查单位资料', key='lab_prep_review', disabled=not state['data'], width='stretch'):
+    if st.button('检查单位资料', key='lab_prep_review', disabled=not state['data'], width='stretch'):
         try:
             state['review'] = prepare_lab_preparation(state['data'])
             state['error'] = ''
@@ -69,6 +70,11 @@ def _render_dialog():
     if state.get('error'):
         st.error(state['error'])
     review = state.get('review')
+    with step_area:
+        render_workflow_step(2 if review else 1, 2,
+            '检查并保存单位资料' if review else '上传并检查单位资料',
+            '核对本次新增、引用和修改的资料，再点击“确认保存单位资料”。' if review else
+            '上传填写好的Excel，点击“检查单位资料”查看缺项和冲突。')
     if review:
         summary = review['summary']
         st.caption(f"资料 {summary['rows']} 行 · 新增 {summary['create']} 行 · 引用已有 {summary['reuse']} 行 · 单位设置变更 {summary['settings']} 项")

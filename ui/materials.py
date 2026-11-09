@@ -63,7 +63,8 @@ def render_material_config_creation(template_id, *, on_created=None):
                 source=st.text_input('CV要求依据（选填）',value=item['quality_target_source_text'] or '',key=f'v12_create_cv_source_{template_id}_{item["id"]}')
                 requirements[item['id']]=dict(cv_limit=value,quality_target_source_text=source)
     registering=False
-    if st.button('保存批次设置',type='primary',key='v11_create_config_button',width='stretch',disabled=registering):
+    st.caption('建立批次后，继续设置各水平参数、质控品适用依据和质量目标。')
+    if st.button('建立批次并继续设置',type='primary',key='v11_create_config_button',width='stretch',disabled=registering):
         try: config=create_material_config(template_id=template_id,selections=selections,quality_requirements=requirements)
         except ValueError as exc:st.error(str(exc))
         else:
@@ -107,7 +108,7 @@ def render_material_replacement(configs):
         registering=False
         if items.empty:
             st.info('请在“需要换批的检验项目”中至少选择一项。')
-        if st.button('保存新批次',key='material_copy_save',disabled=items.empty or registering,type='primary'):
+        if st.button('保存新批次并继续设置',key='material_copy_save',disabled=items.empty or registering,type='primary'):
             try: config=copy_material_config(source_config_id=source_id,selections=selections)
             except ValueError as exc:st.error(str(exc))
             else:

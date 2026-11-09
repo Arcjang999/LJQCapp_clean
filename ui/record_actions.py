@@ -7,6 +7,7 @@ from uuid import uuid4
 import pandas as pd
 from services.time_service import detection_input_max
 import streamlit as st
+from ui.date_time_inputs import minute_datetime_input
 
 from services.record_maintenance_service import get_record_context, save_record_action
 from services.value_type_service import get_input_value_type_label
@@ -183,8 +184,8 @@ def _render_record_dialog():
                 _close()
             return
         st.divider()
-        draft['test_time'] = st.datetime_input('检测时间', key=_widget_key(state, 'test_time', draft['test_time']),
-            max_value=detection_input_max(draft['test_time']))
+        draft['test_time'] = minute_datetime_input('检测时间', key=_widget_key(state, 'test_time', draft['test_time']),
+            preserve_original=state['initial']['test_time'], max_value=detection_input_max(draft['test_time']))
         draft['operator'] = st.text_input('检测人', key=_widget_key(state, 'operator', draft['operator']))
         if context['method'] == 'lj':
             draft['value'] = st.number_input(get_input_value_type_label(context['input_value_type']), format='%.4f',

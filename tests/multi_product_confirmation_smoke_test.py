@@ -119,7 +119,7 @@ class MultiProductConfirmationTests(unittest.TestCase):
             state = app.session_state['batch_item_dialog']
             prefix = 'batch_product_' + state['token']
             self.assertFalse(any(row.label == '质量要求确认人' for row in app.text_input))
-            self.assertTrue(any(row.label == '确认并保存' for row in app.button))
+            self.assertTrue(any(row.label == '保存质控品适用依据' for row in app.button))
             # The first product's existing confirmation is reused; only the new product asks for evidence.
             product_prefix = prefix + '_' + str(f['product'])
             app.text_input(key=product_prefix + '_person').set_value('第二产品核对人')

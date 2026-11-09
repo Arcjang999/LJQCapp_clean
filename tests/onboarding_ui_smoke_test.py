@@ -180,14 +180,14 @@ class OnboardingUiTests(unittest.TestCase):
             ('onboarding_step_materials', '仪器试剂管理'),
             ('onboarding_step_project', '新建项目'),
         ], steps)
-        self.assertTrue(any(item.value == '第 1 步，共 3 步' for item in app.caption))
+        self.assertTrue(any(item.value == '1/3 实验室信息' for item in app.subheader))
         self.assertEqual('填写实验室信息', app.button(key='onboarding_unit').label)
         self.assertFalse(any(button.key == 'onboarding_verification' for button in app.button))
         self.click(app, 'onboarding_next')
         self.assert_guide(app, 'materials')
         self.click(app, 'onboarding_next')
         self.assert_guide(app, 'project')
-        self.assertTrue(any(item.value == '第 3 步，共 3 步' for item in app.caption))
+        self.assertTrue(any(item.value == '3/3 新建项目' for item in app.subheader))
         self.assertTrue(any(button.key == 'onboarding_finish' for button in app.button))
         self.assertFalse(any(button.key == 'onboarding_next' for button in app.button))
 

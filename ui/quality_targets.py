@@ -8,6 +8,7 @@ from database import atomic_write, get_connection
 from services.quality_target_service import (adopt_requirement, clear_requirement, decode, item_context,
     suggested_requirements, source_label, validate_spec_for_item, batch_quality_summary)
 from services.terminology_service import display_quality_record, display_quality_text
+from ui.standard_source_links import render_standard_source_links
 
 
 def catalog_table(records):
@@ -27,8 +28,7 @@ def render_spec(spec):
     st.write('允许总误差/可比性偏差：'+(spec['tea_text'] or '原条款未规定'))
     st.caption('标准规定的检测范围：'+spec['scope']+'；单位：'+(spec['measurement_unit'] or '以本项目设置的单位为准'))
     if spec.get('notes'):st.info(spec['notes'])
-    if spec.get('source_url','').startswith('https://'):
-        st.link_button('查看标准原文',spec['source_url'])
+    render_standard_source_links(spec)
     if spec.get('source_page'):st.caption(f"条款在原文第 {spec['source_page']} 页，页码包含封面。")
     basis = spec.get('laboratory_basis')
     if basis:
@@ -58,7 +58,7 @@ def render_review_summary(review, *, historical=False):
             label = '待填写'
         st.write('实验室自定 Ct 线：' + label)
     if review.get('status') == 'pending':
-        st.info('质量要求还没有确认。请填写检测条件和确认人，然后保存质量目标。')
+        st.info('质量要求还没有确认。请填写检测条件和确认人，再保存并确认质量要求。')
     recorded = review.get('recorded', {})
     if recorded:
         st.write('实验室自定要求：' + recorded.get('requirement_text', ''))
@@ -520,7 +520,7 @@ def render_quality_setup(item, prior, prefix, *, levels=None, goal=None, quick=F
         inline_fields.add('evidence')
     other_issues = [row for row in result['validation_issues'] if row['field'] not in inline_fields]
     if other_issues:
-        st.warning(('下一步前' if quick else '保存质量目标前') + '，请完成以下操作：\n\n' +
+        st.warning(('下一步前' if quick else '保存并确认质量要求前') + '，请完成以下操作：\n\n' +
                    '\n'.join('- ' + row['message'] for row in other_issues))
     return result
 
@@ -530,6 +530,9 @@ def render_adoption(scope,item_id,*,embedded=False,expected_revision=None,on_sav
         is_frozen_lot)
     item=item_context(scope,item_id);goal=decode(item['quality_goal_json']);prefix=f'quality_{scope}_{item_id}'
     review=decode(item.get('quality_review_json'))
+    notice = st.session_state.pop(prefix+'_save_notice', '')
+    if notice:
+        st.success(notice)
     st.caption(f"{item['test_item_name']}｜单位 {item['unit_symbol']}｜{item['level_count']} 个水平")
     frozen=False
     if scope=='lot':
@@ -542,7 +545,7 @@ def render_adoption(scope,item_id,*,embedded=False,expected_revision=None,on_sav
         if goal and (frozen or goal['spec']['id'] in current_ids):
             render_spec(goal['spec'])
             if scope=='lot' and goal.get('pending'):
-                st.info('各水平的浓度和类别决定适用限值，请核对后确认本批次质量目标。')
+                st.info('各水平的浓度和类别决定适用限值，请核对后点击“保存并确认批次质量要求”。')
             else:
                 st.caption(f"确认人：{goal['confirmed_by']}｜设置时间：{goal['adopted_at']}")
             if goal.get('evidence'):st.caption('设置说明：'+display_quality_text(goal['evidence']))
@@ -580,7 +583,7 @@ def render_adoption(scope,item_id,*,embedded=False,expected_revision=None,on_sav
             if current['revision'] != expected_revision:
                 raise ValueError('本批次设置已修改，请重新打开后再保存。')
     pending, confirm = st.columns(2)
-    if pending.button('保存，稍后继续', key=prefix+'_save_pending'):
+    if pending.button('保存质量要求草稿', key=prefix+'_save_pending'):
         try:
             from services.quality_review_service import save_pending_review
             from services.quality_setup_service import local_catalog_review
@@ -606,9 +609,10 @@ def render_adoption(scope,item_id,*,embedded=False,expected_revision=None,on_sav
         else:
             if on_saved is not None:
                 on_saved()
-            st.success('填写内容已保存。下次可继续填写，完成后再确认项目或批次设置。')
+            else:
+                st.session_state[prefix+'_save_notice'] = '质量要求草稿已保存，下次可继续填写。'
             st.rerun()
-    if confirm.button('确认本批次质量目标' if scope == 'lot' else '保存质量目标', key=prefix+'_adopt',
+    if confirm.button('保存并确认批次质量要求' if scope == 'lot' else '保存并确认项目质量要求', key=prefix+'_adopt',
                       disabled=not result['checked'] or result['blocked'], type='primary'):
         try:
             with atomic_write():
@@ -629,7 +633,9 @@ def render_adoption(scope,item_id,*,embedded=False,expected_revision=None,on_sav
         else:
             if on_saved is not None:
                 on_saved()
-            st.success('质量目标已保存，请继续确认项目或批次设置。')
+            else:
+                st.session_state[prefix+'_save_notice'] = ('批次质量要求已保存并确认，请返回批次确认设置。'
+                    if scope == 'lot' else '项目质量要求已保存并确认，请返回项目确认设置。')
             st.rerun()
 
 

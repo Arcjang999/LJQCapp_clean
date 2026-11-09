@@ -59,6 +59,39 @@ def confirm_fields(app):
 
 
 class TargetStatisticsUiTests(unittest.TestCase):
+    def test_cancel_after_typing_keeps_statistics_inputs_until_explicit_discard(self):
+        with IsolatedDatabase():
+            binding, _ = statistics_fixture()
+            app = open_statistics(make_app(binding['id']))
+            select_statistics(app, 'cumulative')
+            person_key, evidence_key = key(app, 'confirmed_by'), key(app, 'evidence')
+            effective_key, confirmed_key = key(app, 'effective_at'), key(app, 'confirmed')
+            self.assertEqual(60, app.datetime_input(key=effective_key).proto.step)
+            self.assertEqual(0, app.datetime_input(key=effective_key).value.second)
+            when = local_now().replace(second=0, microsecond=0)
+            before = database_state()
+            app.text_input(key=person_key).set_value('退出前刚填的确认人')
+            app.text_area(key=evidence_key).set_value('退出前刚填的切换依据。')
+            app.datetime_input(key=effective_key).set_value(when)
+            app.button(key='target_statistics_cancel').click().run()
+            assert_clean(app)
+            self.assertTrue(app.session_state['target_profile_dialog']['discard'])
+            self.assertEqual(before, database_state())
+            app.button(key='target_statistics_continue').click().run()
+            assert_clean(app)
+            self.assertEqual('退出前刚填的确认人', app.text_input(key=person_key).value)
+            self.assertEqual('退出前刚填的切换依据。', app.text_area(key=evidence_key).value)
+            self.assertEqual(when, app.datetime_input(key=effective_key).value)
+            self.assertFalse(app.checkbox(key=confirmed_key).value)
+            self.assertTrue(app.button(key='target_statistics_save').disabled)
+            self.assertTrue(any('已核对全部水平的新统计值和生效时间' in row.value for row in app.caption))
+            self.assertEqual(before, database_state())
+            app.button(key='target_statistics_cancel').click().run()
+            app.button(key='target_statistics_discard').click().run()
+            assert_clean(app)
+            self.assertNotIn('target_profile_dialog', app.session_state.filtered_state)
+            self.assertEqual(before, database_state())
+
     def test_full_management_page_routes_batch_and_lifecycle_parameter_dialog_once(self):
         with IsolatedDatabase():
             binding, _ = statistics_fixture()

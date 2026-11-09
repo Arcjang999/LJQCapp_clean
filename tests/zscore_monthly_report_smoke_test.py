@@ -252,7 +252,9 @@ def test_zscore_monthly_report_builds_pdf_and_snapshot() -> None:
         assert "追溯" in pdf_text
         assert "质量目标采用依据" in pdf_text
         assert "失控处理归档清单" in pdf_text
-        assert "尚无自动评价" in ''.join(pdf_text.split())
+        recorded_quality = package.report.quality_summary['review']['recorded']
+        assert ''.join(recorded_quality['source_name'].lower().split()) in ''.join(pdf_text.split())
+        assert ''.join(recorded_quality['requirement_text'].lower().split()) in ''.join(pdf_text.split())
         assert str(reader.metadata.get("/Subject", "")) == REPORT_TYPE_ZSCORE_MONTHLY
         assert "run级" not in pdf_text
         assert "level明细" not in pdf_text

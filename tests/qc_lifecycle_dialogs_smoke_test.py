@@ -149,6 +149,10 @@ def test_verification_dialog_failure_cancel_and_fresh_tokens():
         at = start(f)
         at.button(key='qc_lifecycle_verify').click().run()
         p = prefix(at)
+        picker = at.datetime_input(key=p+'when')
+        assert picker.proto.step == 60 and picker.value.second == picker.value.microsecond == 0
+        selected_time = datetime(2026, 9, 3, 11, 25)
+        picker.set_value(selected_time).run()
         context = at.session_state['qc_lifecycle_dialog']['context']
         lot_id = next(iter(context['actual_lots']))
         before = dump()
@@ -164,12 +168,14 @@ def test_verification_dialog_failure_cancel_and_fresh_tokens():
         assert dump() == before
         at.button(key='qcl_continue').click().run()
         assert at.text_input(key=p+'person').value == '确认人员'
+        assert at.datetime_input(key=p+'when').value == selected_time
         at.button(key='qcl_save').click().run()
         clean(at)
         assert 'qc_lifecycle_dialog' not in at.session_state
         with get_connection() as c:
             row = c.execute('SELECT * FROM qc_lot_verifications WHERE qc_lot_id=?', (lot_id,)).fetchone()
             assert row['evidence'] == '验证记录第一行\n第二行' and row['confirmed_by'] == '确认人员'
+            assert row['confirmed_at'] == '2026-09-03 11:25:00'
         at.button(key='qc_lifecycle_verify').click().run()
         assert prefix(at) != p and at.text_input(key=prefix(at)+'person').value == ''
 

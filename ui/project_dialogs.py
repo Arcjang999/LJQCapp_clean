@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import logging
+import sqlite3
 from uuid import uuid4
 import pandas as pd
 import streamlit as st
@@ -27,6 +29,21 @@ def open_project_dialog(kind, template_id=None, item_id=None):
         kind = 'project'
     if kind == 'project' and template_id is None:
         kind = 'quick'
+    if kind in ('quick', 'project') and template_id is None and item_id is None:
+        from ui.project_setup_draft import open_saved_setup
+        try:
+            saved = open_saved_setup()
+        except (ValueError, TypeError) as error:
+            st.error(str(error))
+            return
+        except (sqlite3.Error, OSError):
+            logging.exception('Could not read new-project draft')
+            st.error('草稿暂时无法打开，请重试。')
+            return
+        if saved is not None:
+            st.session_state[MODAL_KEY] = saved
+            st.session_state['onboarding_open'] = False
+            st.rerun()
     template = _plain(get_project_template(template_id)) if template_id is not None else {}
     if kind == 'quick':
         from ui.quick_project_setup import new_quick_setup_draft
@@ -53,6 +70,8 @@ def open_project_dialog(kind, template_id=None, item_id=None):
     st.session_state[MODAL_KEY] = dict(kind=kind, template_id=template_id, item_id=item_id,
         revision=template.get('revision_no'), draft=deepcopy(draft), initial=deepcopy(draft), token=uuid4().hex,
         discard=False, template_name=template.get('template_name', ''))
+    if kind in ('quick', 'project') and template_id is None and item_id is None:
+        st.session_state[MODAL_KEY]['creation_draft_id'] = uuid4().hex
     st.rerun()
 
 
@@ -121,6 +140,8 @@ def _qc_choices(ctx, *, defaults=False):
 
 
 def _cancel(ctx):
+    from ui.project_setup_draft import remember_setup_inputs
+    remember_setup_inputs(ctx)
     relation_dirty = any(isinstance(value, dict) and value.get('values') != value.get('initial')
                          for key, value in ctx.items() if key.endswith('_editor'))
     if ctx['draft'] != ctx['initial'] or relation_dirty:
@@ -130,12 +151,25 @@ def _cancel(ctx):
 
 
 def _render_discard(ctx):
-    st.warning('本次填写尚未保存。是否放弃修改？')
-    left, right = st.columns(2)
+    from ui.project_setup_draft import is_new_project_setup, render_save_setup_draft, clear_saved_setup
+    st.warning('本次填写尚未保存。')
+    if is_new_project_setup(ctx):
+        left, middle, right = st.columns([1, 1.5, 1])
+        with middle:
+            render_save_setup_draft(ctx)
+    else:
+        left, right = st.columns(2)
     if left.button('继续编辑', type='primary', key='project_continue_edit'):
         ctx['discard'] = False
+        ctx['restore_setup_draft_widgets'] = True
         st.rerun()
     if right.button('放弃修改', key='project_discard_changes'):
+        try:
+            clear_saved_setup(ctx)
+        except (ValueError, sqlite3.Error, OSError):
+            logging.exception('Could not clear new-project draft')
+            st.error('草稿未能删除，请重试。')
+            return
         _finish()
 
 
@@ -207,15 +241,23 @@ def _render_project_form(ctx):
     relation_pending = render_pending_product_relation_notice(ctx)
     if ctx['template_id'] is None and not reviewed:
         st.info('请先核对所选质控品是否适用，完成“确认所选质控品”后即可保存项目。')
+    from ui.project_setup_draft import render_save_setup_draft, clear_saved_setup
+    render_save_setup_draft(ctx, disabled=registration_open or relation_pending)
     cancel, save = st.columns(2)
     if cancel.button('取消', key='project_dialog_cancel', disabled=registration_open):
         _cancel(ctx)
     if save.button('保存项目', type='primary', key='project_dialog_save',
                    disabled=registration_open or relation_pending or (ctx['template_id'] is None and not reviewed)):
         try:
-            tid = save_project_details(ctx['draft'], template_id=ctx['template_id'], expected_revision=ctx['revision'])
+            from database import atomic_write
+            with atomic_write():
+                tid = save_project_details(ctx['draft'], template_id=ctx['template_id'], expected_revision=ctx['revision'])
+                clear_saved_setup(ctx)
         except ValueError as exc:
             st.error(str(exc))
+        except (sqlite3.Error, OSError):
+            logging.exception('Could not save project settings')
+            st.error('项目保存失败，请重试。')
         else:
             st.session_state['workspace_project_id'] = tid
             st.session_state['home_selected_project_id'] = tid
@@ -346,7 +388,7 @@ def _render_item_form(ctx):
     cancel, save = st.columns(2)
     if cancel.button('取消', key='project_dialog_cancel', disabled=registration_open):
         _cancel(ctx)
-    if save.button('保存', type='primary', key='project_item_save',
+    if save.button('保存检验项目并设置质量要求', type='primary', key='project_item_save',
                    disabled=registration_open or relation_pending or not ctx['draft']['target_statistics_mode']):
         try:
             iid = save_single_test_item(ctx['template_id'], ctx['draft'], expected_revision=ctx['revision'], item_id=ctx['item_id'])
@@ -468,7 +510,7 @@ def _render_panel_source(ctx, template, options):
             '质控品适用检验项目': '请在“本次检验项目”中至少选择一项；没有清单时，点击“自行选择检验项目”。',
             '选择检验项目': '请在“本次检验项目”中至少选择一项。',
         }[source]
-        st.info('“预览整组带入”暂不可用。' + instruction)
+        st.info(instruction)
     if cancel.button('取消', key='panel_source_cancel', disabled=registration_open):
         _finish()
     if preview.button('预览整组带入', type='primary', disabled=not candidates or registration_open, key='panel_source_preview'):
@@ -520,9 +562,12 @@ def _render_panel_form(ctx):
     st.subheader('整组添加检验项目')
     st.caption(ctx['template_name'])
     template, options = _plain(get_project_template(ctx['template_id'])), _panel_reference_options()
+    from ui.workflow_steps import render_workflow_step
     if ctx['draft']['stage'] == 'source':
+        render_workflow_step(1, 2, '选择检验项目', '选择本次添加的检验项目，再点击“预览整组带入”检查检测设置。')
         _render_panel_source(ctx, template, options)
         return
+    render_workflow_step(2, 2, '检查并保存检验项目', '检查各项目的方法、试剂、单位和统计方式，保存后分别填写质量要求。')
     prepared = ctx['panel_preview']
     st.info(f"本次新增 {prepared['added_count']} 项，保留已有 {prepared['retained_count']} 项。请在表中修改方法、单位或试剂，保存后分别设置质量要求。")
     entries = pd.DataFrame(prepared['entries'])
@@ -632,6 +677,8 @@ def render_project_dialog():
     if not ctx:
         return
     from ui.project_dependencies import apply_project_dependency_saved
+    from ui.project_setup_draft import restore_setup_inputs
+    restore_setup_inputs(ctx)
     apply_project_dependency_saved(ctx)
     if ctx['discard']:
         _render_discard(ctx)

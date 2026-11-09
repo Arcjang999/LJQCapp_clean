@@ -11,6 +11,7 @@ import sqlite3
 import sys
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -197,6 +198,64 @@ class HandlingTest(unittest.TestCase):
         submitted = self.save(revised, action='submit', request='resubmit')
         returned = self.save(submitted, action='return', request='returned', reason='补充资料')
         self.assertEqual('in_progress', returned['status'])
+        self.assertEqual(self.original, self.source_dump())
+
+    def test_minute_confirmation_accepts_the_submission_minute_without_inventing_seconds(self):
+        with patch.object(service, '_now', return_value='2026-11-09 11:06:22'):
+            event = self.open(request='minute-open')
+            event = self.save(event, request='minute-draft')
+            event = self.save(event, action='submit', request='minute-submit')
+        self.assertEqual('2026-11-09 11:06:22', event['saved_at'])
+        confirm = {**event['content'], 'confirmer_text': '确认员',
+                   'confirmed_at': '2026-11-09 11:06', 'confirmation_checked': True}
+        with patch.object(service, '_now', return_value='2026-11-09 11:06:45'):
+            for label, when in (('before', '2026-11-09 11:05'),
+                                ('future', '2026-11-09 11:07'),
+                                ('invalid', '2026-11-9 11:06')):
+                self.deny(lambda when=when, label=label: self.save(event, action='confirm',
+                    request='minute-' + label, content={**confirm, 'confirmed_at': when}),
+                    '日期和时间' if label == 'invalid' else '确认时间')
+            completed = self.save(event, action='confirm', request='minute-confirm', content=confirm)
+            repeated = self.save(event, action='confirm', request='minute-confirm', content=confirm)
+        self.assertEqual('completed', completed['status'])
+        self.assertEqual('2026-11-09 11:06', completed['content']['confirmed_at'])
+        self.assertEqual(completed['revision_no'], repeated['revision_no'])
+        self.assertEqual(self.original, self.source_dump())
+
+    def test_second_and_timezone_confirmation_keep_exact_timestamp_bounds(self):
+        for name, timestamp in (('lj', '2026-11-09 11:06:30'),
+                                ('z2', '2026-11-09T03:06:30+00:00')):
+            with self.subTest(timestamp=timestamp):
+                with patch.object(service, '_now', return_value='2026-11-09 11:06:22'):
+                    event = self.open(name, request=name + '-seconds-open')
+                    event = self.save(event, request=name + '-seconds-draft')
+                    event = self.save(event, action='submit', request=name + '-seconds-submit')
+                confirm = {**event['content'], 'confirmer_text': '确认员',
+                           'confirmed_at': timestamp, 'confirmation_checked': True}
+                with patch.object(service, '_now', return_value='2026-11-09 11:06:45'):
+                    for label, when in (('before', '2026-11-09 11:06:21'),
+                                        ('future', '2026-11-09 11:06:46')):
+                        self.deny(lambda when=when, label=label: self.save(event, action='confirm',
+                            request=name + '-seconds-' + label,
+                            content={**confirm, 'confirmed_at': when}), '确认时间')
+                    completed = self.save(event, action='confirm', request=name + '-seconds-confirm', content=confirm)
+                self.assertEqual('2026-11-09 11:06:30', completed['content']['confirmed_at'])
+        self.assertEqual(self.original, self.source_dump())
+
+    def test_minute_confirmation_handles_the_day_boundary(self):
+        with patch.object(service, '_now', return_value='2026-11-08 23:59:55'):
+            event = self.open(request='midnight-open')
+            event = self.save(event, request='midnight-draft')
+            event = self.save(event, action='submit', request='midnight-submit')
+        confirm = {**event['content'], 'confirmer_text': '确认员',
+                   'confirmed_at': '2026-11-09 00:00', 'confirmation_checked': True}
+        with patch.object(service, '_now', return_value='2026-11-09 00:00:20'):
+            for label, when in (('before', '2026-11-08 23:58'),
+                                ('future', '2026-11-09 00:01')):
+                self.deny(lambda when=when, label=label: self.save(event, action='confirm',
+                    request='midnight-' + label, content={**confirm, 'confirmed_at': when}), '确认时间')
+            completed = self.save(event, action='confirm', request='midnight-confirm', content=confirm)
+        self.assertEqual('2026-11-09 00:00', completed['content']['confirmed_at'])
         self.assertEqual(self.original, self.source_dump())
 
     def test_retest_exact_identity_time_full_run_and_removal(self):
