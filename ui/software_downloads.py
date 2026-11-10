@@ -4,13 +4,12 @@ from __future__ import annotations
 import streamlit as st
 
 from services.software_download_service import get_software_download_catalog
-from services.desktop_update_catalog_service import get_desktop_update_catalog
 from services.runtime_edition import software_downloads_available
 from ui.common import go_to_home_page
 from ui.module_styles import render_module_header
 
 
-def _installation_help(target: str, sha256: str, *, bootstrap: bool = False) -> None:
+def _installation_help(target: str, sha256: str) -> None:
     with st.expander("安装提示与文件校验"):
         if target == "windows-x86_64":
             st.markdown(
@@ -23,18 +22,11 @@ def _installation_help(target: str, sha256: str, *, bootstrap: bool = False) -> 
                        "再输入 -Algorithm SHA256 后回车，比对 Hash。")
             st.markdown("[微软 SmartScreen 说明](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/smartscreen-reputation)")
         else:
-            application_name = "LJQCAppUpdater" if bootstrap else "LJQCApp"
-            instructions = (
-                "打开下载的 DMG，双击其中的 LJQCAppUpdater 自动更新工具。"
-                "确认原来的 LJQCApp 位置，点击窗口中的“接入更新”。"
-                "完成后仍从原来的 LJQCApp 图标打开软件，无需手动拖动它替换原应用。"
-                if bootstrap else "打开 DMG 后，将 LJQCApp 拖入“应用程序”，再打开应用。"
-            )
             st.markdown(
-                instructions + "当前安装包尚未完成 "
+                "当前安装包尚未完成 "
                 "Apple Developer ID 签名和公证，可能提示无法验证开发者或无法检查恶意软件。"
                 "确认文件来自本页、SHA-256 与下方一致且你信任本应用后，可在首次尝试打开后，"
-                "进入“系统设置 → 隐私与安全”，找到 " + application_name + " 并选择“仍要打开”，再按提示确认。"
+                "进入“系统设置 → 隐私与安全”，找到 LJQCAppInstaller 并选择“仍要打开”，再按提示确认。"
             )
             st.caption("校验方法：在“终端”中输入 shasum -a 256，将下载的 DMG 拖入窗口后回车，"
                        "比对输出的校验值。")
@@ -60,13 +52,11 @@ def render_software_downloads_page() -> None:
               kwargs={"rerun": False})
     st.markdown("**当前提供开发版，仍在持续更新。** 请从本页下载安装包；"
                 "首次安装如遇系统验证提示，可查看下方“安装提示与文件校验”。")
-    st.markdown("**第一次使用：** 先安装下方的 1.00 软件，再完成“启用自动更新”。\n\n"
-                "**已经安装 1.00：** 直接完成“启用自动更新”，不用重新安装软件。\n\n"
-                "设置完成后，仍从原图标打开软件；有新版时会提示，确认后下载更新。"
+    st.markdown("**1.01 一体安装包包含程序和自动更新器，安装完成即可使用。**\n\n"
+                "以后打开软件时会从服务器检查更新，有新版时按提示确认下载。\n\n"
+                "已经安装旧版的电脑，请先保存工作并退出软件，再运行下方同平台的安装包。"
                 "原有数据、报告、附件和保存位置继续保留。")
     catalog = get_software_download_catalog()
-    updates = get_desktop_update_catalog()
-    bootstraps = {entry.target: entry for entry in updates.bootstraps}
     if not catalog.readable:
         st.info("安装包信息暂时无法读取，请稍后重试。")
     for column, option in zip(st.columns(2, gap="large"), catalog.downloads, strict=True):
@@ -75,35 +65,20 @@ def render_software_downloads_page() -> None:
             st.caption("系统要求：Windows 10/11，64 位（x64）。" if option.target == "windows-x86_64"
                        else "系统要求：macOS 13 或以上，Apple 芯片（M 系列）。")
             release = option.release
-            st.markdown("**第一步：安装软件（1.00）**")
+            if release is not None and not release.updater_integrated:
+                release = None
+            st.markdown("**1.01 一体安装包**")
             if release is None:
-                st.button("安装包准备中", key="software_download_pending_" + option.target,
+                st.button("1.01 安装包准备中", key="software_download_pending_" + option.target,
                           disabled=True, width="stretch")
             else:
-                build = f" · 构建 {release.build_number}" if release.build_number is not None else ""
-                st.caption(f"开发版 · 版本 {release.version}{build} · {release.published_at.isoformat()} · "
+                st.caption(f"开发版 · {release.published_at.isoformat()} · "
                            f"{_package_size(release.size_bytes)}")
                 st.link_button(option.download_label, release.url, width="stretch")
-                _installation_help(option.target, release.sha256)
-            st.markdown("**第二步：启用自动更新（只需设置一次）**")
-            st.caption("此工具用于开启更新检查。完成后需要联网下载新版软件；"
-                       "已经能正常检查更新的电脑，无需重复安装。")
-            bootstrap = bootstraps.get(option.target)
-            if bootstrap is None:
-                st.button("自动更新工具准备中", key="software_update_pending_" + option.target,
-                          disabled=True, width="stretch")
-            else:
-                st.caption(f"自动更新工具 · 构建 {bootstrap.build_number} · "
-                           f"{bootstrap.published_at.date().isoformat()} · {_package_size(bootstrap.size_bytes)}")
-                label = "下载 Windows 自动更新工具" if option.target == "windows-x86_64" else "下载 Mac 自动更新工具"
-                st.link_button(label, bootstrap.url, width="stretch")
                 if option.target == "windows-x86_64":
-                    st.markdown("1. 保存工作并关闭 LJQCApp。\n"
-                                "2. 双击下载的工具，确认原软件位置，点击“接入更新”。\n"
-                                "3. 以后仍从原图标打开软件，有新版时点击“下载并更新”。")
+                    st.markdown("双击下载的安装包，按提示完成安装，再从 LJQCApp 图标打开软件。")
                 else:
-                    st.markdown("1. 保存工作并关闭 LJQCApp。\n"
-                                "2. 打开下载的 DMG，双击里面的 LJQCAppUpdater。\n"
-                                "3. 确认已安装的 LJQCApp 位置，点击“接入更新”。\n"
-                                "4. 以后仍从原图标打开软件，有新版时点击“下载并更新”。")
-                _installation_help(option.target, bootstrap.sha256, bootstrap=True)
+                    st.markdown("打开下载的 DMG，双击其中的 LJQCAppInstaller 完成安装，"
+                                "再从“应用程序”中的 LJQCApp 打开软件。")
+                st.caption("自动更新器随程序一起安装，无需单独下载、填写地址或寻找程序位置。")
+                _installation_help(option.target, release.sha256)

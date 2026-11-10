@@ -1,0 +1,106 @@
+name: Integrated 1.01 installers (explicit only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: desktop-integrated-installers-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.target }} integrated installer
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: windows-x86_64
+            runner: windows-2022
+            architecture: x64
+          - target: macos-arm64
+            runner: macos-15
+            architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    env:
+      PYTHONUTF8: '1'
+      PIP_DISABLE_PIP_VERSION_CHECK: '1'
+      LJQC_DEPLOYMENT_MODE: desktop
+    steps:
+      - name: Preserve identical source bytes
+        shell: bash
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: '3.13'
+          architecture: ${{ matrix.architecture }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install packaging dependencies
+        run: python -m pip install -r requirements.txt pyinstaller==6.22.3
+      - name: Prepare Windows installer compiler
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./packaging/prepare_windows_ci.ps1
+      - name: Reuse the original accepted native 1.01 program
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: LJQCUpdate-${{ matrix.target }}-4-1
+          run-id: 42559274090
+          github-token: ${{ github.token }}
+          path: output/integrated-original
+      - name: Select the original program archive for packaging
+        shell: python
+        run: |
+          import pathlib
+          import shutil
+          artifacts = list(pathlib.Path('output/integrated-original').rglob('*-patch.tar.gz'))
+          if len(artifacts) != 1:
+              raise RuntimeError('The original platform program archive is missing or ambiguous')
+          output = pathlib.Path('output/integrated-input')
+          output.mkdir(parents=True, exist_ok=True)
+          shutil.copyfile(artifacts[0], output / 'program-patch.tar.gz')
+      - name: Package Windows with its integrated updater
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          python packaging/build_integrated_installer.py
+          --manifest resources/desktop_installer_manifests/${{ matrix.target }}.json
+          --patch output/integrated-input/program-patch.tar.gz
+          --output output/integrated-installers/${{ matrix.target }}
+          --installer-build 2026111001
+          --inno-compiler "$env:LJQC_CI_INNO_COMPILER"
+          --chinese-messages "$env:LJQC_CI_CHINESE_MESSAGES"
+      - name: Package Mac with its integrated updater
+        if: runner.os == 'macOS'
+        run: >-
+          python packaging/build_integrated_installer.py
+          --manifest resources/desktop_installer_manifests/${{ matrix.target }}.json
+          --patch output/integrated-input/program-patch.tar.gz
+          --output output/integrated-installers/${{ matrix.target }}
+          --installer-build 2026111001
+      - name: Retain the complete installer and download record
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: LJQCIntegrated-${{ matrix.target }}-${{ github.run_number }}-${{ github.run_attempt }}
+          path: output/integrated-installers/${{ matrix.target }}/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+      - name: Retain packaging diagnostics
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: LJQCIntegrated-diagnostics-${{ matrix.target }}-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            output/integrated-installers/**/*.log
+            output/integrated-installers/**/*.json
+          if-no-files-found: warn
+          retention-days: 7

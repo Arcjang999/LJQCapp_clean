@@ -114,6 +114,8 @@ def main(argv: list[str] | None = None) -> int:
         raise BootstrapError("资料位置必须使用完整路径。")
     from desktop_updates.manager import UpdateManager
     manager = UpdateManager(root=root, target=target)
+    from desktop_updates.integrated_install import recover_integrated_install
+    recover_integrated_install(manager)
     recover_bootstrap(manager)
     from desktop_updates.helper_repair import (needs_helper_repair, recover_helper_repair,
                                                repair_registered_helper)

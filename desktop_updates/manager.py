@@ -103,7 +103,7 @@ class UpdateManager:
                 with _FileLock(self.root / 'runtime/service.lock'):
                     # Recovery may find an external DB between two atomic renames.
                     # This relaxes only existence checking; no replacement DB is created.
-                    path = database_path(self.root, require_database=not self.journal_path.exists())
+                    path = database_path(self.root, require_database=not (self.journal_path.exists() or (self.directory / 'integrated-installation.json').exists()))
                     if path.exists():
                         try:
                             self._reservation = sqlite3.connect(path.resolve().as_uri() + '?mode=rw', uri=True, timeout=1)

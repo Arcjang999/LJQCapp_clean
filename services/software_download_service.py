@@ -28,6 +28,8 @@ class PublishedDownload:
     sha256: str
     size_bytes: int
     build_number: int | None = None
+    program_build_number: int | None = None
+    updater_integrated: bool = False
 
 
 @dataclass(frozen=True)
@@ -80,7 +82,15 @@ def _published_download(value: object, target: str) -> PublishedDownload | None:
     build_number = value.get("build_number")
     if build_number is not None and (type(build_number) is not int or build_number <= 0):
         raise ValueError("Invalid build number")
-    return PublishedDownload(version, published_at, url, digest.lower(), size, build_number)
+    program_build_number = value.get("program_build_number")
+    if program_build_number is not None and (type(program_build_number) is not int
+                                             or program_build_number <= 0):
+        raise ValueError("Invalid program build number")
+    updater_integrated = value.get("updater_integrated", False)
+    if type(updater_integrated) is not bool:
+        raise ValueError("Invalid integrated updater flag")
+    return PublishedDownload(version, published_at, url, digest.lower(), size,
+                             build_number, program_build_number, updater_integrated)
 
 
 def get_software_download_catalog(path: Path | None = None) -> SoftwareDownloadCatalog:

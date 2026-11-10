@@ -14,7 +14,7 @@ python scripts/install_desktop_update_receiver.py bundle --output output/desktop
 
 输出包含整包 SHA-256、长度和完整源码提交。包内只有接线脚本、固定发布工具、更新协议/HTTPS模块、公开发行公钥和逐文件摘要清单；没有 SSH 私钥、更新签名私钥、业务资料或基础安装包。工具包不接收任意路径列表。后续源码改变须重新提交并导出新包。
 
-将工具包和专用部署身份的 **Ed25519 SSH 公钥** `ljqc-update-deploy.pub` 上传到控制台可见的临时位置。私钥只留在受控本机及 GitHub 部署环境，不能上传服务器。核对服务器上的工具包 SHA-256 与本机输出一致；查看归档成员后，在 root 所有、`0755` 的新 `/var/tmp/ljqc-update-receiver-<build>/` 目录使用 `tar --no-same-owner` 解开。工具包已将成员归一为 root/0644，不携带本机用户身份。后续命令使用该目录内的脚本。
+通过本机 **OrcaTerm 桌面客户端**的文件管理器，将工具包上传到服务器本轮临时目录，将专用部署身份的 **Ed25519 SSH 公钥** `ljqc-update-deploy.pub` 上传到下方命令对应的 `/home/ubuntu/ljqc-update-deploy.pub`。后续服务器命令均在客户端的远程会话中执行，入口见[云端部署说明](CLOUD_DEPLOYMENT.md#服务器操作入口2026-11-10)。私钥只留在受控本机及 GitHub 部署环境，不能上传服务器。核对服务器上的工具包 SHA-256 与本机输出一致；查看归档成员后，在 root 所有、`0755` 的新 `/var/tmp/ljqc-update-receiver-<build>/` 目录使用 `tar --no-same-owner` 解开。工具包已将成员归一为 root/0644，不携带本机用户身份。后续命令使用该目录内的脚本。
 
 ## 2 先检查，再安装专用接收身份
 
