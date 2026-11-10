@@ -1,6 +1,7 @@
 name: Integrated 1.01 installers (explicit only)
 
 on:
+  workflow_call:
   workflow_dispatch:
 
 permissions:

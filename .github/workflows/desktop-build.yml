@@ -3,6 +3,10 @@ name: Base installers (explicit only)
 on:
   workflow_dispatch:
     inputs:
+      integrated_101:
+        description: 'Explicitly package the fixed 1.01 release with its integrated updater'
+        type: boolean
+        default: false
       rebuild_base_installers:
         description: 'Only select after the project owner explicitly requests replacement base installers'
         required: true
@@ -18,15 +22,19 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  integrated:
+    if: inputs.integrated_101 == true
+    uses: ./.github/workflows/desktop-integrated-installers.yml
+
   updates:
-    if: inputs.rebuild_base_installers != true
+    if: inputs.rebuild_base_installers != true && inputs.integrated_101 != true
     uses: ./.github/workflows/desktop-updates.yml
     with:
       publish: false
     secrets: inherit
 
   build:
-    if: inputs.rebuild_base_installers == true
+    if: inputs.rebuild_base_installers == true && inputs.integrated_101 != true
     name: ${{ matrix.target }} candidate
     timeout-minutes: 45
     strategy:
