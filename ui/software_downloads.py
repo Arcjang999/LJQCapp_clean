@@ -52,7 +52,7 @@ def render_software_downloads_page() -> None:
               kwargs={"rerun": False})
     st.markdown("**当前提供开发版，仍在持续更新。** 请从本页下载安装包；"
                 "首次安装如遇系统验证提示，可查看下方“安装提示与文件校验”。")
-    st.markdown("**1.01 一体安装包包含程序和自动更新器，安装完成即可使用。**\n\n"
+    st.markdown("**一体安装包包含程序和自动更新器。**\n\n"
                 "以后打开软件时会从服务器检查更新，有新版时按提示确认下载。\n\n"
                 "已经安装旧版的电脑，请先保存工作并退出软件，再运行下方同平台的安装包。"
                 "原有数据、报告、附件和保存位置继续保留。")
@@ -67,9 +67,10 @@ def render_software_downloads_page() -> None:
             release = option.release
             if release is not None and not release.updater_integrated:
                 release = None
-            st.markdown("**1.01 一体安装包**")
+            public_version = (release.display_version or release.version) if release is not None else ''
+            st.markdown("**" + (public_version + " " if public_version else '') + "一体安装包**")
             if release is None:
-                st.button("1.01 安装包准备中", key="software_download_pending_" + option.target,
+                st.button("安装包准备中", key="software_download_pending_" + option.target,
                           disabled=True, width="stretch")
             else:
                 st.caption(f"开发版 · {release.published_at.isoformat()} · "
@@ -81,4 +82,6 @@ def render_software_downloads_page() -> None:
                     st.markdown("打开下载的 DMG，双击其中的 LJQCAppInstaller 完成安装，"
                                 "再从“应用程序”中的 LJQCApp 打开软件。")
                 st.caption("自动更新器随程序一起安装，无需单独下载、填写地址或寻找程序位置。")
+                if release.activation_required:
+                    st.markdown("首次打开软件时，输入收到的验证码并联网激活。")
                 _installation_help(option.target, release.sha256)

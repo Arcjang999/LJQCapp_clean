@@ -152,7 +152,8 @@ def test_storage_failure_displays_an_action_without_internal_details() -> None:
 
 
 def test_business_pages_do_not_render_tracebacks_or_default_language_code() -> None:
-    files = [PROJECT_ROOT / "app.py", *sorted((PROJECT_ROOT / "pages").glob("*.py")),
+    files = [PROJECT_ROOT / "app.py", PROJECT_ROOT / "app_main.py",
+             *sorted((PROJECT_ROOT / "pages").glob("*.py")),
              *sorted((PROJECT_ROOT / "ui").glob("*.py"))]
     leaks = []
     for path in files:

@@ -1,5 +1,6 @@
 {
-  "version": "1.0.1",
-  "build_number": 2026110901,
-  "data_format_version": 1
+  "version": "1.1.1",
+  "build_number": 2026111201,
+  "data_format_version": 1,
+  "display_version": "1.01.1"
 }

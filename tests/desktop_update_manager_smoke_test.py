@@ -204,6 +204,8 @@ class UpdateManagerTests(unittest.TestCase):
         self.assertFalse(self.manager.journal_path.exists())
 
     def test_interruption_between_database_renames_recovers_forward(self):
+        # Original releases predate the optional public display label.
+        self.manifest.pop('display_version', None)
         manifest = self.accept()
         original_switch = self.manager._switch_data
         def interrupted(journal):
@@ -221,6 +223,7 @@ class UpdateManagerTests(unittest.TestCase):
         with self.manager.maintenance():
             self.manager._recover()
         self.assertEqual(self.manager.get_state()['current']['build_number'], 2026110701)
+        self.assertNotIn('display_version', self.manager.get_state()['current'])
         self.assertFalse(self.manager.journal_path.exists())
 
     def test_custom_database_missing_between_renames_can_recover(self):

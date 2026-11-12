@@ -24,7 +24,7 @@ PAGE = "from ui.software_downloads import render_software_downloads_page; render
 def published(**overrides):
     record = dict(published=True, version="1.2.3", published_at="2026-11-06",
                   url="https://downloads.example.org/releases/1.2.3/windows-x64.exe",
-                  sha256="a" * 64, size_bytes=25_000_000)
+                  sha256="a" * 64, size_bytes=25_000_000, updater_integrated=True)
     record.update(overrides)
     return record
 
@@ -83,8 +83,8 @@ class SoftwareDownloadsTest(unittest.TestCase):
         self.assertEqual(len(links), 1)
         self.assertEqual(links[0].proto.url, record["url"])
         self.assertEqual(links[0].proto.label, "下载 Windows 安装包")
-        self.assertTrue(any("1.2.3" in item.value and "2026-11-06" in item.value
-                            and "25.0 MB" in item.value for item in app.caption))
+        self.assertTrue(any("1.2.3 一体安装包" in item.value for item in app.markdown))
+        self.assertTrue(any("2026-11-06" in item.value and "25.0 MB" in item.value for item in app.caption))
 
     def test_invalid_record_does_not_hide_the_other_valid_platform(self):
         invalid = [

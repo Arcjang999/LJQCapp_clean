@@ -89,7 +89,7 @@ def open_reagent_lifecycle_dialog(kind, lot_id=None, *, product_id=None):
         verified = [ceil_minute(row['confirmed_at']) for row in context['verifications']
                     if row['reagent_lot_id'] == lot_id and row['system_id'] in system_ids
                     and row['confirmed_at'] <= now.isoformat(sep=' ')]
-        draft = dict(systems=[], when=max([minute_value(now), *verified]), person='', reason='', confirmed=False)
+        draft = dict(systems=[], when=max([minute_value(now)] + verified), person='', reason='', confirmed=False)
     st.session_state[MODAL_KEY] = dict(kind=kind, lot_id=lot_id, context=context, bound_product_id=bound_product_id,
         fingerprint=context['fingerprint'], token=uuid4().hex, draft=deepcopy(draft), initial=draft, discard=False)
     st.rerun(scope='app')

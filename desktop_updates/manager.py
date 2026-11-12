@@ -15,6 +15,7 @@ import time
 import uuid
 from urllib.request import urlopen
 
+from services.release_info import display_version_label
 from .data_guard import (atomic_json, assert_current, assert_retained, assert_attachments, database_path,
                          digest_file, logical_digest, prepare_candidate, snapshot)
 from .protocol import BASE_RELEASE, UPDATER_VERSION, TARGETS, UpdateError, strict_json, verify_envelope, validate_trust
@@ -354,6 +355,8 @@ class UpdateManager:
             current = {'path': str(destination), 'entrypoint': verified['payload']['entrypoint'],
                        'version': verified['version'], 'build_number': verified['build_number'], 'target': self.target,
                        'source_digest': verified['source_digest'], 'source_commit': verified['source_commit']}
+            if 'display_version' in verified:
+                current['display_version'] = display_version_label(verified)
             new_state = {**old_state, 'current': current, 'previous': old_state['current'],
                          'last_update_at': datetime.now(timezone.utc).isoformat()}
             journal = {'format_version': 1, 'phase': 'prepared', 'old_state': old_state, 'new_state': new_state,

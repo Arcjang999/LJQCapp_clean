@@ -163,18 +163,39 @@ _transaction_connection = ContextVar("qc_transaction_connection", default=None)
 
 
 class _DatabaseConnection(sqlite3.Connection):
+    def commit(self):
+        if self.in_transaction:
+            try:
+                _assert_desktop_authorization()
+            except BaseException:
+                self.rollback()
+                raise
+        return super().commit()
+
     def __exit__(self, exc_type, exc_value, traceback):
         if _transaction_connection.get() is self:
             return False
         try:
+            if exc_type is None and self.in_transaction:
+                try:
+                    _assert_desktop_authorization()
+                except BaseException:
+                    self.rollback()
+                    raise
             return super().__exit__(exc_type, exc_value, traceback)
         finally:
             self.close()
 
 
+def _assert_desktop_authorization():
+    from desktop_licensing.runtime import assert_business_access
+    assert_business_access(DB_PATH)
+
+
 @contextmanager
 def atomic_write():
     """Share one transaction across existing service/DAO calls for a logical write."""
+    _assert_desktop_authorization()
     existing = _transaction_connection.get()
     if existing is not None:
         yield existing
@@ -216,6 +237,7 @@ def read_snapshot():
 
 
 def get_connection() -> sqlite3.Connection:
+    _assert_desktop_authorization()
     existing = _transaction_connection.get()
     if existing is not None:
         return existing

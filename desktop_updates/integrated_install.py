@@ -20,6 +20,7 @@ import subprocess
 import sys
 import uuid
 
+from services.release_info import display_version_label
 from .bootstrap import (BootstrapError, default_base_path, install_windows_shortcuts,
                         verify_mac_bundle)
 from .data_guard import (assert_attachments, assert_current, atomic_json,
@@ -129,10 +130,15 @@ def inspect_bundle(manager, bundle: Path) -> dict:
 
 
 def _current(manifest: dict, directory: Path, target: str) -> dict:
-    return {"path": str(directory), "entrypoint": manifest["payload"]["entrypoint"],
+    current = {"path": str(directory), "entrypoint": manifest["payload"]["entrypoint"],
             "version": manifest["version"], "build_number": manifest["build_number"],
             "target": target, "source_digest": manifest["source_digest"],
             "source_commit": manifest["source_commit"]}
+    # Historic recovery journals compare this complete record. Do not invent a
+    # display field absent from their original signed manifest.
+    if "display_version" in manifest:
+        current["display_version"] = display_version_label(manifest)
+    return current
 
 
 def _destination(manager, state: dict) -> Path:

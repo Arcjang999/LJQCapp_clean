@@ -1,8 +1,53 @@
-name: Integrated 1.01 installers (explicit only)
+name: Integrated installers from accepted native releases (explicit only)
 
 on:
   workflow_call:
+    inputs:
+      source_run_id:
+        type: string
+        default: ''
+      source_attempt:
+        type: number
+        default: 0
+      source_commit:
+        type: string
+        default: ''
+      source_digest:
+        type: string
+        default: ''
+      program_version:
+        type: string
+        default: '1.0.1'
+      program_build:
+        type: number
+        default: 2026110901
+      installer_build:
+        type: number
+        default: 2026111001
   workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'Successful desktop-updates run containing the signed program and accepted helper; blank keeps the original 0901 base'
+        type: string
+        default: ''
+      source_attempt:
+        type: number
+        default: 0
+      source_commit:
+        type: string
+        default: ''
+      source_digest:
+        type: string
+        default: ''
+      program_version:
+        type: string
+        default: '1.0.1'
+      program_build:
+        type: number
+        default: 2026110901
+      installer_build:
+        type: number
+        default: 2026111001
 
 permissions:
   contents: read
@@ -15,7 +60,8 @@ concurrency:
 jobs:
   build:
     name: ${{ matrix.target }} integrated installer
-    timeout-minutes: 45
+    timeout-minutes: 60
+    environment: desktop-license-ci
     strategy:
       fail-fast: false
       matrix:
@@ -31,6 +77,14 @@ jobs:
       PYTHONUTF8: '1'
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
       LJQC_DEPLOYMENT_MODE: desktop
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+      SOURCE_ATTEMPT: ${{ inputs.source_attempt }}
+      SOURCE_COMMIT: ${{ inputs.source_commit }}
+      SOURCE_DIGEST: ${{ inputs.source_digest }}
+      PROGRAM_VERSION: ${{ inputs.program_version }}
+      PROGRAM_BUILD: ${{ inputs.program_build }}
+      INSTALLER_BUILD: ${{ inputs.installer_build }}
+      TARGET: ${{ matrix.target }}
     steps:
       - name: Preserve identical source bytes
         shell: bash
@@ -38,56 +92,144 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          ref: ${{ inputs.source_commit || github.sha }}
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: '3.13'
           architecture: ${{ matrix.architecture }}
           cache: pip
           cache-dependency-path: requirements.txt
-      - name: Install packaging dependencies
+      - name: Install packaging dependencies without compiling business code
         run: python -m pip install -r requirements.txt pyinstaller==6.22.3
+      - name: Validate the accepted source run and selected release
+        id: source
+        shell: python
+        env:
+          GH_READ_TOKEN: ${{ github.token }}
+          CI_CODE: ${{ secrets.LJQC_CI_INSTALLER_LICENSE_CODE }}
+        run: |
+          import json, os, pathlib, re, sys, urllib.request
+          new = bool(os.environ['SOURCE_RUN_ID'])
+          if new:
+              if not os.environ.get('CI_CODE'):
+                  raise RuntimeError('Configure the short-lived integrated installer CI activation code')
+              if (not os.environ['SOURCE_RUN_ID'].isdigit()
+                  or not re.fullmatch('[0-9a-f]{40}', os.environ['SOURCE_COMMIT'])
+                  or not re.fullmatch('[0-9a-f]{64}', os.environ['SOURCE_DIGEST'])):
+                  raise RuntimeError('Explicit native source identity is required')
+              request = urllib.request.Request(
+                  os.environ['GITHUB_API_URL'] + '/repos/' + os.environ['GITHUB_REPOSITORY'] + '/actions/runs/' + os.environ['SOURCE_RUN_ID'],
+                  headers={'Authorization': 'Bearer ' + os.environ['GH_READ_TOKEN'], 'Accept': 'application/vnd.github+json'})
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  run = json.load(response)
+              if (run['status'] != 'completed' or run['conclusion'] != 'success'
+                  or run['head_sha'] != os.environ['SOURCE_COMMIT'] or run['head_branch'] != 'main'
+                  or run['path'] != '.github/workflows/desktop-updates.yml'
+                  or int(os.environ['SOURCE_ATTEMPT'] or '0') not in (0, run['run_attempt'])):
+                  raise RuntimeError('The selected native source run has not passed its complete main acceptance')
+              sys.path.insert(0, str(pathlib.Path.cwd()))
+              from services.release_info import get_release_info
+              identity = get_release_info(include_source_state=True).as_dict()
+              expected = {'git_commit': os.environ['SOURCE_COMMIT'], 'source_digest': os.environ['SOURCE_DIGEST'],
+                          'version': os.environ['PROGRAM_VERSION'], 'build_number': int(os.environ['PROGRAM_BUILD'])}
+              if identity['source_dirty'] or any(identity[k] != v for k, v in expected.items()):
+                  raise RuntimeError('Integrated packaging source differs from the accepted native program')
+              number, attempt, run_id = run['run_number'], run['run_attempt'], run['id']
+          else:
+              if (os.environ['PROGRAM_VERSION'] != '1.0.1' or int(os.environ['PROGRAM_BUILD']) != 2026110901
+                  or int(os.environ['INSTALLER_BUILD']) != 2026111001):
+                  raise RuntimeError('The legacy path is restricted to the original accepted 0901 program')
+              number, attempt, run_id = 4, 1, 42559274090
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('new=' + str(new).lower() + '\n')
+              output.write('run_id=' + str(run_id) + '\n')
+              output.write('program_artifact=' + (f'LJQCUpdate-signed-{number}-{attempt}' if new else f'LJQCUpdate-{os.environ["TARGET"]}-4-1') + '\n')
+              output.write('helper_artifact=' + f'LJQCHelper-{os.environ["TARGET"]}-{number}-{attempt}' + '\n')
       - name: Prepare Windows installer compiler
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./packaging/prepare_windows_ci.ps1
-      - name: Reuse the original accepted native 1.01 program
+      - name: Download the exact accepted signed program bytes
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
-          name: LJQCUpdate-${{ matrix.target }}-4-1
-          run-id: 42559274090
+          name: ${{ steps.source.outputs.program_artifact }}
+          run-id: ${{ steps.source.outputs.run_id }}
           github-token: ${{ github.token }}
           path: output/integrated-original
-      - name: Select the original program archive for packaging
+      - name: Download the already accepted native helper
+        if: steps.source.outputs.new == 'true'
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: ${{ steps.source.outputs.helper_artifact }}
+          run-id: ${{ steps.source.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: output/integrated-helper-archive
+      - name: Select immutable program and helper inputs
         shell: python
+        env:
+          NEW_RELEASE: ${{ steps.source.outputs.new }}
         run: |
-          import pathlib
-          import shutil
-          artifacts = list(pathlib.Path('output/integrated-original').rglob('*-patch.tar.gz'))
-          if len(artifacts) != 1:
-              raise RuntimeError('The original platform program archive is missing or ambiguous')
+          import json, os, pathlib, shutil, sys
+          root = pathlib.Path('output/integrated-original')
           output = pathlib.Path('output/integrated-input')
-          output.mkdir(parents=True, exist_ok=True)
-          shutil.copyfile(artifacts[0], output / 'program-patch.tar.gz')
-      - name: Package Windows with its integrated updater
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: >-
-          python packaging/build_integrated_installer.py
-          --manifest resources/desktop_installer_manifests/${{ matrix.target }}.json
-          --patch output/integrated-input/program-patch.tar.gz
-          --output output/integrated-installers/${{ matrix.target }}
-          --installer-build 2026111001
-          --inno-compiler "$env:LJQC_CI_INNO_COMPILER"
-          --chinese-messages "$env:LJQC_CI_CHINESE_MESSAGES"
-      - name: Package Mac with its integrated updater
-        if: runner.os == 'macOS'
-        run: >-
-          python packaging/build_integrated_installer.py
-          --manifest resources/desktop_installer_manifests/${{ matrix.target }}.json
-          --patch output/integrated-input/program-patch.tar.gz
-          --output output/integrated-installers/${{ matrix.target }}
-          --installer-build 2026111001
-      - name: Retain the complete installer and download record
+          output.mkdir(parents=True, exist_ok=False)
+          target = os.environ['TARGET']
+          if os.environ['NEW_RELEASE'] == 'true':
+              matches = [p for p in root.rglob('latest.json') if json.loads(p.read_text())['signed'].get('target') == target]
+              if len(matches) != 1:
+                  raise RuntimeError('Expected exactly one signed platform manifest')
+              manifest = matches[0]
+              value = json.loads(manifest.read_text())['signed']
+              expected = {'version': os.environ['PROGRAM_VERSION'], 'build_number': int(os.environ['PROGRAM_BUILD']),
+                          'source_commit': os.environ['SOURCE_COMMIT'], 'source_digest': os.environ['SOURCE_DIGEST']}
+              if any(value[k] != v for k, v in expected.items()):
+                  raise RuntimeError('Signed program differs from the explicitly accepted source')
+              archives = list(root.rglob(value['artifact']['url'].rsplit('/', 1)[-1]))
+              helpers = list(pathlib.Path('output/integrated-helper-archive').glob('*-accepted-helper.tar.gz'))
+              if len(helpers) != 1:
+                  raise RuntimeError('Expected the accepted native helper archive')
+              helper_root = pathlib.Path('output/integrated-helper')
+              sys.path.insert(0, str(pathlib.Path('packaging').resolve()))
+              from build_integrated_installer import extract_accepted_helper
+              extract_accepted_helper(helpers[0], helper_root)
+          else:
+              manifest = pathlib.Path('resources/desktop_installer_manifests') / (target + '.json')
+              archives = list(root.rglob('*-patch.tar.gz'))
+          if len(archives) != 1:
+              raise RuntimeError('The accepted platform program is missing or ambiguous')
+          shutil.copyfile(archives[0], output / 'program-patch.tar.gz')
+          shutil.copyfile(manifest, output / 'manifest.json')
+      - name: Package only the installer shell around accepted program and helper bytes
+        shell: python
+        env:
+          NEW_RELEASE: ${{ steps.source.outputs.new }}
+        run: |
+          import os, subprocess, sys
+          args = [sys.executable, 'packaging/build_integrated_installer.py',
+                  '--manifest', 'output/integrated-input/manifest.json', '--patch', 'output/integrated-input/program-patch.tar.gz',
+                  '--output', 'output/integrated-installers/' + os.environ['TARGET'], '--installer-build', os.environ['INSTALLER_BUILD']]
+          if os.environ['NEW_RELEASE'] == 'true':
+              args += ['--program-version', os.environ['PROGRAM_VERSION'], '--program-build', os.environ['PROGRAM_BUILD'],
+                       '--source-commit', os.environ['SOURCE_COMMIT'], '--source-digest', os.environ['SOURCE_DIGEST'],
+                       '--helper-export', 'output/integrated-helper']
+          if sys.platform == 'win32':
+              args += ['--inno-compiler', os.environ['LJQC_CI_INNO_COMPILER'], '--chinese-messages', os.environ['LJQC_CI_CHINESE_MESSAGES']]
+          subprocess.run(args, check=True)
+      - name: Verify real integrated installation and production authorization
+        if: steps.source.outputs.new == 'true'
+        shell: python
+        env:
+          LJQC_CI_LICENSE_CODE: ${{ secrets.LJQC_CI_INSTALLER_LICENSE_CODE }}
+        run: |
+          import json, os, pathlib, subprocess, sys
+          output = pathlib.Path('output/integrated-installers') / os.environ['TARGET']
+          receipt = output / 'integrated-build-receipt.json'
+          value = json.loads(receipt.read_text())
+          subprocess.run([sys.executable, 'packaging/ci_verify_integrated_installer.py', '--target', os.environ['TARGET'],
+                          '--installer', str(output / value['artifact']['file']), '--receipt', str(receipt),
+                          '--manifest', 'output/integrated-input/manifest.json', '--patch', 'output/integrated-input/program-patch.tar.gz',
+                          '--output', str(output / 'native-installation')], check=True)
+      - name: Retain the complete accepted installer and download record
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: LJQCIntegrated-${{ matrix.target }}-${{ github.run_number }}-${{ github.run_attempt }}
@@ -95,7 +237,7 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 7
-      - name: Retain packaging diagnostics
+      - name: Retain bounded packaging diagnostics
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:

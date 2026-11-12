@@ -15,7 +15,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from services.release_info import get_release_info, release_input_files
-from release_payload import digest_file, write_payload_manifest
+from release_payload import assert_protected_payload, digest_file, write_payload_manifest
 
 
 def main() -> None:
@@ -45,7 +45,9 @@ def main() -> None:
     (source / 'source_identity.json').write_text(json.dumps(info, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     metadata = stage / 'build_info.json'
     metadata.write_text(json.dumps(info, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    protected = stage / 'protected_runtime'
     env = {**os.environ, 'LJQC_BUILD_INFO': str(metadata), 'PYTHONPATH': str(source),
+           'LJQC_PROTECTED_RUNTIME': str(protected), 'PYTHONDONTWRITEBYTECODE': '1',
            'PYINSTALLER_CONFIG_DIR': str(stage / 'pyinstaller-cache')}
     logs = stage / 'logs'
     logs.mkdir()
@@ -53,6 +55,8 @@ def main() -> None:
         print(name + '...', flush=True)
         with (logs / (name + '.log')).open('w', encoding='utf-8') as log:
             subprocess.run(command, cwd=source, env=env, stdout=log, stderr=subprocess.STDOUT, check=True)
+    run([sys.executable, str(source / 'packaging/protected_runtime.py'), '--root', str(source),
+         '--output', str(protected), '--work', str(stage / 'protected_compiler')], 'compile-business-modules')
     iconset = stage / 'LJQCApp.iconset'
     iconset.mkdir()
     for size in (16, 32, 128, 256, 512):
@@ -92,6 +96,7 @@ def main() -> None:
         '本包待 Apple Developer ID 签名和公证，供安装验收；尚不是已公证的公开分发版本。\n'
         '旧解压版迁入：先在原软件保存完整备份，再从新软件的系统设置恢复完整备份。\n'
         '需要诊断时，在终端运行："/Applications/LJQCApp.app/Contents/MacOS/LJQCApp" --diagnose\n', encoding='utf-8')
+    assert_protected_payload(image_root)
     write_payload_manifest(image_root, info)
     shutil.copy2(image_root / 'release_payload_manifest.json', stage / 'release_payload_manifest.json')
     if args.skip_dmg:

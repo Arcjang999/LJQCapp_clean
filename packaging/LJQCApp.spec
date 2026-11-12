@@ -15,62 +15,13 @@ BUNDLE_MODE = os.environ.get("LJQCAPP_BUNDLE_MODE", "onedir").strip().lower() or
 CONSOLE = os.environ.get("LJQCAPP_CONSOLE", "false").strip().lower() == "true"
 APP_ICON = str(PROJECT_ROOT / "assets" / "app_icon.ico")
 
-PROJECT_MODULE_FILES = [
-    "app.py",
-    "database.py",
-    "import_review.py",
-    "plotting.py",
-    "qc_logic.py",
-    "zscore_logic.py",
-    "zscore_plotting.py",
-]
-PROJECT_PACKAGES = [
-    "migrations",
-    "pages",
-    "services",
-    "ui",
-]
-PROJECT_DATA_DIRS = ["data/dictionaries", "data/catalogs", "resources"]
-PROJECT_HELP_FILES = [
-    "docs/OPERATION_GUIDE.md",
-    "docs/current_user_guide.md",
-    "docs/images/first-use/01-navigation.png",
-    "docs/images/first-use/02-new-project.png",
-    "docs/images/first-use/03-quality-standard.png",
-    "docs/images/first-use/04-ct-alert-settings.jpg",
-    "docs/images/first-use/05-ct-alert-judgment.jpg",
-]
+sys.path.insert(0, str(PROJECT_ROOT / "packaging"))
+from protected_runtime import application_datas, assert_native_analysis, protected_runtime
 
-
-def collect_project_source_datas() -> list[tuple[str, str]]:
-    datas: list[tuple[str, str]] = []
-    for module_file in PROJECT_MODULE_FILES:
-        datas.append((str(PROJECT_ROOT / module_file), "."))
-
-    for package_name in PROJECT_PACKAGES:
-        package_root = PROJECT_ROOT / package_name
-        for file_path in package_root.rglob("*"):
-            if not file_path.is_file() or "__pycache__" in file_path.parts or file_path.suffix in (".pyc", ".pyo"):
-                continue
-            relative_parent = file_path.parent.relative_to(PROJECT_ROOT)
-            datas.append((str(file_path), str(relative_parent)))
-    for data_dir_name in PROJECT_DATA_DIRS:
-        data_root = PROJECT_ROOT / data_dir_name
-        for file_path in data_root.rglob("*"):
-            if not file_path.is_file():
-                continue
-            relative_parent = file_path.parent.relative_to(PROJECT_ROOT)
-            datas.append((str(file_path), str(relative_parent)))
-    for help_file_name in PROJECT_HELP_FILES:
-        help_file = PROJECT_ROOT / help_file_name
-        if not help_file.is_file():
-            raise FileNotFoundError(f"Missing required help resource: {help_file}")
-        datas.append((str(help_file), str(help_file.parent.relative_to(PROJECT_ROOT))))
-    return datas
-
-
-project_source_datas = collect_project_source_datas()
-project_source_datas.append((str(PROJECT_ROOT / "release.json"), "."))
+runtime_root, protection = protected_runtime(PROJECT_ROOT)
+# Compiled modules must win over the development checkout on every import.
+sys.path.insert(0, str(runtime_root))
+project_source_datas = application_datas(PROJECT_ROOT, runtime_root)
 metadata = os.environ.get("LJQCAPP_BUILD_METADATA", "")
 if metadata:
     project_source_datas.append((metadata, "."))
@@ -83,10 +34,7 @@ hiddenimports = list(
         collect_submodules("streamlit")
         + collect_submodules("pyarrow")
         + collect_submodules("altair")
-        + collect_submodules("pages")
-        + collect_submodules("migrations")
-        + collect_submodules("services")
-        + collect_submodules("ui")
+        + protection["hiddenimports"]
         + [
             "database",
             "import_review",
@@ -102,11 +50,9 @@ hiddenimports = list(
 )
 
 a = Analysis(
-    [str(PROJECT_ROOT / "run_app.py")],
+    [str(runtime_root / "service_entry.py")],
     pathex=[
-        str(PROJECT_ROOT),
-        str(PROJECT_ROOT / "pages"),
-        str(PROJECT_ROOT / "ui"),
+        str(runtime_root),
     ],
     binaries=[],
     datas=streamlit_datas + streamlit_metadata + matplotlib_datas + certifi_datas + project_source_datas,
@@ -118,6 +64,7 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+assert_native_analysis(a, protection)
 pyz = PYZ(a.pure)
 
 if BUNDLE_MODE == "onefile":

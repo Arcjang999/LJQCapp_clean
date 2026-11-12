@@ -20,7 +20,7 @@ from urllib.parse import quote
 import zipfile
 
 
-from services.release_info import get_release_info
+from services.release_info import display_version_label, get_release_info
 from services.storage_paths import get_storage_paths
 
 APP_VERSION = get_release_info().version
@@ -211,7 +211,7 @@ def seed_demo_database(*, profile: str, replace_demo: bool) -> int:
 
 def print_version() -> int:
     build_info = _read_build_info()
-    print(f"LJQCApp 版本：{build_info.get('app_version') or APP_VERSION}")
+    print(f"LJQCApp 版本：{display_version_label(build_info) or APP_VERSION}")
     if build_info.get("build_time"):
         print(f"构建时间：{build_info['build_time']}")
     if build_info.get("git_commit"):
@@ -588,7 +588,7 @@ def _collect_text_diagnostics() -> str:
         "LJQCApp 诊断信息",
         "=" * 60,
         f"生成时间：{time.strftime('%Y-%m-%d %H:%M:%S')}",
-        f"软件版本：{build_info.get('app_version') or APP_VERSION}",
+        f"软件版本：{display_version_label(build_info) or APP_VERSION}",
         f"构建时间：{build_info.get('build_time') or '-'}",
         f"Git commit：{build_info.get('git_commit') or '-'}",
         f"系统：{platform.platform()}",
@@ -692,7 +692,9 @@ def update_preflight(result_path: Path | None) -> int:
     expected = paths.root / 'data/qc_lj_app.db'
     if database.get_db_path().resolve() != expected.resolve():
         raise RuntimeError('更新检查未使用隔离副本，已停止更新。')
-    database.init_db(refresh_reference_data=not expected.exists())
+    from desktop_licensing.runtime import candidate_preflight_access
+    with candidate_preflight_access(expected):
+        database.init_db(refresh_reference_data=not expected.exists())
     from services.schema_compatibility import inspect_database
     inspect_database(expected, check_integrity=True)
     info = get_release_info().as_dict()
@@ -710,6 +712,11 @@ def main(argv: list[str] | None = None) -> int:
         return generate_diagnostics(args.diagnose_output)
     if args.update_preflight:
         return update_preflight(args.update_result)
+    if args.reset_db or args.seed_demo:
+        from desktop_licensing.runtime import authorization_required
+        if authorization_required():
+            print('下载版不提供清库或写入演示数据命令。')
+            return 1
     if args.browser_mode:
         return run_browser_mode()
     paths = get_storage_paths()

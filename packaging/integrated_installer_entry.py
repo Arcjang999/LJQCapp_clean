@@ -11,10 +11,13 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from desktop_updates.bootstrap import default_data_root, native_target, resource_path
+from services.release_info import get_release_info
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="安装 LJQCApp 1.01")
+    release = get_release_info()
+    display_version = getattr(release, 'display_version', '') or release.version
+    parser = argparse.ArgumentParser(description="安装 LJQCApp " + display_version)
     parser.add_argument("--install", action="store_true")
     parser.add_argument("--no-gui", action="store_true")
     parser.add_argument("--bundle", type=Path, help=argparse.SUPPRESS)
@@ -34,7 +37,7 @@ def main(argv=None) -> int:
             from PySide6.QtWidgets import QApplication, QProgressDialog
             application = QApplication.instance() or QApplication(sys.argv[:1])
             dialog = QProgressDialog("正在准备安装…", "", 0, 0)
-            dialog.setWindowTitle("安装 LJQCApp 1.01")
+            dialog.setWindowTitle("安装 LJQCApp " + display_version)
             dialog.setCancelButton(None)
             dialog.setWindowModality(Qt.ApplicationModal)
             dialog.setMinimumDuration(0)

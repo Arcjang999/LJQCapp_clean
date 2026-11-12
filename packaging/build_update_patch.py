@@ -17,6 +17,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "packaging")]
 from release_payload import MANIFEST_NAME, digest_file, validate_payload
+from services.release_info import display_version_label
 
 BASE_RELEASE = "1.0.0-2026110606"
 TARGETS = {"windows-x86_64": ("LJQCApp.exe", "10.0.17763"),
@@ -100,6 +101,7 @@ def export_patch(payload: Path, metadata: dict, output: Path, *, now: datetime |
     candidate = {"format": "ljqc-desktop-update", "format_version": 1,
         "product": "LJQCApp", "edition": "desktop", "channel": "dev", "target": target,
         "base_release": BASE_RELEASE, "version": metadata["version"],
+        "display_version": display_version_label(metadata),
         "build_number": metadata["build_number"], "sequence": metadata["build_number"],
         "issued_at": issued.isoformat(), "expires_at": (issued + timedelta(days=14)).isoformat(),
         "min_updater_version": 1, "min_os_version": TARGETS[target][1],

@@ -10,6 +10,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,7 +19,8 @@ from release_payload import digest_file, validate_payload
 from services.release_info import get_release_info
 
 
-def build_bootstrap(output: Path, *, inno: Path | None = None, chinese_messages: Path | None = None) -> dict:
+def build_bootstrap(output: Path, *, inno: Path | None = None, chinese_messages: Path | None = None,
+                    export_helper: Path | None = None) -> dict:
     target = "windows-x86_64" if sys.platform == "win32" else "macos-arm64"
     if sys.platform not in ("win32", "darwin") or (sys.platform == "darwin" and platform.machine() != "arm64"):
         raise ValueError("The update bootstrap must be built on its native Windows x64 or Mac arm64 host")
@@ -146,6 +148,28 @@ def build_bootstrap(output: Path, *, inno: Path | None = None, chinese_messages:
             "code_signing": "ad-hoc-pending-developer-id" if target == "macos-arm64" else "unsigned-development",
             "base_installer_rebuilt": False}
         (output / "bootstrap-build-receipt.json").write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if export_helper is not None:
+            if tls_probe.get('status') != 'passed' or ui_probe.get('status') != 'passed':
+                raise ValueError('Only a native CI-verified helper may be exported for integrated packaging')
+            export_helper = export_helper.resolve()
+            export_helper.mkdir(parents=True, exist_ok=False)
+            exported = export_helper / package.name
+            shutil.copytree(package, exported, symlinks=True)
+            if target == 'macos-arm64':
+                shutil.copyfile(helper_manifest_path, export_helper / 'update_helper_manifest.json')
+            verified = verify_helper_manifest(exported, target)
+            if verified != helper_manifest:
+                raise ValueError('Exported helper differs from its accepted native inventory')
+            (export_helper / 'helper-build-receipt.json').write_text(
+                json.dumps(receipt, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+            # GitHub artifacts flatten modes and links. Keep the already signed
+            # Mac framework links and native executables inside a tar archive.
+            archive = export_helper.parent / (target + '-accepted-helper.tar.gz')
+            if archive.exists():
+                raise ValueError('Refusing to overwrite an accepted native helper archive')
+            with tarfile.open(archive, 'w:gz', dereference=False) as bundle:
+                for path in sorted(export_helper.rglob('*')):
+                    bundle.add(path, arcname=path.relative_to(export_helper).as_posix(), recursive=False)
         return receipt
 
 
@@ -154,8 +178,10 @@ def main() -> None:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--inno-compiler", type=Path)
     parser.add_argument("--chinese-messages", type=Path)
+    parser.add_argument("--export-helper", type=Path)
     args = parser.parse_args()
-    result = build_bootstrap(args.output, inno=args.inno_compiler, chinese_messages=args.chinese_messages)
+    result = build_bootstrap(args.output, inno=args.inno_compiler, chinese_messages=args.chinese_messages,
+                             export_helper=args.export_helper)
     print(json.dumps({"status": result["status"], "target": result["target"], "artifact": result["artifact"]}))
 
 

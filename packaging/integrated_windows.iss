@@ -12,6 +12,9 @@
 #ifndef AppVersion
   #error AppVersion is required
 #endif
+#ifndef DisplayVersion
+  #define DisplayVersion "1.01"
+#endif
 #ifndef BuildNumber
   #error BuildNumber is required
 #endif
@@ -23,7 +26,7 @@
 AppId={{9E90D501-F54A-4D90-8D95-0A2CED20D1E1}
 AppName=LJQCApp
 AppVersion={#AppVersion}
-AppVerName=LJQCApp 1.01（含自动更新）
+AppVerName=LJQCApp {#DisplayVersion}（含自动更新）
 AppPublisher=LJQCApp
 CreateAppDir=no
 Uninstallable=no
@@ -47,8 +50,8 @@ Name: "chinesesimp"; MessagesFile: "{#ChineseMessagesFile}"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Messages]
-WelcomeLabel2=安装 LJQCApp 1.01 和自动更新器。已有用户请先保存工作并关闭软件。安装会继续使用原有资料，之后可从原图标打开。
-FinishedLabel=已安装 LJQCApp 1.01 和自动更新器。请从开始菜单中的 LJQCApp 打开软件。后续更新会从服务器获取。
+WelcomeLabel2=安装 LJQCApp {#DisplayVersion} 和自动更新器。已有用户请先保存工作并关闭软件。安装会继续使用原有资料，之后可从原图标打开。
+FinishedLabel=已安装 LJQCApp {#DisplayVersion} 和自动更新器。请从开始菜单中的 LJQCApp 打开软件。后续更新会从服务器获取。
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{tmp}\LJQCAppIntegrated-{#BuildNumber}"; Flags: ignoreversion recursesubdirs createallsubdirs

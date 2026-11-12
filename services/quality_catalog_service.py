@@ -12,6 +12,8 @@ KIND_LABELS = {'numeric': '数值要求', 'process': '对照与质控要求',
                'qualitative': '定性要求', 'signal_precision': '信号精密度',
                'custom': '实验室自定要求'}
 CATEGORIES = ['分子检测', '免疫检测', '生化检测', '血液与凝血', '实验室自定']
+SCOPE_FIELDS = (('technique', 'techniques'), ('result_kind', 'result_kinds'),
+                ('result_scale', 'scales'), ('purpose', 'purposes'))
 
 
 def _numeric_category(spec):
@@ -68,8 +70,7 @@ def browse_quality_catalog(query='', *, kind='', category='', section='projects'
             if source_status(source, on_date) != 'current':
                 continue
             scope = '；'.join(' / '.join(CONTEXT_OPTIONS[key][v] for v in rule[field])
-                for key, field in [('technique', 'techniques'), ('result_kind', 'result_kinds'),
-                                   ('result_scale', 'scales'), ('purpose', 'purposes')])
+                for key, field in SCOPE_FIELDS)
             rows.append(dict(id=rule['id'], name=rule['name'], standard=source['standard'],
                 category='通用要求', kind=rule['kind'], status='current',
                 effective_date=source['effective_date'], scope=scope,

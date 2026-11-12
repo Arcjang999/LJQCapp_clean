@@ -1,7 +1,7 @@
-"""Package the accepted 1.01 program with an automatically installed updater.
+"""Package an accepted program with an automatically installed updater.
 
-The already signed program archive is copied verbatim.  Only the small updater
-and installer are frozen from this source; no business program is rebuilt.
+New releases reuse the accepted program and native helper bytes and freeze only
+the installer shell. The original 0901 defaults retain their legacy helper build.
 """
 from __future__ import annotations
 
@@ -14,15 +14,16 @@ import platform
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "packaging")]
 
-from desktop_updates.helper_repair import write_helper_manifest
+from desktop_updates.helper_repair import verify_helper_manifest, write_helper_manifest
 from desktop_updates.protocol import BASE_RELEASE, DEFAULT_ORIGIN, strict_json, verify_envelope
 from release_payload import digest_file, validate_payload
-from services.release_info import get_release_info
+from services.release_info import display_version_label, get_release_info
 
 PROGRAM_VERSION = "1.0.1"
 PROGRAM_BUILD = 2026110901
@@ -33,7 +34,9 @@ def _write_json(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def _verify_program(manifest_path: Path, patch_path: Path, target: str) -> tuple[dict, bytes]:
+def _verify_program(manifest_path: Path, patch_path: Path, target: str, *,
+                    program_version: str = PROGRAM_VERSION, program_build: int = PROGRAM_BUILD,
+                    source_commit: str | None = None, source_digest: str | None = None) -> tuple[dict, bytes]:
     raw = manifest_path.read_bytes()
     envelope = strict_json(raw)
     # This fixed, embedded base remains installable after channel metadata
@@ -44,8 +47,11 @@ def _verify_program(manifest_path: Path, patch_path: Path, target: str) -> tuple
     trust = strict_json((ROOT / "resources/desktop_update_trust.json").read_bytes())
     manifest = verify_envelope(raw, trust, target=target, installed_build=0,
                                highest_sequence=0, now=issued)
-    if manifest["version"] != PROGRAM_VERSION or manifest["build_number"] != PROGRAM_BUILD:
-        raise ValueError("The integrated 1.01 base must contain the accepted build 2026110901")
+    if manifest["version"] != program_version or manifest["build_number"] != program_build:
+        raise ValueError("The integrated installer must contain its explicitly selected accepted program")
+    if ((source_commit is not None and manifest['source_commit'] != source_commit)
+            or (source_digest is not None and manifest['source_digest'] != source_digest)):
+        raise ValueError('The accepted program differs from its selected native source')
     if (not patch_path.is_file() or patch_path.is_symlink()
             or patch_path.stat().st_size != manifest["artifact"]["size_bytes"]
             or digest_file(patch_path) != manifest["artifact"]["sha256"]):
@@ -53,21 +59,82 @@ def _verify_program(manifest_path: Path, patch_path: Path, target: str) -> tuple
     return manifest, raw
 
 
+def _reused_helper(directory: Path, target: str, manifest: dict, installer_build: int) -> tuple[Path, Path, dict]:
+    directory = directory.resolve(strict=True)
+    receipt = strict_json((directory / 'helper-build-receipt.json').read_bytes())
+    if (receipt.get('status') != 'passed' or receipt.get('target') != target
+            or receipt.get('native_production_tls_probe', {}).get('status') != 'passed'
+            or receipt.get('native_ui_lifecycle_probe', {}).get('status') != 'passed'
+            or receipt.get('business_database_access') is not False):
+        raise ValueError('The reusable helper lacks successful native TLS/UI acceptance')
+    helper = directory / ('LJQCAppUpdater' if target == 'windows-x86_64' else 'LJQCAppUpdater.app')
+    manifest_path = (helper / 'update_helper_manifest.json' if target == 'windows-x86_64'
+                     else directory / 'update_helper_manifest.json')
+    inventory = verify_helper_manifest(helper, target, manifest_path=manifest_path)
+    identity = inventory['release']
+    release = receipt.get('release', {})
+    if (identity['version'] != manifest['version'] or identity['build_number'] != installer_build
+            or identity['source_commit'] != manifest['source_commit']
+            or identity['source_digest'] != manifest['source_digest']
+            or any(release.get(key) != expected for key, expected in (
+                ('version', identity['version']), ('build_number', identity['build_number']),
+                ('git_commit', identity['source_commit']), ('source_digest', identity['source_digest'])))
+            or digest_file(manifest_path) != receipt.get('helper_integrity_manifest', {}).get('sha256')):
+        raise ValueError('The reusable helper differs from the accepted program or native receipt')
+    validate_payload(helper)
+    return helper, manifest_path, inventory
+
+
+def extract_accepted_helper(archive: Path, destination: Path) -> None:
+    """Extract only bounded safe entries while retaining inventoried file modes."""
+    destination.mkdir(parents=True, exist_ok=False)
+    with tarfile.open(archive, 'r:gz') as bundle:
+        members = bundle.getmembers()
+        if len(members) > 50000 or sum(row.size for row in members) > 3 * 1024**3:
+            raise ValueError('Native helper archive exceeds its bounds')
+
+        def safe_member(member, path):
+            safe = tarfile.data_filter(member, path)
+            if safe is not None and member.isfile():
+                if member.mode & ~0o777:
+                    raise ValueError('Native helper archive has unsupported special file permissions')
+                # data_filter deliberately changes regular modes. These are
+                # already inventoried native bytes, so preserve their rwx bits.
+                safe = safe.replace(mode=member.mode)
+            return safe
+
+        bundle.extractall(destination, members=members, filter=safe_member)
+
+
 def build_integrated_installer(manifest_path: Path, patch_path: Path, output: Path, *,
                                installer_build: int = INSTALLER_BUILD,
                                inno: Path | None = None,
-                               chinese_messages: Path | None = None) -> dict:
+                               chinese_messages: Path | None = None,
+                               program_version: str = PROGRAM_VERSION, program_build: int = PROGRAM_BUILD,
+                               source_commit: str | None = None, source_digest: str | None = None,
+                               helper_export: Path | None = None) -> dict:
     target = "windows-x86_64" if sys.platform == "win32" else "macos-arm64"
     if (sys.platform not in ("win32", "darwin")
             or (sys.platform == "darwin" and platform.machine() != "arm64")):
         raise ValueError("Integrated installers must be built on native Windows x64 or Apple Silicon")
-    if type(installer_build) is not int or installer_build <= PROGRAM_BUILD:
-        raise ValueError("The integrated packaging build must be newer than the accepted program")
+    legacy = (program_version == PROGRAM_VERSION and program_build == PROGRAM_BUILD
+              and source_commit is None and source_digest is None and helper_export is None)
+    if type(installer_build) is not int or installer_build < program_build:
+        raise ValueError("The integrated packaging build must not precede the accepted program")
+    if not legacy and (not source_commit or not source_digest or helper_export is None):
+        raise ValueError('A new integrated release requires explicit source identity and its accepted native helper')
     source = get_release_info(ROOT, include_source_state=True).as_dict()
     if source["source_dirty"]:
         raise ValueError("Integrated installer builds require a clean source checkpoint")
-    manifest, manifest_bytes = _verify_program(manifest_path.resolve(), patch_path.resolve(), target)
-    metadata = {**source, "version": PROGRAM_VERSION, "app_version": PROGRAM_VERSION,
+    if not legacy and (source['git_commit'] != source_commit or source['source_digest'] != source_digest):
+        raise ValueError('New integrated packaging must use the same source as the accepted native run')
+    manifest, manifest_bytes = _verify_program(manifest_path.resolve(), patch_path.resolve(), target,
+        program_version=program_version, program_build=program_build,
+        source_commit=source_commit, source_digest=source_digest)
+    display_version = '1.01' if legacy else display_version_label(manifest)
+    filename_version = program_version if legacy else display_version
+    metadata = {**source, "version": program_version, "app_version": program_version,
+                "display_version": display_version,
                 "build_number": installer_build, "target": target,
                 "build_time": datetime.now(timezone.utc).isoformat()}
     output = output.resolve()
@@ -99,25 +166,27 @@ def build_integrated_installer(manifest_path: Path, patch_path: Path, output: Pa
             run(["iconutil", "-c", "icns", str(iconset), "-o", str(icon)], "create-icon")
             env["LJQC_MAC_ICON"] = str(icon)
 
-        run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
-             "--distpath", str(work / "helper-dist"), "--workpath", str(work / "helper-work"),
-             str(ROOT / "packaging/LJQCUpdateBootstrap.spec")], "freeze-updater")
-        helper = work / "helper-dist" / ("LJQCAppUpdater" if target == "windows-x86_64"
-                                            else "LJQCAppUpdater.app")
-        if not helper.is_dir():
-            raise ValueError("The updater application was not produced")
-        validate_payload(helper)
-        if target == "macos-arm64":
-            for attribute in ("com.apple.FinderInfo", "com.apple.ResourceFork"):
-                result = subprocess.run(["xattr", "-dr", attribute, str(helper)], capture_output=True)
-                if result.returncode not in (0, 1):
-                    raise ValueError("Cannot prepare the updater bundle for signing")
-            run(["codesign", "--force", "--deep", "--sign", "-", str(helper)], "sign-updater")
-            run(["codesign", "--verify", "--deep", "--strict", str(helper)], "verify-updater-signature")
-        helper_inventory = write_helper_manifest(helper, target)
-        helper_manifest = (helper / "update_helper_manifest.json" if target == "windows-x86_64"
-                           else helper.parent / "update_helper_manifest.json")
-
+        if helper_export is not None:
+            helper, helper_manifest, helper_inventory = _reused_helper(helper_export, target, manifest, installer_build)
+        else:
+            run([sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean",
+                 "--distpath", str(work / "helper-dist"), "--workpath", str(work / "helper-work"),
+                 str(ROOT / "packaging/LJQCUpdateBootstrap.spec")], "freeze-updater")
+            helper = work / "helper-dist" / ("LJQCAppUpdater" if target == "windows-x86_64"
+                                                else "LJQCAppUpdater.app")
+            if not helper.is_dir():
+                raise ValueError("The updater application was not produced")
+            validate_payload(helper)
+            if target == "macos-arm64":
+                for attribute in ("com.apple.FinderInfo", "com.apple.ResourceFork"):
+                    result = subprocess.run(["xattr", "-dr", attribute, str(helper)], capture_output=True)
+                    if result.returncode not in (0, 1):
+                        raise ValueError("Cannot prepare the updater bundle for signing")
+                run(["codesign", "--force", "--deep", "--sign", "-", str(helper)], "sign-updater")
+                run(["codesign", "--verify", "--deep", "--strict", str(helper)], "verify-updater-signature")
+            helper_inventory = write_helper_manifest(helper, target)
+            helper_manifest = (helper / "update_helper_manifest.json" if target == "windows-x86_64"
+                               else helper.parent / "update_helper_manifest.json")
         bundle = work / "integrated-bundle"
         (bundle / "helper").mkdir(parents=True)
         shutil.copytree(helper, bundle / "helper" / helper.name, symlinks=True)
@@ -130,8 +199,9 @@ def build_integrated_installer(manifest_path: Path, patch_path: Path, output: Pa
                                     else "helper/update_helper_manifest.json")
         bundle_identity = {
             "format": "ljqc-integrated-installer", "format_version": 1,
-            "product": "LJQCApp", "target": target, "version": PROGRAM_VERSION,
-            "installer_build_number": installer_build, "program_build_number": PROGRAM_BUILD,
+            "product": "LJQCApp", "target": target, "version": program_version,
+            "display_version": display_version,
+            "installer_build_number": installer_build, "program_build_number": program_build,
             "base_release": BASE_RELEASE,
             "manifest": {"path": "manifest.json", "sha256": digest_file(bundle / "manifest.json")},
             "program": {"path": "program.tar.gz", "sha256": manifest["artifact"]["sha256"],
@@ -157,12 +227,12 @@ def build_integrated_installer(manifest_path: Path, patch_path: Path, output: Pa
         if target == "windows-x86_64":
             if not inno or not inno.is_file() or not chinese_messages or not chinese_messages.is_file():
                 raise ValueError("Inno Setup and its Chinese messages file are required")
-            filename = f"LJQCApp-{PROGRAM_VERSION}-{installer_build}-windows-x64-Setup.exe"
+            filename = f"LJQCApp-{filename_version}-{installer_build}-windows-x64-Setup.exe"
             artifact = output / filename
             if artifact.exists():
                 raise ValueError("Refusing to replace an existing integrated installer")
             run([str(inno), f"/DSourceDir={installer}", f"/DOutputDir={output}",
-                 f"/DOutputBase={artifact.stem}", f"/DAppVersion={PROGRAM_VERSION}",
+                 f"/DOutputBase={artifact.stem}", f"/DAppVersion={program_version}", f"/DDisplayVersion={display_version}",
                  f"/DBuildNumber={installer_build}", f"/DChineseMessagesFile={chinese_messages}",
                  str(ROOT / "packaging/integrated_windows.iss")], "compile-integrated-setup")
         else:
@@ -178,16 +248,16 @@ def build_integrated_installer(manifest_path: Path, patch_path: Path, output: Pa
             image.mkdir()
             shutil.copytree(installer, image / installer.name, symlinks=True)
             (image / "安装说明.txt").write_text(
-                "LJQCApp 1.01\n\n打开 LJQCAppInstaller，点击安装。程序和自动更新器一起安装，"
+                f"LJQCApp {display_version}\n\n打开 LJQCAppInstaller，点击安装。程序和自动更新器一起安装，"
                 "无需选择程序或更新器位置。安装后从“应用程序”中的 LJQCApp 打开。\n"
                 "已有用户请先保存工作并关闭软件，原有资料继续保留。\n"
                 "后续更新由软件从服务器获取，无需再次下载完整安装包。\n"
                 "本开发版尚待 Apple Developer ID 签名和公证。\n", encoding="utf-8")
-            filename = f"LJQCApp-{PROGRAM_VERSION}-{installer_build}-macos-arm64-pending-signing.dmg"
+            filename = f"LJQCApp-{filename_version}-{installer_build}-macos-arm64-pending-signing.dmg"
             artifact = output / filename
             if artifact.exists():
                 raise ValueError("Refusing to replace an existing integrated installer")
-            run(["hdiutil", "create", "-volname", "LJQCApp 1.01 安装", "-srcfolder", str(image),
+            run(["hdiutil", "create", "-volname", f"LJQCApp {display_version} 安装", "-srcfolder", str(image),
                  "-format", "UDZO", "-ov", str(artifact)], "create-integrated-dmg")
 
         if not artifact.is_file():
@@ -196,12 +266,14 @@ def build_integrated_installer(manifest_path: Path, patch_path: Path, output: Pa
         if any(current[key] != source[key] for key in ("git_commit", "source_digest", "source_dirty")):
             raise ValueError("Source changed while building the integrated installer")
         record = {
-            "published": True, "target": target, "version": PROGRAM_VERSION,
-            "build_number": installer_build, "program_build_number": PROGRAM_BUILD,
+            "published": True, "target": target, "version": program_version,
+            "display_version": display_version,
+            "build_number": installer_build, "program_build_number": program_build,
             "published_at": datetime.now(timezone.utc).date().isoformat(),
-            "url": f"{DEFAULT_ORIGIN}/downloads/releases/{PROGRAM_VERSION}/{installer_build}/{filename}",
+            "url": f"{DEFAULT_ORIGIN}/downloads/releases/{program_version}/{installer_build}/{filename}",
             "sha256": digest_file(artifact), "size_bytes": artifact.stat().st_size,
             "updater_integrated": True,
+            "activation_required": not legacy,
         }
         _write_json(output / "download-record.json", record)
         receipt = {
@@ -216,7 +288,8 @@ def build_integrated_installer(manifest_path: Path, patch_path: Path, output: Pa
             "bundle_sha256": digest_file(bundle / "bundle.json"),
             "updater_integrated": True, "program_archive_rebuilt": False,
             "helper_file_count": len(helper_inventory["files"]),
-            "business_storage_opened": False, "additional_native_validation": "not_requested",
+            "business_storage_opened": False, "helper_archive_rebuilt": helper_export is None,
+            "additional_native_validation": "not_requested" if legacy else "pending_explicit_installer_acceptance",
             "code_signing": ("ad-hoc-pending-developer-id" if target == "macos-arm64"
                              else "unsigned-development"),
         }
@@ -232,10 +305,17 @@ def main() -> None:
     parser.add_argument("--installer-build", type=int, default=INSTALLER_BUILD)
     parser.add_argument("--inno-compiler", type=Path)
     parser.add_argument("--chinese-messages", type=Path)
+    parser.add_argument("--program-version", default=PROGRAM_VERSION)
+    parser.add_argument("--program-build", type=int, default=PROGRAM_BUILD)
+    parser.add_argument("--source-commit")
+    parser.add_argument("--source-digest")
+    parser.add_argument("--helper-export", type=Path)
     args = parser.parse_args()
     result = build_integrated_installer(args.manifest, args.patch, args.output,
         installer_build=args.installer_build, inno=args.inno_compiler,
-        chinese_messages=args.chinese_messages)
+        chinese_messages=args.chinese_messages, program_version=args.program_version,
+        program_build=args.program_build, source_commit=args.source_commit,
+        source_digest=args.source_digest, helper_export=args.helper_export)
     print(json.dumps({"status": result["status"], "target": result["target"],
                       "artifact": result["artifact"]}))
 

@@ -36,6 +36,7 @@ REPOSITORY = "Arcjang999/LJQCapp_clean"
 REPOSITORY_ID = 1193577748
 WORKFLOW = ".github/workflows/desktop-updates.yml"
 TRANSFER = "Transfer only through the restricted receiving command"
+NOT_REQUESTED = "State when server publication was not requested"
 PUBLISH_JOB = "Sign and optionally publish the verified pair / sign_and_transfer"
 MAX_ZIP_BYTES = 4 * 1024**3
 MAX_SIGNED_BYTES = 12 * 1024**3
@@ -150,13 +151,20 @@ def validate_source(run: dict, jobs_page: dict, artifacts_page: dict, expected: 
     _required_steps(publication, SIGN_STEPS)
     transfers = [step for step in publication["steps"] if step.get("name") == TRANSFER]
     if (len(transfers) != 1 or transfers[0].get("status") != "completed"
-            or transfers[0].get("conclusion") not in ("success", "failure")):
+            or transfers[0].get("conclusion") not in ("success", "failure", "skipped")):
         raise ValueError("The original restricted transfer was not completed")
     failures = [(job["name"], step.get("name")) for job in jobs for step in job["steps"]
                 if step.get("conclusion") in ("failure", "cancelled", "timed_out")]
     expected_failures = [] if run["conclusion"] == "success" else [(PUBLISH_JOB, TRANSFER)]
-    if (failures != expected_failures or publication.get("conclusion") != run["conclusion"]
-            or transfers[0]["conclusion"] != run["conclusion"]):
+    if failures != expected_failures or publication.get("conclusion") != run["conclusion"]:
+        raise ValueError("Only a restricted transfer failure may be reused")
+    if transfers[0]["conclusion"] == "skipped":
+        # A signed, accepted candidate may deliberately await explicit release.
+        # A skipped transfer alone cannot prove that publication was withheld.
+        if run["conclusion"] != "success":
+            raise ValueError("An unpublished candidate must have fully succeeded")
+        _required_steps(publication, (NOT_REQUESTED,))
+    elif transfers[0]["conclusion"] != run["conclusion"]:
         raise ValueError("Only a restricted transfer failure may be reused")
     artifacts = artifacts_page.get("artifacts", [])
     if artifacts_page.get("total_count") != len(artifacts) or len(artifacts) > 100:

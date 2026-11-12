@@ -31,5 +31,5 @@ def software_downloads_available() -> bool:
 def runtime_version_label() -> str:
     labels = {"desktop": "桌面版", "web": "网页版", "source": "源码运行版"}
     release = get_release_info()
-    return (f"{labels[get_runtime_edition()]} · 版本 {release.version}"
+    return (f"{labels[get_runtime_edition()]} · 版本 {release.display_version or release.version}"
             f" · 构建 {release.build_number}")

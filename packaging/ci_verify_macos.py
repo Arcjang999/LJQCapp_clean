@@ -24,7 +24,7 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / 'packaging')]
-from release_payload import digest_file, validate_payload
+from release_payload import assert_protected_payload, digest_file, validate_payload
 from services.release_info import get_release_info
 from services.runtime_lock import ServiceLock
 
@@ -88,6 +88,7 @@ def find_stage(build_root: Path) -> tuple[Path, dict]:
 
 
 def check_bundle_manifest(app: Path, manifest: dict) -> int:
+    assert_protected_payload(app)
     if manifest.get('format') != 'ljqc-program-payload' or manifest.get('mutable_data_included') is not False:
         raise ValueError('The program payload manifest is not recognized')
     expected = {}

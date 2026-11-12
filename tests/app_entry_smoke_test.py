@@ -151,7 +151,7 @@ class AppEntryTest(unittest.TestCase):
             app.button(key='onboarding_skip').click().run()
         self.assertFalse(any(button.key == 'open_software_downloads_page' for button in app.button))
         release = get_release_info()
-        self.assertTrue(any(f'桌面版 · 版本 {release.version} · 构建 {release.build_number}' in item.value
+        self.assertTrue(any(f'桌面版 · 版本 {release.display_version or release.version} · 构建 {release.build_number}' in item.value
                             for item in app.markdown))
         draft = {'retained': {'draft_id': 'desktop-stale-route', 'values': {'one': '321'}}}
         app.session_state['daily_saved_drafts'] = draft

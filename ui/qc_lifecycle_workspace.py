@@ -54,7 +54,7 @@ def open_qc_lifecycle_dialog(kind, context_id):
         verified = [ceil_minute(row['confirmed_at']) for row in context['verifications']
                     if (kind == 'combination' or row['qc_lot_id'] in context['actual_lots'])
                     and row['confirmed_at'] <= current_time.isoformat(sep=' ')]
-        now = max([now, *verified])
+        now = max([now] + verified)
     draft = {'when': now, 'person': '', 'reason': ''}
     if kind == 'prepare':
         draft.update(target=None, items=[])

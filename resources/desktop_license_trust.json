@@ -1,0 +1,11 @@
+{
+  "format_version": 1,
+  "origin": "https://159.75.243.120",
+  "api_prefix": "/licensing",
+  "keys": {
+    "license-542243ef8879ce19": "v+ZdNPPyKQilmVFDNpue7XjP3SZkZHyOMNfXJ6fWgUw="
+  },
+  "timeout_seconds": 8,
+  "offline_seconds": 86400,
+  "cache_seconds": 300
+}

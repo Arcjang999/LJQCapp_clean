@@ -78,6 +78,54 @@ class ResendControlTests(unittest.TestCase):
         run["event"] = "push"
         self.assertEqual(resend.validate_source(run, jobs, artifacts, self.expected)["id"], self.expected.artifact_id)
 
+    def test_successful_published_or_explicitly_unpublished_signed_candidate_is_accepted(self):
+        for transfer in ('success', 'skipped'):
+            with self.subTest(transfer=transfer):
+                run, jobs, artifacts = self.api_fixture()
+                run['conclusion'] = 'success'
+                publication = jobs['jobs'][-1]
+                publication['conclusion'] = 'success'
+                publication['steps'][-1]['conclusion'] = transfer
+                if transfer == 'skipped':
+                    publication['steps'].append(dict(name=resend.NOT_REQUESTED,
+                        status='completed', conclusion='success'))
+                before = copy.deepcopy((run, jobs, artifacts))
+                self.assertEqual(self.expected.artifact_id,
+                    resend.validate_source(run, jobs, artifacts, self.expected)['id'])
+                self.assertEqual(before, (run, jobs, artifacts))
+
+    def test_skipped_transfer_requires_unambiguous_successful_no_publication_notice(self):
+        mutations = ('notice-missing', 'notice-duplicate', 'notice-skipped', 'notice-failed',
+            'notice-incomplete', 'run-failed', 'publication-failed', 'transfer-incomplete',
+            'transfer-duplicate', 'native-failed', 'adoption-skipped', 'sign-skipped', 'extra-failure')
+        for mutation in mutations:
+            with self.subTest(mutation=mutation):
+                run, jobs, artifacts = self.api_fixture()
+                run['conclusion'] = 'success'
+                publication = jobs['jobs'][-1]
+                publication['conclusion'] = 'success'
+                transfer = publication['steps'][-1]
+                transfer['conclusion'] = 'skipped'
+                notice = dict(name=resend.NOT_REQUESTED, status='completed', conclusion='success')
+                publication['steps'].append(notice)
+                if mutation == 'notice-missing': publication['steps'].pop()
+                elif mutation == 'notice-duplicate': publication['steps'].append(copy.deepcopy(notice))
+                elif mutation == 'notice-skipped': notice['conclusion'] = 'skipped'
+                elif mutation == 'notice-failed': notice['conclusion'] = 'failure'
+                elif mutation == 'notice-incomplete': notice['status'] = 'in_progress'
+                elif mutation == 'run-failed': run['conclusion'] = 'failure'; publication['conclusion'] = 'failure'
+                elif mutation == 'publication-failed': publication['conclusion'] = 'failure'
+                elif mutation == 'transfer-incomplete': transfer['status'] = 'in_progress'
+                elif mutation == 'transfer-duplicate': publication['steps'].append(copy.deepcopy(transfer))
+                elif mutation == 'native-failed': jobs['jobs'][0]['conclusion'] = 'failure'
+                elif mutation == 'adoption-skipped':
+                    next(step for step in jobs['jobs'][0]['steps'] if step['name'] == resend.COMMON_STEPS[3])['conclusion'] = 'skipped'
+                elif mutation == 'sign-skipped': publication['steps'][3]['conclusion'] = 'skipped'
+                else:
+                    publication['steps'].append(dict(name='Unexpected failed step', status='completed', conclusion='failure'))
+                with self.assertRaises(ValueError):
+                    resend.validate_source(run, jobs, artifacts, self.expected)
+
     def test_other_repo_branch_pull_request_attempt_and_incomplete_run_are_refused(self):
         mutations = (("repository", {"id": 123, "full_name": "elsewhere/project"}), ("head_repository", {}),
             ("head_branch", "feature"), ("event", "pull_request"), ("path", ".github/workflows/other.yml"),
@@ -312,6 +360,7 @@ class ResendControlTests(unittest.TestCase):
         self.assertNotIn("SIGNING_KEY", recipe)
         self.assertNotIn("build_update_bootstrap", recipe)
         normal = (ROOT / ".github/workflows/desktop-update-publish.yml").read_text()
+        self.assertIn('name: ' + resend.NOT_REQUESTED, normal)
         self.assertIn("from resend_desktop_update import publish_current", normal)
         self.assertIn("timeout-minutes: 360", normal)
         for workflow in ("desktop-build.yml", "desktop-updates.yml", "desktop-update-refresh.yml", "desktop-update-publish.yml"):

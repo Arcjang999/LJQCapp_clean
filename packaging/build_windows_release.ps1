@@ -42,6 +42,8 @@ Copy-Item -LiteralPath $MetadataPath -Destination (Join-Path $ArtifactDir "build
 $ServiceDist = Join-Path $WorkRoot "service_dist"
 $QtDist = Join-Path $WorkRoot "qt_dist"
 $ReleaseStaging = Join-Path $WorkRoot "payload"
+$ProtectedRuntime = Join-Path $WorkRoot "protected_runtime"
+$ProtectedCompilerWork = Join-Path $WorkRoot "protected_compiler"
 
 if (-not $SkipInstaller -and -not $InnoCompiler) {
     $FoundCompiler = Get-Command ISCC.exe -ErrorAction SilentlyContinue
@@ -66,6 +68,7 @@ if (-not $SkipInstaller) {
 }
 
 function Invoke-PackageBuild([string]$Spec, [string]$Dist, [string]$Work, [string]$Name, [string]$Console) {
+    $OriginalBytecodePolicy = $env:PYTHONDONTWRITEBYTECODE
     Push-Location $RepoRoot
     try {
         $env:LJQCAPP_BUNDLE_MODE = "onedir"
@@ -73,12 +76,16 @@ function Invoke-PackageBuild([string]$Spec, [string]$Dist, [string]$Work, [strin
         $env:LJQCAPP_QT_APP_NAME = $Name
         $env:LJQCAPP_CONSOLE = $Console
         $env:LJQCAPP_BUILD_METADATA = $MetadataPath
+        $env:LJQC_PROTECTED_RUNTIME = $ProtectedRuntime
+        $env:PYTHONDONTWRITEBYTECODE = "1"
         & $PythonExe -m PyInstaller --clean -y --distpath $Dist --workpath $Work $Spec
         if ($LASTEXITCODE -ne 0) { throw "PyInstaller build failed: $Name" }
     } finally {
-        foreach ($NameToClear in @("LJQCAPP_BUNDLE_MODE", "LJQCAPP_APP_NAME", "LJQCAPP_QT_APP_NAME", "LJQCAPP_CONSOLE", "LJQCAPP_BUILD_METADATA")) {
+        foreach ($NameToClear in @("LJQCAPP_BUNDLE_MODE", "LJQCAPP_APP_NAME", "LJQCAPP_QT_APP_NAME", "LJQCAPP_CONSOLE", "LJQCAPP_BUILD_METADATA", "LJQC_PROTECTED_RUNTIME")) {
             Remove-Item "Env:\$NameToClear" -ErrorAction SilentlyContinue
         }
+        if ($null -eq $OriginalBytecodePolicy) { Remove-Item Env:\PYTHONDONTWRITEBYTECODE -ErrorAction SilentlyContinue }
+        else { $env:PYTHONDONTWRITEBYTECODE = $OriginalBytecodePolicy }
         Pop-Location
     }
 }
@@ -89,6 +96,8 @@ function Copy-Package([string]$Source, [string]$Destination) {
     Get-ChildItem -LiteralPath $Source -Force | Copy-Item -Destination $Destination -Recurse
 }
 
+& $PythonExe (Join-Path $PSScriptRoot "protected_runtime.py") --root $RepoRoot --output $ProtectedRuntime --work $ProtectedCompilerWork
+if ($LASTEXITCODE -ne 0) { throw "Native business module compilation failed; no source fallback is permitted." }
 Invoke-PackageBuild (Join-Path $PSScriptRoot "LJQCApp.spec") $ServiceDist (Join-Path $WorkRoot "service_work") "LJQCAppService" "true"
 Invoke-PackageBuild (Join-Path $PSScriptRoot "LJQCAppQt.spec") $QtDist (Join-Path $WorkRoot "qt_work") "LJQCApp" "false"
 Copy-Package (Join-Path $QtDist "LJQCApp") $ReleaseStaging
@@ -96,6 +105,8 @@ Copy-Package (Join-Path $ServiceDist "LJQCAppService") (Join-Path $ReleaseStagin
 foreach ($Executable in @((Join-Path $ReleaseStaging "LJQCApp.exe"), (Join-Path $ReleaseStaging "_internal\app\LJQCAppService.exe"))) {
     if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) { throw "Assembled executable is missing: $Executable" }
 }
+& $PythonExe -c "import sys; from pathlib import Path; sys.path.insert(0, str(Path(sys.argv[1])/'packaging')); from release_payload import assert_protected_payload; assert_protected_payload(Path(sys.argv[2]))" $RepoRoot $ReleaseStaging
+if ($LASTEXITCODE -ne 0) { throw "Readable business source or missing native modules in the assembled payload." }
 & $PythonExe (Join-Path $PSScriptRoot "write_release_assets.py") --staging $ReleaseStaging --metadata $MetadataPath
 if ($LASTEXITCODE -ne 0) { throw "Release resource and payload verification failed." }
 Copy-Item -LiteralPath (Join-Path $ReleaseStaging "release_payload_manifest.json") -Destination (Join-Path $ArtifactDir "release_payload_manifest.json")

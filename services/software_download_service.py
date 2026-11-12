@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 from urllib.parse import urlsplit
 
+from services.release_info import display_version_label
 
 LOGGER = logging.getLogger(__name__)
 _VERSION = re.compile(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?")
@@ -30,6 +31,8 @@ class PublishedDownload:
     build_number: int | None = None
     program_build_number: int | None = None
     updater_integrated: bool = False
+    display_version: str = ""
+    activation_required: bool = False
 
 
 @dataclass(frozen=True)
@@ -89,8 +92,16 @@ def _published_download(value: object, target: str) -> PublishedDownload | None:
     updater_integrated = value.get("updater_integrated", False)
     if type(updater_integrated) is not bool:
         raise ValueError("Invalid integrated updater flag")
+    display_version = value.get("display_version")
+    if display_version is not None and (not isinstance(display_version, str)
+            or not display_version or display_version_label(value) != display_version):
+        raise ValueError("Invalid public version label")
+    activation_required = value.get("activation_required", False)
+    if type(activation_required) is not bool:
+        raise ValueError("Invalid activation requirement flag")
     return PublishedDownload(version, published_at, url, digest.lower(), size,
-                             build_number, program_build_number, updater_integrated)
+                             build_number, program_build_number, updater_integrated,
+                             display_version_label(value), activation_required)
 
 
 def get_software_download_catalog(path: Path | None = None) -> SoftwareDownloadCatalog:

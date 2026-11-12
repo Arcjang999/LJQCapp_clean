@@ -19,7 +19,7 @@ import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "packaging"), str(ROOT)]
-from release_payload import MANIFEST_NAME, validate_payload
+from release_payload import MANIFEST_NAME, assert_protected_payload, validate_payload
 from services.release_info import get_release_info
 from services.runtime_lock import ServiceLock
 
@@ -68,6 +68,7 @@ def verify_build(build_root: Path) -> tuple[Path, dict, Path]:
             raise ValueError("Windows receipt does not match the current CI source identity")
     payload = Path(receipt["staging"]).resolve()
     manifest = read_json(payload / MANIFEST_NAME)
+    assert_protected_payload(payload)
     if manifest.get("files") != validate_payload(payload):
         raise ValueError("The assembled program differs from its payload manifest")
     keys = ("version", "build_number", "data_format_version", "git_commit", "source_digest", "source_dirty", "target")

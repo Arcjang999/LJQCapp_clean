@@ -14,6 +14,11 @@ from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 SUITES = (
+    'desktop_licensing_smoke_test', 'licensing_server_smoke_test', 'desktop_license_access_smoke_test',
+    'licensing_ip_smoke_test', 'licensing_admin_smoke_test',
+    'public_version_smoke_test',
+    'integrated_release_reuse_smoke_test', 'integrated_installer_ci_smoke_test',
+    'protected_runtime_smoke_test',
     'installer_runtime_smoke_test', 'desktop_distribution_smoke_test',
     'storage_paths_adoption_smoke_test', 'storage_connection_lifecycle_smoke_test',
     'onboarding_service_smoke_test', 'onboarding_ui_smoke_test',
@@ -34,6 +39,14 @@ SUITES = (
 
 def run_child(name: str, sandbox: Path, result_file: Path) -> int:
     sandbox = sandbox.resolve()
+    if name in ('desktop_licensing_smoke_test', 'licensing_server_smoke_test',
+                'desktop_license_access_smoke_test', 'licensing_ip_smoke_test',
+                'licensing_admin_smoke_test') and sandbox.is_relative_to(ROOT):
+        # License private-material policy forbids even QA signing keys beneath
+        # a source checkout. Keep these guarded fixtures outside the checkout;
+        # their result/log still lives in the ordinary CI evidence directory.
+        import tempfile
+        sandbox = Path(tempfile.mkdtemp(prefix='ljqc-license-ci-')).resolve() / 'sandbox'
     sandbox.mkdir(parents=True, exist_ok=False)
     os.environ.update(LJQC_DATA_ROOT=str(sandbox / 'root'), TMPDIR=str(sandbox),
                       TMP=str(sandbox), TEMP=str(sandbox), MPLCONFIGDIR=str(sandbox / 'mpl'))

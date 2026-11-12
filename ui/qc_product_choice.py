@@ -12,7 +12,7 @@ import streamlit as st
 
 from services.master_data_service import list_qc_materials
 from services.qc_product_display_service import (
-    product_choice_label, product_concentration_caption, product_display_rows,
+    product_choice_label, product_choice_markdown_label, product_concentration_caption, product_display_rows,
 )
 from services.qc_product_recommendation_service import (
     get_qc_product_recommendations, validate_qc_product_choice, validate_choice_review,
@@ -70,7 +70,7 @@ def render_product_choice(ctx, *, reagent_id, lab_instrument_id, test_item_id=No
     current = draft.get(field)
     if locked:
         row = products.get(current)
-        st.caption('质控品：' + (product_choice_label(row) if row else '当前项目所选产品'))
+        st.caption('质控品：' + (product_choice_markdown_label(row) if row else '当前项目所选产品'))
     else:
         modes = ['已核对的候选', '人工选品'] if candidates else ['人工选品']
         mode_key = prefix + '_mode'
@@ -194,7 +194,7 @@ def render_product_reviews(ctx, qc_material_ids, *, reagent_id, lab_instrument_i
         product_key = str(product)
         old = reviews.get(product_key, {})
         pfx = prefix if len(products) == 1 else prefix + '_' + product_key
-        label = product_choice_label(catalog[product]) if product in catalog else '质控品已不存在'
+        label = product_choice_markdown_label(catalog[product]) if product in catalog else '质控品已不存在'
         st.markdown('**' + label + '**')
         error = ''
         try:
@@ -393,7 +393,7 @@ def _render_relation_editor(ctx, scope, current_product, prefix):
         if field == 'qc_material_id':
             records = product_display_rows(records)
         row = next((row for row in records if row['id'] == values.get(field)), None)
-        text = product_choice_label(row) if row and field == 'qc_material_id' else str(row[name]) if row else '全部'
+        text = product_choice_markdown_label(row) if row and field == 'qc_material_id' else str(row[name]) if row else '全部'
         summaries.append(label + '：' + text)
     st.caption('｜'.join(summaries))
     st.caption('适用范围按上方条件登记；“全部”涵盖该类别的所有选项。请填写说明书或使用记录作为依据。')

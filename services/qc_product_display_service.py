@@ -4,6 +4,9 @@ from string import punctuation
 from services.product_directory_service import list_catalog_product_choices
 
 
+_MARKDOWN_ESCAPES = str.maketrans({character: '\\' + character for character in punctuation})
+
+
 def _text(value):
     return '' if value is None else str(value).strip()
 
@@ -27,6 +30,11 @@ def product_choice_label(row):
     return '｜'.join(_text(part) for part in parts if _text(part))
 
 
+def product_choice_markdown_label(row):
+    """Keep saved product text literal in Markdown headings and captions."""
+    return product_choice_label(row).translate(_MARKDOWN_ESCAPES)
+
+
 def product_concentration_summary(row):
     row = dict(row)
     return '｜'.join(label + '：' + _text(row.get(field)) for field, label in
@@ -36,5 +44,4 @@ def product_concentration_summary(row):
 
 def product_concentration_caption(row):
     """Keep source punctuation literal when Streamlit renders the caption."""
-    return product_concentration_summary(row).translate(str.maketrans(
-        {character: '\\' + character for character in punctuation}))
+    return product_concentration_summary(row).translate(_MARKDOWN_ESCAPES)

@@ -18,7 +18,7 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT), str(ROOT / "packaging")]
 from build_update_patch import export_patch
-from release_payload import digest_file
+from release_payload import assert_protected_payload, digest_file
 from services.release_info import get_release_info
 from services.runtime_lock import ServiceLock
 from desktop_updates.payload import extract_verified_payload
@@ -92,6 +92,7 @@ def find_program(build_root: Path, target: str) -> tuple[Path, dict]:
 
 def verify_native_payload(program: Path, target: str, output: Path) -> dict:
     """Probe the actual extracted archive, not a separate pre-export directory."""
+    assert_protected_payload(program)
     desktop = program / ("LJQCApp.exe" if target == "windows-x86_64" else "LJQCApp.app/Contents/MacOS/LJQCApp")
     service = program / ("_internal/app/LJQCAppService.exe" if target == "windows-x86_64" else "LJQCApp.app/Contents/Resources/app/LJQCAppService")
     import certifi
@@ -223,6 +224,11 @@ def main() -> None:
         extracted = Path(temporary) / "program"
         extract_verified_payload(args.output / name, extracted, candidate)
         result = verify_native_payload(extracted, args.target, args.output)
+        from ci_verify_license import verify_frozen_license
+        service = extracted / ('_internal/app/LJQCAppService.exe' if args.target == 'windows-x86_64'
+                               else 'LJQCApp.app/Contents/Resources/app/LJQCAppService')
+        result['production_license_acceptance'] = verify_frozen_license(
+            service, args.target, args.output / 'native-license')
     receipt = {"status": "passed", "release": metadata, "base_release": candidate["base_release"],
                "artifact": {"file": name, "sha256": digest_file(args.output / name)},
                "extracted_native_program": result, "signed": False, "published": False,

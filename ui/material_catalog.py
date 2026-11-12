@@ -15,7 +15,9 @@ from services.material_catalog_service import (
     update_control_material, update_material_product,
 )
 from services.material_workflow_service import concentration_label, list_material_specs, material_label, register_control_material
-from services.qc_product_display_service import product_choice_label, product_concentration_caption, product_display_rows
+from services.qc_product_display_service import (
+    product_choice_label, product_choice_markdown_label, product_concentration_caption, product_display_rows,
+)
 from ui.required_fields import required_field
 
 
@@ -81,7 +83,7 @@ def _material_editor(state: dict, *, on_saved=None, on_cancel=None) -> None:
     product_id = state['product_id']
     locked = bool(record.get('identity_locked'))
     product = get_material_product(product_id)
-    st.caption('质控品：' + product_choice_label(product))
+    st.caption('质控品：' + product_choice_markdown_label(product))
     if locked:
         st.info('此批号的包装资料已锁定，可修改备注。新批号、效期或浓度水平请通过“新增质控品批号”登记。')
     spec_id = None

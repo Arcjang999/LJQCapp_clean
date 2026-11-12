@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QLabel,
 from desktop_updates.bootstrap import (BootstrapError, default_base_path, helper_source,
                                        install_bootstrap)
 from desktop_updates.helper_repair import helper_manifest_path, repair_registered_helper
+from services.release_info import display_version_label
 
 
 class Worker(QThread):
@@ -97,7 +98,7 @@ class UpdateWindow(QWidget):
     def _refresh_version(self):
         state = self.manager.get_state()
         current = state.get("current", {})
-        self.version.setText("当前版本 " + str(current.get("version", "1.00")))
+        self.version.setText("当前版本 " + (display_version_label(current) or "1.00"))
 
     def _start(self, operation, completed, *, failure=None):
         if self.worker is not None and self.worker.isRunning():
@@ -175,7 +176,7 @@ class UpdateWindow(QWidget):
             if not self.manual_check:
                 self.open_current()
             return
-        self.status.setText("有可用更新：" + str(manifest.get("version", "")))
+        self.status.setText("有可用更新：" + display_version_label(manifest))
         description = manifest.get("release_notes") or manifest.get("notes") or manifest.get("summary") or "改进功能及稳定性。"
         if isinstance(description, list):
             description = "\n".join(str(line) for line in description)

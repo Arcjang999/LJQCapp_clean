@@ -1,7 +1,7 @@
 """The maintained first-use guide loads in source and in a staged release layout."""
 from __future__ import annotations
 
-import ast
+import importlib.machinery
 from pathlib import Path
 import re
 import shutil
@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / 'packaging'))
 
 from streamlit.testing.v1 import AppTest
 from ui import user_guide
@@ -29,16 +30,9 @@ render_user_guide_page()
 
 
 def release_source_datas():
-    """Run the real spec's resource collector without invoking a build or hooks."""
-    tree = ast.parse((ROOT / 'packaging' / 'LJQCApp.spec').read_text(encoding='utf-8'))
-    names = {'PROJECT_MODULE_FILES', 'PROJECT_PACKAGES', 'PROJECT_DATA_DIRS', 'PROJECT_HELP_FILES'}
-    nodes = [node for node in tree.body if
-        (isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id in names
-                                            for target in node.targets)) or
-        (isinstance(node, ast.FunctionDef) and node.name == 'collect_project_source_datas')]
-    namespace = {'PROJECT_ROOT': ROOT}
-    exec(compile(ast.Module(body=nodes, type_ignores=[]), '<release resource collector>', 'exec'), namespace)
-    return namespace['collect_project_source_datas']
+    """Use the protected builds' real resource collector without compiling."""
+    from protected_runtime import application_datas
+    return application_datas
 
 
 class UserGuideSmokeTest(unittest.TestCase):
@@ -47,14 +41,21 @@ class UserGuideSmokeTest(unittest.TestCase):
         self.stage = Path(self.temp.name) / '_internal' / 'app'
         self.stage.mkdir(parents=True)
         self.collector = release_source_datas()
-        resources = self.collector()
+        self.runtime = Path(self.temp.name) / 'protected-runtime'
+        self.runtime.mkdir()
+        resources = self.collector(ROOT, self.runtime)
+        self.assertFalse(any(Path(source).name == 'user_guide.py' for source, _ in resources))
         self.help_resources = [(Path(source), Path(destination)) for source, destination in resources
             if Path(source).name in {'OPERATION_GUIDE.md', 'current_user_guide.md', 'user_guide.py', *PICTURE_NAMES}]
         for source, destination in self.help_resources:
             target = self.stage / destination / source.name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source, target)
-        self.module_path = self.stage / 'ui' / 'user_guide.py'
+        self.module_path = self.stage / 'ui' / ('user_guide' + importlib.machinery.EXTENSION_SUFFIXES[0])
+        self.module_path.parent.mkdir(parents=True, exist_ok=True)
+        # This inert path models the compiled module's location. The source
+        # module already imported above is used to exercise help rendering.
+        self.module_path.touch()
         self.guide_path = self.stage / 'docs' / 'OPERATION_GUIDE.md'
         self.pictures = [self.stage / 'docs' / 'images' / 'first-use' / name for name in PICTURE_NAMES]
 
@@ -84,13 +85,12 @@ class UserGuideSmokeTest(unittest.TestCase):
         self.assertEqual(set(targets), anchors)
         # A missing canonical file must stop resource collection, not make a
         # release that silently falls back to stale or incomplete instructions.
-        with patch.dict(self.collector.__globals__, {'PROJECT_ROOT': self.stage}):
-            for required in (self.guide_path, self.pictures[0]):
-                original = required.read_bytes()
-                required.unlink()
-                with self.assertRaises(FileNotFoundError):
-                    self.collector()
-                required.write_bytes(original)
+        for required in (self.guide_path, self.pictures[0]):
+            original = required.read_bytes()
+            required.unlink()
+            with self.assertRaises(FileNotFoundError):
+                self.collector(self.stage, self.runtime)
+            required.write_bytes(original)
 
     def test_both_help_modes_follow_the_same_file_after_a_content_update(self):
         with patch.object(user_guide, '__file__', str(self.module_path)), \
