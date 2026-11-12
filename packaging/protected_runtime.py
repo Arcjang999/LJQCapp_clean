@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+from contextlib import chdir
 import hashlib
 import importlib.machinery
 import json
@@ -115,13 +116,22 @@ def compile_runtime(root: Path, output: Path, work: Path, *, jobs: int = 2) -> d
         compiler_directives={"language_level": 3, "annotation_typing": False, "infer_types": False,
             "binding": True, "embedsignature": False, "emit_code_comments": False},
         annotate=False, quiet=True)
+    # MSVC mirrors the source directory beneath build_temp for objects and
+    # import libraries. An absolute generated-C path repeats the entire work
+    # prefix there and exceeds Windows toolchain path limits.
+    for extension in extensions:
+        extension.sources = [str(Path(source).resolve(strict=True).relative_to(work))
+                             for source in extension.sources]
     distribution = Distribution({"name": "ljqc-protected-runtime", "ext_modules": extensions})
     command = distribution.get_command_obj("build_ext")
     command.build_lib = str(output)
     command.build_temp = str(work / "objects")
     command.parallel = max(1, jobs)
     command.ensure_finalized()
-    command.run()
+    # build_lib/build_temp stay absolute; only C source arguments are relative.
+    # chdir restores the caller's directory even when compilation fails.
+    with chdir(work):
+        command.run()
     for package in PACKAGES:
         (output / package / "__init__.py").write_text("", encoding="utf-8")
     (output / "app.py").write_bytes(APP_ENTRY.encode("utf-8"))
