@@ -1,4 +1,4 @@
-"""Signed bootstrap webpage links without database access or native Qt."""
+"""Legacy signed catalogs and independent integrated downloads, without DB or Qt."""
 from __future__ import annotations
 
 import base64
@@ -198,38 +198,46 @@ class DesktopUpdateCatalogTests(unittest.TestCase):
         with patch.dict(os.environ, {"LJQC_PUBLIC_UPDATE_ROOT": str(public)}):
             self.assertFalse(get_desktop_update_catalog(trust_path=self.trust_path, now=self.now).readable)
 
-    def test_webpage_keeps_base_and_adds_signed_bootstrap_links(self):
+    def test_webpage_offers_only_integrated_packages_without_reading_legacy_helpers(self):
         from streamlit.testing.v1 import AppTest
         helpers = self.catalog(self.release())
         with patch.dict(os.environ, {"LJQC_DEPLOYMENT_MODE": "cloud"}), \
-                patch("ui.software_downloads.get_desktop_update_catalog", return_value=helpers), \
+                patch("services.desktop_update_catalog_service.get_desktop_update_catalog", return_value=helpers) as legacy, \
                 patch.object(sqlite3, "connect", side_effect=AssertionError("Download webpage opened SQLite")):
             app = AppTest.from_string(PAGE, default_timeout=15).run()
         self.assertFalse(list(app.exception), [error.message for error in app.exception])
+        legacy.assert_not_called()
         links = app.get("link_button")
-        self.assertEqual(len(links), 4)
-        expected = {entry.release.url for entry in get_software_download_catalog().downloads}
-        expected.update(entry.url for entry in helpers.bootstraps)
+        self.assertEqual(len(links), 2)
+        downloads = get_software_download_catalog().downloads
+        self.assertTrue(all(entry.release and entry.release.updater_integrated for entry in downloads))
+        expected = {entry.release.url for entry in downloads}
         self.assertEqual({entry.proto.url for entry in links}, expected)
+        self.assertTrue(expected.isdisjoint(entry.url for entry in helpers.bootstraps))
         text = "\n".join(entry.value for entry in app.markdown)
-        self.assertIn("安装软件（1.00）", text)
-        self.assertIn("无需手动拖动它替换原应用", text)
+        self.assertIn("一体安装包包含程序和自动更新器", text)
+        for entry in downloads:
+            self.assertIn(f"**{entry.release.display_version or entry.release.version} 一体安装包**", text)
+        self.assertIn("自动更新器随程序一起安装，无需单独下载", "\n".join(entry.value for entry in app.caption))
         self.assertIn("无需关闭系统安全保护", "\n".join(entry.value for entry in app.caption))
 
-    def test_webpage_pending_helpers_leave_base_downloads_enabled(self):
+    def test_unavailable_legacy_helpers_do_not_affect_integrated_package_downloads(self):
         from streamlit.testing.v1 import AppTest
         helpers = self.catalog()
+        self.assertFalse(helpers.readable)
         with patch.dict(os.environ, {"LJQC_DEPLOYMENT_MODE": "cloud"}), \
-                patch("ui.software_downloads.get_desktop_update_catalog", return_value=helpers):
+                patch("services.desktop_update_catalog_service.get_desktop_update_catalog", return_value=helpers) as legacy:
             app = AppTest.from_string(PAGE, default_timeout=15).run()
         self.assertFalse(list(app.exception))
-        self.assertEqual(len(app.get("link_button")), 2)
-        self.assertEqual(len([item for item in app.button if item.label == "自动更新工具准备中" and item.disabled]), 2)
+        legacy.assert_not_called()
+        self.assertEqual({item.proto.url for item in app.get("link_button")},
+                         {entry.release.url for entry in get_software_download_catalog().downloads})
+        self.assertFalse([item for item in app.button if item.label == "自动更新工具准备中"])
 
     def test_desktop_does_not_read_bootstrap_or_base_download_catalog(self):
         from streamlit.testing.v1 import AppTest
         with patch.dict(os.environ, {"LJQC_DEPLOYMENT_MODE": "desktop"}), \
-                patch("ui.software_downloads.get_desktop_update_catalog", side_effect=AssertionError("Desktop read update downloads")), \
+                patch("services.desktop_update_catalog_service.get_desktop_update_catalog", side_effect=AssertionError("Desktop read update downloads")), \
                 patch("ui.software_downloads.get_software_download_catalog", side_effect=AssertionError("Desktop read base downloads")):
             app = AppTest.from_string(PAGE, default_timeout=15).run()
         self.assertFalse(list(app.exception))

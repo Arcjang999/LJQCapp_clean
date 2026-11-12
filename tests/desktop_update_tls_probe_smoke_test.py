@@ -188,7 +188,10 @@ class TLSProbeTests(unittest.TestCase):
 
     def test_registered_headless_install_never_requires_selecting_base_again(self):
         from desktop_updates import helper_repair, manager
-        current = SimpleNamespace(get_state=lambda: {"current": {"build_number": 2026110606}})
+        # The real integrated recovery entry must observe no pending journal,
+        # then let this already registered installation follow helper repair.
+        current = SimpleNamespace(directory=self.root / "data/updates",
+            get_state=lambda: {"current": {"build_number": 2026110606}})
         with patch.object(manager, "UpdateManager", return_value=current), patch.object(launcher, "recover_bootstrap"), \
                 patch.object(helper_repair, "recover_helper_repair"), \
                 patch.object(helper_repair, "needs_helper_repair", return_value=False), \
@@ -196,10 +199,12 @@ class TLSProbeTests(unittest.TestCase):
             self.assertEqual(launcher.main(["--install", "--no-gui", "--target", "windows-x86_64",
                 "--helper", str(self.root / "source"), "--data-root", str(self.root / "data")]), 0)
         repair.assert_called_once_with(current, self.root / "source")
+        self.assertFalse(current.directory.exists())
 
     def test_default_new_component_and_windows_install_choose_repair_ui_without_qt_import(self):
         from desktop_updates import helper_repair, manager
-        current = SimpleNamespace(get_state=lambda: {"current": {"build_number": 2026110606}})
+        current = SimpleNamespace(directory=self.root / "data/updates",
+            get_state=lambda: {"current": {"build_number": 2026110606}})
         for flags, needed in (([], True), (["--install"], False)):
             with self.subTest(flags=flags):
                 run_ui = Mock(return_value=0)
@@ -211,6 +216,7 @@ class TLSProbeTests(unittest.TestCase):
                         "--data-root", str(self.root / "data")]), 0)
                 self.assertTrue(run_ui.call_args.kwargs["repair_mode"])
                 self.assertIsNone(run_ui.call_args.kwargs["base"])
+                self.assertFalse(current.directory.exists())
 
 
 if __name__ == "__main__":

@@ -124,8 +124,8 @@ def compile_runtime(root: Path, output: Path, work: Path, *, jobs: int = 2) -> d
     command.run()
     for package in PACKAGES:
         (output / package / "__init__.py").write_text("", encoding="utf-8")
-    (output / "app.py").write_text(APP_ENTRY, encoding="utf-8")
-    (output / "service_entry.py").write_text(SERVICE_ENTRY, encoding="utf-8")
+    (output / "app.py").write_bytes(APP_ENTRY.encode("utf-8"))
+    (output / "service_entry.py").write_bytes(SERVICE_ENTRY.encode("utf-8"))
     compiled = []
     for name in sorted(sources):
         expected = output.joinpath(*name.split("."))

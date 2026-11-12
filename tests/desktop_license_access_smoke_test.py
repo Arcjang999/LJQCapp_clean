@@ -1,4 +1,5 @@
 """Authorization protects first entry, fragment writes and maintenance commands."""
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 import sys
@@ -101,7 +102,9 @@ if render_license_gate(client=st.session_state['isolated_client'], required=True
                                 connection.commit()
                         finally:
                             connection.close()
-                with sqlite3.connect(target, timeout=1) as reader:
+                # sqlite3's transaction context does not close a plain reader;
+                # release it before the isolated database directory is removed.
+                with closing(sqlite3.connect(target, timeout=1)) as reader:
                     self.assertEqual(0, reader.execute(
                         "SELECT count(*) FROM app_settings WHERE key='license-expiry-probe'").fetchone()[0])
                     reader.execute('BEGIN IMMEDIATE')

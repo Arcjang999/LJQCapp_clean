@@ -35,7 +35,7 @@ def runtime_fixture(root: Path):
         path.write_bytes(b"isolated native module placeholder")
         modules.append(dict(module=name, file=path.relative_to(root).as_posix(),
             sha256=hashlib.sha256(path.read_bytes()).hexdigest()))
-    (root / "app.py").write_text(protection.APP_ENTRY, encoding="utf-8")
+    (root / "app.py").write_bytes(protection.APP_ENTRY.encode("utf-8"))
     (root / 'resources').mkdir()
     trust = b'{"format_version":1,"origin":"https://example.invalid","keys":{}}'
     (root / 'resources/desktop_license_trust.json').write_bytes(trust)
@@ -92,10 +92,10 @@ class ProtectedRuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             runtime = Path(temporary) / "runtime"
             value = runtime_fixture(runtime)
-            (runtime / "app.py").write_text(protection.APP_ENTRY + "print('business code')\n")
+            (runtime / "app.py").write_bytes((protection.APP_ENTRY + "print('business code')\n").encode("utf-8"))
             with self.assertRaisesRegex(ValueError, "unexpected application source"):
                 assert_protected_payload(runtime)
-            (runtime / "app.py").write_text(protection.APP_ENTRY)
+            (runtime / "app.py").write_bytes(protection.APP_ENTRY.encode("utf-8"))
             (runtime / value["modules"][0]["file"]).unlink()
             with self.assertRaisesRegex(ValueError, "missing"):
                 assert_protected_payload(runtime)
