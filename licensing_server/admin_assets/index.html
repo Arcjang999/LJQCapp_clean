@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <title>验证码管理</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/admin.css">
+  <script src="/admin.js" defer></script>
+</head>
+<body>
+  <main id="login-screen" class="login-screen">
+    <section class="login-card" aria-labelledby="login-title">
+      <div class="brand-mark" aria-hidden="true">验</div>
+      <p class="eyebrow">桌面软件授权</p>
+      <h1 id="login-title">验证码管理</h1>
+      <p class="muted">登录后生成验证码，管理使用期限与电脑名额。</p>
+      <form id="login-form" autocomplete="on">
+        <label for="username">管理员账号</label>
+        <input id="username" name="username" autocomplete="username" maxlength="80" required>
+        <label for="password">密码</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" maxlength="256" required>
+        <p id="login-error" class="feedback error" role="alert" hidden></p>
+        <button id="login-button" type="button" class="primary full">登录</button>
+      </form>
+      <p class="login-note">独立管理入口</p>
+    </section>
+  </main>
+
+  <div id="admin-screen" class="app-shell" hidden>
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark small" aria-hidden="true">验</span><div><strong>验证码管理</strong><span>桌面软件授权</span></div></div>
+      <div class="nav-label">管理</div>
+      <div class="nav-item active"><span aria-hidden="true">▤</span> 验证码</div>
+      <div class="sidebar-bottom"><span class="status-dot"></span> 独立管理后台</div>
+    </aside>
+    <main class="workspace">
+      <header class="topbar"><span>授权 / 验证码</span><div><span id="current-user"></span><button id="logout-button" type="button" class="text-button">退出登录</button></div></header>
+      <section class="page-content">
+        <div class="page-heading"><div><p class="eyebrow">授权管理</p><h1>验证码</h1><p class="muted">签发给客户，查看已用台数并管理使用期限。</p></div><button id="new-code-button" type="button" class="primary">＋ 生成验证码</button></div>
+        <div id="page-message" class="feedback" role="status" hidden></div>
+        <div class="stats" aria-label="授权概况">
+          <div class="stat-card"><span>验证码总数</span><strong id="stat-total">0</strong></div>
+          <div class="stat-card"><span>使用中</span><strong id="stat-active">0</strong></div>
+          <div class="stat-card"><span>已绑定电脑</span><strong id="stat-devices">0</strong></div>
+          <div class="stat-card"><span>已停用 / 已到期</span><strong id="stat-inactive">0</strong></div>
+        </div>
+        <section class="panel" aria-labelledby="list-title">
+          <div class="panel-heading"><div><h2 id="list-title">已签发验证码</h2><p class="muted small-text">按客户备注查找，打开记录查看电脑与 IP。</p></div><button id="refresh-button" type="button" class="secondary">刷新列表</button></div>
+          <div class="filters"><label class="search-label" for="search">查找备注或记录编号</label><input id="search" type="search" placeholder="输入客户或实验室名称" autocomplete="off"><label class="search-label" for="status-filter">状态</label><select id="status-filter"><option value="all">全部状态</option><option value="active">使用中</option><option value="disabled">已停用</option><option value="expired">已到期</option></select></div>
+          <div class="table-scroll"><table><thead><tr><th>客户 / 实验室备注</th><th>状态</th><th>已用 / 允许台数</th><th>到期时间（北京时间）</th><th>签发时间</th><th class="actions-column">操作</th></tr></thead><tbody id="license-rows"></tbody></table></div>
+          <div id="empty-state" class="empty-state" hidden><div class="empty-icon" aria-hidden="true">▤</div><h3 id="empty-title">尚未签发验证码</h3><p id="empty-text">点击“生成验证码”，设置允许台数和截止时间。</p></div>
+          <div class="list-footer"><span id="record-count">0 条记录</span><span>停用或解绑后，离线电脑最长仍可使用至原24小时期限。</span></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="issue-dialog" aria-labelledby="issue-title">
+    <div class="dialog-heading"><div><p class="eyebrow">新授权</p><h2 id="issue-title">生成验证码</h2></div><button class="close-button" type="button" data-close="issue-dialog" aria-label="关闭生成窗口">×</button></div>
+    <form id="issue-form">
+      <label for="issue-label">客户 / 实验室备注（选填）</label><input id="issue-label" maxlength="160" placeholder="例如：某实验室测试" autocomplete="off">
+      <label for="issue-devices">最多允许几台电脑</label><input id="issue-devices" type="number" min="1" max="1000" step="1" value="10" required>
+      <label for="issue-date">使用截止时间（北京时间）</label><div class="date-time"><input id="issue-date" type="date" value="2026-11-30" required aria-label="截止日期"><input id="issue-time" type="time" step="60" value="23:59" required aria-label="截止时间"></div>
+      <p class="field-note">同一台电脑重复打开不增加名额。断网最多继续使用24小时，且不超过总有效期。</p>
+      <p id="issue-error" class="feedback error" role="alert" hidden></p>
+      <div class="dialog-actions"><button type="button" class="secondary" data-close="issue-dialog">取消</button><button id="issue-submit" type="button" class="primary">生成验证码</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="issued-dialog" aria-labelledby="issued-title">
+    <div class="dialog-heading"><div><p class="eyebrow">已签发</p><h2 id="issued-title">验证码已生成</h2></div><button class="close-button" type="button" data-close="issued-dialog" aria-label="关闭验证码窗口">×</button></div>
+    <p class="muted">验证码仅在本次生成后显示，请复制保存并交给对应客户。</p>
+    <label for="issued-code">验证码</label><input id="issued-code" class="code-value" readonly autocomplete="off" spellcheck="false">
+    <p id="issued-summary" class="issued-summary"></p>
+    <p id="copy-message" class="feedback success" role="status" hidden></p>
+    <div class="dialog-actions"><button type="button" class="secondary" data-close="issued-dialog">关闭</button><button id="copy-code-button" type="button" class="primary">复制验证码</button></div>
+  </dialog>
+
+  <dialog id="detail-dialog" class="detail-dialog" aria-labelledby="detail-title">
+    <div class="dialog-heading"><div><p class="eyebrow">授权详情</p><h2 id="detail-title">验证码详情</h2><p id="detail-id" class="muted small-text"></p></div><button class="close-button" type="button" data-close="detail-dialog" aria-label="关闭详情">×</button></div>
+    <div id="detail-message" class="feedback" role="status" hidden></div>
+    <div class="detail-summary"><div><span>状态</span><strong id="detail-status"></strong></div><div><span>已用 / 允许台数</span><strong id="detail-seats"></strong></div><div><span>到期时间（北京时间）</span><strong id="detail-expires"></strong></div></div>
+    <section class="extend-section" aria-labelledby="extend-title"><div><h3 id="extend-title">延长使用期限</h3><p class="muted small-text">保存后，已激活电脑下次联网自动取得新期限。</p></div><form id="extend-form"><div class="date-time"><input id="extend-date" type="date" required aria-label="延期日期"><input id="extend-time" type="time" step="60" required aria-label="延期时间"></div><button id="extend-button" type="button" class="secondary">保存延期</button></form></section>
+    <div class="device-heading"><div><h3>激活电脑</h3><p class="muted small-text">IP 是网络出口地址，多台电脑可能相同；历史未记录的 IP 显示为“未记录”。</p></div><button id="refresh-devices" type="button" class="secondary">刷新设备</button></div>
+    <div class="table-scroll device-table"><table><thead><tr><th>设备编号</th><th>状态</th><th>首次激活</th><th>最近验证</th><th>首次记录 IP</th><th>最近 IP</th><th>操作</th></tr></thead><tbody id="device-rows"></tbody></table></div>
+    <p id="no-devices" class="empty-devices" hidden>尚无电脑激活此验证码。</p>
+    <div class="detail-footer"><p class="muted small-text">原验证码无法从列表找回。需要更换验证码时，可停用本条后重新生成。</p><button id="toggle-license" type="button" class="danger-outline">停用验证码</button></div>
+  </dialog>
+
+  <dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-title">
+    <div class="dialog-heading"><h2 id="confirm-title">确认操作</h2><button type="button" class="close-button" data-close="confirm-dialog" aria-label="取消操作">×</button></div><p id="confirm-text" class="muted"></p><p id="confirm-error" class="feedback error" role="alert" hidden></p><div class="dialog-actions"><button type="button" class="secondary" data-close="confirm-dialog">取消</button><button type="button" id="confirm-submit" class="danger">确认</button></div>
+  </dialog>
+</body>
+</html>
