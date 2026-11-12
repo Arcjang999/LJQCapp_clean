@@ -93,6 +93,12 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ inputs.source_commit || github.sha }}
+      - name: Check out the trusted verification harness separately
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: output/qa-harness
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: '3.13'
@@ -225,7 +231,9 @@ jobs:
           output = pathlib.Path('output/integrated-installers') / os.environ['TARGET']
           receipt = output / 'integrated-build-receipt.json'
           value = json.loads(receipt.read_text())
-          subprocess.run([sys.executable, 'packaging/ci_verify_integrated_installer.py', '--target', os.environ['TARGET'],
+          subprocess.run([sys.executable, 'output/qa-harness/packaging/ci_verify_integrated_installer.py',
+                          '--source-root', str(pathlib.Path.cwd()), '--helper-export', 'output/integrated-helper',
+                          '--target', os.environ['TARGET'],
                           '--installer', str(output / value['artifact']['file']), '--receipt', str(receipt),
                           '--manifest', 'output/integrated-input/manifest.json', '--patch', 'output/integrated-input/program-patch.tar.gz',
                           '--output', str(output / 'native-installation')], check=True)
